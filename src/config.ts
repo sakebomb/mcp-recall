@@ -1,22 +1,28 @@
 import { parse } from "smol-toml";
+import { readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
+import { z } from "zod";
 
-export interface RecallConfig {
-  store: {
-    expire_after_session_days: number;
-    key: "git_root" | "cwd";
-    max_size_mb: number;
-    pin_recommendation_threshold: number;
-  };
-  retrieve: {
-    default_max_bytes: number;
-  };
-  denylist: {
-    additional: string[];
-    override_defaults: string[];
-  };
-}
+const RecallConfigSchema = z.object({
+  store: z.object({
+    expire_after_session_days: z.number().positive(),
+    key: z.enum(["git_root", "cwd"]),
+    max_size_mb: z.number().positive(),
+    pin_recommendation_threshold: z.number().int().nonnegative(),
+  }),
+  retrieve: z.object({
+    default_max_bytes: z.number().positive(),
+  }),
+  denylist: z.object({
+    additional: z.array(z.string()),
+    override_defaults: z.array(z.string()),
+  }),
+});
+
+const PartialConfigSchema = RecallConfigSchema.deepPartial();
+
+export type RecallConfig = z.infer<typeof RecallConfigSchema>;
 
 const DEFAULTS: RecallConfig = {
   store: {
@@ -34,11 +40,16 @@ const DEFAULTS: RecallConfig = {
   },
 };
 
-const CONFIG_PATH = join(homedir(), ".config", "mcp-recall", "config.toml");
+function getConfigPath(): string {
+  return (
+    process.env.RECALL_CONFIG_PATH ??
+    join(homedir(), ".config", "mcp-recall", "config.toml")
+  );
+}
 
 function deepMerge<T extends Record<string, unknown>>(
   defaults: T,
-  overrides: Partial<T>
+  overrides: Record<string, unknown>
 ): T {
   const result = { ...defaults };
   for (const key of Object.keys(overrides) as Array<keyof T>) {
@@ -70,11 +81,25 @@ export function loadConfig(): RecallConfig {
   if (cached) return cached;
 
   try {
-    const raw = Bun.file(CONFIG_PATH).textSync();
-    const parsed = parse(raw) as Partial<RecallConfig>;
-    cached = deepMerge(DEFAULTS, parsed);
-  } catch {
-    // File doesn't exist or is invalid — use defaults silently
+    const raw = readFileSync(getConfigPath(), "utf8");
+    const result = PartialConfigSchema.safeParse(parse(raw));
+    if (result.success) {
+      cached = deepMerge(DEFAULTS, result.data);
+    } else {
+      const issues = result.error.issues
+        .map((i) => `${i.path.join(".")}: ${i.message}`)
+        .join(", ");
+      process.stderr.write(`[recall] invalid config (${issues}); using defaults\n`);
+      cached = deepMerge(DEFAULTS, {});
+    }
+  } catch (err: unknown) {
+    const isNotFound =
+      err instanceof Error &&
+      "code" in err &&
+      (err as NodeJS.ErrnoException).code === "ENOENT";
+    if (!isNotFound) {
+      process.stderr.write(`[recall] failed to load config: ${err}; using defaults\n`);
+    }
     cached = deepMerge(DEFAULTS, {});
   }
 
