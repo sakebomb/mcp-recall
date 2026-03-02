@@ -4938,8 +4938,7 @@ var RecallConfigSchema = exports_external.object({
   store: exports_external.object({
     expire_after_session_days: exports_external.number().positive(),
     key: exports_external.enum(["git_root", "cwd"]),
-    max_size_mb: exports_external.number().positive(),
-    pin_recommendation_threshold: exports_external.number().int().nonnegative()
+    max_size_mb: exports_external.number().positive()
   }),
   retrieve: exports_external.object({
     default_max_bytes: exports_external.number().positive()
@@ -4954,8 +4953,7 @@ var DEFAULTS = {
   store: {
     expire_after_session_days: 7,
     key: "git_root",
-    max_size_mb: 500,
-    pin_recommendation_threshold: 3
+    max_size_mb: 500
   },
   retrieve: {
     default_max_bytes: 8192

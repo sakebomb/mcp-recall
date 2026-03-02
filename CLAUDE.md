@@ -20,6 +20,7 @@ Project-level conventions. Global `~/.claude/CLAUDE.md` guardrails always take p
 bun test              # run all tests
 bun test --watch      # watch mode
 bun run typecheck     # tsc --noEmit
+bun run build         # bundle src/ → plugins/mcp-recall/dist/
 bun run start         # MCP server
 bun run dev           # MCP server in watch mode
 ```
@@ -31,39 +32,46 @@ No `just` / `make` in this project. Use `bun test` directly (not `just test`).
 ```
 bin/recall              Shell entrypoint for hooks (session-start, post-tool-use)
 src/
-  server.ts             MCP server — exposes 5 recall__* tools
+  server.ts             MCP server — exposes 10 recall__* tools
   cli.ts                Hook CLI dispatcher
   config.ts             TOML config loader (Zod-validated, cached)
   project-key.ts        Git root detection + SHA256 path hash
-  db/                   SQLite + FTS layer (Phase 4)
-  handlers/             Compression handlers per tool type (Phase 3)
-  hooks/                Hook implementations (Phase 5)
-  denylist.ts           Built-in + configurable denylist (Phase 2)
-  secrets.ts            Secret pattern detection before any write (Phase 2)
+  db/                   SQLite + FTS5 + chunking layer
+  handlers/             Compression handlers per tool type (9 handlers)
+  hooks/                Hook implementations (SessionStart, PostToolUse)
+  denylist.ts           Built-in + configurable denylist
+  secrets.ts            Secret pattern detection before any write
 tests/                  Bun tests, co-located by module name
-.claude-plugin/plugin.json   Claude Code plugin manifest
-hooks/hooks.json        Hook definitions (SessionStart + PostToolUse)
+.claude-plugin/         Root plugin manifest (local dev / manual install)
+hooks/hooks.json        Hook definitions — canonical source, copied to plugins/ on build
+plugins/mcp-recall/     Marketplace-installable plugin bundle
+  dist/                 Bundled server.js + cli.js (bun build --target bun)
 ```
 
-**Hook flow**: `PostToolUse` intercepts all `mcp__*` tools (except `mcp__recall__*`) → denylist check → secret scan → compress → store in SQLite → return summary to Claude.
+**Hook flow**: `PostToolUse` intercepts all `mcp__*` tools (except `mcp__recall__*`) → denylist check → secret scan → dedup check → compress → store in SQLite → return summary to Claude.
 
 **MCP server tools** (all `recall__` prefixed):
-- `recall__retrieve` — fetch stored content by ID, FTS-scoped
-- `recall__search` — FTS across stored outputs
-- `recall__forget` — delete by ID / tool / session / age / all
-- `recall__list_stored` — browse stored items
-- `recall__stats` — session efficiency report
+- `recall__retrieve` — fetch stored content by ID, with optional FTS snippet
+- `recall__search` — FTS across stored outputs with tool filter
+- `recall__forget` — delete by id / tool / session / age / all
+- `recall__list_stored` — paginated browse, sortable, with tool filter
+- `recall__stats` — session efficiency report (counts, sizes, token savings)
+- `recall__pin` — pin/unpin items; protected from expiry and LFU eviction
+- `recall__note` — store arbitrary text as project memory
+- `recall__export` — JSON dump of all items, oldest-first
+- `recall__session_summary` — per-session digest (tool breakdown, top accessed, pinned, notes)
+- `recall__context` — orientation snapshot: pinned + notes + recently accessed + last session headline
 
 ## Phases
 
 | Phase | Scope | Status |
 |-------|-------|--------|
-| 1 | Scaffold, config, project-key | Complete (feat/phase-1-scaffold) |
-| 2 | Denylist + secret detection | Planned |
-| 3 | Compression handlers | Planned |
-| 4 | SQLite + FTS DB layer | Planned |
-| 5 | Hook implementations | Planned |
-| 6 | MCP server tools | Planned |
+| 1 | Scaffold, config, project-key | Complete |
+| 2 | Denylist + secret detection | Complete |
+| 3 | Compression handlers (9 types) | Complete |
+| 4 | SQLite + FTS5 + chunking DB layer | Complete |
+| 5 | Hook pipeline (dedup, eviction) | Complete |
+| 6 | MCP server tools (10 tools) | Complete |
 
 ## Testing Conventions
 
@@ -77,7 +85,8 @@ hooks/hooks.json        Hook definitions (SessionStart + PostToolUse)
 
 - Default config: `~/.config/mcp-recall/config.toml`
 - Override via: `RECALL_CONFIG_PATH` env var
-- SQLite DB: excluded from git via `.gitignore` (`*.db*`)
+- SQLite DB: `~/.local/share/mcp-recall/<project-key>.db` (override via `RECALL_DB_PATH`)
+- SQLite DB excluded from git via `.gitignore` (`*.db*`)
 
 ## Denylist Defaults (never store outputs from)
 

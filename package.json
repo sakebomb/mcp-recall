@@ -2,6 +2,23 @@
   "name": "mcp-recall",
   "version": "1.0.0",
   "description": "Context compression and persistent retrieval for Claude Code",
+  "author": {
+    "name": "sakebomb",
+    "url": "https://github.com/sakebomb"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/sakebomb/mcp-recall#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sakebomb/mcp-recall"
+  },
+  "bugs": {
+    "url": "https://github.com/sakebomb/mcp-recall/issues"
+  },
+  "keywords": ["mcp", "claude", "claude-code", "context", "compression", "memory", "sqlite", "plugin"],
+  "engines": {
+    "bun": ">=1.1.0"
+  },
   "module": "src/server.ts",
   "type": "module",
   "scripts": {
