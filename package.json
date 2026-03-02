@@ -8,7 +8,8 @@
     "start": "bun run src/server.ts",
     "test": "bun test",
     "dev": "bun --watch src/server.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "bun build src/server.ts --target bun --outfile plugins/mcp-recall/dist/server.js && bun build src/cli.ts --target bun --outfile plugins/mcp-recall/dist/cli.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
