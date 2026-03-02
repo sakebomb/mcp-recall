@@ -106,6 +106,16 @@ const SCHEMA = `
     DELETE FROM outputs_fts WHERE rowid = old.rowid;
   END;
 
+  CREATE VIRTUAL TABLE IF NOT EXISTS content_chunks USING fts5(
+    output_id UNINDEXED,
+    chunk_index UNINDEXED,
+    content
+  );
+
+  CREATE TRIGGER IF NOT EXISTS outputs_ad_chunks AFTER DELETE ON stored_outputs BEGIN
+    DELETE FROM content_chunks WHERE output_id = old.id;
+  END;
+
   CREATE TABLE IF NOT EXISTS sessions (
     date TEXT PRIMARY KEY
   );
@@ -161,6 +171,38 @@ export function closeDb(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Chunking
+// ---------------------------------------------------------------------------
+
+export const CHUNK_SIZE = 512;
+export const CHUNK_OVERLAP = 64;
+
+/**
+ * Splits text into overlapping fixed-size chunks for precise FTS retrieval.
+ * Short texts (≤ CHUNK_SIZE) are returned as a single-element array.
+ */
+export function chunkText(text: string): string[] {
+  if (text.length === 0) return [];
+  if (text.length <= CHUNK_SIZE) return [text];
+  const chunks: string[] = [];
+  const step = CHUNK_SIZE - CHUNK_OVERLAP;
+  for (let pos = 0; pos < text.length; pos += step) {
+    chunks.push(text.slice(pos, pos + CHUNK_SIZE));
+  }
+  return chunks;
+}
+
+function storeChunks(db: Database, id: string, full_content: string): void {
+  const chunks = chunkText(full_content);
+  const stmt = db.prepare(
+    `INSERT INTO content_chunks (output_id, chunk_index, content) VALUES (?, ?, ?)`
+  );
+  for (let i = 0; i < chunks.length; i++) {
+    stmt.run(id, i, chunks[i]!);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Operations
 // ---------------------------------------------------------------------------
 
@@ -184,6 +226,8 @@ export function storeOutput(db: Database, input: StoreInput): StoredOutput {
     input.summary, input.full_content, input.original_size,
     summary_size, created_at, input_hash
   );
+
+  storeChunks(db, id, input.full_content);
 
   return {
     id, ...input, summary_size, created_at,
@@ -276,14 +320,25 @@ export function retrieveSnippet(
 
   if (!row) return null;
 
-  const result = db.prepare(`
+  // 1. Chunk-based retrieval: returns the best matching chunk verbatim
+  const chunkRow = db.prepare(`
+    SELECT content FROM content_chunks
+    WHERE content_chunks MATCH ? AND output_id = ?
+    ORDER BY rank
+    LIMIT 1
+  `).get(query, id) as { content: string } | null;
+
+  if (chunkRow) return chunkRow.content;
+
+  // 2. Legacy fallback: FTS snippet on full document (items stored pre-chunking)
+  const snippetRow = db.prepare(`
     SELECT snippet(outputs_fts, 3, '', '', ' [...] ', 64) as excerpt
     FROM outputs_fts
     WHERE outputs_fts MATCH ?
     AND rowid = ?
   `).get(query, row.rowid) as { excerpt: string } | null;
 
-  return result?.excerpt ?? null;
+  return snippetRow?.excerpt ?? null;
 }
 
 export function searchOutputs(
