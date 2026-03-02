@@ -57,7 +57,168 @@ mcp-recall must never break a tool call under any failure condition. Every new c
 
 ## Adding a compression handler
 
-1. Create `src/handlers/<name>.ts` — export a `Handler` and add a file-level JSDoc comment.
-2. Register it in `src/handlers/index.ts` with a tool-name match condition and a comment in the dispatch table.
-3. Add tests to `tests/handlers.test.ts` (aim for ≥ 5 tests: basic compression, edge cases, dispatcher routing).
-4. Add a row to the Compression handlers table in the README.
+Handlers are the best way to contribute. Each one targets a specific MCP tool (or family of tools) and reduces its output to an actionable summary. The community issues [#49](https://github.com/sakebomb/mcp-recall/issues/49)–[#53](https://github.com/sakebomb/mcp-recall/issues/53) and [#59](https://github.com/sakebomb/mcp-recall/issues/59)–[#66](https://github.com/sakebomb/mcp-recall/issues/66) are all open for contribution. Comment on one to claim it before starting.
+
+### The contract
+
+```ts
+// src/handlers/types.ts
+export interface CompressionResult {
+  summary: string;     // what Claude sees instead of the full output
+  originalSize: number; // byte size of the full content (always from extractText)
+}
+
+export type Handler = (toolName: string, output: unknown) => CompressionResult;
+```
+
+A handler receives the raw MCP `output` (which may be a `{ content: [{ type: "text", text: "..." }] }` wrapper or a plain string) and returns a compressed `summary` plus the `originalSize`.
+
+**Rules:**
+- Always call `extractText(output)` first and use its result for `originalSize`. Never measure the raw `output` object.
+- Never throw. If parsing fails, return a graceful fallback (e.g. `raw.slice(0, 500)`).
+- Return a result for every code path — no `undefined`, no `null`.
+- Keep `summary` under ~1 KB for typical inputs. The goal is to give Claude enough to reason with, not a full reproduction.
+- The function must be a named `const` export (e.g. `export const jiraHandler: Handler = ...`). The name shows up in `[recall:debug]` logs.
+
+### Step 1 — Create the handler file
+
+Use `src/handlers/slack.ts` as your reference — it's the simplest real-world example.
+
+```ts
+// src/handlers/jira.ts
+/**
+ * Jira handler — summarises issue and search results from the Jira MCP.
+ * Extracts key, summary, status, assignee, and priority. Discards
+ * description bodies, comment threads, and raw field metadata.
+ */
+import type { CompressionResult, Handler } from "./types";
+import { extractText } from "./types";
+
+const MAX_ISSUES = 10;
+
+export const jiraHandler: Handler = (
+  _toolName: string,
+  output: unknown
+): CompressionResult => {
+  const raw = extractText(output);
+  const originalSize = Buffer.byteLength(raw, "utf8");
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // Not JSON — fall back to a plain text excerpt
+    return { summary: raw.slice(0, 500), originalSize };
+  }
+
+  // ... extract the fields you care about ...
+
+  return { summary: "...", originalSize };
+};
+```
+
+### Step 2 — Register in the dispatcher
+
+Open `src/handlers/index.ts`. Add your import and a match condition in the dispatch function. Conditions are checked top-to-bottom — put more specific matches above generic ones.
+
+```ts
+// import
+import { jiraHandler } from "./jira";
+
+// inside getHandler(), before the content-based fallbacks:
+if (toolName.includes("jira")) {
+  return jiraHandler;
+}
+```
+
+Add a numbered comment to the dispatch table JSDoc to keep it in sync.
+
+### Step 3 — Capture a real fixture
+
+The easiest way to write tests is to capture a real tool output first.
+
+```bash
+# Start Claude with debug logging
+RECALL_DEBUG=1 claude
+
+# Run the MCP tool you're targeting (e.g. ask Claude to search Jira)
+# The hook logs will show: [recall:debug] intercepted mcp__jira__search_issues · 14.2KB
+# If it falls through to genericHandler, the output isn't being matched yet
+
+# Alternatively: add a temporary console.log in the handler during dev,
+# or paste a real API response from the MCP tool's docs into a fixture file.
+```
+
+Save the captured output as a `const` in your test file — see the `LARGE_GITHUB_RESPONSE` fixture in `tests/hooks.test.ts` as a pattern.
+
+### Step 4 — Write tests
+
+Add a `describe` block to `tests/handlers.test.ts`. Aim for at least 5 tests:
+
+```ts
+import { jiraHandler } from "../src/handlers/jira";
+import { getHandler } from "../src/handlers/index";
+
+const JIRA_ISSUE = JSON.stringify({
+  issues: [
+    { key: "PROJ-1", fields: { summary: "Fix login bug", status: { name: "In Progress" }, assignee: { displayName: "Alice" }, priority: { name: "High" } } },
+    { key: "PROJ-2", fields: { summary: "Add dark mode", status: { name: "Todo" }, assignee: null, priority: { name: "Medium" } } },
+  ],
+  total: 2,
+});
+
+describe("jiraHandler", () => {
+  it("extracts issue key and summary", () => {
+    const { summary } = jiraHandler("mcp__jira__search_issues", JIRA_ISSUE);
+    expect(summary).toContain("PROJ-1");
+    expect(summary).toContain("Fix login bug");
+  });
+
+  it("includes status and assignee", () => {
+    const { summary } = jiraHandler("mcp__jira__search_issues", JIRA_ISSUE);
+    expect(summary).toContain("In Progress");
+    expect(summary).toContain("Alice");
+  });
+
+  it("reports originalSize in bytes", () => {
+    const { originalSize } = jiraHandler("mcp__jira__search_issues", JIRA_ISSUE);
+    expect(originalSize).toBe(Buffer.byteLength(JIRA_ISSUE, "utf8"));
+  });
+
+  it("handles MCP content wrapper", () => {
+    const output = { content: [{ type: "text", text: JIRA_ISSUE }] };
+    const { summary } = jiraHandler("mcp__jira__search_issues", output);
+    expect(summary).toContain("PROJ-1");
+  });
+
+  it("returns fallback for non-JSON output", () => {
+    const { summary } = jiraHandler("mcp__jira__search_issues", "plain text output");
+    expect(typeof summary).toBe("string");
+    expect(summary.length).toBeGreaterThan(0);
+  });
+
+  it("is routed by getHandler for mcp__jira__ tools", () => {
+    const handler = getHandler("mcp__jira__search_issues", JIRA_ISSUE);
+    expect(handler).toBe(jiraHandler);
+  });
+});
+```
+
+### Step 5 — Update the README
+
+Add a row to the Compression handlers table in `README.md`:
+
+```
+│  Jira       → issues  │
+```
+
+### PR checklist for handlers
+
+- [ ] `bun test` passes
+- [ ] `bun run typecheck` passes
+- [ ] Handler is a named `const` export
+- [ ] `extractText` used for `originalSize`
+- [ ] No throws — every code path returns a `CompressionResult`
+- [ ] ≥ 5 tests including: basic extraction, MCP wrapper, `originalSize`, fallback, dispatcher routing
+- [ ] Row added to README compression handler table
+- [ ] Issue number referenced in PR title (e.g. `feat: Jira compression handler (#49)`)
