@@ -12,7 +12,7 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 
 ## Summary
 
-**261 tests across 8 files, 0 failures.**
+**276 tests across 8 files, 0 failures.**
 
 | File | Tests | Phase |
 |------|-------|-------|
@@ -20,7 +20,7 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 | `tests/project-key.test.ts` | 6 | 1 |
 | `tests/denylist.test.ts` | 14 | 2 |
 | `tests/secrets.test.ts` | 8 | 2 |
-| `tests/handlers.test.ts` | 72 | 3 + 2d |
+| `tests/handlers.test.ts` | 87 | 3 + 2d + v6 |
 | `tests/db.test.ts` | 68 | 4 + 2a + v3 |
 | `tests/hooks.test.ts` | 17 | 5 + 2b |
 | `tests/tools.test.ts` | 59 | 6 + 2c + v4 + v5 |
@@ -318,3 +318,18 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 | toolContext: excludes items not accessed within the days window | lookback enforced |
 | toolContext: shows last session headline | last session line present |
 | toolContext: pinned items appear in Pinned section, not in Recently accessed | section isolation |
+| stripAnsi: removes color escape sequences | ANSI color codes stripped |
+| stripAnsi: removes bold and reset sequences | bold/reset stripped |
+| stripAnsi: leaves plain text unchanged | no false removals |
+| shellHandler: includes line count in header for plain output | line count shown |
+| shellHandler: strips ANSI codes from plain output | escape codes removed |
+| shellHandler: truncates at 50 lines with overflow count | cap enforced |
+| shellHandler: handles structured stdout/stderr output | JSON shape parsed |
+| shellHandler: shows exit code in header | exit:N in header |
+| shellHandler: shows stderr section when stderr is non-empty | stderr section present |
+| shellHandler: handles alternate output field name | output field supported |
+| shellHandler: handles empty output gracefully | 0 lines |
+| shellHandler: reports originalSize in bytes | byte count accurate |
+| shellHandler: routes bash tools to shell handler | name-based dispatch |
+| shellHandler: routes shell tools to shell handler | name-based dispatch |
+| shellHandler: routes terminal tools to shell handler | name-based dispatch |
