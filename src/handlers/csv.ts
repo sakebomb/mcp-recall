@@ -1,3 +1,8 @@
+/**
+ * CSV handler — emits a header row, the first 5 data rows as `key=value` pairs,
+ * and a row/column count summary. Also exports `looksLikeCsv` for content-based
+ * dispatch in the handler index.
+ */
 import type { CompressionResult, Handler } from "./types";
 import { extractText } from "./types";
 

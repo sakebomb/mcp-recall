@@ -1,3 +1,8 @@
+/**
+ * Linear handler — extracts identifier, title, state, priority, description
+ * excerpt, and URL from Linear issue responses. Handles single objects,
+ * arrays, GraphQL, and Relay connection shapes.
+ */
 import type { CompressionResult, Handler } from "./types";
 import { extractText } from "./types";
 

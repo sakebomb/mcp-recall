@@ -1,3 +1,8 @@
+/**
+ * GitHub handler — summarises GitHub API responses into key fields
+ * (number, title, state, author, labels, body excerpt). Handles both
+ * single objects and arrays.
+ */
 import type { CompressionResult, Handler } from "./types";
 import { extractText } from "./types";
 

@@ -8,6 +8,7 @@ import { randomBytes } from "crypto";
 // Types
 // ---------------------------------------------------------------------------
 
+/** A fully-hydrated row from the `stored_outputs` table. */
 export interface StoredOutput {
   id: string;
   project_key: string;
@@ -24,6 +25,7 @@ export interface StoredOutput {
   input_hash: string | null;
 }
 
+/** Input required to persist a new compressed tool output. */
 export interface StoreInput {
   project_key: string;
   session_id: string;
@@ -34,12 +36,14 @@ export interface StoreInput {
   input_hash?: string;
 }
 
+/** Options for full-text search across stored outputs. */
 export interface SearchOptions {
   project_key: string;
   tool?: string;
   limit?: number;
 }
 
+/** Options for paginated listing of stored outputs. */
 export interface ListOptions {
   project_key: string;
   tool?: string;
@@ -48,6 +52,7 @@ export interface ListOptions {
   sort?: "newest" | "oldest";
 }
 
+/** Criteria for bulk-deleting stored outputs. Exactly one selector should be set. */
 export interface ForgetOptions {
   id?: string;
   tool?: string;
@@ -57,6 +62,7 @@ export interface ForgetOptions {
   force?: boolean; // override pinned protection
 }
 
+/** Aggregate storage statistics for a project. */
 export interface Stats {
   total_items: number;
   total_original_bytes: number;
@@ -64,11 +70,13 @@ export interface Stats {
   compression_ratio: number;
 }
 
+/** Options for the session-orientation context snapshot. */
 export interface ContextOptions {
   days?: number;   // lookback window for recently accessed (default 7)
   limit?: number;  // max items in recently accessed section (default 5)
 }
 
+/** Data returned by {@link getContext}: four isolated sections with no overlap. */
 export interface ContextData {
   pinned: StoredOutput[];
   notes: StoredOutput[];
@@ -81,11 +89,13 @@ export interface ContextData {
   } | null;
 }
 
+/** Filter options for {@link getSessionSummary}. Provide either session_id or date, not both. */
 export interface SessionSummaryOptions {
   session_id?: string;
   date?: string; // YYYY-MM-DD, defaults to today (UTC)
 }
 
+/** Digest returned by {@link getSessionSummary}. */
 export interface SessionSummaryData {
   label: string;
   stored_count: number;
@@ -180,6 +190,11 @@ function applyMigrations(db: Database): void {
 
 let instance: Database | null = null;
 
+/**
+ * Returns the SQLite database path for a project.
+ * Respects `RECALL_DB_PATH` env override; otherwise places the DB in
+ * `~/.local/share/mcp-recall/<projectKey>.db`.
+ */
 export function defaultDbPath(projectKey: string): string {
   return (
     process.env.RECALL_DB_PATH ??
@@ -187,6 +202,11 @@ export function defaultDbPath(projectKey: string): string {
   );
 }
 
+/**
+ * Opens and returns the singleton SQLite database, creating it if needed.
+ * Applies the full schema and any pending migrations on first open.
+ * Use `":memory:"` in tests to avoid touching the filesystem.
+ */
 export function getDb(path: string): Database {
   if (instance) return instance;
   if (path !== ":memory:") {
@@ -200,6 +220,7 @@ export function getDb(path: string): Database {
   return instance;
 }
 
+/** Closes the singleton database connection and resets the instance. Call in tests after each case. */
 export function closeDb(): void {
   instance?.close();
   instance = null;
@@ -245,6 +266,10 @@ function generateId(): string {
   return `recall_${randomBytes(4).toString("hex")}`;
 }
 
+/**
+ * Persists a compressed tool output and populates the FTS index and chunk table.
+ * Returns the fully-hydrated row including the generated `id`.
+ */
 export function storeOutput(db: Database, input: StoreInput): StoredOutput {
   const id = generateId();
   const summary_size = Buffer.byteLength(input.summary, "utf8");
@@ -271,12 +296,14 @@ export function storeOutput(db: Database, input: StoreInput): StoredOutput {
   };
 }
 
+/** Fetches a single stored output by its ID, or `null` if not found. */
 export function retrieveOutput(db: Database, id: string): StoredOutput | null {
   return db.prepare(
     `SELECT * FROM stored_outputs WHERE id = ?`
   ).get(id) as StoredOutput | null;
 }
 
+/** Increments `access_count` and updates `last_accessed` timestamp for an item. */
 export function recordAccess(db: Database, id: string): void {
   const now = Math.floor(Date.now() / 1000);
   db.prepare(`
@@ -286,6 +313,10 @@ export function recordAccess(db: Database, id: string): void {
   `).run(now, id);
 }
 
+/**
+ * Pins or unpins an item. Pinned items are exempt from expiry and LFU eviction.
+ * Returns `true` if the item was found and updated.
+ */
 export function pinOutput(
   db: Database,
   id: string,
@@ -298,6 +329,10 @@ export function pinOutput(
   return result.changes > 0;
 }
 
+/**
+ * Looks up the most recent stored output with a matching `input_hash` for the project.
+ * Returns `null` on a miss, indicating the call should be compressed and stored normally.
+ */
 export function checkDedup(
   db: Database,
   project_key: string,
@@ -311,6 +346,11 @@ export function checkDedup(
   `).get(project_key, input_hash) as StoredOutput | null;
 }
 
+/**
+ * Enforces the project store size cap by evicting least-frequently-accessed
+ * non-pinned items until total `original_size` is within `max_size_mb`.
+ * Returns the number of items evicted (0 if already within limit).
+ */
 export function evictIfNeeded(
   db: Database,
   project_key: string,
@@ -344,6 +384,11 @@ export function evictIfNeeded(
   return evicted;
 }
 
+/**
+ * Returns a relevant excerpt from a stored item's full content using FTS.
+ * Prefers chunk-based retrieval (precise, verbatim) over the legacy FTS snippet
+ * function. Returns `null` if the item doesn't exist or the query has no match.
+ */
 export function retrieveSnippet(
   db: Database,
   id: string,
@@ -376,6 +421,10 @@ export function retrieveSnippet(
   return snippetRow?.excerpt ?? null;
 }
 
+/**
+ * Full-text searches across stored outputs for a project.
+ * Results are ordered by FTS rank (best match first), capped at `options.limit` (default 10).
+ */
 export function searchOutputs(
   db: Database,
   query: string,
@@ -397,6 +446,7 @@ export function searchOutputs(
   return db.prepare(sql).all(...params) as StoredOutput[];
 }
 
+/** Returns a paginated list of stored outputs, optionally filtered by tool name. */
 export function listOutputs(db: Database, options: ListOptions): StoredOutput[] {
   const limit = options.limit ?? 20;
   const offset = options.offset ?? 0;
@@ -425,6 +475,12 @@ function countAndDelete(db: Database, where: string, params: unknown[]): number 
   return count;
 }
 
+/**
+ * Deletes stored outputs matching the given criteria.
+ * Pinned items are skipped unless `options.force` is true.
+ * Exactly one selector (`id`, `tool`, `session_id`, `older_than_days`, or `all`) should be set.
+ * Returns the number of items deleted.
+ */
 export function forgetOutputs(
   db: Database,
   project_key: string,
@@ -452,6 +508,7 @@ export function forgetOutputs(
   return 0;
 }
 
+/** Returns aggregate storage stats (counts, sizes, compression ratio) for a project. */
 export function getStats(db: Database, project_key: string): Stats {
   const row = db.prepare(`
     SELECT
@@ -474,6 +531,12 @@ export function getStats(db: Database, project_key: string): Stats {
   return { ...row, compression_ratio };
 }
 
+/**
+ * Returns a session-orientation snapshot in four isolated sections:
+ * pinned items, unpinned notes, recently accessed items (within `opts.days`),
+ * and a headline from the last past session.
+ * Each item appears in exactly one section.
+ */
 export function getContext(
   db: Database,
   project_key: string,
@@ -528,6 +591,10 @@ export function getContext(
   return { pinned, notes, recent, last_session };
 }
 
+/**
+ * Returns a digest of stored activity for a session or calendar day.
+ * Filters by `opts.session_id` (exact) or `opts.date` (YYYY-MM-DD UTC, defaults to today).
+ */
 export function getSessionSummary(
   db: Database,
   project_key: string,
@@ -598,6 +665,11 @@ export function getSessionSummary(
   return { label, ...agg, tool_counts, top_accessed, pinned, notes };
 }
 
+/**
+ * Deletes non-pinned items created more than `calendar_days` ago.
+ * Called by the SessionStart hook to enforce the expiry policy.
+ * Returns the number of items deleted.
+ */
 export function pruneExpired(
   db: Database,
   project_key: string,
@@ -607,10 +679,12 @@ export function pruneExpired(
   return countAndDelete(db, "created_at < ? AND project_key = ? AND pinned = 0", [cutoff, project_key]);
 }
 
+/** Records a session date (YYYY-MM-DD) in the sessions table. No-op if already present. */
 export function recordSession(db: Database, date: string): void {
   db.prepare(`INSERT OR IGNORE INTO sessions (date) VALUES (?)`).run(date);
 }
 
+/** Returns all recorded session dates in descending order (most recent first). */
 export function getSessionDays(db: Database): string[] {
   return (
     db.prepare(`SELECT date FROM sessions ORDER BY date DESC`).all() as {
