@@ -1,7 +1,9 @@
 /**
- * Shell handler — strips ANSI escape codes and caps stdout at 50 lines /
- * stderr at 20 lines. Handles structured `{stdout, stderr, returncode}` JSON
- * as well as plain string output.
+ * Shell handler — strips ANSI escape codes and SSH banner noise, then caps
+ * stdout at 50 lines / stderr at 20 lines. Handles structured
+ * `{stdout, stderr, returncode}` JSON as well as plain string output.
+ * Routes bash, shell, terminal, run_command, ssh_exec, exec_command,
+ * remote_exec, and container_exec tool name patterns.
  */
 import type { CompressionResult, Handler } from "./types";
 import { extractText } from "./types";
@@ -15,6 +17,34 @@ const ANSI_RE = /[\x1b\x9b][\[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-
 
 export function stripAnsi(text: string): string {
   return text.replace(ANSI_RE, "");
+}
+
+// Matches SSH warning/notice lines emitted by OpenSSH (e.g. post-quantum
+// key-exchange advisories that appear before the actual command output).
+const SSH_NOISE_RE = /^\*\* .+/;
+
+/**
+ * Removes SSH banner noise lines (lines starting with `** `) and collapses
+ * any resulting consecutive blank lines into one. Applied after stripAnsi.
+ */
+export function stripSshNoise(text: string): string {
+  const lines = text.split("\n");
+  const filtered = lines.filter((line) => !SSH_NOISE_RE.test(line));
+
+  // Collapse runs of blank lines to a single blank line.
+  const result: string[] = [];
+  let prevBlank = false;
+  for (const line of filtered) {
+    const blank = line.trim() === "";
+    if (blank && prevBlank) continue;
+    result.push(line);
+    prevBlank = blank;
+  }
+
+  // Trim leading blank lines.
+  while (result.length > 0 && result[0]!.trim() === "") result.shift();
+
+  return result.join("\n");
 }
 
 function trimTrailingEmpty(lines: string[]): string[] {
@@ -73,8 +103,8 @@ export const shellHandler: Handler = (
   const structured = parseStructured(raw);
 
   if (structured) {
-    const stdout = stripAnsi(structured.stdout ?? structured.output ?? "");
-    const stderr = stripAnsi(structured.stderr ?? "");
+    const stdout = stripSshNoise(stripAnsi(structured.stdout ?? structured.output ?? ""));
+    const stderr = stripSshNoise(stripAnsi(structured.stderr ?? ""));
     const exitCode = structured.returncode ?? structured.exit_code;
 
     const exitStr = exitCode !== undefined ? `exit:${exitCode} · ` : "";
@@ -96,7 +126,7 @@ export const shellHandler: Handler = (
   }
 
   // Plain string — treat as stdout
-  const text = stripAnsi(raw);
+  const text = stripSshNoise(stripAnsi(raw));
   const fmt = formatLines(text, HEAD_STDOUT);
   return {
     summary: `[bash · ${fmt.header}]\n${fmt.body}`,
