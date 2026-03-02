@@ -4,6 +4,9 @@
  * Tools exposed:
  *   recall__retrieve     — fetch stored content, FTS-scoped
  *   recall__search       — FTS across all stored outputs
+ *   recall__pin          — pin/unpin an item from expiry and eviction
+ *   recall__note         — store arbitrary text as a recall note
+ *   recall__export       — JSON dump of all stored items
  *   recall__forget       — delete stored items
  *   recall__list_stored  — paginated item browser
  *   recall__stats        — aggregate session efficiency report
@@ -16,6 +19,9 @@ import { getDb, defaultDbPath } from "./db/index";
 import {
   toolRetrieve,
   toolSearch,
+  toolPin,
+  toolNote,
+  toolExport,
   toolForget,
   toolListStored,
   toolStats,
@@ -31,14 +37,14 @@ const server = new McpServer({
 
 server.tool(
   "recall__retrieve",
-  "Fetch stored content from a previous tool call. Pass a query to return only relevant sections via FTS. Use when you need more detail from a compressed result.",
+  "Fetch stored content from a previous tool call. Pass a query to return the most relevant excerpt via FTS. Use when you need more detail from a compressed result.",
   {
     id: z.string().describe("8-char or full item ID"),
-    query: z.string().optional().describe("FTS query to narrow the result"),
+    query: z.string().optional().describe("FTS query to return a focused excerpt"),
     max_bytes: z
       .number()
       .optional()
-      .describe("Override default 8KB cap on returned bytes"),
+      .describe("Override default 8KB cap on returned bytes (used when FTS returns no match)"),
   },
   async (args) => ({
     content: [{ type: "text", text: toolRetrieve(db, args) }],
@@ -59,8 +65,41 @@ server.tool(
 );
 
 server.tool(
+  "recall__pin",
+  "Pin an item to protect it from expiry and eviction. Use for important results you want to keep indefinitely. Pass pinned: false to unpin.",
+  {
+    id: z.string().describe("Item ID to pin or unpin"),
+    pinned: z.boolean().optional().describe("true to pin (default), false to unpin"),
+  },
+  async (args) => ({
+    content: [{ type: "text", text: toolPin(db, projectKey, args) }],
+  })
+);
+
+server.tool(
+  "recall__note",
+  "Store arbitrary text as a recall note — conclusions, findings, context that should survive context resets. Use for project memory.",
+  {
+    text: z.string().describe("Note content to store"),
+    title: z.string().optional().describe("Short title for the note (shown in list/search)"),
+  },
+  async (args) => ({
+    content: [{ type: "text", text: toolNote(db, projectKey, args) }],
+  })
+);
+
+server.tool(
+  "recall__export",
+  "Export all stored items for this project as JSON. Use before a full clear to preserve data.",
+  {},
+  async () => ({
+    content: [{ type: "text", text: toolExport(db, projectKey) }],
+  })
+);
+
+server.tool(
   "recall__forget",
-  "Delete stored items by ID, tool pattern, session, age, or clear all. Always confirm before clearing all.",
+  "Delete stored items by ID, tool pattern, session, age, or clear all. Pinned items are skipped unless force: true.",
   {
     id: z.string().optional().describe("Delete a single item by ID"),
     tool: z.string().optional().describe("Delete all items matching tool name substring"),
@@ -71,6 +110,7 @@ server.tool(
       .describe("Delete items older than N calendar days"),
     all: z.boolean().optional().describe("Clear entire store (requires confirmed: true)"),
     confirmed: z.boolean().optional().describe("Required to execute all: true"),
+    force: z.boolean().optional().describe("Override pin protection and delete pinned items too"),
   },
   async (args) => ({
     content: [{ type: "text", text: toolForget(db, projectKey, args) }],
@@ -79,7 +119,7 @@ server.tool(
 
 server.tool(
   "recall__list_stored",
-  "Browse stored items by recency or size. Use to find a specific item to retrieve or forget.",
+  "Browse stored items by recency, access frequency, or size. Use to find a specific item to retrieve or forget.",
   {
     limit: z.number().optional().describe("Items per page (default 10)"),
     offset: z.number().optional().describe("Pagination offset"),
@@ -87,7 +127,7 @@ server.tool(
     sort: z
       .enum(["recent", "accessed", "size"])
       .optional()
-      .describe("Sort order (default: recent)"),
+      .describe("Sort order: recent (default), accessed (most-used first), size (largest first)"),
   },
   async (args) => ({
     content: [{ type: "text", text: toolListStored(db, projectKey, args) }],
