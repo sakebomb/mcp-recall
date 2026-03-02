@@ -11,6 +11,7 @@
  *   recall__list_stored      — paginated item browser
  *   recall__stats            — aggregate session efficiency report
  *   recall__session_summary  — digest of a single session's activity
+ *   recall__context          — session orientation: pinned, notes, recent, last session
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -27,6 +28,7 @@ import {
   toolListStored,
   toolStats,
   toolSessionSummary,
+  toolContext,
 } from "./tools";
 
 const projectKey = getProjectKey(process.cwd());
@@ -160,6 +162,24 @@ server.tool(
   },
   async (args) => ({
     content: [{ type: "text", text: toolSessionSummary(db, projectKey, args) }],
+  })
+);
+
+server.tool(
+  "recall__context",
+  "Session orientation: pinned items, recent notes, recently accessed items, and last session headline. Call at the start of a session to quickly re-orient to prior work.",
+  {
+    days: z
+      .number()
+      .optional()
+      .describe("Lookback window for recently accessed items in days (default 7)"),
+    limit: z
+      .number()
+      .optional()
+      .describe("Max recently accessed items to show (default 5)"),
+  },
+  async (args) => ({
+    content: [{ type: "text", text: toolContext(db, projectKey, args) }],
   })
 );
 

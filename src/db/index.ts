@@ -64,6 +64,23 @@ export interface Stats {
   compression_ratio: number;
 }
 
+export interface ContextOptions {
+  days?: number;   // lookback window for recently accessed (default 7)
+  limit?: number;  // max items in recently accessed section (default 5)
+}
+
+export interface ContextData {
+  pinned: StoredOutput[];
+  notes: StoredOutput[];
+  recent: StoredOutput[];
+  last_session: {
+    date: string;
+    stored_count: number;
+    total_original_bytes: number;
+    total_summary_bytes: number;
+  } | null;
+}
+
 export interface SessionSummaryOptions {
   session_id?: string;
   date?: string; // YYYY-MM-DD, defaults to today (UTC)
@@ -455,6 +472,60 @@ export function getStats(db: Database, project_key: string): Stats {
       : 0;
 
   return { ...row, compression_ratio };
+}
+
+export function getContext(
+  db: Database,
+  project_key: string,
+  opts: ContextOptions = {}
+): ContextData {
+  const days = opts.days ?? 7;
+  const limit = opts.limit ?? 5;
+  const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
+  const today = new Date().toISOString().slice(0, 10);
+
+  // 1. All pinned items, most recently accessed first
+  const pinned = db.prepare(`
+    SELECT * FROM stored_outputs
+    WHERE project_key = ? AND pinned = 1
+    ORDER BY last_accessed DESC NULLS LAST, created_at DESC
+  `).all(project_key) as StoredOutput[];
+
+  // 2. Unpinned notes, newest first (capped to avoid noise)
+  const notes = db.prepare(`
+    SELECT * FROM stored_outputs
+    WHERE project_key = ? AND pinned = 0 AND tool_name = 'recall__note'
+    ORDER BY created_at DESC
+    LIMIT 10
+  `).all(project_key) as StoredOutput[];
+
+  // 3. Unpinned non-notes recently accessed, most recent first
+  const recent = db.prepare(`
+    SELECT * FROM stored_outputs
+    WHERE project_key = ? AND pinned = 0 AND tool_name != 'recall__note'
+      AND last_accessed >= ?
+    ORDER BY last_accessed DESC
+    LIMIT ?
+  `).all(project_key, cutoff, limit) as StoredOutput[];
+
+  // 4. Last session headline (most recent past date in sessions table)
+  const sessionDays = getSessionDays(db);
+  const pastDays = sessionDays.filter((d) => d < today);
+  let last_session = null;
+  if (pastDays.length > 0) {
+    const lastDate = pastDays[0]!;
+    const summary = getSessionSummary(db, project_key, { date: lastDate });
+    if (summary.stored_count > 0) {
+      last_session = {
+        date: lastDate,
+        stored_count: summary.stored_count,
+        total_original_bytes: summary.total_original_bytes,
+        total_summary_bytes: summary.total_summary_bytes,
+      };
+    }
+  }
+
+  return { pinned, notes, recent, last_session };
 }
 
 export function getSessionSummary(

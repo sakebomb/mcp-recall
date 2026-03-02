@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { getDb, closeDb, storeOutput, pinOutput, recordSession, type StoreInput } from "../src/db/index";
+import { getDb, closeDb, storeOutput, pinOutput, recordAccess, recordSession, type StoreInput } from "../src/db/index";
 import {
   toolRetrieve,
   toolSearch,
@@ -10,6 +10,7 @@ import {
   toolListStored,
   toolStats,
   toolSessionSummary,
+  toolContext,
 } from "../src/tools";
 import { resetConfig } from "../src/config";
 import type { Database } from "bun:sqlite";
@@ -489,6 +490,74 @@ describe("MCP tool handlers", () => {
       const result = toolSessionSummary(db, PROJECT_KEY, { session_id: "sess-aaa" });
       expect(result).toContain("sess-aaa");
       expect(result).toContain("1 item");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // toolContext
+  // -------------------------------------------------------------------------
+
+  describe("toolContext", () => {
+    it("returns no-context message when store is empty", () => {
+      const result = toolContext(db, PROJECT_KEY, {});
+      expect(result).toContain("no context available");
+    });
+
+    it("shows pinned items", () => {
+      const stored = storeOutput(db, makeInput());
+      pinOutput(db, stored.id, PROJECT_KEY, true);
+      const result = toolContext(db, PROJECT_KEY, {});
+      expect(result).toContain("Pinned (1)");
+      expect(result).toContain("📌");
+      expect(result).toContain(stored.id);
+    });
+
+    it("shows notes", () => {
+      storeOutput(db, makeInput({ tool_name: "recall__note", summary: "(note): Auth findings" }));
+      const result = toolContext(db, PROJECT_KEY, {});
+      expect(result).toContain("Notes (1)");
+      expect(result).toContain("Auth findings");
+    });
+
+    it("shows recently accessed items", () => {
+      const stored = storeOutput(db, makeInput());
+      recordAccess(db, stored.id); // sets last_accessed to now
+      const result = toolContext(db, PROJECT_KEY, {});
+      expect(result).toContain("Recently accessed");
+      expect(result).toContain(stored.id);
+    });
+
+    it("excludes items not accessed within the days window", () => {
+      const stored = storeOutput(db, makeInput());
+      // Set last_accessed to 8 days ago (outside default 7-day window)
+      const oldAccess = Math.floor(Date.now() / 1000) - 8 * 86400;
+      db.prepare("UPDATE stored_outputs SET access_count = 1, last_accessed = ? WHERE id = ?")
+        .run(oldAccess, stored.id);
+      const result = toolContext(db, PROJECT_KEY, { days: 7 });
+      expect(result).not.toContain(stored.id);
+    });
+
+    it("shows last session headline", () => {
+      const yesterday = new Date(Date.now() - 86400 * 1000).toISOString().slice(0, 10);
+      const startOfYesterday = Math.floor(new Date(`${yesterday}T00:00:00Z`).getTime() / 1000);
+      db.prepare(
+        `INSERT INTO stored_outputs (id,project_key,session_id,tool_name,summary,full_content,original_size,summary_size,created_at)
+         VALUES ('recall_ctx_prev1',?,?,?,?,?,4096,64,?)`
+      ).run(PROJECT_KEY, "sess-prev", "mcp__tool", "prev summary", "prev content", startOfYesterday + 3600);
+      recordSession(db, yesterday);
+      const result = toolContext(db, PROJECT_KEY, {});
+      expect(result).toContain(`Last session (${yesterday})`);
+      expect(result).toContain("1 item");
+    });
+
+    it("pinned items appear in Pinned section, not in Recently accessed", () => {
+      const stored = storeOutput(db, makeInput());
+      pinOutput(db, stored.id, PROJECT_KEY, true);
+      recordAccess(db, stored.id);
+      const result = toolContext(db, PROJECT_KEY, {});
+      expect(result).toContain("Pinned (1)");
+      // Only pinned item exists; recently accessed query excludes pinned=1
+      expect(result).not.toContain("Recently accessed");
     });
   });
 });
