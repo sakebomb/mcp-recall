@@ -12,7 +12,7 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 
 ## Summary
 
-**254 tests across 8 files, 0 failures.**
+**261 tests across 8 files, 0 failures.**
 
 | File | Tests | Phase |
 |------|-------|-------|
@@ -23,7 +23,7 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 | `tests/handlers.test.ts` | 72 | 3 + 2d |
 | `tests/db.test.ts` | 68 | 4 + 2a + v3 |
 | `tests/hooks.test.ts` | 17 | 5 + 2b |
-| `tests/tools.test.ts` | 52 | 6 + 2c + v4 |
+| `tests/tools.test.ts` | 59 | 6 + 2c + v4 + v5 |
 
 ## Coverage
 
@@ -311,3 +311,10 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 | toolSessionSummary: shows pinned items | 📌 section present |
 | toolSessionSummary: shows notes separately | notes section present |
 | toolSessionSummary: filters by session_id | session isolation |
+| toolContext: returns no-context message when store is empty | empty state |
+| toolContext: shows pinned items | Pinned section present |
+| toolContext: shows notes | Notes section present |
+| toolContext: shows recently accessed items | Recently accessed section present |
+| toolContext: excludes items not accessed within the days window | lookback enforced |
+| toolContext: shows last session headline | last session line present |
+| toolContext: pinned items appear in Pinned section, not in Recently accessed | section isolation |

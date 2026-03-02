@@ -129,3 +129,13 @@ Completed work.
 - Merged via PR #27
 
 **v4 total: 254 tests, 0 failures**
+
+### v5 — Context Tool
+
+- `src/db/index.ts` — `ContextOptions`, `ContextData` types; `getContext` runs 4 SQL queries (pinned, unpinned notes, recently accessed within window, last session headline via `getSessionSummary`); section isolation: each item appears in exactly one section
+- `src/tools.ts` — `toolContext` formatter; empty-store fallback message
+- `src/server.ts` — `recall__context` wired as 10th MCP tool with `days?` and `limit?` params
+- `tests/tools.test.ts` — 59 tests (+7): empty store, pinned, notes, recently accessed, outside-window exclusion, last session headline, pinned exclusion from recent
+- Merged via PR #28
+
+**v5 total: 261 tests, 0 failures**
