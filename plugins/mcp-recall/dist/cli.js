@@ -6076,6 +6076,76 @@ ${lines.join(`
   };
 };
 
+// src/handlers/tavily.ts
+var SNIPPET_CHARS = 150;
+var MAX_RESULTS = 10;
+function summariseResult(result) {
+  const parts = [];
+  if (typeof result["title"] === "string" && result["title"].length > 0) {
+    parts.push(result["title"]);
+  }
+  if (typeof result["url"] === "string") {
+    parts.push(result["url"]);
+  }
+  const content = typeof result["content"] === "string" ? result["content"] : "";
+  if (content.length > 0) {
+    const snippet = content.slice(0, SNIPPET_CHARS).trimEnd();
+    const truncated = content.length > SNIPPET_CHARS ? "\u2026" : "";
+    parts.push(`${snippet}${truncated}`);
+  }
+  return parts.join(" \xB7 ");
+}
+var tavilyHandler = (_toolName, output) => {
+  const raw = extractText(output);
+  const originalSize = Buffer.byteLength(raw, "utf8");
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    const excerpt = raw.slice(0, 500).trimEnd();
+    return {
+      summary: excerpt.length < raw.length ? `${excerpt}
+\u2026` : excerpt,
+      originalSize
+    };
+  }
+  if (typeof parsed !== "object" || parsed === null) {
+    return { summary: String(parsed), originalSize };
+  }
+  const obj = parsed;
+  const lines = [];
+  if (typeof obj["query"] === "string" && obj["query"].length > 0) {
+    lines.push(`Query: ${obj["query"]}`);
+  }
+  if (typeof obj["answer"] === "string" && obj["answer"].length > 0) {
+    lines.push(`Answer: ${obj["answer"]}`);
+  }
+  const results = Array.isArray(obj["results"]) ? obj["results"] : [];
+  if (results.length > 0) {
+    const shown = results.slice(0, MAX_RESULTS);
+    const more = results.length > MAX_RESULTS ? results.length - MAX_RESULTS : 0;
+    lines.push(`Results (${results.length}):`);
+    for (const result of shown) {
+      if (typeof result === "object" && result !== null) {
+        lines.push(`  ${summariseResult(result)}`);
+      }
+    }
+    if (more > 0) {
+      lines.push(`  \u2026and ${more} more`);
+    }
+  }
+  if (lines.length === 0) {
+    const excerpt = raw.slice(0, 500).trimEnd();
+    return {
+      summary: excerpt.length < raw.length ? `${excerpt}
+\u2026` : excerpt,
+      originalSize
+    };
+  }
+  return { summary: lines.join(`
+`), originalSize };
+};
+
 // src/handlers/csv.ts
 var MAX_PREVIEW_ROWS = 5;
 function splitCsvRow(row) {
@@ -6206,6 +6276,9 @@ function getHandler(toolName, output, input) {
   }
   if (toolName.includes("slack")) {
     return slackHandler;
+  }
+  if (toolName.includes("tavily")) {
+    return tavilyHandler;
   }
   if (toolName.includes("csv")) {
     return csvHandler;

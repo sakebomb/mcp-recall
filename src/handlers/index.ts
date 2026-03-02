@@ -6,6 +6,7 @@ import { shellHandler } from "./shell";
 import { getBashHandler } from "./bash";
 import { linearHandler } from "./linear";
 import { slackHandler } from "./slack";
+import { tavilyHandler } from "./tavily";
 import { csvHandler, looksLikeCsv } from "./csv";
 import { jsonHandler } from "./json";
 import { genericHandler } from "./generic";
@@ -25,10 +26,11 @@ export { extractText } from "./types";
  *   5. Shell/bash/remote-exec        → shell handler
  *   6. Linear tools                  → linear handler
  *   7. Slack tools                   → slack handler
- *   8. CSV tools (name-based)        → csv handler
- *   9. Unmatched with JSON output    → json handler
- *  10. CSV content-based fallback    → csv handler
- *  11. Everything else               → generic handler
+ *   8. Tavily search/research        → tavily handler
+ *   9. CSV tools (name-based)        → csv handler
+ *  10. Unmatched with JSON output    → json handler
+ *  11. CSV content-based fallback    → csv handler
+ *  12. Everything else               → generic handler
  *
  * `input` (tool_input) is used for the Bash tool to route on the command string.
  */
@@ -73,6 +75,10 @@ export function getHandler(toolName: string, output: unknown, input?: unknown): 
 
   if (toolName.includes("slack")) {
     return slackHandler;
+  }
+
+  if (toolName.includes("tavily")) {
+    return tavilyHandler;
   }
 
   if (toolName.includes("csv")) {

@@ -10,6 +10,7 @@ import { jsonHandler } from "../src/handlers/json";
 import { genericHandler } from "../src/handlers/generic";
 import { getHandler, extractText } from "../src/handlers/index";
 import { getBashHandler, gitDiffHandler, gitLogHandler, terraformPlanHandler } from "../src/handlers/bash";
+import { tavilyHandler } from "../src/handlers/tavily";
 
 // ---------------------------------------------------------------------------
 // extractText
@@ -931,5 +932,109 @@ describe("terraformPlanHandler", () => {
     const { summary } = terraformPlanHandler("Bash", plainOutput);
     // Falls back to shellHandler — no terraform-specific content, just plain output
     expect(summary).toContain("lines");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// tavilyHandler
+// ---------------------------------------------------------------------------
+
+const TAVILY_SEARCH = JSON.stringify({
+  query: "bun runtime benchmarks",
+  answer: "Bun is a fast all-in-one JavaScript runtime. Benchmarks show it is 3x faster than Node.js for many workloads.",
+  results: [
+    {
+      title: "Bun vs Node.js Performance",
+      url: "https://example.com/bun-benchmarks",
+      content: "Bun achieves significant speed improvements over Node.js in HTTP throughput and startup time.",
+      raw_content: "FULL PAGE CONTENT ".repeat(500),
+      score: 0.98,
+    },
+    {
+      title: "Runtime Comparison 2026",
+      url: "https://example.com/comparison",
+      content: "Comparing Bun, Deno, and Node.js across a variety of workloads including I/O and CPU tasks.",
+      raw_content: "FULL PAGE CONTENT ".repeat(500),
+      score: 0.91,
+    },
+  ],
+  response_time: 1.23,
+});
+
+describe("tavilyHandler", () => {
+  it("includes the query in the summary", () => {
+    const { summary } = tavilyHandler("mcp__tavily__tavily_search", TAVILY_SEARCH);
+    expect(summary).toContain("bun runtime benchmarks");
+  });
+
+  it("includes the synthesized answer in full", () => {
+    const { summary } = tavilyHandler("mcp__tavily__tavily_search", TAVILY_SEARCH);
+    expect(summary).toContain("3x faster than Node.js");
+  });
+
+  it("includes result titles and URLs", () => {
+    const { summary } = tavilyHandler("mcp__tavily__tavily_search", TAVILY_SEARCH);
+    expect(summary).toContain("Bun vs Node.js Performance");
+    expect(summary).toContain("https://example.com/bun-benchmarks");
+  });
+
+  it("includes a content snippet for each result", () => {
+    const { summary } = tavilyHandler("mcp__tavily__tavily_search", TAVILY_SEARCH);
+    expect(summary).toContain("significant speed improvements");
+  });
+
+  it("drops raw_content and score — summary is much smaller than original", () => {
+    const { summary, originalSize } = tavilyHandler("mcp__tavily__tavily_search", TAVILY_SEARCH);
+    expect(Buffer.byteLength(summary, "utf8")).toBeLessThan(originalSize * 0.1);
+  });
+
+  it("truncates content snippets at 150 characters", () => {
+    const longContent = "x".repeat(300);
+    const input = JSON.stringify({
+      query: "test",
+      results: [{ title: "T", url: "https://example.com", content: longContent, raw_content: "", score: 1 }],
+    });
+    const { summary } = tavilyHandler("mcp__tavily__tavily_search", input);
+    expect(summary).toContain("…");
+  });
+
+  it("caps results at 10 with overflow count", () => {
+    const manyResults = Array.from({ length: 15 }, (_, i) => ({
+      title: `Result ${i}`,
+      url: `https://example.com/${i}`,
+      content: `Content for result ${i}`,
+      raw_content: "",
+      score: 0.9,
+    }));
+    const input = JSON.stringify({ query: "test", results: manyResults });
+    const { summary } = tavilyHandler("mcp__tavily__tavily_search", input);
+    expect(summary).toContain("5 more");
+    expect(summary).not.toContain("Result 14");
+  });
+
+  it("works without an answer field", () => {
+    const input = JSON.stringify({
+      query: "no answer",
+      results: [{ title: "T", url: "https://example.com", content: "some content", raw_content: "", score: 1 }],
+    });
+    const { summary } = tavilyHandler("mcp__tavily__tavily_search", input);
+    expect(summary).toContain("no answer");
+    expect(summary).toContain("some content");
+  });
+
+  it("falls back gracefully for non-JSON output", () => {
+    const { summary } = tavilyHandler("mcp__tavily__tavily_search", "plain text response");
+    expect(summary).toContain("plain text response");
+  });
+
+  it("reports originalSize in bytes", () => {
+    const { originalSize } = tavilyHandler("mcp__tavily__tavily_search", TAVILY_SEARCH);
+    expect(originalSize).toBe(Buffer.byteLength(TAVILY_SEARCH, "utf8"));
+  });
+
+  it("routes tavily tools to tavily handler", () => {
+    expect(getHandler("mcp__tavily__tavily_search", "{}")).toBe(tavilyHandler);
+    expect(getHandler("mcp__tavily__tavily_research", "{}")).toBe(tavilyHandler);
+    expect(getHandler("mcp__tavily__tavily_extract", "{}")).toBe(tavilyHandler);
   });
 });
