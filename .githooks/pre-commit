@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -e
+
+# Rebuild plugin dist/ if any src/ TypeScript files are staged.
+if git diff --cached --name-only | grep -q '^src/'; then
+  echo "[pre-commit] src/ changed — rebuilding plugins/mcp-recall/dist/"
+  bun run build
+  git add plugins/mcp-recall/dist/
+fi

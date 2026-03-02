@@ -148,3 +148,26 @@ Completed work.
 - Merged via PR #30
 
 **v6 total: 276 tests, 0 failures**
+
+---
+
+## 2026-03-02 (continued) — Marketplace Install + Pre-commit Hook
+
+### Marketplace Install
+
+- `plugins/mcp-recall/.claude-plugin/plugin.json` — metadata only (name, description, author) per marketplace convention
+- `plugins/mcp-recall/.mcp.json` — MCP server config: `{"recall": {"command": "bun", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/server.js"]}}`
+- `plugins/mcp-recall/hooks/hooks.json` — SessionStart + PostToolUse hooks targeting `bin/recall`
+- `plugins/mcp-recall/bin/recall` — wrapper calling `dist/cli.js`
+- `plugins/mcp-recall/dist/server.js` + `dist/cli.js` — bundled via `bun build --target bun`; npm deps inlined, `bun:sqlite` stays external
+- Root `.claude-plugin/plugin.json` — removed `mcpServers` (metadata-only per marketplace convention)
+- `.gitignore` — added `!plugins/mcp-recall/dist/` negation to track distribution bundles
+- `package.json` — added `build` script
+- `README.md` — updated Install section with two-command marketplace flow
+- Merged via PR #32
+
+### Pre-commit Hook
+
+- `.githooks/pre-commit` — detects staged `src/` changes; auto-runs `bun run build` and stages `plugins/mcp-recall/dist/`; no-op otherwise
+- `package.json` — added `prepare` script: `git config core.hooksPath .githooks` (wires hook on `bun install`)
+- Merged via PR #33

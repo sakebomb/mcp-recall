@@ -9,7 +9,8 @@
     "test": "bun test",
     "dev": "bun --watch src/server.ts",
     "typecheck": "tsc --noEmit",
-    "build": "bun build src/server.ts --target bun --outfile plugins/mcp-recall/dist/server.js && bun build src/cli.ts --target bun --outfile plugins/mcp-recall/dist/cli.js"
+    "build": "bun build src/server.ts --target bun --outfile plugins/mcp-recall/dist/server.js && bun build src/cli.ts --target bun --outfile plugins/mcp-recall/dist/cli.js",
+    "prepare": "git config core.hooksPath .githooks"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
