@@ -1,5 +1,6 @@
 # mcp-recall
 
+![CI](https://github.com/sakebomb/mcp-recall/actions/workflows/ci.yml/badge.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 ![Runtime: Bun](https://img.shields.io/badge/runtime-Bun-f472b6.svg)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)
