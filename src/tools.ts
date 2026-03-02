@@ -16,6 +16,7 @@ import {
   getStats,
   getSessionDays,
   getSessionSummary,
+  getContext,
   storeOutput,
   type StoredOutput,
   type ForgetOptions,
@@ -297,6 +298,79 @@ export function toolListStored(
   const separator = "-".repeat(header.length);
 
   return [header, separator, ...rows].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// recall__context
+// ---------------------------------------------------------------------------
+
+export interface ContextArgs {
+  days?: number;
+  limit?: number;
+}
+
+export function toolContext(
+  db: Database,
+  projectKey: string,
+  args: ContextArgs
+): string {
+  const data = getContext(db, projectKey, args);
+  const today = new Date().toISOString().slice(0, 10);
+
+  const isEmpty =
+    data.pinned.length === 0 &&
+    data.notes.length === 0 &&
+    data.recent.length === 0 &&
+    data.last_session === null;
+
+  if (isEmpty) {
+    return `[recall: no context available yet — use recall tools to build up your context store]`;
+  }
+
+  const lines: string[] = [
+    `Context — ${today}`,
+    "═".repeat(36),
+  ];
+
+  if (data.pinned.length > 0) {
+    lines.push("", `Pinned (${data.pinned.length}):`);
+    for (const item of data.pinned) {
+      const excerpt = item.summary.slice(0, 100).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > 100 ? "…" : "";
+      lines.push(`  📌 ${item.id}  ${item.tool_name.padEnd(40)}  ${formatDate(item.created_at)}`);
+      lines.push(`    ${excerpt}${ellipsis}`);
+    }
+  }
+
+  if (data.notes.length > 0) {
+    lines.push("", `Notes (${data.notes.length}):`);
+    for (const note of data.notes) {
+      const excerpt = note.summary.slice(0, 100).replace(/\n/g, " ");
+      const ellipsis = note.summary.length > 100 ? "…" : "";
+      lines.push(`  ${note.id}  ${formatDate(note.created_at)}`);
+      lines.push(`    ${excerpt}${ellipsis}`);
+    }
+  }
+
+  if (data.recent.length > 0) {
+    const days = args.days ?? 7;
+    lines.push("", `Recently accessed (last ${days} day${days === 1 ? "" : "s"}, ${data.recent.length} item${data.recent.length === 1 ? "" : "s"}):`);
+    for (const item of data.recent) {
+      const excerpt = item.summary.slice(0, 100).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > 100 ? "…" : "";
+      lines.push(`  ${item.id}  ${item.tool_name.padEnd(40)}  ${formatDate(item.created_at)}  ×${item.access_count}`);
+      lines.push(`    ${excerpt}${ellipsis}`);
+    }
+  }
+
+  if (data.last_session) {
+    const s = data.last_session;
+    const reductionStr = reductionPct(s.total_original_bytes, s.total_summary_bytes);
+    lines.push("", `Last session (${s.date}):`);
+    lines.push(`  ${s.stored_count} item${s.stored_count === 1 ? "" : "s"} stored · ${formatBytes(s.total_original_bytes)} → ${formatBytes(s.total_summary_bytes)} (${reductionStr} reduction)`);
+  }
+
+  return lines.join("\n");
 }
 
 // ---------------------------------------------------------------------------
