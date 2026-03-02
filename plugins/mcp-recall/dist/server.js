@@ -19578,6 +19578,7 @@ function getDb(path) {
   instance = new Database(path);
   instance.run("PRAGMA journal_mode=WAL");
   instance.run("PRAGMA foreign_keys=ON");
+  instance.run("PRAGMA optimize");
   instance.run(SCHEMA);
   applyMigrations(instance);
   return instance;
@@ -19690,25 +19691,28 @@ function countAndDelete(db, where, params) {
   }
   return count;
 }
+var VACUUM_THRESHOLD = 50;
 function forgetOutputs(db, project_key, options) {
   const pinGuard = options.force ? "" : "AND pinned = 0";
+  let deleted = 0;
   if (options.all) {
-    return countAndDelete(db, `project_key = ? ${pinGuard}`, [project_key]);
-  }
-  if (options.id) {
-    return countAndDelete(db, "id = ? AND project_key = ?", [options.id, project_key]);
-  }
-  if (options.tool) {
-    return countAndDelete(db, `tool_name = ? AND project_key = ? ${pinGuard}`, [options.tool, project_key]);
-  }
-  if (options.session_id) {
-    return countAndDelete(db, `session_id = ? AND project_key = ? ${pinGuard}`, [options.session_id, project_key]);
-  }
-  if (options.older_than_days !== undefined) {
+    deleted = countAndDelete(db, `project_key = ? ${pinGuard}`, [project_key]);
+  } else if (options.id) {
+    deleted = countAndDelete(db, "id = ? AND project_key = ?", [options.id, project_key]);
+  } else if (options.tool) {
+    deleted = countAndDelete(db, `tool_name = ? AND project_key = ? ${pinGuard}`, [options.tool, project_key]);
+  } else if (options.session_id) {
+    deleted = countAndDelete(db, `session_id = ? AND project_key = ? ${pinGuard}`, [options.session_id, project_key]);
+  } else if (options.older_than_days !== undefined) {
     const cutoff = Math.floor(Date.now() / 1000) - options.older_than_days * 86400;
-    return countAndDelete(db, `created_at < ? AND project_key = ? ${pinGuard}`, [cutoff, project_key]);
+    deleted = countAndDelete(db, `created_at < ? AND project_key = ? ${pinGuard}`, [cutoff, project_key]);
   }
-  return 0;
+  if (deleted >= VACUUM_THRESHOLD) {
+    try {
+      db.run("VACUUM");
+    } catch {}
+  }
+  return deleted;
 }
 function getStats(db, project_key) {
   const row = db.prepare(`
