@@ -2,6 +2,7 @@ import type { Handler } from "./types";
 import { playwrightHandler } from "./playwright";
 import { githubHandler } from "./github";
 import { filesystemHandler } from "./filesystem";
+import { shellHandler } from "./shell";
 import { linearHandler } from "./linear";
 import { slackHandler } from "./slack";
 import { csvHandler, looksLikeCsv } from "./csv";
@@ -19,12 +20,13 @@ export { extractText } from "./types";
  *   1. Playwright browser_snapshot → playwright handler
  *   2. GitHub tools               → github handler
  *   3. Filesystem tools           → filesystem handler
- *   4. Linear tools               → linear handler
- *   5. Slack tools                → slack handler
- *   6. CSV tools (name-based)     → csv handler
- *   7. Unmatched with JSON output → json handler
- *   8. CSV content-based fallback → csv handler
- *   9. Everything else            → generic handler
+ *   4. Shell/bash tools           → shell handler
+ *   5. Linear tools               → linear handler
+ *   6. Slack tools                → slack handler
+ *   7. CSV tools (name-based)     → csv handler
+ *   8. Unmatched with JSON output → json handler
+ *   9. CSV content-based fallback → csv handler
+ *  10. Everything else            → generic handler
  */
 export function getHandler(toolName: string, output: unknown): Handler {
   if (toolName.includes("playwright") && toolName.includes("snapshot")) {
@@ -41,6 +43,15 @@ export function getHandler(toolName: string, output: unknown): Handler {
     toolName.includes("get_file")
   ) {
     return filesystemHandler;
+  }
+
+  if (
+    toolName.includes("bash") ||
+    toolName.includes("shell") ||
+    toolName.includes("terminal") ||
+    toolName.includes("run_command")
+  ) {
+    return shellHandler;
   }
 
   if (toolName.includes("linear")) {
