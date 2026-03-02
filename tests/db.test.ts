@@ -4,6 +4,11 @@ import {
   closeDb,
   storeOutput,
   retrieveOutput,
+  recordAccess,
+  pinOutput,
+  checkDedup,
+  evictIfNeeded,
+  retrieveSnippet,
   searchOutputs,
   listOutputs,
   forgetOutputs,
@@ -320,6 +325,185 @@ describe("db", () => {
       const days = getSessionDays(db);
       expect(days[0]).toBe("2026-03-01");
       expect(days[1]).toBe("2026-02-28");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // recordAccess
+  // -------------------------------------------------------------------------
+
+  describe("recordAccess", () => {
+    it("increments access_count", () => {
+      const stored = storeOutput(db, makeInput());
+      expect(stored.access_count).toBe(0);
+      recordAccess(db, stored.id);
+      const updated = retrieveOutput(db, stored.id)!;
+      expect(updated.access_count).toBe(1);
+    });
+
+    it("accumulates on repeated access", () => {
+      const stored = storeOutput(db, makeInput());
+      recordAccess(db, stored.id);
+      recordAccess(db, stored.id);
+      recordAccess(db, stored.id);
+      expect(retrieveOutput(db, stored.id)!.access_count).toBe(3);
+    });
+
+    it("sets last_accessed to a recent timestamp", () => {
+      const before = Math.floor(Date.now() / 1000);
+      const stored = storeOutput(db, makeInput());
+      recordAccess(db, stored.id);
+      const after = Math.floor(Date.now() / 1000);
+      const updated = retrieveOutput(db, stored.id)!;
+      expect(updated.last_accessed).toBeGreaterThanOrEqual(before);
+      expect(updated.last_accessed!).toBeLessThanOrEqual(after);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // pinOutput
+  // -------------------------------------------------------------------------
+
+  describe("pinOutput", () => {
+    it("pins an item", () => {
+      const stored = storeOutput(db, makeInput());
+      expect(stored.pinned).toBe(0);
+      pinOutput(db, stored.id, PROJECT_KEY, true);
+      expect(retrieveOutput(db, stored.id)!.pinned).toBe(1);
+    });
+
+    it("unpins a pinned item", () => {
+      const stored = storeOutput(db, makeInput());
+      pinOutput(db, stored.id, PROJECT_KEY, true);
+      pinOutput(db, stored.id, PROJECT_KEY, false);
+      expect(retrieveOutput(db, stored.id)!.pinned).toBe(0);
+    });
+
+    it("returns true when item exists", () => {
+      const stored = storeOutput(db, makeInput());
+      expect(pinOutput(db, stored.id, PROJECT_KEY, true)).toBe(true);
+    });
+
+    it("returns false for unknown id", () => {
+      expect(pinOutput(db, "recall_00000000", PROJECT_KEY, true)).toBe(false);
+    });
+
+    it("pruneExpired skips pinned items", () => {
+      const old_ts = Math.floor(Date.now() / 1000) - 10 * 86400;
+      db.prepare(`
+        INSERT INTO stored_outputs
+          (id,project_key,session_id,tool_name,summary,full_content,original_size,summary_size,created_at,pinned)
+        VALUES ('recall_pin00001',?,?,?,?,?,100,3,?,1)
+      `).run(PROJECT_KEY, "2026-02-19", "mcp__tool", "pinned old", "content", old_ts);
+      expect(pruneExpired(db, PROJECT_KEY, 7)).toBe(0);
+    });
+
+    it("forgetOutputs(all) skips pinned items by default", () => {
+      const stored = storeOutput(db, makeInput());
+      pinOutput(db, stored.id, PROJECT_KEY, true);
+      storeOutput(db, makeInput());
+      const deleted = forgetOutputs(db, PROJECT_KEY, { all: true });
+      expect(deleted).toBe(1); // only the unpinned one
+      expect(retrieveOutput(db, stored.id)).not.toBeNull();
+    });
+
+    it("forgetOutputs(all, force) deletes pinned items too", () => {
+      const stored = storeOutput(db, makeInput());
+      pinOutput(db, stored.id, PROJECT_KEY, true);
+      forgetOutputs(db, PROJECT_KEY, { all: true, force: true });
+      expect(retrieveOutput(db, stored.id)).toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // checkDedup
+  // -------------------------------------------------------------------------
+
+  describe("checkDedup", () => {
+    it("returns null when no matching hash exists", () => {
+      expect(checkDedup(db, PROJECT_KEY, "abc123")).toBeNull();
+    });
+
+    it("returns the stored item when hash matches", () => {
+      storeOutput(db, makeInput({ input_hash: "hash1234" }));
+      const hit = checkDedup(db, PROJECT_KEY, "hash1234");
+      expect(hit).not.toBeNull();
+      expect(hit!.input_hash).toBe("hash1234");
+    });
+
+    it("returns the most recent match when multiple exist", () => {
+      const now = Math.floor(Date.now() / 1000);
+      db.prepare(`
+        INSERT INTO stored_outputs (id,project_key,session_id,tool_name,summary,full_content,original_size,summary_size,created_at,input_hash)
+        VALUES ('recall_dedup0001',?,?,?,?,?,100,3,?,?)
+      `).run(PROJECT_KEY, "2026-03-01", "mcp__tool", "old", "content", now - 10, "hash1234");
+      db.prepare(`
+        INSERT INTO stored_outputs (id,project_key,session_id,tool_name,summary,full_content,original_size,summary_size,created_at,input_hash)
+        VALUES ('recall_dedup0002',?,?,?,?,?,100,3,?,?)
+      `).run(PROJECT_KEY, "2026-03-01", "mcp__tool", "new", "content", now, "hash1234");
+      const hit = checkDedup(db, PROJECT_KEY, "hash1234");
+      expect(hit!.summary).toBe("new");
+    });
+
+    it("does not match hash from a different project", () => {
+      storeOutput(db, makeInput({ project_key: "otherproject567", input_hash: "hash1234" }));
+      expect(checkDedup(db, PROJECT_KEY, "hash1234")).toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // evictIfNeeded
+  // -------------------------------------------------------------------------
+
+  describe("evictIfNeeded", () => {
+    it("returns 0 when store is under the size limit", () => {
+      storeOutput(db, makeInput({ original_size: 100 }));
+      expect(evictIfNeeded(db, PROJECT_KEY, 500)).toBe(0);
+    });
+
+    it("evicts least-accessed item when over limit", () => {
+      // Two items totalling 600B, limit is effectively 0 (0.0005 MB ≈ 512B)
+      const a = storeOutput(db, makeInput({ original_size: 300, summary: "item a" }));
+      const b = storeOutput(db, makeInput({ original_size: 300, summary: "item b" }));
+      // Give item b more accesses so it survives
+      recordAccess(db, b.id);
+      recordAccess(db, b.id);
+      const evicted = evictIfNeeded(db, PROJECT_KEY, 0.0005);
+      expect(evicted).toBeGreaterThan(0);
+      // item b (more accessed) should survive longer
+      expect(retrieveOutput(db, b.id)).not.toBeNull();
+    });
+
+    it("does not evict pinned items", () => {
+      const stored = storeOutput(db, makeInput({ original_size: 1000000 }));
+      pinOutput(db, stored.id, PROJECT_KEY, true);
+      // Even with a 0 limit, pinned item is not evicted
+      evictIfNeeded(db, PROJECT_KEY, 0);
+      expect(retrieveOutput(db, stored.id)).not.toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // retrieveSnippet
+  // -------------------------------------------------------------------------
+
+  describe("retrieveSnippet", () => {
+    it("returns null for unknown id", () => {
+      expect(retrieveSnippet(db, "recall_00000000", "query")).toBeNull();
+    });
+
+    it("returns a text excerpt when query matches full_content", () => {
+      const stored = storeOutput(db, makeInput({
+        full_content: "The quick brown fox jumps over the lazy authentication dog",
+      }));
+      const snippet = retrieveSnippet(db, stored.id, "authentication");
+      expect(snippet).not.toBeNull();
+      expect(snippet).toContain("authentication");
+    });
+
+    it("returns null when query does not match", () => {
+      const stored = storeOutput(db, makeInput({ full_content: "hello world" }));
+      expect(retrieveSnippet(db, stored.id, "zzznomatch")).toBeNull();
     });
   });
 });
