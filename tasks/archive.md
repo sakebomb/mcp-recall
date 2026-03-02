@@ -115,3 +115,17 @@ Completed work.
 - Merged via PR #26
 
 **v3 total: 247 tests, 0 failures**
+
+---
+
+## 2026-03-02 (continued) — v4
+
+### v4 — Session Summary Tool
+
+- `src/db/index.ts` — `SessionSummaryOptions`, `SessionSummaryData` types; `getSessionSummary` runs 5 focused SQL queries (aggregate stats, tool counts, top-5 accessed, pinned, notes); filters by `session_id` (exact) or date range (YYYY-MM-DD, defaults today UTC)
+- `src/tools.ts` — `toolSessionSummary` formats structured data into a readable digest
+- `src/server.ts` — `recall__session_summary` wired as 9th MCP tool with `session_id?` and `date?` params
+- `tests/tools.test.ts` — 52 tests (+7): empty state, aggregate stats, tool breakdown, most accessed, pinned, notes, session_id filter
+- Merged via PR #27
+
+**v4 total: 254 tests, 0 failures**

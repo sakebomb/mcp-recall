@@ -12,7 +12,7 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 
 ## Summary
 
-**247 tests across 8 files, 0 failures.**
+**254 tests across 8 files, 0 failures.**
 
 | File | Tests | Phase |
 |------|-------|-------|
@@ -23,7 +23,7 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 | `tests/handlers.test.ts` | 72 | 3 + 2d |
 | `tests/db.test.ts` | 68 | 4 + 2a + v3 |
 | `tests/hooks.test.ts` | 17 | 5 + 2b |
-| `tests/tools.test.ts` | 45 | 6 + 2c |
+| `tests/tools.test.ts` | 52 | 6 + 2c + v4 |
 
 ## Coverage
 
@@ -304,3 +304,10 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 | toolForget (v2): deletes pinned items when force: true | force override |
 | toolListStored (v2): sorts by access_count descending when sort=accessed | LFU order |
 | toolListStored (v2): shows pin indicator for pinned items | 📌 marker shown |
+| toolSessionSummary: returns no-data message when nothing stored for the date | empty state |
+| toolSessionSummary: shows stored count and compression stats | aggregate correct |
+| toolSessionSummary: shows tool breakdown sorted by count | highest count first |
+| toolSessionSummary: shows most accessed items | access_count section present |
+| toolSessionSummary: shows pinned items | 📌 section present |
+| toolSessionSummary: shows notes separately | notes section present |
+| toolSessionSummary: filters by session_id | session isolation |
