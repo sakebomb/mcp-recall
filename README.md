@@ -86,7 +86,7 @@ Sessions that used to hit context limits in 30 minutes routinely run for 3+ hour
 - `PostToolUse` hook — intercepts MCP tool outputs and native Bash commands; deduplicates identical calls; compresses, stores, and returns summary
 - `recall` MCP server — exposes ten tools for retrieval, search, memory, and management
 
-> **Scope**: Compression applies to MCP tools only. Claude Code's `PostToolUse` hook can replace MCP tool output via `updatedMCPToolOutput`. Built-in tools (Read, Bash, Grep) don't support output replacement — their full output still enters context directly. See [Scope](#scope) for details and the recommended workaround.
+> **Scope**: Compression applies to MCP tools and the native `Bash` built-in. The remaining built-ins (Read, Grep, Glob) pass through unchanged. See [Scope](#scope) for details.
 
 ---
 
@@ -206,224 +206,20 @@ This means a 7-day setting gives you 7 working sessions of stored context, regar
 
 Ten `recall__*` tools are available to Claude in every session.
 
-### `recall__retrieve`
-
-Fetch stored content from a previous tool call.
-
-```
-recall__retrieve(id, query?, max_bytes?)
-```
-
-- Omit `query` to return the compressed summary
-- Pass `query` to return an FTS excerpt focused on the relevant section — falls back to full content (capped at `max_bytes`) if the query has no match
-- Override `max_bytes` when you need more than the default 8 KB on a full-content retrieval
-
-Every call records an access, which informs `sort: "accessed"` and LFU eviction order.
-
-**When Claude uses it**: when a compressed summary isn't enough and it needs specific detail from a prior tool call.
-
----
-
-### `recall__search`
-
-Search across all stored outputs by content.
-
-```
-recall__search(query, tool?, limit?)
-```
-
-- FTS search (BM25 ranking) across all stored tool outputs for the current project
-- Each result includes a `> …excerpt…` snippet from the matching content
-- Filter by tool name with `tool` (substring match — e.g. `"github"` matches all `mcp__github__*` tools)
-- Default `limit`: 5 results
-
-**When Claude uses it**: when it doesn't have an ID but knows what it's looking for — e.g. *"find the Playwright snapshot that had the login form"*.
-
----
-
-### `recall__pin`
-
-Pin an item to protect it from expiry and eviction.
-
-```
-recall__pin(id, pinned?)
-```
-
-- `pinned` defaults to `true`; pass `false` to unpin
-- Pinned items are excluded from `pruneExpired`, LFU eviction, and `forget(all: true)` (unless `force: true`)
-
-**When Claude uses it**: to preserve an important result indefinitely — architectural decisions, key findings, expensive snapshots.
-
----
-
-### `recall__note`
-
-Store arbitrary text as a recall note.
-
-```
-recall__note(text, title?)
-```
-
-- Stores as `tool_name = "recall__note"` — searchable and retrievable like any other item
-- Use for conclusions, findings, and context that should survive a context reset
-- `title` appears in list/search output; defaults to `(note)`
-
-**When Claude uses it**: to record its own conclusions or project context that doesn't come from a tool call.
-
----
-
-### `recall__export`
-
-Export all stored items as JSON.
-
-```
-recall__export()
-```
-
-- Returns a JSON array of all stored items for the current project, ordered oldest-first
-- Use before `forget(all: true)` to preserve data
-
----
-
-### `recall__forget`
-
-Delete stored items.
-
-```
-recall__forget(id?, tool?, session_id?, older_than_days?, all?, confirmed?, force?)
-```
-
-| Usage | Effect |
+| Tool | Use when |
 |---|---|
-| `forget(id: "recall_abc12345")` | Delete one item |
-| `forget(tool: "mcp__github__list_issues")` | Delete all items from that tool |
-| `forget(session_id: "xyz")` | Delete everything from a specific session |
-| `forget(older_than_days: 3)` | Delete items older than 3 calendar days |
-| `forget(all: true, confirmed: true)` | Wipe the entire store |
-| `forget(all: true, confirmed: true, force: true)` | Wipe including pinned items |
+| `recall__context` | Start of session — get pinned items, notes, and recent activity |
+| `recall__retrieve(id, query?)` | Need detail from a prior tool call |
+| `recall__search(query, tool?)` | Find stored output by content, no ID needed |
+| `recall__pin(id)` | Protect an item from expiry and eviction |
+| `recall__note(text, title?)` | Store a conclusion or decision as project memory |
+| `recall__stats()` | Session efficiency report with savings and suggestions |
+| `recall__session_summary(date?)` | Digest of a specific session's activity |
+| `recall__list_stored(sort?, tool?)` | Browse stored items |
+| `recall__forget(...)` | Delete by id, tool, session, age, or all |
+| `recall__export()` | JSON dump of all stored items |
 
-Pinned items are skipped by default. Pass `force: true` to override pin protection.
-
----
-
-### `recall__list_stored`
-
-Browse stored items.
-
-```
-recall__list_stored(limit?, offset?, tool?, sort?)
-```
-
-- Default `limit`: 10
-- `sort`: `"recent"` (default) | `"accessed"` | `"size"`
-  - `"accessed"` orders by access count descending — most-used items first
-- `tool` uses substring matching — `"playwright"` matches all Playwright tools
-- Returns a compact table with recall IDs, tool names, dates, size/reduction info, and 📌 for pinned items
-
----
-
-### `recall__stats`
-
-Aggregate session efficiency report.
-
-```
-recall__stats()
-```
-
-Example output:
-
-```
-Session stats for current project:
-  Items stored:      23
-  Original size:     342KB
-  Compressed size:   6.1KB
-  Saved:             98.2% reduction
-  ~Tokens saved:     ~84,000
-  Session days:      4
-
-Suggestions:
-  📌 Pin candidates (accessed ≥5×): recall_ab12 mcp__playwright__browser_snapshot
-  🗑  Stale items (never accessed, >3 days): recall_cd34 mcp__github__list_issues
-```
-
-The Suggestions section is omitted when nothing qualifies — no noise on fresh projects. Thresholds are configurable via `pin_recommendation_threshold` and `stale_item_days`.
-
----
-
-### `recall__session_summary`
-
-Digest of a single session's activity.
-
-```
-recall__session_summary(session_id?, date?)
-```
-
-- Defaults to today (UTC). Pass `date` (YYYY-MM-DD) for a specific day, or `session_id` for a specific Claude session.
-- Shows: items stored, compression savings, tool breakdown by count, most-accessed items, pinned items, and notes stored that session.
-
-Example output:
-
-```
-Session Summary — 2026-03-02
-────────────────────────────────────
-Stored: 12 items · 847KB → 23KB (97% reduction)
-Retrieved: 5 items · 8 total accesses
-
-Tools stored:
-  mcp__playwright__browser_snapshot            ×4
-  mcp__github__list_issues                     ×3
-  mcp__filesystem__read_file                   ×2
-  recall__note                                 ×1
-  + 2 more
-
-Most accessed:
-  recall_ab12cd (×3) mcp__playwright__browser_snapshot
-    Page: Dashboard · 12 interactive elements…
-
-Pinned: 1
-  📌 recall_ef34gh  recall__note
-    Auth flow: use JWT with 1h expiry…
-```
-
-**When Claude uses it**: to review what happened in a session, or to hand off context to a new session.
-
----
-
-### `recall__context`
-
-Session orientation — the first thing to call when starting a new session.
-
-```
-recall__context(days?, limit?)
-```
-
-- Returns pinned items, recent notes, recently accessed items (default: last 7 days, up to 5), and a one-line last-session headline.
-- Each item appears in exactly one section — pinned items are never duplicated in the recently accessed section.
-- `days` controls the lookback window for recently accessed items. `limit` caps how many recent items are shown.
-
-Example output:
-
-```
-Context — 2026-03-02
-════════════════════════════════════
-
-Pinned (1):
-  📌 recall_ab12  recall__note                          2026-03-01
-    Auth flow: use JWT with 1h expiry, refresh at 80%…
-
-Notes (1):
-  recall_cd34  2026-03-01
-    Deploy checklist: run migrations, restart workers…
-
-Recently accessed (last 7 days, 2 items):
-  recall_ef56  mcp__github__list_issues    2026-03-02  ×3
-    #42 "Add session summary" [open]…
-
-Last session (2026-03-01):
-  12 items stored · 847KB → 23KB (97% reduction)
-```
-
-**When Claude uses it**: at the start of every session to re-orient to prior work without having to remember IDs.
+→ [Full tool reference](docs/tools.md)
 
 ---
 
@@ -455,29 +251,9 @@ Repeated identical tool calls return a cached header instead of re-compressing:
 | Generic JSON | Any unmatched tool with JSON output | 3-level depth limit, arrays capped at 3 items with overflow count. |
 | Generic text | Everything else | First 500 chars + ellipsis. |
 
-The generic JSON handler is intentionally conservative — it keeps structure and marks what was dropped. Correctness matters more than compression ratio. Claude needs to trust the summaries.
+The generic JSON handler is intentionally conservative — it keeps structure and marks what was dropped. Correctness matters more than compression ratio.
 
----
-
-## Denylist
-
-The following tool glob patterns are **never stored**, regardless of config:
-
-| Pattern | Reason |
-|---|---|
-| `mcp__recall__*` | Prevent circular compression of recall's own tools |
-| `mcp__1password__*` | Credential manager by definition |
-| `*secret*` | Catches `get_secret`, `read_secret`, etc. |
-| `*token*` | Auth tokens |
-| `*password*` | Passwords |
-| `*credential*` | Credentials |
-| `*key*` | API keys, private keys |
-| `*auth*` | Auth flows |
-| `*env*` | Environment variables |
-
-Output is also scanned for known secret patterns before any write — PEM headers, SSH private keys, GitHub PATs (classic and fine-grained), OpenAI keys, Anthropic keys, AWS access key IDs, and generic Bearer tokens. Matches are skipped and logged as warnings to stderr.
-
-Extend the defaults via `denylist.additional`. Replace them entirely via `denylist.override_defaults` (you must re-specify any defaults you still want).
+Credential tools are never stored — `mcp__1password__*`, `*secret*`, `*token*`, `*password*`, `*credential*`, `*key*`, `*auth*`, `*env*` are blocked by default. Output is also scanned for secret patterns (PEM headers, GitHub PATs, AWS keys, etc.) before any write. See [SECURITY.md](SECURITY.md) for details.
 
 ---
 
@@ -514,54 +290,13 @@ rm -rf ~/.local/share/mcp-recall/
 
 ## Error contract
 
-mcp-recall never breaks a tool call. Every failure mode degrades gracefully to the original uncompressed output:
-
-| Scenario | Result |
-|---|---|
-| Hook errors or crashes | Original output passes through (exit 0) |
-| SQLite write fails | Catch, log to stderr, original passes through |
-| Compression handler throws | Catch, log, original passes through |
-| Hook times out (10s limit) | Claude Code cancels, original passes through |
-| Secret detected in output | Skip store, log warning, original passes through |
-| Output too small to compress | Passthrough — no point storing |
-
-The session gets slightly worse context efficiency on failure. It never gets broken.
+mcp-recall never breaks a tool call. Every failure mode — hook crash, SQLite error, handler exception, timeout, secret detected — degrades gracefully to the original uncompressed output passing through unchanged. The session gets slightly worse context efficiency. It never gets broken.
 
 ---
 
 ## Troubleshooting
 
-**Plugin not loading**
-
-```bash
-claude --debug
-# Look for plugin loading errors
-```
-
-If the plugin isn't appearing, confirm Bun is installed and on your PATH:
-
-```bash
-bun --version
-```
-
-**Hook not firing**
-
-The most common cause is the hook script not being executable:
-
-```bash
-ls -la $(claude plugin path mcp-recall)/bin/recall
-# Should show -rwxr-xr-x
-```
-
-If not executable, reinstall the plugin. If the issue persists, [open an issue](https://github.com/sakebomb/mcp-recall/issues).
-
-**Stats showing zero after first session**
-
-The `SessionStart` hook records the first day. Stats accumulate from the second session onward if nothing was stored in the first session. Run `recall__stats()` after any MCP tool call to confirm data is flowing.
-
-**MCP tools not appearing in Claude**
-
-Restart Claude Code after installing the plugin. The MCP server registers at startup.
+→ [Troubleshooting guide](docs/troubleshooting.md)
 
 ---
 
@@ -574,106 +309,19 @@ bun install
 bun test
 ```
 
-### Project structure
-
-```
-mcp-recall/
-├── .claude-plugin/
-│   └── plugin.json         # plugin manifest (local dev)
-├── .githooks/
-│   └── pre-commit          # auto-rebuilds plugins/dist/ when src/ changes
-├── hooks/
-│   └── hooks.json          # SessionStart + PostToolUse hook definitions (canonical)
-├── bin/
-│   └── recall              # hook entrypoint (shell script → src/cli.ts)
-├── plugins/
-│   └── mcp-recall/         # marketplace-installable plugin bundle
-│       ├── .claude-plugin/plugin.json
-│       ├── .mcp.json
-│       ├── hooks/hooks.json
-│       ├── bin/recall
-│       └── dist/           # bundled server.js + cli.js (bun build --target bun)
-├── src/
-│   ├── server.ts           # MCP server (wires recall__* tools)
-│   ├── cli.ts              # CLI dispatcher for hook subcommands
-│   ├── tools.ts            # recall__* tool handler logic
-│   ├── config.ts           # TOML config loader (Zod-validated)
-│   ├── denylist.ts         # glob pattern denylist
-│   ├── secrets.ts          # secret pattern detection
-│   ├── project-key.ts      # git root detection + SHA256 project key
-│   ├── db/
-│   │   └── index.ts        # SQLite + FTS5 layer
-│   ├── handlers/
-│   │   ├── index.ts        # dispatcher
-│   │   ├── playwright.ts
-│   │   ├── github.ts
-│   │   ├── shell.ts
-│   │   ├── linear.ts
-│   │   ├── slack.ts
-│   │   ├── csv.ts
-│   │   ├── filesystem.ts
-│   │   ├── json.ts
-│   │   ├── generic.ts
-│   │   └── types.ts
-│   └── hooks/
-│       ├── session-start.ts
-│       └── post-tool-use.ts
-└── tests/                  # 276 tests, 8 files
-```
-
-### Running locally
-
-To test the plugin against a live Claude Code session:
-
-```bash
-# Build the bundle first, then install the plugin subdirectory
-bun run build
-claude plugin install ./plugins/mcp-recall --scope local
-claude --debug  # verify plugin loads
-```
-
-### Contributing
-
-Issues and PRs welcome. For significant changes, open an issue first to discuss the approach. Please include tests for new handlers and maintain the error contract — mcp-recall must never break a tool call under any failure condition.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for project structure, workflow, and how to add a new compression handler.
 
 ---
 
-## Roadmap
+## What's next
 
-### v2 — shipped
+Community contributions welcome — see the [open issues](https://github.com/sakebomb/mcp-recall/issues) for planned handlers:
 
-- **`recall__pin`** — exempt items from expiry and eviction permanently
-- **`recall__note`** — store Claude's own conclusions as project memory
-- **`recall__export`** — JSON dump before a full clear
-- **Access tracking** — `sort: "accessed"` in `list_stored`; LFU eviction when store exceeds `max_size_mb`
-- **Auto-dedup** — `[cached]` header for repeated identical tool calls; no re-compression or second DB write
-- **FTS snippets** — `retrieve(query)` returns a focused excerpt via `snippet()` rather than a full content dump
-- **Additional handlers** — CSV, Linear, Slack
-
-### v3 — shipped
-
-- **FTS chunking** — split large stored content into overlapping chunks for more precise snippet retrieval on long documents
-
-### v4 — shipped
-
-- **`recall__session_summary`** — digest of a single session: tools called, compression savings, most-accessed items, pinned items, notes. Filter by date or session ID.
-
-### v5 — shipped
-
-- **`recall__context`** — single-call session orientation: pinned items, recent notes, recently accessed items (configurable lookback), and last session headline. Call at the start of every session.
-
-### v6 — shipped
-
-- **Shell handler** — dedicated compression for bash/shell/terminal/run_command tools: strips ANSI escape codes, parses structured `{stdout, stderr, returncode}` JSON, caps stdout at 50 lines and stderr at 20 lines with overflow counts.
-
-### v1.0.0 — shipped
-
-- **Tavily handler** — extracts query, synthesized answer, and per-result title/URL/150-char snippet; drops `raw_content`, `score`, `response_time`; caps at 10 results.
-- **Shell handler extended** — covers remote-exec MCP tools (`ssh_exec`, `exec_command`, `remote_exec`, `container_exec`); strips OpenSSH post-quantum advisory noise.
-- **SessionStart context injection** — auto-injects pinned items, notes, and recently accessed items before the first message of every session; capped at 2000 chars.
-- **`recall__search` snippets** — each search result now includes a `> …excerpt…` line from the matching content.
-- **`recall__stats` suggestions** — pin candidates (frequently accessed non-pinned items) and stale item alerts; both thresholds configurable.
-- **Bash compression** — native `Bash` tool intercepted with CLI-aware handlers: `git diff`/`git show`, `git log`, `terraform plan`; everything else falls through to shell handler.
+- [Jira](https://github.com/sakebomb/mcp-recall/issues/49) — issue fields, description excerpt, comment count
+- [Notion](https://github.com/sakebomb/mcp-recall/issues/50) — extract readable text from block metadata
+- [Database results](https://github.com/sakebomb/mcp-recall/issues/51) — column names + first N rows
+- [Sentry](https://github.com/sakebomb/mcp-recall/issues/52) — exception type, message, top stack frames
+- [GitLab](https://github.com/sakebomb/mcp-recall/issues/53) — mirrors the GitHub handler
 
 ---
 
