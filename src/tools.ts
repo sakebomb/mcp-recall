@@ -15,6 +15,7 @@ import {
   forgetOutputs,
   getStats,
   getSessionDays,
+  getSessionSummary,
   storeOutput,
   type StoredOutput,
   type ForgetOptions,
@@ -296,6 +297,77 @@ export function toolListStored(
   const separator = "-".repeat(header.length);
 
   return [header, separator, ...rows].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// recall__session_summary
+// ---------------------------------------------------------------------------
+
+export interface SessionSummaryArgs {
+  session_id?: string;
+  date?: string;
+}
+
+export function toolSessionSummary(
+  db: Database,
+  projectKey: string,
+  args: SessionSummaryArgs
+): string {
+  const data = getSessionSummary(db, projectKey, args);
+
+  if (data.stored_count === 0) {
+    return `[recall: no items stored for ${data.label}]`;
+  }
+
+  const reductionStr = reductionPct(data.total_original_bytes, data.total_summary_bytes);
+
+  const lines: string[] = [
+    `Session Summary — ${data.label}`,
+    "─".repeat(36),
+    `Stored: ${data.stored_count} item${data.stored_count === 1 ? "" : "s"} · ${formatBytes(data.total_original_bytes)} → ${formatBytes(data.total_summary_bytes)} (${reductionStr} reduction)`,
+    `Retrieved: ${data.accessed_count} item${data.accessed_count === 1 ? "" : "s"} · ${data.total_accesses} total access${data.total_accesses === 1 ? "" : "es"}`,
+    "",
+    "Tools stored:",
+  ];
+
+  const TOP_TOOLS = 5;
+  for (const t of data.tool_counts.slice(0, TOP_TOOLS)) {
+    lines.push(`  ${t.tool_name.padEnd(44)}×${t.count}`);
+  }
+  if (data.tool_counts.length > TOP_TOOLS) {
+    lines.push(`  + ${data.tool_counts.length - TOP_TOOLS} more`);
+  }
+
+  if (data.top_accessed.length > 0) {
+    lines.push("", "Most accessed:");
+    for (const item of data.top_accessed) {
+      const excerpt = item.summary.slice(0, 100).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > 100 ? "…" : "";
+      lines.push(`  ${item.id} (×${item.access_count}) ${item.tool_name}`);
+      lines.push(`    ${excerpt}${ellipsis}`);
+    }
+  }
+
+  if (data.pinned.length > 0) {
+    lines.push("", `Pinned: ${data.pinned.length}`);
+    for (const item of data.pinned) {
+      const excerpt = item.summary.slice(0, 100).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > 100 ? "…" : "";
+      lines.push(`  📌 ${item.id}  ${item.tool_name}`);
+      lines.push(`    ${excerpt}${ellipsis}`);
+    }
+  }
+
+  if (data.notes.length > 0) {
+    lines.push("", `Notes: ${data.notes.length}`);
+    for (const note of data.notes) {
+      const excerpt = note.summary.slice(0, 100).replace(/\n/g, " ");
+      const ellipsis = note.summary.length > 100 ? "…" : "";
+      lines.push(`  ${note.id} — ${excerpt}${ellipsis}`);
+    }
+  }
+
+  return lines.join("\n");
 }
 
 // ---------------------------------------------------------------------------

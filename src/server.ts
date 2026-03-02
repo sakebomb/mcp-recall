@@ -2,14 +2,15 @@
  * mcp-recall MCP server.
  *
  * Tools exposed:
- *   recall__retrieve     — fetch stored content, FTS-scoped
- *   recall__search       — FTS across all stored outputs
- *   recall__pin          — pin/unpin an item from expiry and eviction
- *   recall__note         — store arbitrary text as a recall note
- *   recall__export       — JSON dump of all stored items
- *   recall__forget       — delete stored items
- *   recall__list_stored  — paginated item browser
- *   recall__stats        — aggregate session efficiency report
+ *   recall__retrieve         — fetch stored content, FTS-scoped
+ *   recall__search           — FTS across all stored outputs
+ *   recall__pin              — pin/unpin an item from expiry and eviction
+ *   recall__note             — store arbitrary text as a recall note
+ *   recall__export           — JSON dump of all stored items
+ *   recall__forget           — delete stored items
+ *   recall__list_stored      — paginated item browser
+ *   recall__stats            — aggregate session efficiency report
+ *   recall__session_summary  — digest of a single session's activity
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -25,6 +26,7 @@ import {
   toolForget,
   toolListStored,
   toolStats,
+  toolSessionSummary,
 } from "./tools";
 
 const projectKey = getProjectKey(process.cwd());
@@ -140,6 +142,24 @@ server.tool(
   {},
   async () => ({
     content: [{ type: "text", text: toolStats(db, projectKey) }],
+  })
+);
+
+server.tool(
+  "recall__session_summary",
+  "Digest of a single session's activity — tools called, compression savings, most-accessed items, pinned items, notes. Defaults to today. Use at session start for orientation or handoff.",
+  {
+    session_id: z
+      .string()
+      .optional()
+      .describe("Filter by specific Claude session ID (exact match)"),
+    date: z
+      .string()
+      .optional()
+      .describe("Filter by date in YYYY-MM-DD format (defaults to today)"),
+  },
+  async (args) => ({
+    content: [{ type: "text", text: toolSessionSummary(db, projectKey, args) }],
   })
 );
 
