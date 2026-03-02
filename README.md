@@ -39,6 +39,7 @@ Sessions that used to hit context limits in 30 minutes routinely run for 3+ hour
                │                        │
                │  Playwright → elements │
                │  GitHub     → key fields│
+               │  Shell      → 50 lines │
                │  Linear     → issues   │
                │  Slack      → messages │
                │  CSV        → row/col  │
@@ -422,6 +423,7 @@ Repeated identical tool calls return a cached header instead of re-compressing:
 |---|---|---|
 | Playwright | tool name contains `playwright` and `snapshot` | Interactive elements (buttons, inputs, links), visible text, headings. Drops aria noise. |
 | GitHub | `mcp__github__*` | Number, title, state, body (200 chars), labels, URL. Lists: first 10 + overflow count. |
+| Shell | tool name contains `bash`, `shell`, `terminal`, or `run_command` | Strips ANSI escape codes. Parses structured `{stdout, stderr, returncode}` JSON; falls back to plain text. Stdout: first 50 lines + overflow count. Stderr: first 20 lines, shown in a separate section. Exit code in header. |
 | Linear | tool name contains `linear` | Identifier, title, state, priority (numeric → label), description excerpt (200 chars), URL. Handles single, array, GraphQL, and Relay shapes. |
 | Slack | tool name contains `slack` | Channel, formatted timestamp, user/display name, message text (200 chars). Handles `{ok, messages}` wrappers and bare arrays. Lists: first 10 + overflow count. |
 | Filesystem | `mcp__filesystem__*` or tool name contains `read_file` / `get_file` | Line count header + first 50 lines + truncation notice. |
