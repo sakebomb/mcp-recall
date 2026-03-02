@@ -69,7 +69,7 @@ export function handlePostToolUse(raw: string): HookOutput {
   }
 
   // 5. Compress
-  const handler = getHandler(tool_name, tool_response);
+  const handler = getHandler(tool_name, tool_response, tool_input);
   const { summary, originalSize } = handler(tool_name, tool_response);
   const summarySize = Buffer.byteLength(summary, "utf8");
 
