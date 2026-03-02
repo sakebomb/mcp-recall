@@ -1,3 +1,8 @@
+/**
+ * Shell handler — strips ANSI escape codes and caps stdout at 50 lines /
+ * stderr at 20 lines. Handles structured `{stdout, stderr, returncode}` JSON
+ * as well as plain string output.
+ */
 import type { CompressionResult, Handler } from "./types";
 import { extractText } from "./types";
 

@@ -1,3 +1,7 @@
+/**
+ * Generic handler — last-resort fallback for plain text output.
+ * Delivers the first 500 characters with a truncation note if longer.
+ */
 import type { CompressionResult, Handler } from "./types";
 import { extractText } from "./types";
 

@@ -1,3 +1,7 @@
+/**
+ * Filesystem handler — captures a line-count header and the first 50 lines
+ * of file content, discarding the remainder.
+ */
 import type { CompressionResult, Handler } from "./types";
 import { extractText } from "./types";
 

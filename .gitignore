@@ -6,3 +6,15 @@ dist/
 *.db-wal
 .env
 bun.lockb
+
+# OS
+.DS_Store
+._*
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

@@ -1,3 +1,8 @@
+/**
+ * Slack handler — formats messages as `#channel [timestamp] user: text`,
+ * capping text at 200 chars and the message list at 10. Handles
+ * `{ ok, messages }` API responses, bare arrays, and single message objects.
+ */
 import type { CompressionResult, Handler } from "./types";
 import { extractText } from "./types";
 

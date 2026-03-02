@@ -1,3 +1,7 @@
+/**
+ * Playwright handler — compresses browser_snapshot accessibility trees into
+ * interactive elements and visible text, discarding raw HTML structure.
+ */
 import type { CompressionResult, Handler } from "./types";
 import { extractText } from "./types";
 

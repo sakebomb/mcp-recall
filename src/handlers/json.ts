@@ -1,3 +1,8 @@
+/**
+ * JSON handler — truncates deeply nested JSON to depth 3, capping arrays at
+ * 3 items with an overflow note. Used as the fallback for unrecognised JSON
+ * tool outputs.
+ */
 import type { CompressionResult, Handler } from "./types";
 import { extractText } from "./types";
 

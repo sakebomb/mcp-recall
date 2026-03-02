@@ -1,0 +1,2 @@
+[test]
+timeout = 10000   # 10s per test; DB and handler tests are fast, but allow headroom
