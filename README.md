@@ -44,11 +44,10 @@ Sessions that used to hit context limits in 30 minutes routinely run for 3+ hour
    ┌─────────────────┐  ┌────────────────────────┐
    │     Context     │  │      SQLite store       │
    │                 │  │                         │
-   │  299 B summary  │  │  full_output  (56 KB)   │
-   │  + recall header│  │  summary      (299 B)   │
+   │  299 B summary  │  │  full_content  (56 KB)  │
+   │  + recall header│  │  summary       (299 B)  │
    │                 │  │  FTS index              │
    └─────────────────┘  │  session_days           │
-                        │  access_count + stats   │
                         └────────────┬────────────┘
                                      │
                         ┌────────────┴────────────┐
@@ -68,7 +67,7 @@ Sessions that used to hit context limits in 30 minutes routinely run for 3+ hour
 - `PostToolUse` hook — intercepts MCP tool outputs, compresses, stores, returns summary
 - `recall` MCP server — exposes five tools for retrieval, search, and management
 
-> **Scope**: Compression applies to MCP tools only. Built-in Claude Code tools (Read, Bash, Grep) still enter context in full — mcp-recall stores them and injects a note, but saves no tokens in the current session. See [Scope](#scope) for details and the recommended workaround.
+> **Scope**: Compression applies to MCP tools only. Claude Code's `PostToolUse` hook can replace MCP tool output via `updatedMCPToolOutput`. Built-in tools (Read, Bash, Grep) don't support output replacement — their full output still enters context directly. See [Scope](#scope) for details and the recommended workaround.
 
 ---
 
@@ -140,13 +139,8 @@ expire_after_session_days = 7
 # Falls back to "cwd" if not inside a git repo.
 key = "git_root"
 
-# Hard cap on store size. When exceeded, least-frequently-accessed
-# non-pinned items are pruned (LFU eviction).
+# Hard cap on store size in megabytes.
 max_size_mb = 500
-
-# mcp-recall suggests pinning an item after this many retrieve() calls.
-# Pinned items survive pruning and manual clears. (v2 feature)
-pin_recommendation_threshold = 3
 
 [retrieve]
 # Max bytes returned by recall__retrieve() when no query is provided.
@@ -154,15 +148,17 @@ pin_recommendation_threshold = 3
 default_max_bytes = 8192
 
 [denylist]
-# Additional tool name patterns to never store (regex).
+# Additional tool name glob patterns to never store.
 # These extend the built-in defaults — they don't replace them.
 additional = [
-  # "mcp__myserver__.*__secret.*",
+  # "*myserver*secret*",
 ]
 
-# Remove specific patterns from built-in defaults (use sparingly).
+# Replace built-in defaults entirely (use sparingly).
+# Must re-specify any defaults you still want.
 override_defaults = [
-  # "mcp__1password__vault_list",  # safe — returns no secrets
+  # "mcp__recall__*",
+  # "mcp__1password__*",
 ]
 ```
 
@@ -186,9 +182,9 @@ Fetch stored content from a previous tool call.
 recall__retrieve(id, query?, max_bytes?)
 ```
 
-- Pass `query` to return only relevant sections via FTS search (recommended)
-- Omit `query` to return up to `max_bytes` of the full output (default 8 KB)
-- Override `max_bytes` when you know you need more detail
+- Pass `query` to return the full stored content (capped at `max_bytes`) — useful when you need more detail than the summary provides
+- Omit `query` to return the compressed summary
+- Override `max_bytes` when you know you need more than the default 8 KB
 
 **When Claude uses it**: when a compressed summary isn't enough and it needs specific detail from a prior tool call.
 
@@ -203,7 +199,7 @@ recall__search(query, tool?, limit?)
 ```
 
 - FTS search (BM25 ranking) across all stored tool outputs for the current project
-- Filter by tool name pattern with `tool` (e.g. `"mcp__github__.*"`)
+- Filter by tool name with `tool` (substring match — e.g. `"github"` matches all `mcp__github__*` tools)
 - Default `limit`: 5 results
 
 **When Claude uses it**: when it doesn't have an ID but knows what it's looking for — e.g. *"find the Playwright snapshot that had the login form"*.
@@ -220,12 +216,11 @@ recall__forget(id?, tool?, session_id?, older_than_days?, all?, confirmed?)
 
 | Usage | Effect |
 |---|---|
-| `forget(id: "abc12345")` | Delete one item |
-| `forget(tool: "mcp__github__.*")` | Delete all GitHub tool outputs |
+| `forget(id: "recall_abc12345")` | Delete one item |
+| `forget(tool: "mcp__github__list_issues")` | Delete all items from that tool |
 | `forget(session_id: "xyz")` | Delete everything from a specific session |
-| `forget(older_than_days: 3)` | Delete non-pinned items older than 3 session days |
-| `forget(all: true)` | Returns warning + item count, requires confirmation |
-| `forget(all: true, confirmed: true)` | Wipes the store (session day history preserved) |
+| `forget(older_than_days: 3)` | Delete items older than 3 calendar days |
+| `forget(all: true, confirmed: true)` | Wipe the entire store |
 
 ---
 
@@ -238,8 +233,9 @@ recall__list_stored(limit?, offset?, tool?, sort?)
 ```
 
 - Default `limit`: 10
-- `sort`: `"recent"` (default) | `"accessed"` | `"size"`
-- Returns a compact table with 8-character IDs, tool name, size, access count, and age
+- `sort`: `"recent"` (default) | `"size"`
+- `tool` uses substring matching — `"playwright"` matches all Playwright tools
+- Returns a compact table with recall IDs, tool names, dates, and size/reduction info
 
 ---
 
@@ -254,37 +250,32 @@ recall__stats()
 Example output:
 
 ```
-Session: 47 minutes
-Items stored: 23
-Original size: 342 KB  (~85,500 tokens)
-Delivered to context: 6.1 KB  (~1,525 tokens)
-Saved: 98.2%
-
-Top tools:
-  mcp__playwright__snapshot  ×8   →  247 KB stored, 2.1 KB delivered
-  mcp__github__list_issues   ×6   →  61 KB stored, 2.8 KB delivered
-  mcp__filesystem__read_file ×9   →  34 KB stored, 1.2 KB delivered
+Session stats for current project:
+  Items stored:      23
+  Original size:     342KB
+  Compressed size:   6.1KB
+  Saved:             98.2% reduction
+  ~Tokens saved:     ~84,000
+  Session days:      4
 ```
-
-Stats are also written to `~/.local/share/mcp-recall/{project}/stats.json` on every store operation for use by external tooling (status bars, dashboards, scripts).
 
 ---
 
 ## Compression handlers
 
-Handlers are tried in order. First match wins. Every compressed result includes a header:
+Handlers are selected by tool name, with content-based fallback. Every compressed result includes a header line:
 
 ```
-[recall: mcp__playwright__snapshot | 56.2KB → 299B | id: abc12345 | retrieve() for full]
+[recall:recall_abc12345 · 56.2KB→299B (99% reduction)]
 ```
 
 | Handler | Matches | Strategy |
 |---|---|---|
-| Playwright | `mcp__playwright__.*snapshot.*` | Interactive elements, visible text, page title. Drops aria noise. |
-| GitHub | `mcp__github__.*` | Number, title, state, body (200 chars), labels, assignees. Lists: first 5 + count. |
-| Filesystem | `mcp__filesystem__.*` | Line count + first 50 lines + truncation notice. |
-| Generic JSON | Any JSON output | Conservative: 3-level depth limit, 3-item array sample, `_truncated: true` flag. |
-| Generic text | Everything else | First 500 chars + `[+N bytes]` notice. |
+| Playwright | tool name contains `playwright` and `snapshot` | Interactive elements (buttons, inputs, links), visible text, headings. Drops aria noise. |
+| GitHub | `mcp__github__*` | Number, title, state, body (200 chars), labels, URL. Lists: first 10 + overflow count. |
+| Filesystem | `mcp__filesystem__*` or tool name contains `read_file` / `get_file` | Line count header + first 50 lines + truncation notice. |
+| Generic JSON | Any unmatched tool with JSON output | 3-level depth limit, arrays capped at 3 items with overflow count. |
+| Generic text | Everything else | First 500 chars + ellipsis. |
 
 The generic JSON handler is intentionally conservative — it keeps structure and marks what was dropped. Correctness matters more than compression ratio. Claude needs to trust the summaries.
 
@@ -292,23 +283,23 @@ The generic JSON handler is intentionally conservative — it keeps structure an
 
 ## Denylist
 
-The following tool patterns are **never stored**, regardless of config:
+The following tool glob patterns are **never stored**, regardless of config:
 
 | Pattern | Reason |
 |---|---|
-| `mcp__1password__.*` | Credential manager by definition |
-| `mcp__.*__.*secret.*` | Catches `get_secret`, `read_secret`, etc. |
-| `mcp__.*__.*token.*` | Auth tokens |
-| `mcp__.*__.*password.*` | Passwords |
-| `mcp__.*__.*credential.*` | Credentials |
-| `mcp__.*__.*key.*` | API keys, private keys |
-| `mcp__.*__.*auth.*` | Auth flows |
-| `mcp__.*__.*env.*` | Environment variables |
-| `mcp__recall__.*` | Prevent circular compression of recall's own tools |
+| `mcp__recall__*` | Prevent circular compression of recall's own tools |
+| `mcp__1password__*` | Credential manager by definition |
+| `*secret*` | Catches `get_secret`, `read_secret`, etc. |
+| `*token*` | Auth tokens |
+| `*password*` | Passwords |
+| `*credential*` | Credentials |
+| `*key*` | API keys, private keys |
+| `*auth*` | Auth flows |
+| `*env*` | Environment variables |
 
-Output is also scanned for known secret patterns before any write — PEM headers, GitHub PATs, OpenAI keys, Slack tokens, and others. Matches are skipped and logged as warnings.
+Output is also scanned for known secret patterns before any write — PEM headers, SSH private keys, GitHub PATs (classic and fine-grained), OpenAI keys, Anthropic keys, AWS access key IDs, and generic Bearer tokens. Matches are skipped and logged as warnings to stderr.
 
-Extend or selectively override the defaults via `denylist.additional` and `denylist.override_defaults` in config.
+Extend the defaults via `denylist.additional`. Replace them entirely via `denylist.override_defaults` (you must re-specify any defaults you still want).
 
 ---
 
@@ -316,7 +307,7 @@ Extend or selectively override the defaults via `denylist.additional` and `denyl
 
 **Compression applies to MCP tools only.**
 
-Claude Code's `PostToolUse` hook can replace MCP tool output via `updatedMCPToolOutput`. Built-in tools (Read, Bash, Grep, Glob) don't support output replacement — their full output still enters context. For built-in tools, mcp-recall stores the output and injects a note so Claude knows it's retrievable later, but no context is saved in the current session.
+Claude Code's `PostToolUse` hook can replace MCP tool output via `updatedMCPToolOutput`. Built-in tools (Read, Bash, Grep, Glob) don't support output replacement — their full output still enters context directly and mcp-recall has no way to intercept it.
 
 If your biggest context consumers are built-in tool calls, consider switching to MCP equivalents where possible — for example, the [filesystem MCP server](https://github.com/modelcontextprotocol/servers) instead of the built-in Read tool.
 
@@ -346,11 +337,12 @@ mcp-recall never breaks a tool call. Every failure mode degrades gracefully to t
 
 | Scenario | Result |
 |---|---|
-| Hook errors or crashes | Original output passes through |
+| Hook errors or crashes | Original output passes through (exit 0) |
 | SQLite write fails | Catch, log to stderr, original passes through |
 | Compression handler throws | Catch, log, original passes through |
 | Hook times out (10s limit) | Claude Code cancels, original passes through |
 | Secret detected in output | Skip store, log warning, original passes through |
+| Output too small to compress | Passthrough — no point storing |
 
 The session gets slightly worse context efficiency on failure. It never gets broken.
 
@@ -406,22 +398,33 @@ bun test
 ```
 mcp-recall/
 ├── .claude-plugin/
-│   └── plugin.json       # plugin manifest
+│   └── plugin.json         # plugin manifest
 ├── hooks/
-│   └── hooks.json        # SessionStart + PostToolUse hooks
+│   └── hooks.json          # SessionStart + PostToolUse hook definitions
 ├── bin/
-│   └── recall            # hook entrypoint (shell script)
+│   └── recall              # hook entrypoint (shell script → src/cli.ts)
 ├── src/
-│   ├── server.ts         # MCP server
-│   ├── cli.ts            # CLI entrypoint
-│   ├── db/               # SQLite layer
-│   ├── handlers/         # compression handlers
-│   ├── hooks/            # hook implementations
-│   ├── config.ts
-│   ├── denylist.ts
-│   ├── secrets.ts
-│   └── project-key.ts
-└── tests/
+│   ├── server.ts           # MCP server (wires recall__* tools)
+│   ├── cli.ts              # CLI dispatcher for hook subcommands
+│   ├── tools.ts            # recall__* tool handler logic
+│   ├── config.ts           # TOML config loader (Zod-validated)
+│   ├── denylist.ts         # glob pattern denylist
+│   ├── secrets.ts          # secret pattern detection
+│   ├── project-key.ts      # git root detection + SHA256 project key
+│   ├── db/
+│   │   └── index.ts        # SQLite + FTS5 layer
+│   ├── handlers/
+│   │   ├── index.ts        # dispatcher
+│   │   ├── playwright.ts
+│   │   ├── github.ts
+│   │   ├── filesystem.ts
+│   │   ├── json.ts
+│   │   ├── generic.ts
+│   │   └── types.ts
+│   └── hooks/
+│       ├── session-start.ts
+│       └── post-tool-use.ts
+└── tests/                  # 148 tests, 8 files
 ```
 
 ### Running locally
@@ -447,6 +450,7 @@ Issues and PRs welcome. For significant changes, open an issue first to discuss 
 - **`recall__pin`** — exempt an item from expiry permanently
 - **`recall__note`** — store Claude's own conclusions, not just tool outputs (project memory layer)
 - **`recall__export`** — JSON dump before a full clear
+- **Access tracking** — `sort: "accessed"` in `list_stored`, LFU eviction when store exceeds `max_size_mb`
 - **Auto-dedup** — return cached results for repeated identical tool calls, with staleness signals
 - **FTS chunking** — chunk stored content for more precise retrieve results
 - **Additional handlers** — CSV/tabular, Linear, Slack
