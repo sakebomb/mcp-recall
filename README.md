@@ -71,6 +71,8 @@ Sessions that used to hit context limits in 30 minutes routinely run for 3+ hour
                         │  list_stored()          │
                         │  forget(...)            │
                         │  stats()                │
+                        │  session_summary()      │
+                        │  context()              │
                         └─────────────────────────┘
 ```
 
@@ -78,7 +80,7 @@ Sessions that used to hit context limits in 30 minutes routinely run for 3+ hour
 
 - `SessionStart` hook — records each active day for session-scoped expiry
 - `PostToolUse` hook — intercepts MCP tool outputs; deduplicates identical calls; compresses, stores, and returns summary
-- `recall` MCP server — exposes eight tools for retrieval, search, memory, and management
+- `recall` MCP server — exposes ten tools for retrieval, search, memory, and management
 
 > **Scope**: Compression applies to MCP tools only. Claude Code's `PostToolUse` hook can replace MCP tool output via `updatedMCPToolOutput`. Built-in tools (Read, Bash, Grep) don't support output replacement — their full output still enters context directly. See [Scope](#scope) for details and the recommended workaround.
 
@@ -186,7 +188,7 @@ This means a 7-day setting gives you 7 working sessions of stored context, regar
 
 ## Tools
 
-Eight `recall__*` tools are available to Claude in every session.
+Ten `recall__*` tools are available to Claude in every session.
 
 ### `recall__retrieve`
 
@@ -322,6 +324,83 @@ Session stats for current project:
   ~Tokens saved:     ~84,000
   Session days:      4
 ```
+
+---
+
+### `recall__session_summary`
+
+Digest of a single session's activity.
+
+```
+recall__session_summary(session_id?, date?)
+```
+
+- Defaults to today (UTC). Pass `date` (YYYY-MM-DD) for a specific day, or `session_id` for a specific Claude session.
+- Shows: items stored, compression savings, tool breakdown by count, most-accessed items, pinned items, and notes stored that session.
+
+Example output:
+
+```
+Session Summary — 2026-03-02
+────────────────────────────────────
+Stored: 12 items · 847KB → 23KB (97% reduction)
+Retrieved: 5 items · 8 total accesses
+
+Tools stored:
+  mcp__playwright__browser_snapshot            ×4
+  mcp__github__list_issues                     ×3
+  mcp__filesystem__read_file                   ×2
+  recall__note                                 ×1
+  + 2 more
+
+Most accessed:
+  recall_ab12cd (×3) mcp__playwright__browser_snapshot
+    Page: Dashboard · 12 interactive elements…
+
+Pinned: 1
+  📌 recall_ef34gh  recall__note
+    Auth flow: use JWT with 1h expiry…
+```
+
+**When Claude uses it**: to review what happened in a session, or to hand off context to a new session.
+
+---
+
+### `recall__context`
+
+Session orientation — the first thing to call when starting a new session.
+
+```
+recall__context(days?, limit?)
+```
+
+- Returns pinned items, recent notes, recently accessed items (default: last 7 days, up to 5), and a one-line last-session headline.
+- Each item appears in exactly one section — pinned items are never duplicated in the recently accessed section.
+- `days` controls the lookback window for recently accessed items. `limit` caps how many recent items are shown.
+
+Example output:
+
+```
+Context — 2026-03-02
+════════════════════════════════════
+
+Pinned (1):
+  📌 recall_ab12  recall__note                          2026-03-01
+    Auth flow: use JWT with 1h expiry, refresh at 80%…
+
+Notes (1):
+  recall_cd34  2026-03-01
+    Deploy checklist: run migrations, restart workers…
+
+Recently accessed (last 7 days, 2 items):
+  recall_ef56  mcp__github__list_issues    2026-03-02  ×3
+    #42 "Add session summary" [open]…
+
+Last session (2026-03-01):
+  12 items stored · 847KB → 23KB (97% reduction)
+```
+
+**When Claude uses it**: at the start of every session to re-orient to prior work without having to remember IDs.
 
 ---
 
@@ -500,7 +579,7 @@ mcp-recall/
 │   └── hooks/
 │       ├── session-start.ts
 │       └── post-tool-use.ts
-└── tests/                  # 231 tests, 8 files
+└── tests/                  # 261 tests, 8 files
 ```
 
 ### Running locally
@@ -531,9 +610,17 @@ Issues and PRs welcome. For significant changes, open an issue first to discuss 
 - **FTS snippets** — `retrieve(query)` returns a focused excerpt via `snippet()` rather than a full content dump
 - **Additional handlers** — CSV, Linear, Slack
 
-### v3
+### v3 — shipped
 
 - **FTS chunking** — split large stored content into overlapping chunks for more precise snippet retrieval on long documents
+
+### v4 — shipped
+
+- **`recall__session_summary`** — digest of a single session: tools called, compression savings, most-accessed items, pinned items, notes. Filter by date or session ID.
+
+### v5 — shipped
+
+- **`recall__context`** — single-call session orientation: pinned items, recent notes, recently accessed items (configurable lookback), and last session headline. Call at the start of every session.
 
 ---
 
