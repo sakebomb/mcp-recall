@@ -13,7 +13,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "mcp__(?!recall__).*",
+        "matcher": "(mcp__(?!recall__).*|Bash)",
         "hooks": [
           {
             "type": "command",
