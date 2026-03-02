@@ -16,6 +16,9 @@ import {
   pruneExpired,
   recordSession,
   getSessionDays,
+  chunkText,
+  CHUNK_SIZE,
+  CHUNK_OVERLAP,
   type StoreInput,
 } from "../src/db/index";
 import type { Database } from "bun:sqlite";
@@ -503,6 +506,155 @@ describe("db", () => {
 
     it("returns null when query does not match", () => {
       const stored = storeOutput(db, makeInput({ full_content: "hello world" }));
+      expect(retrieveSnippet(db, stored.id, "zzznomatch")).toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // chunkText
+  // -------------------------------------------------------------------------
+
+  describe("chunkText", () => {
+    it("returns empty array for empty string", () => {
+      expect(chunkText("")).toEqual([]);
+    });
+
+    it("returns single chunk for text shorter than CHUNK_SIZE", () => {
+      const text = "short text";
+      expect(chunkText(text)).toEqual([text]);
+    });
+
+    it("returns single chunk for text exactly CHUNK_SIZE", () => {
+      const text = "x".repeat(CHUNK_SIZE);
+      expect(chunkText(text)).toHaveLength(1);
+    });
+
+    it("splits text longer than CHUNK_SIZE into multiple chunks", () => {
+      const text = "x".repeat(CHUNK_SIZE * 2);
+      expect(chunkText(text).length).toBeGreaterThan(1);
+    });
+
+    it("each chunk is at most CHUNK_SIZE characters", () => {
+      const text = "a".repeat(CHUNK_SIZE * 3 + 100);
+      for (const chunk of chunkText(text)) {
+        expect(chunk.length).toBeLessThanOrEqual(CHUNK_SIZE);
+      }
+    });
+
+    it("consecutive chunks overlap by CHUNK_OVERLAP characters", () => {
+      const text = "abcdefghij".repeat(60); // > CHUNK_SIZE
+      const chunks = chunkText(text);
+      expect(chunks.length).toBeGreaterThan(1);
+      const step = CHUNK_SIZE - CHUNK_OVERLAP;
+      // Second chunk starts at step, so first chunk's tail overlaps second chunk's head
+      expect(chunks[1]!.slice(0, CHUNK_OVERLAP)).toBe(chunks[0]!.slice(step, step + CHUNK_OVERLAP));
+    });
+
+    it("last chunk contains the end of the text", () => {
+      const text = "x".repeat(CHUNK_SIZE + 100);
+      const chunks = chunkText(text);
+      const last = chunks[chunks.length - 1]!;
+      expect(text.endsWith(last)).toBe(true);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Chunk storage and deletion
+  // -------------------------------------------------------------------------
+
+  describe("content_chunks", () => {
+    it("stores chunks when an item is stored", () => {
+      const longContent = "word ".repeat(200); // > CHUNK_SIZE
+      storeOutput(db, makeInput({ full_content: longContent }));
+      const count = (
+        db.prepare("SELECT COUNT(*) as n FROM content_chunks").get() as { n: number }
+      ).n;
+      expect(count).toBeGreaterThan(1);
+    });
+
+    it("stores a single chunk for short content", () => {
+      const stored = storeOutput(db, makeInput({ full_content: "short content" }));
+      const count = (
+        db.prepare("SELECT COUNT(*) as n FROM content_chunks WHERE output_id = ?")
+          .get(stored.id) as { n: number }
+      ).n;
+      expect(count).toBe(1);
+    });
+
+    it("chunk count matches chunkText output for the stored content", () => {
+      const content = "z".repeat(CHUNK_SIZE * 2 + 50);
+      const stored = storeOutput(db, makeInput({ full_content: content }));
+      const expected = chunkText(content).length;
+      const actual = (
+        db.prepare("SELECT COUNT(*) as n FROM content_chunks WHERE output_id = ?")
+          .get(stored.id) as { n: number }
+      ).n;
+      expect(actual).toBe(expected);
+    });
+
+    it("deletes chunks when the item is deleted", () => {
+      const stored = storeOutput(db, makeInput({ full_content: "some content to chunk" }));
+      db.prepare("DELETE FROM stored_outputs WHERE id = ?").run(stored.id);
+      const count = (
+        db.prepare("SELECT COUNT(*) as n FROM content_chunks WHERE output_id = ?")
+          .get(stored.id) as { n: number }
+      ).n;
+      expect(count).toBe(0);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // retrieveSnippet — chunk-based retrieval
+  // -------------------------------------------------------------------------
+
+  describe("retrieveSnippet (chunked)", () => {
+    it("returns the matching chunk when query matches full_content", () => {
+      const stored = storeOutput(db, makeInput({
+        full_content: "The deployment pipeline uses kubernetes and helm charts for orchestration",
+      }));
+      const result = retrieveSnippet(db, stored.id, "kubernetes");
+      expect(result).not.toBeNull();
+      expect(result).toContain("kubernetes");
+    });
+
+    it("returned content is the full chunk, not just a short excerpt", () => {
+      // Content longer than a snippet window but shorter than CHUNK_SIZE
+      const content = "alpha ".repeat(50) + "targetword " + "beta ".repeat(50);
+      const stored = storeOutput(db, makeInput({ full_content: content }));
+      const result = retrieveSnippet(db, stored.id, "targetword");
+      expect(result).not.toBeNull();
+      // A full chunk is much longer than a 64-word legacy snippet
+      expect(result!.length).toBeGreaterThan(100);
+    });
+
+    it("returns the chunk containing the match for a multi-chunk document", () => {
+      // Build a document where the match is in a specific chunk
+      const prefix = "x ".repeat(300);   // fills first chunk
+      const target = "uniquekeyword ";
+      const suffix = "y ".repeat(300);
+      const content = prefix + target + suffix;
+      const stored = storeOutput(db, makeInput({ full_content: content }));
+      const result = retrieveSnippet(db, stored.id, "uniquekeyword");
+      expect(result).not.toBeNull();
+      expect(result).toContain("uniquekeyword");
+    });
+
+    it("falls back to legacy FTS snippet for items stored without chunks", () => {
+      // Insert directly via SQL — no chunks created
+      const now = Math.floor(Date.now() / 1000);
+      db.prepare(`
+        INSERT INTO stored_outputs
+          (id, project_key, session_id, tool_name, summary, full_content, original_size, summary_size, created_at)
+        VALUES ('recall_legacy01', ?, 'sess', 'mcp__tool', 'summary', 'legacy content with matchword', 100, 7, ?)
+      `).run(PROJECT_KEY, now);
+
+      const result = retrieveSnippet(db, "recall_legacy01", "matchword");
+      expect(result).not.toBeNull();
+      expect(result).toContain("matchword");
+    });
+
+    it("returns null when query matches no chunk and no legacy FTS entry", () => {
+      const stored = storeOutput(db, makeInput({ full_content: "completely different content" }));
       expect(retrieveSnippet(db, stored.id, "zzznomatch")).toBeNull();
     });
   });
