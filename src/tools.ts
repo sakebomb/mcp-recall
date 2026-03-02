@@ -121,10 +121,20 @@ export function toolSearch(
     return `[recall: no results for "${args.query}"]`;
   }
 
+  const SNIPPET_MAX = 150;
+
   const lines = items.map((item, i) => {
     const excerpt = item.summary.slice(0, 120).replace(/\n/g, " ");
     const ellipsis = item.summary.length > 120 ? "…" : "";
-    return `${i + 1}. ${item.id} · ${item.tool_name} · ${formatDate(item.created_at)}\n   ${excerpt}${ellipsis}`;
+    const summaryLine = `${i + 1}. ${item.id} · ${item.tool_name} · ${formatDate(item.created_at)}\n   ${excerpt}${ellipsis}`;
+
+    const snippet = retrieveSnippet(db, item.id, args.query);
+    if (!snippet) return summaryLine;
+
+    const snipText = snippet.replace(/\n/g, " ").trim();
+    const capped = snipText.slice(0, SNIPPET_MAX);
+    const trailingEllipsis = snipText.length > SNIPPET_MAX ? "…" : "";
+    return `${summaryLine}\n   > …${capped}${trailingEllipsis}`;
   });
 
   return `Found ${items.length} result${items.length === 1 ? "" : "s"} for "${args.query}":\n\n${lines.join("\n\n")}`;
