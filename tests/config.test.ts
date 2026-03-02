@@ -75,4 +75,15 @@ describe("loadConfig", () => {
     expect(config.store.max_size_mb).toBe(256);
     expect((config.store as Record<string, unknown>).unknown_key).toBeUndefined();
   });
+
+  it("debug.enabled defaults to false", () => {
+    const config = loadConfig();
+    expect(config.debug.enabled).toBe(false);
+  });
+
+  it("debug.enabled reads true from TOML", () => {
+    writeFileSync(TEST_CONFIG_PATH, "[debug]\nenabled = true\n");
+    const config = loadConfig();
+    expect(config.debug.enabled).toBe(true);
+  });
 });

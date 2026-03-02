@@ -11,6 +11,15 @@ Learnings captured after corrections. Updated after any mistake or course correc
 
 ---
 
+## Claude Code Plugin Installation
+
+**Pattern**: Installing a local Claude Code plugin not yet in a marketplace
+**Mistake**: `claude plugin install ./path` only works for marketplace-registered plugins — fails with "Plugin not found in any configured marketplace"
+**Rule**: For local installs, add MCP server to `~/.claude.json` under `mcpServers`, and add hooks to `~/.claude/settings.json` under `hooks`. Use absolute paths (no `CLAUDE_PLUGIN_ROOT`). MCP server schema: `{type:"stdio", command:"bun", args:["/abs/path/dist/server.js"]}`.
+**Date**: 2026-03-02
+
+---
+
 ## Git
 
 **Pattern**: Pushing commits to GitHub repos with email privacy enabled

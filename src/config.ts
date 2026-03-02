@@ -19,6 +19,9 @@ const RecallConfigSchema = z.object({
     additional: z.array(z.string()),
     override_defaults: z.array(z.string()),
   }),
+  debug: z.object({
+    enabled: z.boolean(),
+  }),
 });
 
 const PartialConfigSchema = RecallConfigSchema.deepPartial();
@@ -39,6 +42,9 @@ const DEFAULTS: RecallConfig = {
   denylist: {
     additional: [],
     override_defaults: [],
+  },
+  debug: {
+    enabled: false,
   },
 };
 
