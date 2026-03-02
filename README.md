@@ -10,6 +10,8 @@ MCP tool outputs — Playwright snapshots, GitHub issues, file reads — can con
 
 Sessions that used to hit context limits in 30 minutes routinely run for 3+ hours.
 
+![mcp-recall demo](demo/demo.gif)
+
 ---
 
 ## How it works
