@@ -2,6 +2,9 @@ import type { Handler } from "./types";
 import { playwrightHandler } from "./playwright";
 import { githubHandler } from "./github";
 import { filesystemHandler } from "./filesystem";
+import { linearHandler } from "./linear";
+import { slackHandler } from "./slack";
+import { csvHandler, looksLikeCsv } from "./csv";
 import { jsonHandler } from "./json";
 import { genericHandler } from "./generic";
 import { extractText } from "./types";
@@ -16,8 +19,12 @@ export { extractText } from "./types";
  *   1. Playwright browser_snapshot → playwright handler
  *   2. GitHub tools               → github handler
  *   3. Filesystem tools           → filesystem handler
- *   4. Unmatched with JSON output → json handler
- *   5. Everything else            → generic handler
+ *   4. Linear tools               → linear handler
+ *   5. Slack tools                → slack handler
+ *   6. CSV tools (name-based)     → csv handler
+ *   7. Unmatched with JSON output → json handler
+ *   8. CSV content-based fallback → csv handler
+ *   9. Everything else            → generic handler
  */
 export function getHandler(toolName: string, output: unknown): Handler {
   if (toolName.includes("playwright") && toolName.includes("snapshot")) {
@@ -36,11 +43,28 @@ export function getHandler(toolName: string, output: unknown): Handler {
     return filesystemHandler;
   }
 
-  // Content-based fallback: try JSON handler if output looks like JSON
+  if (toolName.includes("linear")) {
+    return linearHandler;
+  }
+
+  if (toolName.includes("slack")) {
+    return slackHandler;
+  }
+
+  if (toolName.includes("csv")) {
+    return csvHandler;
+  }
+
+  // Content-based fallbacks
   const text = extractText(output);
   const trimmed = text.trimStart();
+
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
     return jsonHandler;
+  }
+
+  if (looksLikeCsv(text)) {
+    return csvHandler;
   }
 
   return genericHandler;

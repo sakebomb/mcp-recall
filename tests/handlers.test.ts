@@ -2,6 +2,9 @@ import { describe, it, expect } from "bun:test";
 import { playwrightHandler } from "../src/handlers/playwright";
 import { githubHandler } from "../src/handlers/github";
 import { filesystemHandler } from "../src/handlers/filesystem";
+import { csvHandler, looksLikeCsv } from "../src/handlers/csv";
+import { linearHandler } from "../src/handlers/linear";
+import { slackHandler } from "../src/handlers/slack";
 import { jsonHandler } from "../src/handlers/json";
 import { genericHandler } from "../src/handlers/generic";
 import { getHandler, extractText } from "../src/handlers/index";
@@ -270,5 +273,296 @@ describe("getHandler", () => {
   it("routes plain text to generic handler when tool name is unrecognised", () => {
     const h = getHandler("mcp__unknown__tool", "plain text output");
     expect(h).toBe(genericHandler);
+  });
+
+  it("routes linear tools to linear handler", () => {
+    const h = getHandler("mcp__linear__get_issue", "");
+    expect(h).toBe(linearHandler);
+  });
+
+  it("routes slack tools to slack handler", () => {
+    const h = getHandler("mcp__slack__get_messages", "");
+    expect(h).toBe(slackHandler);
+  });
+
+  it("routes csv tools to csv handler by name", () => {
+    const h = getHandler("mcp__export__get_csv", "");
+    expect(h).toBe(csvHandler);
+  });
+
+  it("routes CSV-shaped plain text to csv handler", () => {
+    const csv = "col1,col2,col3\nv1,v2,v3\nv4,v5,v6\nv7,v8,v9";
+    const h = getHandler("mcp__unknown__tool", csv);
+    expect(h).toBe(csvHandler);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// csvHandler
+// ---------------------------------------------------------------------------
+
+describe("csvHandler", () => {
+  const CSV = [
+    "name,age,city,country",
+    "Alice,30,London,UK",
+    "Bob,25,Paris,France",
+    "Carol,35,Berlin,Germany",
+  ].join("\n");
+
+  it("includes row and column count in summary", () => {
+    const { summary } = csvHandler("mcp__csv__export", CSV);
+    expect(summary).toContain("3 rows");
+    expect(summary).toContain("4 cols");
+  });
+
+  it("includes header column names", () => {
+    const { summary } = csvHandler("mcp__csv__export", CSV);
+    expect(summary).toContain("name");
+    expect(summary).toContain("age");
+    expect(summary).toContain("city");
+  });
+
+  it("includes preview rows with key=value pairs", () => {
+    const { summary } = csvHandler("mcp__csv__export", CSV);
+    expect(summary).toContain("Alice");
+    expect(summary).toContain("row 1");
+  });
+
+  it("shows only first 5 data rows with overflow count", () => {
+    const rows = Array.from({ length: 10 }, (_, i) => `v${i},x,y`);
+    const input = ["a,b,c", ...rows].join("\n");
+    const { summary } = csvHandler("mcp__csv__export", input);
+    expect(summary).toContain("5 more rows");
+  });
+
+  it("handles quoted fields with embedded commas", () => {
+    const input = `name,address\nAlice,"123 Main St, Apt 4"\nBob,456 Oak Ave`;
+    const { summary } = csvHandler("mcp__csv__export", input);
+    expect(summary).toContain("Alice");
+    expect(summary).toContain("2 rows");
+  });
+
+  it("handles empty CSV input", () => {
+    const { summary } = csvHandler("mcp__csv__export", "");
+    expect(summary).toContain("empty");
+  });
+
+  it("reports originalSize in bytes", () => {
+    const { originalSize } = csvHandler("mcp__csv__export", CSV);
+    expect(originalSize).toBe(Buffer.byteLength(CSV, "utf8"));
+  });
+
+  it("handles MCP content wrapper", () => {
+    const { summary } = csvHandler("mcp__csv__export", {
+      content: [{ type: "text", text: CSV }],
+    });
+    expect(summary).toContain("3 rows");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// looksLikeCsv
+// ---------------------------------------------------------------------------
+
+describe("looksLikeCsv", () => {
+  it("returns true for CSV-shaped text with 3+ lines and 2+ commas in first line", () => {
+    expect(looksLikeCsv("a,b,c\n1,2,3\n4,5,6")).toBe(true);
+  });
+
+  it("returns false for plain text", () => {
+    expect(looksLikeCsv("hello world\nno commas here\nstill no commas")).toBe(false);
+  });
+
+  it("returns false for fewer than 3 lines", () => {
+    expect(looksLikeCsv("a,b,c\n1,2,3")).toBe(false);
+  });
+
+  it("returns false for JSON (handled earlier in dispatcher)", () => {
+    expect(looksLikeCsv('{"key": "value"}\n{"a": "b"}\n{"c": "d"}')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// linearHandler
+// ---------------------------------------------------------------------------
+
+describe("linearHandler", () => {
+  const SINGLE_ISSUE = JSON.stringify({
+    identifier: "ENG-123",
+    title: "Fix authentication bug",
+    state: { name: "In Progress" },
+    priority: 2,
+    description: "The login form throws a 500 on invalid credentials.",
+    url: "https://linear.app/org/issue/ENG-123",
+  });
+
+  it("includes identifier and title for a single issue", () => {
+    const { summary } = linearHandler("mcp__linear__get_issue", SINGLE_ISSUE);
+    expect(summary).toContain("ENG-123");
+    expect(summary).toContain("Fix authentication bug");
+  });
+
+  it("includes state label", () => {
+    const { summary } = linearHandler("mcp__linear__get_issue", SINGLE_ISSUE);
+    expect(summary).toContain("[In Progress]");
+  });
+
+  it("maps numeric priority to human label", () => {
+    const { summary } = linearHandler("mcp__linear__get_issue", SINGLE_ISSUE);
+    expect(summary).toContain("Priority: High");
+  });
+
+  it("includes description excerpt", () => {
+    const { summary } = linearHandler("mcp__linear__get_issue", SINGLE_ISSUE);
+    expect(summary).toContain("500 on invalid credentials");
+  });
+
+  it("includes URL", () => {
+    const { summary } = linearHandler("mcp__linear__get_issue", SINGLE_ISSUE);
+    expect(summary).toContain("https://linear.app");
+  });
+
+  it("summarises an array of issues with count header", () => {
+    const arr = JSON.stringify([
+      { identifier: "ENG-1", title: "Issue one", state: { name: "Todo" }, priority: 3 },
+      { identifier: "ENG-2", title: "Issue two", state: { name: "Done" }, priority: 4 },
+    ]);
+    const { summary } = linearHandler("mcp__linear__list_issues", arr);
+    expect(summary).toContain("2 Linear issues");
+    expect(summary).toContain("ENG-1");
+    expect(summary).toContain("ENG-2");
+  });
+
+  it("caps list at 10 items with overflow count", () => {
+    const arr = JSON.stringify(
+      Array.from({ length: 15 }, (_, i) => ({
+        identifier: `ENG-${i + 1}`,
+        title: `Issue ${i + 1}`,
+        state: { name: "Todo" },
+        priority: 0,
+      }))
+    );
+    const { summary } = linearHandler("mcp__linear__list_issues", arr);
+    expect(summary).toContain("5 more");
+  });
+
+  it("handles GraphQL wrapper { data: { issue: {...} } }", () => {
+    const gql = JSON.stringify({
+      data: { issue: { identifier: "ENG-99", title: "GraphQL issue", state: { name: "Backlog" }, priority: 4 } },
+    });
+    const { summary } = linearHandler("mcp__linear__get_issue", gql);
+    expect(summary).toContain("ENG-99");
+  });
+
+  it("handles Relay-style { nodes: [...] } wrapper", () => {
+    const relay = JSON.stringify({
+      nodes: [
+        { identifier: "ENG-10", title: "Node issue", state: { name: "Todo" }, priority: 3 },
+      ],
+    });
+    const { summary } = linearHandler("mcp__linear__list_issues", relay);
+    expect(summary).toContain("ENG-10");
+  });
+
+  it("falls back gracefully for non-JSON input", () => {
+    const { summary } = linearHandler("mcp__linear__get_issue", "not json");
+    expect(summary).toContain("not json");
+  });
+
+  it("reports originalSize in bytes", () => {
+    const { originalSize } = linearHandler("mcp__linear__get_issue", SINGLE_ISSUE);
+    expect(originalSize).toBe(Buffer.byteLength(SINGLE_ISSUE, "utf8"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// slackHandler
+// ---------------------------------------------------------------------------
+
+describe("slackHandler", () => {
+  const MESSAGES_WRAPPER = JSON.stringify({
+    ok: true,
+    messages: [
+      { ts: "1740825600.000000", user: "U12345", text: "Hello team, standup in 5 minutes" },
+      { ts: "1740825660.000000", user: "U67890", text: "On my way, be there shortly" },
+    ],
+    channel: "C_GENERAL",
+  });
+
+  it("includes message count in summary", () => {
+    const { summary } = slackHandler("mcp__slack__get_messages", MESSAGES_WRAPPER);
+    expect(summary).toContain("2 messages");
+  });
+
+  it("includes user identifier in output", () => {
+    const { summary } = slackHandler("mcp__slack__get_messages", MESSAGES_WRAPPER);
+    expect(summary).toContain("U12345");
+  });
+
+  it("includes message text excerpt", () => {
+    const { summary } = slackHandler("mcp__slack__get_messages", MESSAGES_WRAPPER);
+    expect(summary).toContain("standup in 5 minutes");
+  });
+
+  it("formats timestamp as readable date", () => {
+    const { summary } = slackHandler("mcp__slack__get_messages", MESSAGES_WRAPPER);
+    expect(summary).toMatch(/\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]/);
+  });
+
+  it("includes channel identifier when present", () => {
+    const { summary } = slackHandler("mcp__slack__get_messages", MESSAGES_WRAPPER);
+    expect(summary).toContain("C_GENERAL");
+  });
+
+  it("handles bare array of messages", () => {
+    const arr = JSON.stringify([
+      { ts: "1740825600.000000", user: "alice", text: "bare array message" },
+      { ts: "1740825660.000000", user: "bob", text: "another message" },
+      { ts: "1740825720.000000", user: "carol", text: "third message" },
+    ]);
+    const { summary } = slackHandler("mcp__slack__get_messages", arr);
+    expect(summary).toContain("3 messages");
+    expect(summary).toContain("bare array message");
+  });
+
+  it("caps messages at 10 with overflow count", () => {
+    const msgs = Array.from({ length: 15 }, (_, i) => ({
+      ts: String(1740825600 + i),
+      user: "U123",
+      text: `message ${i}`,
+    }));
+    const { summary } = slackHandler("mcp__slack__get_messages", JSON.stringify({ messages: msgs }));
+    expect(summary).toContain("5 more messages");
+  });
+
+  it("uses display_name from user_profile when available", () => {
+    const input = JSON.stringify({
+      messages: [{
+        ts: "1740825600.000000",
+        user: "U12345",
+        user_profile: { display_name: "alice_display" },
+        text: "hello",
+      }],
+    });
+    const { summary } = slackHandler("mcp__slack__get_messages", input);
+    expect(summary).toContain("alice_display");
+  });
+
+  it("truncates long message text at 200 chars", () => {
+    const input = JSON.stringify({
+      messages: [{ ts: "1740825600.000000", user: "U1", text: "x".repeat(300) }],
+    });
+    const { summary } = slackHandler("mcp__slack__get_messages", input);
+    expect(summary).toContain("…");
+  });
+
+  it("falls back gracefully for unrecognised JSON shapes", () => {
+    const { summary } = slackHandler("mcp__slack__get_messages", '{"unrelated": true}');
+    expect(summary).toContain("unrelated");
+  });
+
+  it("reports originalSize in bytes", () => {
+    const { originalSize } = slackHandler("mcp__slack__get_messages", MESSAGES_WRAPPER);
+    expect(originalSize).toBe(Buffer.byteLength(MESSAGES_WRAPPER, "utf8"));
   });
 });
