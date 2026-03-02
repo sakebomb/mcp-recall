@@ -60,4 +60,42 @@ Completed work.
 - `tests/tools.test.ts` — 24 tests
 - Merged via PR #16
 
-**Total: 148 tests, 0 failures**
+**v1 total: 148 tests, 0 failures**
+
+---
+
+## 2026-03-01 (continued) — v2
+
+### v2 Phase 2a — DB Layer
+- `src/db/index.ts` — new columns via idempotent `ALTER TABLE` migrations: `pinned`, `access_count`, `last_accessed`, `input_hash`
+- New operations: `recordAccess`, `pinOutput`, `checkDedup`, `evictIfNeeded`, `retrieveSnippet`
+- Updated: `pruneExpired` skips pinned; `forgetOutputs` skips pinned (unless `force: true`); `storeOutput` accepts optional `input_hash`
+- `tests/db.test.ts` — 52 tests (+20)
+- Merged via PR #20
+
+### v2 Phase 2b — Hook Updates
+- `src/hooks/post-tool-use.ts` — compute `sha256(tool_name + JSON.stringify(tool_input))` as `input_hash`; dedup check before compression returns `[recall:id · cached · YYYY-MM-DD]` on hit; `evictIfNeeded` called after every successful store
+- `tests/hooks.test.ts` — 17 tests (+4)
+- Merged via PR #21
+
+### v2 Phase 2c — MCP Tools
+- `src/tools.ts` — 3 new tools + 3 updated tools
+- `src/server.ts` — wired new tools with descriptions
+- `recall__pin(id, pinned?)` — pin/unpin items; protected from expiry and LFU eviction
+- `recall__note(text, title?)` — store arbitrary text as `tool_name = "recall__note"` for project memory
+- `recall__export` — JSON dump of all items, oldest-first
+- `recall__retrieve` (updated) — calls `recordAccess` on every fetch; uses `retrieveSnippet` when query provided, falls back to full content slice on no FTS match
+- `recall__list_stored` (updated) — `sort: "accessed"` (access_count DESC); pinned items show 📌
+- `recall__forget` (updated) — `force` param overrides pin protection
+- `tests/tools.test.ts` — 45 tests (+21)
+- Merged via PR #22
+
+### v2 Phase 2d — Additional Handlers
+- `src/handlers/csv.ts` — header + first 5 data rows as key=value pairs + row/col count; handles quoted fields; `looksLikeCsv()` for content-based dispatch
+- `src/handlers/linear.ts` — identifier, title, state, numeric priority (0–4 → label), description excerpt, URL; handles single, array, GraphQL, and Relay shapes
+- `src/handlers/slack.ts` — channel, formatted timestamp, user/display_name, message text (200 char cap); handles `{ ok, messages }`, bare arrays, single message; caps at 10
+- `src/handlers/index.ts` — added linear, slack, csv name-based routes + CSV content-based fallback
+- `tests/handlers.test.ts` — 72 tests (+38)
+- Merged via PR #23
+
+**v2 total: 231 tests, 0 failures**
