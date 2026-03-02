@@ -79,8 +79,8 @@ Sessions that used to hit context limits in 30 minutes routinely run for 3+ hour
 
 **Two hooks, one MCP server.**
 
-- `SessionStart` hook — records each active day for session-scoped expiry
-- `PostToolUse` hook — intercepts MCP tool outputs; deduplicates identical calls; compresses, stores, and returns summary
+- `SessionStart` hook — records each active day, prunes expired items, and injects a compact context snapshot before the first message
+- `PostToolUse` hook — intercepts MCP tool outputs and native Bash commands; deduplicates identical calls; compresses, stores, and returns summary
 - `recall` MCP server — exposes ten tools for retrieval, search, memory, and management
 
 > **Scope**: Compression applies to MCP tools only. Claude Code's `PostToolUse` hook can replace MCP tool output via `updatedMCPToolOutput`. Built-in tools (Read, Bash, Grep) don't support output replacement — their full output still enters context directly. See [Scope](#scope) for details and the recommended workaround.
@@ -163,6 +163,14 @@ key = "git_root"
 # non-pinned items are evicted when this limit is exceeded.
 max_size_mb = 500
 
+# Access count threshold for pin suggestions in recall__stats.
+# Items accessed at least this many times will appear as pin candidates.
+pin_recommendation_threshold = 5
+
+# Days since creation before a never-accessed item appears as a stale candidate
+# in recall__stats. Helps identify stored output that was never retrieved.
+stale_item_days = 3
+
 [retrieve]
 # Max bytes returned by recall__retrieve() when no query is provided.
 # Claude can override this per-call via the max_bytes parameter.
@@ -222,6 +230,7 @@ recall__search(query, tool?, limit?)
 ```
 
 - FTS search (BM25 ranking) across all stored tool outputs for the current project
+- Each result includes a `> …excerpt…` snippet from the matching content
 - Filter by tool name with `tool` (substring match — e.g. `"github"` matches all `mcp__github__*` tools)
 - Default `limit`: 5 results
 
@@ -328,7 +337,13 @@ Session stats for current project:
   Saved:             98.2% reduction
   ~Tokens saved:     ~84,000
   Session days:      4
+
+Suggestions:
+  📌 Pin candidates (accessed ≥5×): recall_ab12 mcp__playwright__browser_snapshot
+  🗑  Stale items (never accessed, >3 days): recall_cd34 mcp__github__list_issues
 ```
+
+The Suggestions section is omitted when nothing qualifies — no noise on fresh projects. Thresholds are configurable via `pin_recommendation_threshold` and `stale_item_days`.
 
 ---
 
@@ -425,11 +440,13 @@ Repeated identical tool calls return a cached header instead of re-compressing:
 
 | Handler | Matches | Strategy |
 |---|---|---|
+| Bash | native `Bash` tool | CLI-aware routing on `tool_input.command`: `git diff`/`git show` → changed-files summary with per-file +/- stats; `git log` → 20-commit cap; `terraform plan` → resource action symbols + Plan: summary; everything else → shell handler. |
 | Playwright | tool name contains `playwright` and `snapshot` | Interactive elements (buttons, inputs, links), visible text, headings. Drops aria noise. |
 | GitHub | `mcp__github__*` | Number, title, state, body (200 chars), labels, URL. Lists: first 10 + overflow count. |
-| Shell | tool name contains `bash`, `shell`, `terminal`, or `run_command` | Strips ANSI escape codes. Parses structured `{stdout, stderr, returncode}` JSON; falls back to plain text. Stdout: first 50 lines + overflow count. Stderr: first 20 lines, shown in a separate section. Exit code in header. |
+| Shell | tool name contains `bash`, `shell`, `terminal`, `run_command`, `ssh_exec`, `exec_command`, `remote_exec`, or `container_exec` | Strips ANSI escape codes and SSH post-quantum advisory noise. Parses structured `{stdout, stderr, returncode}` JSON; falls back to plain text. Stdout: first 50 lines + overflow count. Stderr: first 20 lines, shown in a separate section. Exit code in header. |
 | Linear | tool name contains `linear` | Identifier, title, state, priority (numeric → label), description excerpt (200 chars), URL. Handles single, array, GraphQL, and Relay shapes. |
 | Slack | tool name contains `slack` | Channel, formatted timestamp, user/display name, message text (200 chars). Handles `{ok, messages}` wrappers and bare arrays. Lists: first 10 + overflow count. |
+| Tavily | tool name contains `tavily` | Query header, synthesized answer in full, per-result title + URL + 150-char content snippet. Drops `raw_content`, `score`, `response_time`. Lists: first 10 + overflow count. |
 | Filesystem | `mcp__filesystem__*` or tool name contains `read_file` / `get_file` | Line count header + first 50 lines + truncation notice. |
 | CSV | tool name contains `csv`, or content-based detection | Column headers + first 5 data rows as key=value pairs + row/col count. Handles quoted fields. |
 | Generic JSON | Any unmatched tool with JSON output | 3-level depth limit, arrays capped at 3 items with overflow count. |
@@ -463,11 +480,14 @@ Extend the defaults via `denylist.additional`. Replace them entirely via `denyli
 
 ## Scope
 
-**Compression applies to MCP tools only.**
+**Compression applies to MCP tools and the native Bash built-in.**
 
-Claude Code's `PostToolUse` hook can replace MCP tool output via `updatedMCPToolOutput`. Built-in tools (Read, Bash, Grep, Glob) don't support output replacement — their full output still enters context directly and mcp-recall has no way to intercept it.
+Claude Code's `PostToolUse` hook supports output replacement for MCP tools and the `Bash` tool. mcp-recall intercepts both:
 
-If your biggest context consumers are built-in tool calls, consider switching to MCP equivalents where possible — for example, the [filesystem MCP server](https://github.com/modelcontextprotocol/servers) instead of the built-in Read tool.
+- **MCP tools** (`mcp__*`) — all compression handlers apply (Playwright, GitHub, filesystem, shell/remote-exec, Linear, Slack, Tavily, CSV, JSON, generic text)
+- **Bash** — CLI-aware handlers: `git diff` → file-level changed-files summary; `git log` → 20-commit cap; `terraform plan` → resource action summary; everything else → 50-line shell cap with ANSI stripping
+
+The remaining built-in tools — `Read`, `Grep`, `Glob` — do not support output replacement. Their full output enters context directly. If large file reads are your biggest context consumer, consider the [filesystem MCP server](https://github.com/modelcontextprotocol/servers) instead of the built-in Read tool.
 
 ---
 
@@ -642,6 +662,15 @@ Issues and PRs welcome. For significant changes, open an issue first to discuss 
 ### v6 — shipped
 
 - **Shell handler** — dedicated compression for bash/shell/terminal/run_command tools: strips ANSI escape codes, parses structured `{stdout, stderr, returncode}` JSON, caps stdout at 50 lines and stderr at 20 lines with overflow counts.
+
+### v1.0.0 — shipped
+
+- **Tavily handler** — extracts query, synthesized answer, and per-result title/URL/150-char snippet; drops `raw_content`, `score`, `response_time`; caps at 10 results.
+- **Shell handler extended** — covers remote-exec MCP tools (`ssh_exec`, `exec_command`, `remote_exec`, `container_exec`); strips OpenSSH post-quantum advisory noise.
+- **SessionStart context injection** — auto-injects pinned items, notes, and recently accessed items before the first message of every session; capped at 2000 chars.
+- **`recall__search` snippets** — each search result now includes a `> …excerpt…` line from the matching content.
+- **`recall__stats` suggestions** — pin candidates (frequently accessed non-pinned items) and stale item alerts; both thresholds configurable.
+- **Bash compression** — native `Bash` tool intercepted with CLI-aware handlers: `git diff`/`git show`, `git log`, `terraform plan`; everything else falls through to shell handler.
 
 ---
 
