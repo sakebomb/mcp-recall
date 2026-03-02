@@ -29,10 +29,19 @@ Sessions that used to hit context limits in 30 minutes routinely run for 3+ hour
                └───────────┬────────────┘
                            │
                ┌───────────┴────────────┐
+               │      Dedup check       │
+               │                        │
+               │  sha256(name+input) ───┼──► [cached] header on hit
+               └───────────┬────────────┘
+                           │ (miss)
+               ┌───────────┴────────────┐
                │   Compression handler  │
                │                        │
                │  Playwright → elements │
                │  GitHub     → key fields│
+               │  Linear     → issues   │
+               │  Slack      → messages │
+               │  CSV        → row/col  │
                │  Filesystem → 50 lines │
                │  JSON       → depth 3  │
                │  Text       → 500 chars│
@@ -47,7 +56,8 @@ Sessions that used to hit context limits in 30 minutes routinely run for 3+ hour
    │  299 B summary  │  │  full_content  (56 KB)  │
    │  + recall header│  │  summary       (299 B)  │
    │                 │  │  FTS index              │
-   └─────────────────┘  │  session_days           │
+   └─────────────────┘  │  access tracking        │
+                        │  session_days           │
                         └────────────┬────────────┘
                                      │
                         ┌────────────┴────────────┐
@@ -55,17 +65,20 @@ Sessions that used to hit context limits in 30 minutes routinely run for 3+ hour
                         │                         │
                         │  retrieve(id, query?)   │
                         │  search(query)          │
+                        │  pin(id)                │
+                        │  note(text)             │
+                        │  export()               │
                         │  list_stored()          │
-                        │  stats()                │
                         │  forget(...)            │
+                        │  stats()                │
                         └─────────────────────────┘
 ```
 
 **Two hooks, one MCP server.**
 
 - `SessionStart` hook — records each active day for session-scoped expiry
-- `PostToolUse` hook — intercepts MCP tool outputs, compresses, stores, returns summary
-- `recall` MCP server — exposes five tools for retrieval, search, and management
+- `PostToolUse` hook — intercepts MCP tool outputs; deduplicates identical calls; compresses, stores, and returns summary
+- `recall` MCP server — exposes eight tools for retrieval, search, memory, and management
 
 > **Scope**: Compression applies to MCP tools only. Claude Code's `PostToolUse` hook can replace MCP tool output via `updatedMCPToolOutput`. Built-in tools (Read, Bash, Grep) don't support output replacement — their full output still enters context directly. See [Scope](#scope) for details and the recommended workaround.
 
@@ -139,7 +152,8 @@ expire_after_session_days = 7
 # Falls back to "cwd" if not inside a git repo.
 key = "git_root"
 
-# Hard cap on store size in megabytes.
+# Hard cap on store size in megabytes. Least-frequently-accessed
+# non-pinned items are evicted when this limit is exceeded.
 max_size_mb = 500
 
 [retrieve]
@@ -172,7 +186,7 @@ This means a 7-day setting gives you 7 working sessions of stored context, regar
 
 ## Tools
 
-Five `recall__*` tools are available to Claude in every session.
+Eight `recall__*` tools are available to Claude in every session.
 
 ### `recall__retrieve`
 
@@ -182,9 +196,11 @@ Fetch stored content from a previous tool call.
 recall__retrieve(id, query?, max_bytes?)
 ```
 
-- Pass `query` to return the full stored content (capped at `max_bytes`) — useful when you need more detail than the summary provides
 - Omit `query` to return the compressed summary
-- Override `max_bytes` when you know you need more than the default 8 KB
+- Pass `query` to return an FTS excerpt focused on the relevant section — falls back to full content (capped at `max_bytes`) if the query has no match
+- Override `max_bytes` when you need more than the default 8 KB on a full-content retrieval
+
+Every call records an access, which informs `sort: "accessed"` and LFU eviction order.
 
 **When Claude uses it**: when a compressed summary isn't enough and it needs specific detail from a prior tool call.
 
@@ -206,12 +222,56 @@ recall__search(query, tool?, limit?)
 
 ---
 
+### `recall__pin`
+
+Pin an item to protect it from expiry and eviction.
+
+```
+recall__pin(id, pinned?)
+```
+
+- `pinned` defaults to `true`; pass `false` to unpin
+- Pinned items are excluded from `pruneExpired`, LFU eviction, and `forget(all: true)` (unless `force: true`)
+
+**When Claude uses it**: to preserve an important result indefinitely — architectural decisions, key findings, expensive snapshots.
+
+---
+
+### `recall__note`
+
+Store arbitrary text as a recall note.
+
+```
+recall__note(text, title?)
+```
+
+- Stores as `tool_name = "recall__note"` — searchable and retrievable like any other item
+- Use for conclusions, findings, and context that should survive a context reset
+- `title` appears in list/search output; defaults to `(note)`
+
+**When Claude uses it**: to record its own conclusions or project context that doesn't come from a tool call.
+
+---
+
+### `recall__export`
+
+Export all stored items as JSON.
+
+```
+recall__export()
+```
+
+- Returns a JSON array of all stored items for the current project, ordered oldest-first
+- Use before `forget(all: true)` to preserve data
+
+---
+
 ### `recall__forget`
 
 Delete stored items.
 
 ```
-recall__forget(id?, tool?, session_id?, older_than_days?, all?, confirmed?)
+recall__forget(id?, tool?, session_id?, older_than_days?, all?, confirmed?, force?)
 ```
 
 | Usage | Effect |
@@ -221,6 +281,9 @@ recall__forget(id?, tool?, session_id?, older_than_days?, all?, confirmed?)
 | `forget(session_id: "xyz")` | Delete everything from a specific session |
 | `forget(older_than_days: 3)` | Delete items older than 3 calendar days |
 | `forget(all: true, confirmed: true)` | Wipe the entire store |
+| `forget(all: true, confirmed: true, force: true)` | Wipe including pinned items |
+
+Pinned items are skipped by default. Pass `force: true` to override pin protection.
 
 ---
 
@@ -233,9 +296,10 @@ recall__list_stored(limit?, offset?, tool?, sort?)
 ```
 
 - Default `limit`: 10
-- `sort`: `"recent"` (default) | `"size"`
+- `sort`: `"recent"` (default) | `"accessed"` | `"size"`
+  - `"accessed"` orders by access count descending — most-used items first
 - `tool` uses substring matching — `"playwright"` matches all Playwright tools
-- Returns a compact table with recall IDs, tool names, dates, and size/reduction info
+- Returns a compact table with recall IDs, tool names, dates, size/reduction info, and 📌 for pinned items
 
 ---
 
@@ -269,11 +333,20 @@ Handlers are selected by tool name, with content-based fallback. Every compresse
 [recall:recall_abc12345 · 56.2KB→299B (99% reduction)]
 ```
 
+Repeated identical tool calls return a cached header instead of re-compressing:
+
+```
+[recall:recall_abc12345 · cached · 2026-03-01]
+```
+
 | Handler | Matches | Strategy |
 |---|---|---|
 | Playwright | tool name contains `playwright` and `snapshot` | Interactive elements (buttons, inputs, links), visible text, headings. Drops aria noise. |
 | GitHub | `mcp__github__*` | Number, title, state, body (200 chars), labels, URL. Lists: first 10 + overflow count. |
+| Linear | tool name contains `linear` | Identifier, title, state, priority (numeric → label), description excerpt (200 chars), URL. Handles single, array, GraphQL, and Relay shapes. |
+| Slack | tool name contains `slack` | Channel, formatted timestamp, user/display name, message text (200 chars). Handles `{ok, messages}` wrappers and bare arrays. Lists: first 10 + overflow count. |
 | Filesystem | `mcp__filesystem__*` or tool name contains `read_file` / `get_file` | Line count header + first 50 lines + truncation notice. |
+| CSV | tool name contains `csv`, or content-based detection | Column headers + first 5 data rows as key=value pairs + row/col count. Handles quoted fields. |
 | Generic JSON | Any unmatched tool with JSON output | 3-level depth limit, arrays capped at 3 items with overflow count. |
 | Generic text | Everything else | First 500 chars + ellipsis. |
 
@@ -417,6 +490,9 @@ mcp-recall/
 │   │   ├── index.ts        # dispatcher
 │   │   ├── playwright.ts
 │   │   ├── github.ts
+│   │   ├── linear.ts
+│   │   ├── slack.ts
+│   │   ├── csv.ts
 │   │   ├── filesystem.ts
 │   │   ├── json.ts
 │   │   ├── generic.ts
@@ -424,7 +500,7 @@ mcp-recall/
 │   └── hooks/
 │       ├── session-start.ts
 │       └── post-tool-use.ts
-└── tests/                  # 148 tests, 8 files
+└── tests/                  # 231 tests, 8 files
 ```
 
 ### Running locally
@@ -445,15 +521,19 @@ Issues and PRs welcome. For significant changes, open an issue first to discuss 
 
 ## Roadmap
 
-### v2
+### v2 — shipped
 
-- **`recall__pin`** — exempt an item from expiry permanently
-- **`recall__note`** — store Claude's own conclusions, not just tool outputs (project memory layer)
+- **`recall__pin`** — exempt items from expiry and eviction permanently
+- **`recall__note`** — store Claude's own conclusions as project memory
 - **`recall__export`** — JSON dump before a full clear
-- **Access tracking** — `sort: "accessed"` in `list_stored`, LFU eviction when store exceeds `max_size_mb`
-- **Auto-dedup** — return cached results for repeated identical tool calls, with staleness signals
-- **FTS chunking** — chunk stored content for more precise retrieve results
-- **Additional handlers** — CSV/tabular, Linear, Slack
+- **Access tracking** — `sort: "accessed"` in `list_stored`; LFU eviction when store exceeds `max_size_mb`
+- **Auto-dedup** — `[cached]` header for repeated identical tool calls; no re-compression or second DB write
+- **FTS snippets** — `retrieve(query)` returns a focused excerpt via `snippet()` rather than a full content dump
+- **Additional handlers** — CSV, Linear, Slack
+
+### v3
+
+- **FTS chunking** — split large stored content into overlapping chunks for more precise snippet retrieval on long documents
 
 ---
 
