@@ -19722,6 +19722,25 @@ function getStats(db, project_key) {
   const compression_ratio = row.total_original_bytes > 0 ? row.total_summary_bytes / row.total_original_bytes : 0;
   return { ...row, compression_ratio };
 }
+function getSuggestions(db, project_key, opts = {}) {
+  const threshold = opts.pin_threshold ?? 5;
+  const staleDays = opts.stale_days ?? 3;
+  const limit = opts.limit ?? 3;
+  const staleCutoff = Math.floor(Date.now() / 1000) - staleDays * 86400;
+  const pin_candidates = db.prepare(`
+    SELECT * FROM stored_outputs
+    WHERE project_key = ? AND pinned = 0 AND access_count >= ?
+    ORDER BY access_count DESC
+    LIMIT ?
+  `).all(project_key, threshold, limit);
+  const stale_candidates = db.prepare(`
+    SELECT * FROM stored_outputs
+    WHERE project_key = ? AND pinned = 0 AND access_count = 0 AND created_at < ?
+    ORDER BY created_at ASC
+    LIMIT ?
+  `).all(project_key, staleCutoff, limit);
+  return { pin_candidates, stale_candidates };
+}
 function getContext(db, project_key, opts = {}) {
   const days = opts.days ?? 7;
   const limit = opts.limit ?? 5;
@@ -20766,7 +20785,9 @@ var RecallConfigSchema = exports_external.object({
   store: exports_external.object({
     expire_after_session_days: exports_external.number().positive(),
     key: exports_external.enum(["git_root", "cwd"]),
-    max_size_mb: exports_external.number().positive()
+    max_size_mb: exports_external.number().positive(),
+    pin_recommendation_threshold: exports_external.number().int().positive(),
+    stale_item_days: exports_external.number().int().positive()
   }),
   retrieve: exports_external.object({
     default_max_bytes: exports_external.number().positive()
@@ -20781,7 +20802,9 @@ var DEFAULTS = {
   store: {
     expire_after_session_days: 7,
     key: "git_root",
-    max_size_mb: 500
+    max_size_mb: 500,
+    pin_recommendation_threshold: 5,
+    stale_item_days: 3
   },
   retrieve: {
     default_max_bytes: 8192
@@ -21085,7 +21108,7 @@ function toolSessionSummary(db, projectKey, args) {
   return lines.join(`
 `);
 }
-function toolStats(db, projectKey) {
+function toolStats(db, projectKey, args = {}) {
   const stats = getStats(db, projectKey);
   const sessionDays = getSessionDays(db);
   if (stats.total_items === 0) {
@@ -21103,6 +21126,30 @@ function toolStats(db, projectKey) {
     `  ~Tokens saved:     ~${tokensSaved.toLocaleString()}`,
     `  Session days:      ${sessionDays.length}`
   ];
+  const suggestions = getSuggestions(db, projectKey, {
+    pin_threshold: args.pin_threshold,
+    stale_days: args.stale_days
+  });
+  const hasSuggestions = suggestions.pin_candidates.length > 0 || suggestions.stale_candidates.length > 0;
+  if (hasSuggestions) {
+    lines.push("", "Suggestions:");
+    if (suggestions.pin_candidates.length > 0) {
+      lines.push("  \uD83D\uDCCC Consider pinning:");
+      for (const item of suggestions.pin_candidates) {
+        lines.push(`     ${item.id}  ${item.tool_name.padEnd(40)}  accessed ${item.access_count}\xD7`);
+      }
+    }
+    if (suggestions.stale_candidates.length > 0) {
+      if (suggestions.pin_candidates.length > 0)
+        lines.push("");
+      lines.push("  \uD83D\uDDD1  Never accessed (consider forgetting):");
+      const now = Math.floor(Date.now() / 1000);
+      for (const item of suggestions.stale_candidates) {
+        const ageDays = Math.floor((now - item.created_at) / 86400);
+        lines.push(`     ${item.id}  ${item.tool_name.padEnd(40)}  created ${ageDays} day${ageDays === 1 ? "" : "s"} ago`);
+      }
+    }
+  }
   return lines.join(`
 `);
 }
@@ -21162,9 +21209,15 @@ server.tool("recall__list_stored", "Browse stored items by recency, access frequ
 }, async (args) => ({
   content: [{ type: "text", text: toolListStored(db, projectKey, args) }]
 }));
-server.tool("recall__stats", "Aggregate session efficiency stats \u2014 total savings, compression ratio, token savings, session days. Use to understand the big picture.", {}, async () => ({
-  content: [{ type: "text", text: toolStats(db, projectKey) }]
-}));
+server.tool("recall__stats", "Aggregate session efficiency stats \u2014 total savings, compression ratio, token savings, session days. Use to understand the big picture.", {}, async () => {
+  const config2 = loadConfig();
+  return {
+    content: [{ type: "text", text: toolStats(db, projectKey, {
+      pin_threshold: config2.store.pin_recommendation_threshold,
+      stale_days: config2.store.stale_item_days
+    }) }]
+  };
+});
 server.tool("recall__session_summary", "Digest of a single session's activity \u2014 tools called, compression savings, most-accessed items, pinned items, notes. Defaults to today. Use at session start for orientation or handoff.", {
   session_id: exports_external.string().optional().describe("Filter by specific Claude session ID (exact match)"),
   date: exports_external.string().optional().describe("Filter by date in YYYY-MM-DD format (defaults to today)")

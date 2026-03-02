@@ -14,6 +14,7 @@ import {
   listOutputs,
   forgetOutputs,
   getStats,
+  getSuggestions,
   getSessionDays,
   getSessionSummary,
   getContext,
@@ -458,7 +459,18 @@ export function toolSessionSummary(
 // recall__stats
 // ---------------------------------------------------------------------------
 
-export function toolStats(db: Database, projectKey: string): string {
+export interface StatsArgs {
+  /** Access-count threshold for pin candidates (default: config or 5). */
+  pin_threshold?: number;
+  /** Days without any access before an item is flagged as stale (default: config or 3). */
+  stale_days?: number;
+}
+
+export function toolStats(
+  db: Database,
+  projectKey: string,
+  args: StatsArgs = {}
+): string {
   const stats = getStats(db, projectKey);
   const sessionDays = getSessionDays(db);
 
@@ -481,6 +493,35 @@ export function toolStats(db: Database, projectKey: string): string {
     `  ~Tokens saved:     ~${tokensSaved.toLocaleString()}`,
     `  Session days:      ${sessionDays.length}`,
   ];
+
+  const suggestions = getSuggestions(db, projectKey, {
+    pin_threshold: args.pin_threshold,
+    stale_days: args.stale_days,
+  });
+
+  const hasSuggestions =
+    suggestions.pin_candidates.length > 0 || suggestions.stale_candidates.length > 0;
+
+  if (hasSuggestions) {
+    lines.push("", "Suggestions:");
+
+    if (suggestions.pin_candidates.length > 0) {
+      lines.push("  📌 Consider pinning:");
+      for (const item of suggestions.pin_candidates) {
+        lines.push(`     ${item.id}  ${item.tool_name.padEnd(40)}  accessed ${item.access_count}×`);
+      }
+    }
+
+    if (suggestions.stale_candidates.length > 0) {
+      if (suggestions.pin_candidates.length > 0) lines.push("");
+      lines.push("  🗑  Never accessed (consider forgetting):");
+      const now = Math.floor(Date.now() / 1000);
+      for (const item of suggestions.stale_candidates) {
+        const ageDays = Math.floor((now - item.created_at) / 86400);
+        lines.push(`     ${item.id}  ${item.tool_name.padEnd(40)}  created ${ageDays} day${ageDays === 1 ? "" : "s"} ago`);
+      }
+    }
+  }
 
   return lines.join("\n");
 }
