@@ -9,7 +9,6 @@ const RecallConfigSchema = z.object({
     expire_after_session_days: z.number().positive(),
     key: z.enum(["git_root", "cwd"]),
     max_size_mb: z.number().positive(),
-    pin_recommendation_threshold: z.number().int().nonnegative(),
   }),
   retrieve: z.object({
     default_max_bytes: z.number().positive(),
@@ -29,7 +28,6 @@ const DEFAULTS: RecallConfig = {
     expire_after_session_days: 7,
     key: "git_root",
     max_size_mb: 500,
-    pin_recommendation_threshold: 3,
   },
   retrieve: {
     default_max_bytes: 8192,
