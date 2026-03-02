@@ -38,7 +38,7 @@ The pre-commit hook (`bun install` wires it automatically) detects staged `src/`
 - New features require tests. Bug fixes require regression tests.
 - Test files: `tests/<module>.test.ts` using Bun's native test runner.
 - Name tests: `"<what> <expected>"` — e.g. `"storeOutput returns hydrated row"`.
-- All 276 tests must pass before opening a PR.
+- All tests must pass before opening a PR (`bun test`).
 - Call `resetConfig()` in `afterEach` for config tests to prevent cache bleed.
 - Use `":memory:"` for DB tests and call `closeDb()` in `afterEach`.
 
