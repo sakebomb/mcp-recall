@@ -10,11 +10,5 @@
   "repository": "https://github.com/sakebomb/mcp-recall",
   "license": "MIT",
   "keywords": ["context", "compression", "memory", "mcp"],
-  "hooks": "./hooks/hooks.json",
-  "mcpServers": {
-    "recall": {
-      "command": "bun",
-      "args": ["run", "${CLAUDE_PLUGIN_ROOT}/src/server.ts"]
-    }
-  }
+  "hooks": "./hooks/hooks.json"
 }

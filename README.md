@@ -112,7 +112,11 @@ Across a full session: 315 KB of tool output → 5.4 KB delivered to context.
 ### Install
 
 ```bash
-claude plugin install mcp-recall
+# Register mcp-recall as a plugin marketplace (one-time)
+claude plugin marketplace add mcp-recall https://github.com/sakebomb/mcp-recall
+
+# Install the plugin
+claude plugin install mcp-recall@mcp-recall
 ```
 
 Both hooks and the MCP server register automatically. No manual config needed.
@@ -127,13 +131,13 @@ claude --debug
 ### Update
 
 ```bash
-claude plugin update mcp-recall
+claude plugin update mcp-recall@mcp-recall
 ```
 
 ### Uninstall
 
 ```bash
-claude plugin uninstall mcp-recall
+claude plugin uninstall mcp-recall@mcp-recall
 ```
 
 ---
