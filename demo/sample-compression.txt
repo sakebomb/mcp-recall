@@ -1,0 +1,7 @@
+[recall:recall_a1b2c3d4 · 56.2KB→299B (99% reduction)]
+Page: Dashboard
+  button "Save changes"
+  button "Cancel"
+  textbox "Email address"
+  link "Forgot password?"
+  Heading: Account settings

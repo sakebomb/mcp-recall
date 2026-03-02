@@ -14,55 +14,41 @@ Set Theme "Catppuccin Mocha"
 Set TypingSpeed 40ms
 Set Padding 20
 
-# --- Tests passing ---
+# --- Scene 1: tests passing ---
 Type "bun test"
 Enter
-Sleep 2s
+Sleep 3s
 
-# --- What compression looks like ---
-Sleep 500ms
+# --- Scene 2: compression ---
 Type "clear"
 Enter
 Sleep 300ms
-
-Type "# A Playwright snapshot arrives as 56 KB..."
+Type "# A 56KB Playwright snapshot arrives..."
 Enter
 Sleep 800ms
 Type "# mcp-recall delivers this to Claude instead:"
 Enter
-Sleep 500ms
-Type "echo '[recall:recall_a1b2c3d4 · 56.2KB→299B (99% reduction)]'"
+Sleep 600ms
+Type "cat demo/sample-compression.txt"
 Enter
-Sleep 400ms
-Type "echo 'Page: Dashboard'"
-Enter
-Type "echo '  [button \"Save changes\"]  [button \"Cancel\"]'"
-Enter
-Type "echo '  [textbox \"Email address\"]  [link \"Forgot password?\"]'"
-Enter
-Type "echo '  Heading: Account settings'"
-Enter
-Sleep 1.5s
+Sleep 2s
 
-# --- Stats ---
+# --- Scene 3: stats ---
 Type "clear"
 Enter
 Sleep 300ms
-Type "# After a full session, recall__stats() shows:"
+Type "# After a full session:"
 Enter
 Sleep 500ms
 Type "cat demo/sample-stats.txt"
 Enter
 Sleep 2s
 
-# --- Search ---
+# --- Scene 4: search ---
 Type "clear"
 Enter
 Sleep 300ms
-Type "# Find anything stored — no ID needed:"
-Enter
-Sleep 500ms
-Type "# recall__search(\"login form\")"
+Type "# Find anything stored, no ID needed:"
 Enter
 Sleep 500ms
 Type "cat demo/sample-search.txt"
