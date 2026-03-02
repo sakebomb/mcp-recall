@@ -1,8 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { mkdtempSync, writeFileSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { handleSessionStart } from "../src/hooks/session-start";
 import { handlePostToolUse } from "../src/hooks/post-tool-use";
 import { getDb, closeDb, listOutputs, getSessionDays, retrieveOutput } from "../src/db/index";
 import { resetConfig } from "../src/config";
+import { getProjectKey } from "../src/project-key";
 
 const TEST_CWD = process.cwd();
 const SESSION_ID = "test-session-abc123";
@@ -189,5 +193,84 @@ describe("handlePostToolUse", () => {
     // full_content should be the raw JSON text, not the MCP { content: [...] } wrapper
     expect(item.full_content).toContain('"number"');
     expect(item.full_content).not.toContain('"content":[{');
+  });
+
+  // -------------------------------------------------------------------------
+  // Dedup
+  // -------------------------------------------------------------------------
+
+  it("returns cached response on second call with same tool_input", () => {
+    const input = makePostToolUseInput("mcp__github__list_issues", {
+      content: [{ type: "text", text: LARGE_GITHUB_RESPONSE }],
+    }, { tool_input: { owner: "org", repo: "repo" } });
+
+    handlePostToolUse(input); // first call — stores item
+    const second = handlePostToolUse(input); // second call — cache hit
+
+    expect(second.updatedMCPToolOutput).toMatch(/· cached · \d{4}-\d{2}-\d{2}/);
+    expect(second.suppressOutput).toBe(true);
+  });
+
+  it("cached header contains the original recall id", () => {
+    const input = makePostToolUseInput("mcp__github__list_issues", {
+      content: [{ type: "text", text: LARGE_GITHUB_RESPONSE }],
+    }, { tool_input: { owner: "org", repo: "repo" } });
+
+    const first = handlePostToolUse(input);
+    const idMatch = first.updatedMCPToolOutput!.match(/\[recall:(recall_[0-9a-f]{8})/);
+    const originalId = idMatch![1];
+
+    const second = handlePostToolUse(input);
+    expect(second.updatedMCPToolOutput).toContain(originalId);
+  });
+
+  it("does not store a second item on cache hit", () => {
+    const input = makePostToolUseInput("mcp__github__list_issues", {
+      content: [{ type: "text", text: LARGE_GITHUB_RESPONSE }],
+    }, { tool_input: { owner: "org", repo: "repo" } });
+
+    handlePostToolUse(input);
+    handlePostToolUse(input);
+
+    const db = getDb(":memory:");
+    const count = (db.prepare("SELECT COUNT(*) as n FROM stored_outputs").get() as { n: number }).n;
+    expect(count).toBe(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // Eviction
+  // -------------------------------------------------------------------------
+
+  it("evicts non-pinned items after storing when store exceeds max_size_mb", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "recall-hooks-test-"));
+    const configPath = join(tempDir, "config.toml");
+    // ~3KB limit: allows the new item (~2.25KB) but not the pre-inserted + new item together
+    writeFileSync(configPath, "[store]\nmax_size_mb = 0.003\n");
+    process.env.RECALL_CONFIG_PATH = configPath;
+    resetConfig();
+
+    try {
+      const db = getDb(":memory:");
+      const projectKey = getProjectKey(TEST_CWD);
+      const oldTs = Math.floor(Date.now() / 1000) - 60;
+      db.prepare(`
+        INSERT INTO stored_outputs
+          (id, project_key, session_id, tool_name, summary, full_content, original_size, summary_size, created_at)
+        VALUES ('recall_evict0001', ?, 'session', 'mcp__old__tool', 'old', 'old content', 2000, 3, ?)
+      `).run(projectKey, oldTs);
+
+      handlePostToolUse(
+        makePostToolUseInput("mcp__github__list_issues", {
+          content: [{ type: "text", text: LARGE_GITHUB_RESPONSE }],
+        })
+      );
+
+      // Pre-inserted item (older, lower access_count) should have been evicted
+      expect(db.prepare("SELECT id FROM stored_outputs WHERE id = 'recall_evict0001'").get()).toBeNull();
+    } finally {
+      delete process.env.RECALL_CONFIG_PATH;
+      resetConfig();
+      rmSync(tempDir, { recursive: true });
+    }
   });
 });
