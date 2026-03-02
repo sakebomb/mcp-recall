@@ -556,11 +556,20 @@ bun test
 ```
 mcp-recall/
 ├── .claude-plugin/
-│   └── plugin.json         # plugin manifest
+│   └── plugin.json         # plugin manifest (local dev)
+├── .githooks/
+│   └── pre-commit          # auto-rebuilds plugins/dist/ when src/ changes
 ├── hooks/
-│   └── hooks.json          # SessionStart + PostToolUse hook definitions
+│   └── hooks.json          # SessionStart + PostToolUse hook definitions (canonical)
 ├── bin/
 │   └── recall              # hook entrypoint (shell script → src/cli.ts)
+├── plugins/
+│   └── mcp-recall/         # marketplace-installable plugin bundle
+│       ├── .claude-plugin/plugin.json
+│       ├── .mcp.json
+│       ├── hooks/hooks.json
+│       ├── bin/recall
+│       └── dist/           # bundled server.js + cli.js (bun build --target bun)
 ├── src/
 │   ├── server.ts           # MCP server (wires recall__* tools)
 │   ├── cli.ts              # CLI dispatcher for hook subcommands
@@ -575,6 +584,7 @@ mcp-recall/
 │   │   ├── index.ts        # dispatcher
 │   │   ├── playwright.ts
 │   │   ├── github.ts
+│   │   ├── shell.ts
 │   │   ├── linear.ts
 │   │   ├── slack.ts
 │   │   ├── csv.ts
@@ -585,7 +595,7 @@ mcp-recall/
 │   └── hooks/
 │       ├── session-start.ts
 │       └── post-tool-use.ts
-└── tests/                  # 261 tests, 8 files
+└── tests/                  # 276 tests, 8 files
 ```
 
 ### Running locally
@@ -593,8 +603,9 @@ mcp-recall/
 To test the plugin against a live Claude Code session:
 
 ```bash
-# Install from local directory instead of marketplace
-claude plugin install ./mcp-recall --scope local
+# Build the bundle first, then install the plugin subdirectory
+bun run build
+claude plugin install ./plugins/mcp-recall --scope local
 claude --debug  # verify plugin loads
 ```
 
@@ -627,6 +638,10 @@ Issues and PRs welcome. For significant changes, open an issue first to discuss 
 ### v5 — shipped
 
 - **`recall__context`** — single-call session orientation: pinned items, recent notes, recently accessed items (configurable lookback), and last session headline. Call at the start of every session.
+
+### v6 — shipped
+
+- **Shell handler** — dedicated compression for bash/shell/terminal/run_command tools: strips ANSI escape codes, parses structured `{stdout, stderr, returncode}` JSON, caps stdout at 50 lines and stderr at 20 lines with overflow counts.
 
 ---
 
