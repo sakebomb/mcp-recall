@@ -1,0 +1,7 @@
+2 results for "login form":
+
+  recall_a1b2c3d4  mcp__playwright__browser_snapshot  2026-03-02  56.2KB→299B
+  > [button "Sign in"]  [textbox "Email"]  [textbox "Password"]  [link "Forgot password?"]…
+
+  recall_e5f6a7b8  mcp__github__list_issues            2026-03-02  12.4KB→380B
+  > #142 "Login form: add 'remember me' checkbox" [open] · #139 "Fix login redirect loop" [closed]…
