@@ -366,3 +366,95 @@ describe("handlePostToolUse", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// handlePostToolUse — debug output
+// ---------------------------------------------------------------------------
+
+function captureStderr(fn: () => void): string {
+  const spy = spyOn(process.stderr, "write");
+  fn();
+  const output = spy.mock.calls.map(([c]) => String(c)).join("");
+  spy.mockRestore();
+  return output;
+}
+
+describe("handlePostToolUse — debug output", () => {
+  beforeEach(() => {
+    process.env.RECALL_DEBUG = "1";
+    process.env.RECALL_DB_PATH = ":memory:";
+  });
+
+  afterEach(() => {
+    closeDb();
+    resetConfig();
+    delete process.env.RECALL_DEBUG;
+    delete process.env.RECALL_DB_PATH;
+  });
+
+  it("logs SKIP denylist for denied tools", () => {
+    const output = captureStderr(() =>
+      handlePostToolUse(
+        makePostToolUseInput("mcp__1password__item_lookup", { content: [{ type: "text", text: "x" }] })
+      )
+    );
+    expect(output).toContain("SKIP denylist");
+    expect(output).toContain("mcp__1password__item_lookup");
+  });
+
+  it("logs SKIP no-compression when output is too small to compress", () => {
+    const output = captureStderr(() =>
+      handlePostToolUse(
+        makePostToolUseInput("mcp__github__list_issues", { content: [{ type: "text", text: "tiny" }] })
+      )
+    );
+    expect(output).toContain("SKIP no-compression");
+  });
+
+  it("logs CACHE HIT on second call with same tool_input", () => {
+    const input = makePostToolUseInput(
+      "mcp__github__list_issues",
+      { content: [{ type: "text", text: LARGE_GITHUB_RESPONSE }] },
+      { tool_input: { owner: "org", repo: "repo" } }
+    );
+    handlePostToolUse(input);
+    const output = captureStderr(() => handlePostToolUse(input));
+    expect(output).toContain("CACHE HIT");
+    expect(output).toContain("mcp__github__list_issues");
+  });
+
+  it("logs STORED with id and reduction on successful compression", () => {
+    const output = captureStderr(() =>
+      handlePostToolUse(
+        makePostToolUseInput("mcp__github__list_issues", {
+          content: [{ type: "text", text: LARGE_GITHUB_RESPONSE }],
+        })
+      )
+    );
+    expect(output).toContain("STORED");
+    expect(output).toContain("reduction");
+  });
+
+  it("logs handler name on successful compression", () => {
+    const output = captureStderr(() =>
+      handlePostToolUse(
+        makePostToolUseInput("mcp__github__list_issues", {
+          content: [{ type: "text", text: LARGE_GITHUB_RESPONSE }],
+        })
+      )
+    );
+    expect(output).toContain("handler:");
+    expect(output).toContain("githubHandler");
+  });
+
+  it("logs intercepted size after extractText", () => {
+    const output = captureStderr(() =>
+      handlePostToolUse(
+        makePostToolUseInput("mcp__github__list_issues", {
+          content: [{ type: "text", text: LARGE_GITHUB_RESPONSE }],
+        })
+      )
+    );
+    expect(output).toContain("intercepted mcp__github__list_issues");
+  });
+});

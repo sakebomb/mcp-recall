@@ -20795,6 +20795,9 @@ var RecallConfigSchema = exports_external.object({
   denylist: exports_external.object({
     additional: exports_external.array(exports_external.string()),
     override_defaults: exports_external.array(exports_external.string())
+  }),
+  debug: exports_external.object({
+    enabled: exports_external.boolean()
   })
 });
 var PartialConfigSchema = RecallConfigSchema.deepPartial();
@@ -20812,6 +20815,9 @@ var DEFAULTS = {
   denylist: {
     additional: [],
     override_defaults: []
+  },
+  debug: {
+    enabled: false
   }
 };
 function getConfigPath() {

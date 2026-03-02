@@ -5,6 +5,7 @@ import { isDenied } from "../denylist";
 import { containsSecret, findSecrets } from "../secrets";
 import { getHandler, extractText } from "../handlers/index";
 import { getDb, defaultDbPath, storeOutput, checkDedup, evictIfNeeded } from "../db/index";
+import { dbg } from "../debug";
 
 interface PostToolUseInput {
   session_id: string;
@@ -33,11 +34,13 @@ export function handlePostToolUse(raw: string): HookOutput {
 
   // 1. Denylist check
   if (isDenied(tool_name, config)) {
+    dbg(`SKIP denylist · ${tool_name}`);
     return {};
   }
 
   // 2. Extract text and check for secrets
   const fullContent = extractText(tool_response);
+  dbg(`intercepted ${tool_name} · ${formatBytes(Buffer.byteLength(fullContent, "utf8"))}`);
   if (containsSecret(fullContent)) {
     const names = findSecrets(fullContent);
     process.stderr.write(`[recall] skipped ${tool_name}: detected ${names.join(", ")}\n`);
@@ -60,6 +63,7 @@ export function handlePostToolUse(raw: string): HookOutput {
     const cached = checkDedup(db, projectKey, input_hash);
     if (cached) {
       const cachedDate = new Date(cached.created_at * 1000).toISOString().slice(0, 10);
+      dbg(`CACHE HIT · ${tool_name} · id=${cached.id} · cached ${cachedDate}`);
       const header = `[recall:${cached.id} · cached · ${cachedDate}]`;
       return {
         updatedMCPToolOutput: `${header}\n${cached.summary}`,
@@ -70,11 +74,13 @@ export function handlePostToolUse(raw: string): HookOutput {
 
   // 5. Compress
   const handler = getHandler(tool_name, tool_response, tool_input);
+  dbg(`handler: ${handler.name} · ${tool_name}`);
   const { summary, originalSize } = handler(tool_name, tool_response);
   const summarySize = Buffer.byteLength(summary, "utf8");
 
   // 6. Only store when compression is meaningful
   if (summarySize >= originalSize) {
+    dbg(`SKIP no-compression · ${tool_name} · ${formatBytes(summarySize)} ≥ ${formatBytes(originalSize)}`);
     return {};
   }
 
@@ -94,6 +100,7 @@ export function handlePostToolUse(raw: string): HookOutput {
 
   // 9. Return compressed output to Claude
   const reduction = ((1 - summarySize / originalSize) * 100).toFixed(0);
+  dbg(`STORED · ${tool_name} · id=${stored.id} · ${formatBytes(originalSize)}→${formatBytes(summarySize)} (${reduction}% reduction)`);
   const header = `[recall:${stored.id} · ${formatBytes(originalSize)}→${formatBytes(summarySize)} (${reduction}% reduction)]`;
   return {
     updatedMCPToolOutput: `${header}\n${summary}`,

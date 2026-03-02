@@ -4,44 +4,51 @@ Active work and upcoming tasks.
 
 ## In Progress
 
-Issue #34 — housekeeping
+### #55 — debug mode (`RECALL_DEBUG=1` + `config.debug.enabled`)
 
-## Planned batches
+**Files:**
 
-### PR A — mechanical fixes (quick wins)
-- [ ] `LICENSE` file (MIT)
-- [ ] `CLAUDE.md` — update phases table (all complete) + tool list (5→10)
-- [ ] `tasks/todo.md` — "v3 complete" → "v6 complete"
-- [ ] `package.json` — add license, repository, bugs, homepage, author, engines, keywords
-- [ ] `.gitignore` — add .DS_Store, .idea/, .vscode/, *.swp etc.
-- [ ] Remove dead `pin_recommendation_threshold` from `src/config.ts` (defined but never used)
-- [ ] `.gitignore` note: `bun.lock` already tracked (text format); `bun.lockb` (binary) correctly ignored — close that checklist item
+| File | Change |
+|------|--------|
+| `src/debug.ts` | NEW — `dbg(msg)`: checks env var OR config, writes `[recall:debug] …` to stderr |
+| `src/config.ts` | Add `[debug]` section to Zod schema + defaults (`enabled: false`) |
+| `src/hooks/post-tool-use.ts` | 5 `dbg()` calls: denylist skip, intercepted size, dedup hit, handler name, no-compression skip, stored |
+| `src/hooks/session-start.ts` | 2 `dbg()` calls: injected Xchars / nothing to inject |
+| `src/cli.ts` | In catch block: print full stack trace when `RECALL_DEBUG` set |
+| `tests/debug.test.ts` | NEW — unit tests for `dbg()`: silent, env-var activation, config activation |
+| `tests/hooks.test.ts` | New describe block: 5 pipeline debug output tests |
+| `tests/config.test.ts` | 2 tests: `debug.enabled` reads from TOML, defaults to false |
 
-### PR B — JSDoc + handler headers
-- [ ] JSDoc for all 19+ exported functions/types in `src/db/index.ts`
-- [ ] File-level header comments for handler files that lack them
+**Key decisions:**
+- Dual activation: `RECALL_DEBUG=1` (temporary) or `[debug] enabled = true` in config.toml (persistent)
+- Secret warning stays always-on (security event) — no change to line 43 in post-tool-use.ts
+- `handler.name` used for logging — all handlers are named const exports, no API change needed
+- Never log tool input values or response content in debug output — names and sizes only
 
-### PR C — README updates
-- [ ] Document `recall__forget` input parameter schema (mode, id, tool, session, age, all, force)
-- [ ] Document `recall__search` input parameters (query, tool, limit)
-- [ ] Fix architecture diagram ("5 recall__* tools" → "10")
-- [ ] Remove `pin_recommendation_threshold` from config docs (or keep if re-implemented)
+**Log format:**
+```
+[recall:debug] intercepted mcp__playwright__snapshot · 56.2KB
+[recall:debug] handler: playwrightHandler · mcp__playwright__snapshot
+[recall:debug] STORED · mcp__playwright__snapshot · id=recall_a1b2c3d4 · 56.2KB→299B (99%)
 
-### PR D — contributor files
-- [ ] `CONTRIBUTING.md`
-- [ ] `CHANGELOG.md` (v1–v6 summary)
-- [ ] `bunfig.toml`
-- [ ] `.github/ISSUE_TEMPLATE/bug_report.md`
-- [ ] `.github/ISSUE_TEMPLATE/feature_request.md`
-- [ ] `.github/PULL_REQUEST_TEMPLATE.md`
+[recall:debug] SKIP denylist · mcp__1password__item_lookup
+[recall:debug] CACHE HIT · mcp__github__get_pr · id=recall_a1b2c3d4 · cached 2026-03-01
+[recall:debug] SKIP no-compression · mcp__small__tool · 80B ≥ 95B
+[recall:debug] session-start · project=abc12345 · injected 1.4KB
+```
 
-### PR E — hooks dedup
-- [ ] Build script copies root `hooks/hooks.json` → `plugins/mcp-recall/hooks/hooks.json`
-- [ ] Delete `plugins/mcp-recall/hooks/hooks.json` as a standalone tracked file
+**Branch:** `feat/debug-mode`
 
-### PR F — release tags
-- [ ] Tag v1.0.0 through v1.6.0 at the appropriate commits
-- [ ] Create GitHub releases for each
+## Recently Completed (2026-03-02)
+
+- Installed plugin manually: MCP server in `~/.claude.json`, hooks in `~/.claude/settings.json`
+- Awaiting first restart + end-to-end test
+
+## Open Issues
+
+| # | Title | Priority | Size | Notes |
+|---|-------|----------|------|-------|
+| #35 | feat: GitHub Actions CI — tests, typecheck, bundle freshness | P2: Medium | M | Deferred — waiting on self-hosted runner setup |
 
 ## Blocked
 
