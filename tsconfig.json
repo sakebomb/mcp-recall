@@ -6,8 +6,7 @@
     "strict": true,
     "skipLibCheck": true,
     "types": ["bun-types"],
-    "outDir": "./dist",
-    "rootDir": "./src"
+    "outDir": "./dist"
   },
   "include": ["src/**/*", "tests/**/*"],
   "exclude": ["node_modules", "dist"]

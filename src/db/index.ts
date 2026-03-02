@@ -1,4 +1,4 @@
-import { Database } from "bun:sqlite";
+import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { join } from "path";
 import { homedir } from "os";
 import { mkdirSync } from "fs";
@@ -440,7 +440,7 @@ export function searchOutputs(
     ORDER BY rank
     LIMIT ?
   `;
-  const params: unknown[] = [query, options.project_key];
+  const params: SQLQueryBindings[] = [query, options.project_key];
   if (options.tool) params.push(options.tool);
   params.push(limit);
   return db.prepare(sql).all(...params) as StoredOutput[];
@@ -458,13 +458,13 @@ export function listOutputs(db: Database, options: ListOptions): StoredOutput[] 
     ORDER BY created_at ${order}
     LIMIT ? OFFSET ?
   `;
-  const params: unknown[] = [options.project_key];
+  const params: SQLQueryBindings[] = [options.project_key];
   if (options.tool) params.push(options.tool);
   params.push(limit, offset);
   return db.prepare(sql).all(...params) as StoredOutput[];
 }
 
-function countAndDelete(db: Database, where: string, params: unknown[]): number {
+function countAndDelete(db: Database, where: string, params: SQLQueryBindings[]): number {
   const count = (
     db.prepare(`SELECT COUNT(*) as n FROM stored_outputs WHERE ${where}`)
       .get(...params) as { n: number }
@@ -651,7 +651,7 @@ export function getSessionSummary(
   opts: SessionSummaryOptions = {}
 ): SessionSummaryData {
   let filter: string;
-  let filterParams: unknown[];
+  let filterParams: SQLQueryBindings[];
   let label: string;
 
   if (opts.session_id) {
@@ -668,7 +668,7 @@ export function getSessionSummary(
   }
 
   const base = `WHERE project_key = ? AND ${filter}`;
-  const bp = [project_key, ...filterParams];
+  const bp: SQLQueryBindings[] = [project_key, ...filterParams];
 
   const agg = db.prepare(`
     SELECT

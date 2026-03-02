@@ -288,7 +288,7 @@ export function toolListStored(
     ORDER BY ${order}
     LIMIT ? OFFSET ?
   `;
-  const params: unknown[] = [projectKey];
+  const params: Array<string | number> = [projectKey];
   if (args.tool) params.push(`%${args.tool}%`);
   params.push(limit, offset);
   const items = db.prepare(sql).all(...params) as ReturnType<typeof listOutputs>;

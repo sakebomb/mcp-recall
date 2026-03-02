@@ -8,6 +8,7 @@ const baseConfig: RecallConfig = {
     key: "git_root",
     max_size_mb: 500,
     pin_recommendation_threshold: 3,
+    stale_item_days: 3,
   },
   retrieve: { default_max_bytes: 8192 },
   denylist: { additional: [], override_defaults: [] },
