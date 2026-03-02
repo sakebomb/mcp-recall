@@ -531,6 +531,56 @@ export function getStats(db: Database, project_key: string): Stats {
   return { ...row, compression_ratio };
 }
 
+/** Options for {@link getSuggestions}. */
+export interface SuggestionsOptions {
+  /** Access-count threshold above which a non-pinned item is a pin candidate (default 5). */
+  pin_threshold?: number;
+  /** Items with zero accesses older than this many days are stale candidates (default 3). */
+  stale_days?: number;
+  /** Maximum items to return per category (default 3). */
+  limit?: number;
+}
+
+/** Output of {@link getSuggestions}: two categorised item lists. */
+export interface SuggestionsData {
+  /** Non-pinned items accessed at or above the pin threshold. */
+  pin_candidates: StoredOutput[];
+  /** Non-pinned items that have never been accessed and are older than `stale_days`. */
+  stale_candidates: StoredOutput[];
+}
+
+/**
+ * Returns pin candidates (frequently accessed, not yet pinned) and stale
+ * candidates (never accessed, older than `stale_days`) for the project.
+ * Both lists are capped at `limit` items to avoid overwhelming output.
+ */
+export function getSuggestions(
+  db: Database,
+  project_key: string,
+  opts: SuggestionsOptions = {}
+): SuggestionsData {
+  const threshold = opts.pin_threshold ?? 5;
+  const staleDays = opts.stale_days ?? 3;
+  const limit = opts.limit ?? 3;
+  const staleCutoff = Math.floor(Date.now() / 1000) - staleDays * 86400;
+
+  const pin_candidates = db.prepare(`
+    SELECT * FROM stored_outputs
+    WHERE project_key = ? AND pinned = 0 AND access_count >= ?
+    ORDER BY access_count DESC
+    LIMIT ?
+  `).all(project_key, threshold, limit) as StoredOutput[];
+
+  const stale_candidates = db.prepare(`
+    SELECT * FROM stored_outputs
+    WHERE project_key = ? AND pinned = 0 AND access_count = 0 AND created_at < ?
+    ORDER BY created_at ASC
+    LIMIT ?
+  `).all(project_key, staleCutoff, limit) as StoredOutput[];
+
+  return { pin_candidates, stale_candidates };
+}
+
 /**
  * Returns a session-orientation snapshot in four isolated sections:
  * pinned items, unpinned notes, recently accessed items (within `opts.days`),
