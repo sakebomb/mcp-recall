@@ -139,3 +139,12 @@ Completed work.
 - Merged via PR #28
 
 **v5 total: 261 tests, 0 failures**
+
+### v6 — Shell Handler
+
+- `src/handlers/shell.ts` — `stripAnsi` (ANSI regex covering colors, cursor, erase), `formatLines` (trims trailing empty lines, 50-line stdout cap / 20-line stderr cap with overflow counts), `parseStructured` (detects `{stdout, stderr, returncode/exit_code/output}` JSON), `shellHandler`
+- `src/handlers/index.ts` — routing at step 4 for tool names containing `bash`, `shell`, `terminal`, `run_command`; dispatcher comment updated to 10 steps
+- `tests/handlers.test.ts` — 87 tests (+15): `stripAnsi` (3), `shellHandler` (9), dispatcher routing (3)
+- Merged via PR #30
+
+**v6 total: 276 tests, 0 failures**
