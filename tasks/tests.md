@@ -12,7 +12,7 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 
 ## Summary
 
-**148 tests across 8 files, 0 failures.**
+**231 tests across 8 files, 0 failures.**
 
 | File | Tests | Phase |
 |------|-------|-------|
@@ -20,10 +20,10 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 | `tests/project-key.test.ts` | 6 | 1 |
 | `tests/denylist.test.ts` | 14 | 2 |
 | `tests/secrets.test.ts` | 8 | 2 |
-| `tests/handlers.test.ts` | 34 | 3 |
-| `tests/db.test.ts` | 32 | 4 |
-| `tests/hooks.test.ts` | 13 | 5 |
-| `tests/tools.test.ts` | 24 | 6 |
+| `tests/handlers.test.ts` | 72 | 3 + 2d |
+| `tests/db.test.ts` | 52 | 4 + 2a |
+| `tests/hooks.test.ts` | 17 | 5 + 2b |
+| `tests/tools.test.ts` | 45 | 6 + 2c |
 
 ## Coverage
 
@@ -87,7 +87,7 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 | findSecrets returns multiple matches | handles multiple patterns |
 | findSecrets does not include unmatched pattern names | no extra names |
 
-### `tests/handlers.test.ts` — 34 tests
+### `tests/handlers.test.ts` — 72 tests
 | Test | Description |
 |------|-------------|
 | extractText: returns string as-is | passthrough for plain strings |
@@ -124,8 +124,46 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 | getHandler: routes filesystem tools | name-based dispatch |
 | getHandler: routes JSON output to json handler | content-based fallback |
 | getHandler: routes plain text to generic handler | final fallback |
+| getHandler: routes linear tools to linear handler | name-based dispatch |
+| getHandler: routes slack tools to slack handler | name-based dispatch |
+| getHandler: routes csv tools to csv handler by name | name-based dispatch |
+| getHandler: routes CSV-shaped plain text to csv handler | content-based fallback |
+| csvHandler: includes row and column count in summary | row × col header |
+| csvHandler: includes header column names | headers line shown |
+| csvHandler: includes preview rows with key=value pairs | first 5 rows formatted |
+| csvHandler: shows only first 5 data rows with overflow count | cap enforced |
+| csvHandler: handles quoted fields with embedded commas | basic quote parsing |
+| csvHandler: handles empty CSV input | graceful empty case |
+| csvHandler: reports originalSize in bytes | byte count accurate |
+| csvHandler: handles MCP content wrapper | content array unwrapped |
+| looksLikeCsv: returns true for CSV-shaped text | 3+ lines, 2+ commas in first |
+| looksLikeCsv: returns false for plain text | no false positives |
+| looksLikeCsv: returns false for fewer than 3 lines | minimum line requirement |
+| looksLikeCsv: returns false for JSON | JSON handled earlier in dispatcher |
+| linearHandler: includes identifier and title | ENG-XXX + quoted title |
+| linearHandler: includes state label | [In Progress] format |
+| linearHandler: maps numeric priority to human label | 2 → "High" |
+| linearHandler: includes description excerpt | 200-char cap |
+| linearHandler: includes URL | https:// link present |
+| linearHandler: summarises an array of issues with count header | N Linear issues: |
+| linearHandler: caps list at 10 items with overflow count | …and N more |
+| linearHandler: handles GraphQL wrapper { data: { issue } } | unwrapped correctly |
+| linearHandler: handles Relay-style { nodes: [...] } wrapper | unwrapped correctly |
+| linearHandler: falls back gracefully for non-JSON input | plain text passthrough |
+| linearHandler: reports originalSize in bytes | byte count accurate |
+| slackHandler: includes message count in summary | N messages: header |
+| slackHandler: includes user identifier in output | U12345 or display name shown |
+| slackHandler: includes message text excerpt | text content present |
+| slackHandler: formats timestamp as readable date | [YYYY-MM-DD HH:MM] format |
+| slackHandler: includes channel identifier when present | channel shown |
+| slackHandler: handles bare array of messages | no wrapper needed |
+| slackHandler: caps messages at 10 with overflow count | …and N more messages |
+| slackHandler: uses display_name from user_profile when available | profile resolution |
+| slackHandler: truncates long message text at 200 chars | cap enforced |
+| slackHandler: falls back gracefully for unrecognised JSON shapes | excerpt returned |
+| slackHandler: reports originalSize in bytes | byte count accurate |
 
-### `tests/db.test.ts` — 32 tests
+### `tests/db.test.ts` — 52 tests
 | Test | Description |
 |------|-------------|
 | storeOutput: returns a stored output with generated id | `recall_` + 8 hex chars |
@@ -160,8 +198,28 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 | recordSession: records a session date | date persisted |
 | recordSession: is idempotent | duplicate ignored |
 | getSessionDays: returns dates in descending order | newest first |
+| recordAccess: increments access_count | count goes from 0 to 1 |
+| recordAccess: accumulates on repeated access | 3 calls → count = 3 |
+| recordAccess: sets last_accessed to a recent timestamp | within test window |
+| pinOutput: pins an item | pinned column set to 1 |
+| pinOutput: unpins a pinned item | pinned column set back to 0 |
+| pinOutput: returns true when item exists | boolean success signal |
+| pinOutput: returns false for unknown id | boolean miss signal |
+| pinOutput: pruneExpired skips pinned items | old pinned row survives |
+| pinOutput: forgetOutputs(all) skips pinned items by default | 1 of 2 deleted |
+| pinOutput: forgetOutputs(all, force) deletes pinned items too | force override |
+| checkDedup: returns null when no matching hash exists | miss case |
+| checkDedup: returns the stored item when hash matches | hit case |
+| checkDedup: returns the most recent match when multiple exist | ORDER BY created_at DESC |
+| checkDedup: does not match hash from a different project | project isolation |
+| evictIfNeeded: returns 0 when store is under the size limit | no eviction |
+| evictIfNeeded: evicts least-accessed item when over limit | LFU order respected |
+| evictIfNeeded: does not evict pinned items | pin protection during eviction |
+| retrieveSnippet: returns null for unknown id | missing ID handled |
+| retrieveSnippet: returns a text excerpt when query matches full_content | FTS snippet |
+| retrieveSnippet: returns null when query does not match | no false match |
 
-### `tests/hooks.test.ts` — 13 tests
+### `tests/hooks.test.ts` — 17 tests
 | Test | Description |
 |------|-------------|
 | handleSessionStart: records today's date in sessions table | date written |
@@ -177,13 +235,17 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 | handlePostToolUse: stores the output in the DB | DB write confirmed |
 | handlePostToolUse: stored output preserves session_id | Claude Code session ID saved |
 | handlePostToolUse: stored full_content is extracted text | MCP wrapper stripped |
+| handlePostToolUse: returns cached response on second call with same tool_input | dedup hit |
+| handlePostToolUse: cached header contains the original recall id | ID preserved on cache hit |
+| handlePostToolUse: does not store a second item on cache hit | DB count stays at 1 |
+| handlePostToolUse: evicts non-pinned items after storing when store exceeds max_size_mb | eviction triggered |
 
-### `tests/tools.test.ts` — 24 tests
+### `tests/tools.test.ts` — 45 tests
 | Test | Description |
 |------|-------------|
 | toolRetrieve: returns not-found message for unknown id | missing ID handled |
 | toolRetrieve: returns summary with header when no query | summary path |
-| toolRetrieve: returns full_content when query given | detail path |
+| toolRetrieve: returns full_content when query given (no FTS match) | fallback path |
 | toolRetrieve: applies max_bytes cap to full_content | truncation enforced |
 | toolRetrieve: includes size info in header | KB shown |
 | toolSearch: returns no-results message when nothing matches | empty state |
@@ -205,3 +267,24 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 | toolStats: shows item count, sizes, and reduction | aggregate correct |
 | toolStats: shows session days count | session days shown |
 | toolStats: shows token savings estimate | ~tokens shown |
+| toolRetrieve (v2): increments access_count on retrieve | recordAccess called |
+| toolRetrieve (v2): returns FTS snippet when query matches full_content | snippet path |
+| toolRetrieve (v2): falls back to full_content slice when query has no FTS match | fallback path |
+| toolPin: pins an item and returns confirmation | pinned message returned |
+| toolPin: unpins when pinned: false | unpinned message returned |
+| toolPin: returns not-found for unknown id | missing ID handled |
+| toolPin: defaults pinned to true when omitted | DB column set to 1 |
+| toolNote: stores a note with tool_name recall__note | tool_name correct |
+| toolNote: returns stored id in response | recall_ id present |
+| toolNote: includes title in summary when provided | title in summary |
+| toolNote: uses (note) as default title when none given | default title |
+| toolNote: stores full text as full_content | full_content round-trip |
+| toolNote: truncates summary at 200 chars with ellipsis | cap enforced |
+| toolExport: returns no-items message when store is empty | empty state |
+| toolExport: returns JSON array of stored items | valid JSON array |
+| toolExport: exported items include id, tool_name, summary, and full_content | fields present |
+| toolExport: orders items oldest-first | created_at ASC |
+| toolForget (v2): skips pinned items by default | pin protection |
+| toolForget (v2): deletes pinned items when force: true | force override |
+| toolListStored (v2): sorts by access_count descending when sort=accessed | LFU order |
+| toolListStored (v2): shows pin indicator for pinned items | 📌 marker shown |
