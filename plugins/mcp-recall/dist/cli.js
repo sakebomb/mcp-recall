@@ -5121,6 +5121,7 @@ function getDb(path) {
   instance = new Database(path);
   instance.run("PRAGMA journal_mode=WAL");
   instance.run("PRAGMA foreign_keys=ON");
+  instance.run("PRAGMA optimize");
   instance.run(SCHEMA);
   applyMigrations(instance);
   return instance;
