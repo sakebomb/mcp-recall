@@ -114,6 +114,43 @@ describe("MCP tool handlers", () => {
       const result = toolSearch(db, PROJECT_KEY, { query: "result", limit: 2 });
       expect(result).toContain("Found 2 results");
     });
+
+    it("includes a > snippet line when full_content matches the query", () => {
+      storeOutput(db, makeInput({
+        summary: "GitHub issues list",
+        full_content: "Issue #42: implement the frobnication feature for power users",
+      }));
+      const result = toolSearch(db, PROJECT_KEY, { query: "frobnication" });
+      expect(result).toContain(">");
+      expect(result).toContain("frobnication");
+    });
+
+    it("still returns summary when no snippet is found (graceful fallback)", () => {
+      // Item whose full_content is empty — retrieveSnippet returns null
+      storeOutput(db, makeInput({
+        summary: "ghosttoken appears only in summary",
+        full_content: "",
+      }));
+      const result = toolSearch(db, PROJECT_KEY, { query: "ghosttoken" });
+      expect(result).toContain("ghosttoken");
+      // No crash; result is well-formed
+      expect(result).toContain("Found 1 result");
+    });
+
+    it("caps snippet at 150 characters", () => {
+      const longContent = "frobnicate " + "x".repeat(300);
+      storeOutput(db, makeInput({
+        summary: "item with long full content",
+        full_content: longContent,
+      }));
+      const result = toolSearch(db, PROJECT_KEY, { query: "frobnicate" });
+      // Snippet line should be present and capped (full chunk is 512 chars)
+      expect(result).toContain(">");
+      const snippetLine = result.split("\n").find((l) => l.trim().startsWith(">"))!;
+      // Remove the "> …" prefix (4 chars) and trailing "…" to measure content
+      const snippetContent = snippetLine.trim().replace(/^>\s*…/, "").replace(/…$/, "");
+      expect(snippetContent.length).toBeLessThanOrEqual(150);
+    });
   });
 
   // -------------------------------------------------------------------------
