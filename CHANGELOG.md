@@ -4,72 +4,53 @@ All notable changes to mcp-recall are documented here.
 
 ---
 
-## v1.0.0 — 2026-03-01
+## v1.0.0 — 2026-03-02
 
-Initial release.
+Initial public release.
 
-### Core pipeline
+### Hook pipeline
 
-- **PostToolUse hook** intercepts all `mcp__*` tool outputs (except `mcp__recall__*`), compresses them, stores full content in SQLite, and returns a brief summary to Claude.
-- **SessionStart hook** records each active day and prunes expired entries.
+- **PostToolUse hook** intercepts all `mcp__*` tool outputs and the native `Bash` tool. Compresses, stores full content in SQLite, and returns a brief summary to Claude. Deduplicates identical calls via `sha256(tool_name + input)` — repeated calls return a `[cached]` header without re-compression.
+- **SessionStart hook** records each active day, prunes expired entries, and injects a compact context snapshot before the first message (pinned items, notes, recently accessed items). Capped at 2000 chars with a truncation notice.
 - **Denylist** — built-in glob patterns block credential tools (`*secret*`, `*token*`, `*password*`, `*key*`, `*auth*`, `mcp__1password__*`, etc.). Configurable via `denylist.additional` and `denylist.override_defaults`.
 - **Secret detection** — 10 patterns (PEM headers, SSH private keys, GitHub PATs, OpenAI, Anthropic, AWS, Bearer tokens). Outputs matching any pattern are skipped and logged.
 - **Project key** — stable 16-char SHA256 hash of the git root path; falls back to CWD.
 - **Config** — TOML at `~/.config/mcp-recall/config.toml` (Zod-validated); override via `RECALL_CONFIG_PATH`.
 
-### Compression handlers (v1)
+### Compression handlers
 
-Playwright (accessibility tree), GitHub (key fields), Filesystem (50-line head), JSON (depth-3 truncation), Generic text (500-char truncation).
+| Handler | Matches | Strategy |
+|---------|---------|----------|
+| Bash | native `Bash` tool | CLI-aware: git diff → file-level stats; git log → 20-commit cap; terraform plan → resource actions; fallback → shell |
+| Playwright | `playwright` + `snapshot` in tool name | Interactive elements, visible text, headings. Drops aria noise. |
+| GitHub | `mcp__github__*` | Number, title, state, body (200 chars), labels, URL. First 10 + overflow. |
+| Shell | `bash`, `shell`, `terminal`, `run_command`, `ssh_exec`, `exec_command`, `remote_exec`, `container_exec` | ANSI + SSH noise stripping. Structured JSON support. 50-line stdout cap, 20-line stderr cap. |
+| Linear | `linear` in tool name | Identifier, title, state, priority, description (200 chars), URL. |
+| Slack | `slack` in tool name | Channel, timestamp, user, message text (200 chars). First 10 + overflow. |
+| Tavily | `tavily` in tool name | Query, synthesized answer, per-result title/URL/150-char snippet. Drops raw_content/score. First 10 + overflow. |
+| Filesystem | `mcp__filesystem__*` or `read_file`/`get_file` | Line count + first 50 lines. |
+| CSV | `csv` in tool name or content-based | Headers + first 5 data rows + row/col count. |
+| Generic JSON | Unmatched JSON output | Depth-3 limit, arrays capped at 3 items. |
+| Generic text | Everything else | First 500 chars. |
 
-### MCP tools (v1)
+### MCP server tools
 
-`recall__retrieve`, `recall__search`, `recall__forget`, `recall__list_stored`, `recall__stats`.
+Ten `recall__*` tools available in every Claude session:
 
----
+- **`recall__retrieve`** — fetch stored content by ID; pass `query` for an FTS excerpt focused on the relevant section
+- **`recall__search`** — FTS search (BM25) across all stored outputs; each result includes a content snippet
+- **`recall__forget`** — delete by id / tool / session / age / all; `force: true` overrides pin protection
+- **`recall__list_stored`** — paginated browse; sortable by recent, accessed count, or size
+- **`recall__stats`** — aggregate efficiency report with pin suggestions and stale item alerts
+- **`recall__pin`** — pin/unpin items; pinned items are exempt from expiry and LFU eviction
+- **`recall__note`** — store arbitrary text as project memory; searchable like any stored item
+- **`recall__export`** — JSON dump of all stored items, oldest-first
+- **`recall__session_summary`** — per-session digest: tool breakdown, top accessed, pinned items, notes
+- **`recall__context`** — session orientation: pinned items, notes, recently accessed, last session headline
 
-## v2.0.0 — 2026-03-01
+### Storage
 
-### Features
-
-- **`recall__pin`** — pin/unpin items; pinned items are exempt from expiry, LFU eviction, and bulk-forget (unless `force: true`).
-- **`recall__note`** — store arbitrary text as project memory; searchable and retrievable like any other item.
-- **`recall__export`** — JSON dump of all stored items, oldest-first.
-- **Access tracking** — `access_count` and `last_accessed` on every retrieval; `sort: "accessed"` in `recall__list_stored`; LFU eviction when store exceeds `max_size_mb`.
-- **Auto-dedup** — `sha256(tool_name + input)` fingerprint; identical repeated calls return a `[cached]` header without re-compression or a second DB write.
-- **FTS snippets** — `recall__retrieve(id, query)` returns a focused excerpt via `snippet()` rather than a full content slice.
-
-### Additional handlers
-
-CSV (header + 5 data rows), Linear (identifier, title, state, priority, URL), Slack (channel, timestamp, user, text; capped at 10 messages).
-
----
-
-## v3.0.0 — 2026-03-02
-
-### Features
-
-- **FTS chunking** — full content split into overlapping 512-char chunks (64-char overlap) stored in a `content_chunks` FTS5 table. `recall__retrieve(id, query)` uses chunk-based retrieval first (verbatim match) with a legacy `snippet()` fallback for pre-v3 items.
-
----
-
-## v4.0.0 — 2026-03-02
-
-### Features
-
-- **`recall__session_summary`** — digest of a single session or calendar day: item count, compression savings, tool breakdown, top-5 accessed items, pinned items, notes. Filter by `session_id` or `date` (YYYY-MM-DD, defaults today UTC).
-
----
-
-## v5.0.0 — 2026-03-02
-
-### Features
-
-- **`recall__context`** — single-call session orientation: pinned items, unpinned notes, recently accessed items (configurable `days` lookback, default 7), and a one-line last-session headline. Each item appears in exactly one section. Call at the start of every session.
-
----
-
-## v6.0.0 — 2026-03-02
-
-### Features
-
-- **Shell handler** — dedicated compression for `bash`, `shell`, `terminal`, and `run_command` tools. Strips ANSI escape codes. Parses structured `{stdout, stderr, returncode}` JSON; falls back to plain string. Caps stdout at 50 lines and stderr at 20 lines with overflow counts.
+- SQLite + FTS5 at `~/.local/share/mcp-recall/<project-key>.db`
+- FTS chunking — content split into overlapping 512-char chunks for precise snippet retrieval on long documents
+- Access tracking — `access_count` and `last_accessed` per item; LFU eviction when store exceeds `max_size_mb`
+- Session-day expiry — counts active Claude Code days, not calendar days; vacations don't drain your stored context
