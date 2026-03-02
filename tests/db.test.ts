@@ -250,6 +250,26 @@ describe("db", () => {
       const results = searchOutputs(db, "findme", { project_key: PROJECT_KEY });
       expect(results.length).toBe(0);
     });
+
+    it("bulk delete of 50+ items does not throw and returns correct count", () => {
+      for (let i = 0; i < 55; i++) {
+        storeOutput(db, makeInput({ summary: `bulk item ${i}` }));
+      }
+      expect(() => {
+        const deleted = forgetOutputs(db, PROJECT_KEY, { all: true });
+        expect(deleted).toBe(55);
+      }).not.toThrow();
+    });
+
+    it("data integrity is preserved after bulk delete triggers VACUUM", () => {
+      const survivor = storeOutput(db, makeInput({ project_key: "other-project", summary: "keep me" }));
+      for (let i = 0; i < 55; i++) {
+        storeOutput(db, makeInput({ summary: `vacuum-test item ${i}` }));
+      }
+      forgetOutputs(db, PROJECT_KEY, { all: true });
+      expect(retrieveOutput(db, survivor.id)).not.toBeNull();
+      expect(retrieveOutput(db, survivor.id)!.summary).toBe("keep me");
+    });
   });
 
   // -------------------------------------------------------------------------
