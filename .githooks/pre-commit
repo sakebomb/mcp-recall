@@ -5,5 +5,12 @@ set -e
 if git diff --cached --name-only | grep -q '^src/'; then
   echo "[pre-commit] src/ changed — rebuilding plugins/mcp-recall/dist/"
   bun run build
-  git add plugins/mcp-recall/dist/
+  git add plugins/mcp-recall/dist/ plugins/mcp-recall/hooks/hooks.json
+fi
+
+# Sync hooks.json to plugin directory if the canonical copy changed.
+if git diff --cached --name-only | grep -q '^hooks/hooks\.json$'; then
+  echo "[pre-commit] hooks/hooks.json changed — syncing to plugins/mcp-recall/"
+  cp hooks/hooks.json plugins/mcp-recall/hooks/hooks.json
+  git add plugins/mcp-recall/hooks/hooks.json
 fi
