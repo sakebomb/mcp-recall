@@ -272,6 +272,62 @@ describe("MCP tool handlers", () => {
       const result = toolStats(db, PROJECT_KEY);
       expect(result).toContain("Tokens saved");
     });
+
+    it("omits Suggestions section when no candidates qualify", () => {
+      storeOutput(db, makeInput());
+      // access_count=0, just created — not stale yet, not a pin candidate
+      const result = toolStats(db, PROJECT_KEY, { pin_threshold: 5, stale_days: 3 });
+      expect(result).not.toContain("Suggestions");
+    });
+
+    it("shows pin candidates when access_count meets threshold", () => {
+      const stored = storeOutput(db, makeInput());
+      recordAccess(db, stored.id);
+      const result = toolStats(db, PROJECT_KEY, { pin_threshold: 1 });
+      expect(result).toContain("Suggestions");
+      expect(result).toContain("Consider pinning");
+      expect(result).toContain(stored.id);
+      expect(result).toContain("accessed 1×");
+    });
+
+    it("shows stale candidates when items are old and never accessed", () => {
+      const stored = storeOutput(db, makeInput());
+      // Backdate by 5 days so it's stale under a 3-day threshold
+      const fiveDaysAgo = Math.floor(Date.now() / 1000) - 5 * 86400;
+      db.prepare(`UPDATE stored_outputs SET created_at = ? WHERE id = ?`)
+        .run(fiveDaysAgo, stored.id);
+
+      const result = toolStats(db, PROJECT_KEY, { stale_days: 3 });
+      expect(result).toContain("Suggestions");
+      expect(result).toContain("Never accessed");
+      expect(result).toContain(stored.id);
+      expect(result).toContain("days ago");
+    });
+
+    it("shows both categories when both qualify", () => {
+      // Pin candidate
+      const pinItem = storeOutput(db, makeInput());
+      recordAccess(db, pinItem.id);
+
+      // Stale candidate
+      const staleItem = storeOutput(db, makeInput());
+      const fiveDaysAgo = Math.floor(Date.now() / 1000) - 5 * 86400;
+      db.prepare(`UPDATE stored_outputs SET created_at = ? WHERE id = ?`)
+        .run(fiveDaysAgo, staleItem.id);
+
+      const result = toolStats(db, PROJECT_KEY, { pin_threshold: 1, stale_days: 3 });
+      expect(result).toContain("Consider pinning");
+      expect(result).toContain("Never accessed");
+    });
+
+    it("does not suggest already-pinned items", () => {
+      const stored = storeOutput(db, makeInput());
+      pinOutput(db, stored.id, PROJECT_KEY, true);
+      recordAccess(db, stored.id);
+      // Even with high access_count, pinned items should not appear as pin candidates
+      const result = toolStats(db, PROJECT_KEY, { pin_threshold: 1 });
+      expect(result).not.toContain("Consider pinning");
+    });
   });
 
   // -------------------------------------------------------------------------

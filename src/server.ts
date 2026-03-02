@@ -18,6 +18,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { getProjectKey } from "./project-key";
 import { getDb, defaultDbPath } from "./db/index";
+import { loadConfig } from "./config";
 import {
   toolRetrieve,
   toolSearch,
@@ -142,9 +143,15 @@ server.tool(
   "recall__stats",
   "Aggregate session efficiency stats — total savings, compression ratio, token savings, session days. Use to understand the big picture.",
   {},
-  async () => ({
-    content: [{ type: "text", text: toolStats(db, projectKey) }],
-  })
+  async () => {
+    const config = loadConfig();
+    return {
+      content: [{ type: "text", text: toolStats(db, projectKey, {
+        pin_threshold: config.store.pin_recommendation_threshold,
+        stale_days: config.store.stale_item_days,
+      }) }],
+    };
+  }
 );
 
 server.tool(
