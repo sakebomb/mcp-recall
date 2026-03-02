@@ -55,7 +55,7 @@ function deepMerge<T extends Record<string, unknown>>(
 ): T {
   const result = { ...defaults };
   for (const key of Object.keys(overrides) as Array<keyof T>) {
-    const override = overrides[key];
+    const override = overrides[key as string];
     const def = defaults[key];
     if (
       override !== undefined &&
