@@ -9,6 +9,7 @@ import {
   toolForget,
   toolListStored,
   toolStats,
+  toolSessionSummary,
 } from "../src/tools";
 import { resetConfig } from "../src/config";
 import type { Database } from "bun:sqlite";
@@ -418,6 +419,76 @@ describe("MCP tool handlers", () => {
       pinOutput(db, stored.id, PROJECT_KEY, true);
       const result = toolListStored(db, PROJECT_KEY, {});
       expect(result).toContain("📌");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // toolSessionSummary
+  // -------------------------------------------------------------------------
+
+  describe("toolSessionSummary", () => {
+    const today = new Date().toISOString().slice(0, 10);
+
+    it("returns no-data message when nothing stored for the date", () => {
+      const result = toolSessionSummary(db, PROJECT_KEY, { date: "2000-01-01" });
+      expect(result).toContain("no items stored");
+      expect(result).toContain("2000-01-01");
+    });
+
+    it("shows stored count and compression stats", () => {
+      storeOutput(db, makeInput({ original_size: 4096 }));
+      storeOutput(db, makeInput({ original_size: 8192 }));
+      const result = toolSessionSummary(db, PROJECT_KEY, { date: today });
+      expect(result).toContain("2 items");
+      expect(result).toContain("→");
+      expect(result).toContain("reduction");
+    });
+
+    it("shows tool breakdown sorted by count", () => {
+      storeOutput(db, makeInput({ tool_name: "mcp__playwright__browser_snapshot" }));
+      storeOutput(db, makeInput({ tool_name: "mcp__playwright__browser_snapshot" }));
+      storeOutput(db, makeInput({ tool_name: "mcp__github__list_issues" }));
+      const result = toolSessionSummary(db, PROJECT_KEY, { date: today });
+      expect(result).toContain("mcp__playwright__browser_snapshot");
+      expect(result).toContain("×2");
+      expect(result).toContain("mcp__github__list_issues");
+      // playwright should appear before github (higher count)
+      expect(result.indexOf("mcp__playwright__browser_snapshot")).toBeLessThan(
+        result.indexOf("mcp__github__list_issues")
+      );
+    });
+
+    it("shows most accessed items", () => {
+      const stored = storeOutput(db, makeInput());
+      db.prepare("UPDATE stored_outputs SET access_count = 3 WHERE id = ?").run(stored.id);
+      const result = toolSessionSummary(db, PROJECT_KEY, { date: today });
+      expect(result).toContain("Most accessed");
+      expect(result).toContain(stored.id);
+      expect(result).toContain("×3");
+    });
+
+    it("shows pinned items", () => {
+      const stored = storeOutput(db, makeInput());
+      pinOutput(db, stored.id, PROJECT_KEY, true);
+      const result = toolSessionSummary(db, PROJECT_KEY, { date: today });
+      expect(result).toContain("Pinned: 1");
+      expect(result).toContain("📌");
+      expect(result).toContain(stored.id);
+    });
+
+    it("shows notes separately", () => {
+      storeOutput(db, makeInput({ tool_name: "recall__note", summary: "(note): Auth findings" }));
+      const result = toolSessionSummary(db, PROJECT_KEY, { date: today });
+      expect(result).toContain("Notes: 1");
+      expect(result).toContain("Auth findings");
+    });
+
+    it("filters by session_id", () => {
+      storeOutput(db, makeInput({ session_id: "sess-aaa" }));
+      storeOutput(db, makeInput({ session_id: "sess-bbb" }));
+      const result = toolSessionSummary(db, PROJECT_KEY, { session_id: "sess-aaa" });
+      expect(result).toContain("sess-aaa");
+      expect(result).toContain("1 item");
     });
   });
 });

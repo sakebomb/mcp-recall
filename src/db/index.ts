@@ -64,6 +64,24 @@ export interface Stats {
   compression_ratio: number;
 }
 
+export interface SessionSummaryOptions {
+  session_id?: string;
+  date?: string; // YYYY-MM-DD, defaults to today (UTC)
+}
+
+export interface SessionSummaryData {
+  label: string;
+  stored_count: number;
+  total_original_bytes: number;
+  total_summary_bytes: number;
+  tool_counts: Array<{ tool_name: string; count: number }>;
+  accessed_count: number;
+  total_accesses: number;
+  top_accessed: Array<{ id: string; tool_name: string; summary: string; access_count: number }>;
+  pinned: Array<{ id: string; tool_name: string; summary: string }>;
+  notes: Array<{ id: string; summary: string }>;
+}
+
 // ---------------------------------------------------------------------------
 // Schema + migrations
 // ---------------------------------------------------------------------------
@@ -437,6 +455,76 @@ export function getStats(db: Database, project_key: string): Stats {
       : 0;
 
   return { ...row, compression_ratio };
+}
+
+export function getSessionSummary(
+  db: Database,
+  project_key: string,
+  opts: SessionSummaryOptions = {}
+): SessionSummaryData {
+  let filter: string;
+  let filterParams: unknown[];
+  let label: string;
+
+  if (opts.session_id) {
+    filter = "session_id = ?";
+    filterParams = [opts.session_id];
+    label = opts.session_id;
+  } else {
+    const date = opts.date ?? new Date().toISOString().slice(0, 10);
+    const startOfDay = Math.floor(new Date(`${date}T00:00:00Z`).getTime() / 1000);
+    const endOfDay = startOfDay + 86400;
+    filter = "created_at >= ? AND created_at < ?";
+    filterParams = [startOfDay, endOfDay];
+    label = date;
+  }
+
+  const base = `WHERE project_key = ? AND ${filter}`;
+  const bp = [project_key, ...filterParams];
+
+  const agg = db.prepare(`
+    SELECT
+      COUNT(*) as stored_count,
+      COALESCE(SUM(original_size), 0) as total_original_bytes,
+      COALESCE(SUM(summary_size), 0) as total_summary_bytes,
+      COUNT(CASE WHEN access_count > 0 THEN 1 END) as accessed_count,
+      COALESCE(SUM(access_count), 0) as total_accesses
+    FROM stored_outputs ${base}
+  `).get(...bp) as {
+    stored_count: number;
+    total_original_bytes: number;
+    total_summary_bytes: number;
+    accessed_count: number;
+    total_accesses: number;
+  };
+
+  const tool_counts = db.prepare(`
+    SELECT tool_name, COUNT(*) as count
+    FROM stored_outputs ${base}
+    GROUP BY tool_name
+    ORDER BY count DESC
+  `).all(...bp) as Array<{ tool_name: string; count: number }>;
+
+  const top_accessed = db.prepare(`
+    SELECT id, tool_name, summary, access_count
+    FROM stored_outputs ${base} AND access_count > 0
+    ORDER BY access_count DESC
+    LIMIT 5
+  `).all(...bp) as Array<{ id: string; tool_name: string; summary: string; access_count: number }>;
+
+  const pinned = db.prepare(`
+    SELECT id, tool_name, summary
+    FROM stored_outputs ${base} AND pinned = 1
+    ORDER BY created_at DESC
+  `).all(...bp) as Array<{ id: string; tool_name: string; summary: string }>;
+
+  const notes = db.prepare(`
+    SELECT id, summary
+    FROM stored_outputs ${base} AND tool_name = 'recall__note'
+    ORDER BY created_at DESC
+  `).all(...bp) as Array<{ id: string; summary: string }>;
+
+  return { label, ...agg, tool_counts, top_accessed, pinned, notes };
 }
 
 export function pruneExpired(
