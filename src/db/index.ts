@@ -107,7 +107,10 @@ const SCHEMA = `
 let instance: Database | null = null;
 
 export function defaultDbPath(projectKey: string): string {
-  return join(homedir(), ".local", "share", "mcp-recall", `${projectKey}.db`);
+  return (
+    process.env.RECALL_DB_PATH ??
+    join(homedir(), ".local", "share", "mcp-recall", `${projectKey}.db`)
+  );
 }
 
 export function getDb(path: string): Database {
