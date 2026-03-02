@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { mkdtempSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { handleSessionStart } from "../src/hooks/session-start";
 import { handlePostToolUse } from "../src/hooks/post-tool-use";
-import { getDb, closeDb, listOutputs, getSessionDays, retrieveOutput } from "../src/db/index";
+import { getDb, closeDb, listOutputs, getSessionDays, retrieveOutput, storeOutput, pinOutput } from "../src/db/index";
 import { resetConfig } from "../src/config";
 import { getProjectKey } from "../src/project-key";
 
@@ -83,6 +83,98 @@ describe("handleSessionStart", () => {
 
   it("does not throw on valid input", () => {
     expect(() => handleSessionStart(makeSessionStartInput())).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleSessionStart — context snapshot injection
+// ---------------------------------------------------------------------------
+
+describe("handleSessionStart — context injection", () => {
+  beforeEach(() => {
+    process.env.RECALL_DB_PATH = ":memory:";
+  });
+
+  afterEach(() => {
+    closeDb();
+    resetConfig();
+    delete process.env.RECALL_DB_PATH;
+  });
+
+  it("writes nothing to stdout when the store is empty", () => {
+    const spy = spyOn(process.stdout, "write");
+    handleSessionStart(makeSessionStartInput());
+    const callCount = spy.mock.calls.length;
+    spy.mockRestore();
+    expect(callCount).toBe(0);
+  });
+
+  it("writes context snapshot to stdout when store has a pinned item", () => {
+    const db = getDb(":memory:");
+    const projectKey = getProjectKey(TEST_CWD);
+    const stored = storeOutput(db, {
+      project_key: projectKey,
+      session_id: "sess-inject-001",
+      tool_name: "mcp__github__list_issues",
+      summary: "pinned item summary for injection test",
+      full_content: "full content here",
+      original_size: 100,
+    });
+    pinOutput(db, stored.id, projectKey, true);
+
+    const spy = spyOn(process.stdout, "write");
+    handleSessionStart(makeSessionStartInput());
+    const output = spy.mock.calls.map(([chunk]) => String(chunk)).join("");
+    spy.mockRestore();
+
+    expect(output).toContain("pinned item summary for injection test");
+  });
+
+  it("truncates snapshot at 2000 characters when context is large", () => {
+    const db = getDb(":memory:");
+    const projectKey = getProjectKey(TEST_CWD);
+    // Store enough pinned items to push the formatted snapshot past 2000 chars.
+    // toolContext formats each item as ~200 chars; 15 items ≈ 3000 chars.
+    for (let i = 0; i < 15; i++) {
+      const stored = storeOutput(db, {
+        project_key: projectKey,
+        session_id: "sess-inject-002",
+        tool_name: "mcp__github__list_issues",
+        summary: `pinned item ${i} — ${"x".repeat(80)}`,
+        full_content: "full",
+        original_size: 100,
+      });
+      pinOutput(db, stored.id, projectKey, true);
+    }
+
+    const spy = spyOn(process.stdout, "write");
+    handleSessionStart(makeSessionStartInput());
+    const output = spy.mock.calls.map(([chunk]) => String(chunk)).join("");
+    spy.mockRestore();
+
+    // 2000-char cap + truncation suffix + trailing newline
+    expect(output.length).toBeLessThan(2100);
+    expect(output).toContain("truncated");
+  });
+
+  it("does not inject when the only db content is from an unknown project", () => {
+    // Store data under a different project key — should not appear in injection
+    const db = getDb(":memory:");
+    storeOutput(db, {
+      project_key: "completely-different-project-key",
+      session_id: "sess-other",
+      tool_name: "mcp__github__list_issues",
+      summary: "should not appear",
+      full_content: "full",
+      original_size: 100,
+    });
+
+    const spy = spyOn(process.stdout, "write");
+    handleSessionStart(makeSessionStartInput());
+    const callCount = spy.mock.calls.length;
+    spy.mockRestore();
+
+    expect(callCount).toBe(0);
   });
 });
 
