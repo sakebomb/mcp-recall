@@ -1,0 +1,20 @@
+{
+  "name": "mcp-recall",
+  "version": "1.0.0",
+  "description": "Context compression and persistent retrieval for Claude Code",
+  "author": {
+    "name": "sakebomb",
+    "url": "https://github.com/sakebomb/mcp-recall"
+  },
+  "homepage": "https://github.com/sakebomb/mcp-recall",
+  "repository": "https://github.com/sakebomb/mcp-recall",
+  "license": "MIT",
+  "keywords": ["context", "compression", "memory", "mcp"],
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": {
+    "recall": {
+      "command": "bun",
+      "args": ["run", "${CLAUDE_PLUGIN_ROOT}/src/server.ts"]
+    }
+  }
+}
