@@ -31,6 +31,9 @@ async function main(): Promise<void> {
     }
   } catch (err) {
     // Fail open — a recall error must never break Claude's workflow
+    if (process.env.RECALL_DEBUG) {
+      process.stderr.write(`[recall:debug] STACK: ${err instanceof Error ? err.stack : String(err)}\n`);
+    }
     process.stderr.write(`[recall] error in ${subcommand}: ${err}\n`);
     process.stdout.write("{}\n");
     process.exit(0);

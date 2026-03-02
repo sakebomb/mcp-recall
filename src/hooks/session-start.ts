@@ -2,6 +2,7 @@ import { loadConfig } from "../config";
 import { getProjectKey } from "../project-key";
 import { getDb, defaultDbPath, recordSession, pruneExpired, getContext } from "../db/index";
 import { toolContext } from "../tools";
+import { dbg } from "../debug";
 
 interface SessionStartInput {
   session_id: string;
@@ -39,5 +40,8 @@ export function handleSessionStart(raw: string): void {
         "\n… (truncated — call recall__context for the full view)";
     }
     process.stdout.write(snapshot + "\n");
+    dbg(`session-start · project=${projectKey.slice(0, 8)} · injected ${snapshot.length} chars`);
+  } else {
+    dbg(`session-start · project=${projectKey.slice(0, 8)} · nothing to inject`);
   }
 }

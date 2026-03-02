@@ -4948,6 +4948,9 @@ var RecallConfigSchema = exports_external.object({
   denylist: exports_external.object({
     additional: exports_external.array(exports_external.string()),
     override_defaults: exports_external.array(exports_external.string())
+  }),
+  debug: exports_external.object({
+    enabled: exports_external.boolean()
   })
 });
 var PartialConfigSchema = RecallConfigSchema.deepPartial();
@@ -4965,6 +4968,9 @@ var DEFAULTS = {
   denylist: {
     additional: [],
     override_defaults: []
+  },
+  debug: {
+    enabled: false
   }
 };
 function getConfigPath() {
@@ -5371,6 +5377,14 @@ function toolContext(db, projectKey, args) {
 `);
 }
 
+// src/debug.ts
+function dbg(msg) {
+  if (process.env.RECALL_DEBUG || loadConfig().debug.enabled) {
+    process.stderr.write(`[recall:debug] ${msg}
+`);
+  }
+}
+
 // src/hooks/session-start.ts
 var INJECT_MAX_CHARS = 2000;
 function handleSessionStart(raw) {
@@ -5391,6 +5405,9 @@ function handleSessionStart(raw) {
     }
     process.stdout.write(snapshot + `
 `);
+    dbg(`session-start \xB7 project=${projectKey.slice(0, 8)} \xB7 injected ${snapshot.length} chars`);
+  } else {
+    dbg(`session-start \xB7 project=${projectKey.slice(0, 8)} \xB7 nothing to inject`);
   }
 }
 
@@ -6307,9 +6324,11 @@ function handlePostToolUse(raw) {
   const { tool_name, tool_input, tool_response, cwd, session_id } = input;
   const config = loadConfig();
   if (isDenied(tool_name, config)) {
+    dbg(`SKIP denylist \xB7 ${tool_name}`);
     return {};
   }
   const fullContent = extractText(tool_response);
+  dbg(`intercepted ${tool_name} \xB7 ${formatBytes2(Buffer.byteLength(fullContent, "utf8"))}`);
   if (containsSecret(fullContent)) {
     const names = findSecrets(fullContent);
     process.stderr.write(`[recall] skipped ${tool_name}: detected ${names.join(", ")}
@@ -6323,6 +6342,7 @@ function handlePostToolUse(raw) {
     const cached2 = checkDedup(db, projectKey, input_hash);
     if (cached2) {
       const cachedDate = new Date(cached2.created_at * 1000).toISOString().slice(0, 10);
+      dbg(`CACHE HIT \xB7 ${tool_name} \xB7 id=${cached2.id} \xB7 cached ${cachedDate}`);
       const header2 = `[recall:${cached2.id} \xB7 cached \xB7 ${cachedDate}]`;
       return {
         updatedMCPToolOutput: `${header2}
@@ -6332,9 +6352,11 @@ ${cached2.summary}`,
     }
   }
   const handler = getHandler(tool_name, tool_response, tool_input);
+  dbg(`handler: ${handler.name} \xB7 ${tool_name}`);
   const { summary, originalSize } = handler(tool_name, tool_response);
   const summarySize = Buffer.byteLength(summary, "utf8");
   if (summarySize >= originalSize) {
+    dbg(`SKIP no-compression \xB7 ${tool_name} \xB7 ${formatBytes2(summarySize)} \u2265 ${formatBytes2(originalSize)}`);
     return {};
   }
   const stored = storeOutput(db, {
@@ -6348,6 +6370,7 @@ ${cached2.summary}`,
   });
   evictIfNeeded(db, projectKey, config.store.max_size_mb);
   const reduction = ((1 - summarySize / originalSize) * 100).toFixed(0);
+  dbg(`STORED \xB7 ${tool_name} \xB7 id=${stored.id} \xB7 ${formatBytes2(originalSize)}\u2192${formatBytes2(summarySize)} (${reduction}% reduction)`);
   const header = `[recall:${stored.id} \xB7 ${formatBytes2(originalSize)}\u2192${formatBytes2(summarySize)} (${reduction}% reduction)]`;
   return {
     updatedMCPToolOutput: `${header}
@@ -6379,6 +6402,10 @@ async function main() {
         process.exit(1);
     }
   } catch (err) {
+    if (process.env.RECALL_DEBUG) {
+      process.stderr.write(`[recall:debug] STACK: ${err instanceof Error ? err.stack : String(err)}
+`);
+    }
     process.stderr.write(`[recall] error in ${subcommand}: ${err}
 `);
     process.stdout.write(`{}
