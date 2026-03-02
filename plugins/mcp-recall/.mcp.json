@@ -1,0 +1,6 @@
+{
+  "recall": {
+    "command": "bun",
+    "args": ["${CLAUDE_PLUGIN_ROOT}/dist/server.js"]
+  }
+}

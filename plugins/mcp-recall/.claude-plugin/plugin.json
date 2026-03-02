@@ -1,0 +1,12 @@
+{
+  "name": "mcp-recall",
+  "version": "1.0.0",
+  "description": "Context compression and persistent retrieval for Claude Code — prevents context window exhaustion in long sessions",
+  "author": {
+    "name": "sakebomb",
+    "url": "https://github.com/sakebomb/mcp-recall"
+  },
+  "homepage": "https://github.com/sakebomb/mcp-recall",
+  "license": "MIT",
+  "keywords": ["context", "compression", "memory", "mcp", "sqlite"]
+}
