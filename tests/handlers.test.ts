@@ -9,6 +9,7 @@ import { slackHandler } from "../src/handlers/slack";
 import { jsonHandler } from "../src/handlers/json";
 import { genericHandler } from "../src/handlers/generic";
 import { getHandler, extractText } from "../src/handlers/index";
+import { getBashHandler, gitDiffHandler, gitLogHandler, terraformPlanHandler } from "../src/handlers/bash";
 
 // ---------------------------------------------------------------------------
 // extractText
@@ -737,5 +738,198 @@ describe("stripSshNoise", () => {
     expect(summary).not.toContain("stderr:");
     expect(summary).not.toContain("post-quantum");
     expect(summary).toContain("Hello, world!");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getBashHandler dispatcher
+// ---------------------------------------------------------------------------
+
+describe("getBashHandler", () => {
+  it("routes Bash tool to shell handler when no command", () => {
+    expect(getHandler("Bash", "output", undefined)).toBe(getBashHandler(undefined));
+  });
+
+  it("routes git diff to gitDiffHandler", () => {
+    expect(getBashHandler({ command: "git diff HEAD" })).toBe(gitDiffHandler);
+  });
+
+  it("routes git show to gitDiffHandler", () => {
+    expect(getBashHandler({ command: "git show abc123" })).toBe(gitDiffHandler);
+  });
+
+  it("routes git log to gitLogHandler", () => {
+    expect(getBashHandler({ command: "git log --oneline -10" })).toBe(gitLogHandler);
+  });
+
+  it("routes terraform plan to terraformPlanHandler", () => {
+    expect(getBashHandler({ command: "terraform plan -out=tfplan" })).toBe(terraformPlanHandler);
+  });
+
+  it("routes unrecognised commands to shellHandler", () => {
+    expect(getBashHandler({ command: "npm test" })).toBe(shellHandler);
+  });
+
+  it("getHandler routes Bash tool name to bash dispatcher", () => {
+    const handler = getHandler("Bash", "output", { command: "git diff HEAD" });
+    expect(handler).toBe(gitDiffHandler);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// gitDiffHandler
+// ---------------------------------------------------------------------------
+
+const SAMPLE_DIFF = `diff --git a/src/foo.ts b/src/foo.ts
+index abc123..def456 100644
+--- a/src/foo.ts
++++ b/src/foo.ts
+@@ -10,7 +10,7 @@ function doThing() {
+ context line
+-old line
++new line
+ context line
+@@ -50,3 +50,5 @@
+ more context
++added line 1
++added line 2
+diff --git a/src/bar.ts b/src/bar.ts
+index 111111..222222 100644
+--- a/src/bar.ts
++++ b/src/bar.ts
+@@ -1,3 +1,2 @@
+ keep
+-remove this
+`;
+
+describe("gitDiffHandler", () => {
+  it("shows file count and line stats in header", () => {
+    const { summary } = gitDiffHandler("Bash", { stdout: SAMPLE_DIFF, stderr: "", exit_code: 0 });
+    expect(summary).toContain("2 files changed");
+    expect(summary).toContain("+3");
+    expect(summary).toContain("-2");
+  });
+
+  it("lists each changed file with per-file stats", () => {
+    const { summary } = gitDiffHandler("Bash", { stdout: SAMPLE_DIFF, stderr: "", exit_code: 0 });
+    expect(summary).toContain("src/foo.ts");
+    expect(summary).toContain("src/bar.ts");
+  });
+
+  it("shows hunk count per file", () => {
+    const { summary } = gitDiffHandler("Bash", { stdout: SAMPLE_DIFF, stderr: "", exit_code: 0 });
+    expect(summary).toContain("2 hunks");
+    expect(summary).toContain("1 hunk");
+  });
+
+  it("returns no-changes message for empty diff", () => {
+    const { summary } = gitDiffHandler("Bash", { stdout: "", stderr: "", exit_code: 0 });
+    expect(summary).toContain("no changes");
+  });
+
+  it("reports originalSize correctly", () => {
+    const output = { stdout: SAMPLE_DIFF, stderr: "", exit_code: 0 };
+    const { originalSize } = gitDiffHandler("Bash", output);
+    expect(originalSize).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// gitLogHandler
+// ---------------------------------------------------------------------------
+
+const ONELINE_LOG = `abc1234 Fix authentication bug in login flow
+def5678 Add new user profile feature
+7890abc Update dependencies to latest versions
+`;
+
+const FULL_LOG = `commit abc1234567890abcdef
+Author: Jane Dev <jane@example.com>
+Date:   Sun Mar 2 10:00:00 2026 -0800
+
+    Fix authentication bug in login flow
+
+    More details about the fix.
+
+commit def5678901234abcde
+Author: John Dev <john@example.com>
+Date:   Sat Mar 1 09:00:00 2026 -0800
+
+    Add new user profile feature
+`;
+
+describe("gitLogHandler", () => {
+  it("handles --oneline format with commit count header", () => {
+    const { summary } = gitLogHandler("Bash", { stdout: ONELINE_LOG, stderr: "", exit_code: 0 });
+    expect(summary).toContain("3 commits");
+    expect(summary).toContain("Fix authentication bug");
+  });
+
+  it("handles full format and extracts subject lines", () => {
+    const { summary } = gitLogHandler("Bash", { stdout: FULL_LOG, stderr: "", exit_code: 0 });
+    expect(summary).toContain("2 commits");
+    expect(summary).toContain("Fix authentication bug in login flow");
+    expect(summary).toContain("Add new user profile feature");
+  });
+
+  it("truncates at 20 commits with overflow count", () => {
+    const manyCommits = Array.from({ length: 25 }, (_, i) => `abc${String(i).padStart(4, "0")} commit ${i}`).join("\n");
+    const { summary } = gitLogHandler("Bash", { stdout: manyCommits, stderr: "", exit_code: 0 });
+    expect(summary).toContain("+5 more commits");
+  });
+
+  it("returns no-commits message for empty log", () => {
+    const { summary } = gitLogHandler("Bash", { stdout: "", stderr: "", exit_code: 0 });
+    expect(summary).toContain("no commits");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// terraformPlanHandler
+// ---------------------------------------------------------------------------
+
+const SAMPLE_PLAN = `
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+  ~ update in-place
+  - destroy
+
+Terraform will perform the following actions:
+
+  # aws_instance.web will be created
+  + resource "aws_instance" "web" {
+      + ami = "ami-12345678"
+    }
+
+  # aws_security_group.main will be updated in-place
+  ~ resource "aws_security_group" "main" {
+      ~ ingress = []
+    }
+
+  # aws_s3_bucket.old will be destroyed
+  - resource "aws_s3_bucket" "old" {}
+
+Plan: 2 to add, 1 to change, 1 to destroy.
+`;
+
+describe("terraformPlanHandler", () => {
+  it("includes the Plan: summary line", () => {
+    const { summary } = terraformPlanHandler("Bash", { stdout: SAMPLE_PLAN, stderr: "", exit_code: 0 });
+    expect(summary).toContain("Plan: 2 to add, 1 to change, 1 to destroy");
+  });
+
+  it("lists each resource with action symbol", () => {
+    const { summary } = terraformPlanHandler("Bash", { stdout: SAMPLE_PLAN, stderr: "", exit_code: 0 });
+    expect(summary).toContain("+ aws_instance.web");
+    expect(summary).toContain("~ aws_security_group.main");
+    expect(summary).toContain("- aws_s3_bucket.old");
+  });
+
+  it("falls back to shell handler for non-plan output", () => {
+    const plainOutput = { stdout: "Initializing the backend...\nSuccess!", stderr: "", exit_code: 0 };
+    const { summary } = terraformPlanHandler("Bash", plainOutput);
+    // Falls back to shellHandler — no terraform-specific content, just plain output
+    expect(summary).toContain("lines");
   });
 });

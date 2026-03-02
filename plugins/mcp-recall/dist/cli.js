@@ -5711,6 +5711,169 @@ ${fmt.body}`,
   };
 };
 
+// src/handlers/bash.ts
+var MAX_LOG_COMMITS = 20;
+var MAX_TERRAFORM_RESOURCES = 10;
+function extractStdout(output) {
+  if (output !== null && typeof output === "object") {
+    const obj = output;
+    if (typeof obj.stdout === "string")
+      return stripSshNoise(stripAnsi(obj.stdout));
+    if (typeof obj.output === "string")
+      return stripSshNoise(stripAnsi(obj.output));
+  }
+  return stripSshNoise(stripAnsi(extractText(output)));
+}
+function extractCommand(input) {
+  if (input !== null && typeof input === "object") {
+    const obj = input;
+    if (typeof obj.command === "string")
+      return obj.command.trim();
+  }
+  return null;
+}
+function parseGitDiff(text) {
+  const files = [];
+  let current = null;
+  for (const line of text.split(`
+`)) {
+    if (line.startsWith("diff --git ")) {
+      if (current)
+        files.push(current);
+      const match = line.match(/diff --git a\/.+ b\/(.+)/);
+      const path = match ? match[1] : line.slice(11);
+      current = { path, additions: 0, deletions: 0, hunks: 0 };
+    } else if (current) {
+      if (line.startsWith("@@ ")) {
+        current.hunks++;
+      } else if (line.startsWith("+") && !line.startsWith("+++")) {
+        current.additions++;
+      } else if (line.startsWith("-") && !line.startsWith("---")) {
+        current.deletions++;
+      }
+    }
+  }
+  if (current)
+    files.push(current);
+  return files;
+}
+var gitDiffHandler = (toolName, output) => {
+  const stdout = extractStdout(output);
+  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  if (!stdout.trim()) {
+    return { summary: "[git diff \u2014 no changes]", originalSize };
+  }
+  const files = parseGitDiff(stdout);
+  if (files.length === 0) {
+    return shellHandler(toolName, output);
+  }
+  const totalAdded = files.reduce((s, f) => s + f.additions, 0);
+  const totalDeleted = files.reduce((s, f) => s + f.deletions, 0);
+  const header = `git diff \u2014 ${files.length} file${files.length === 1 ? "" : "s"} changed, +${totalAdded} -${totalDeleted}`;
+  const fileLines = files.map((f) => {
+    const stats = `+${f.additions} -${f.deletions}`;
+    const hunks = `(${f.hunks} hunk${f.hunks === 1 ? "" : "s"})`;
+    return `  ${f.path.padEnd(48)}  ${stats.padEnd(10)}  ${hunks}`;
+  });
+  return { summary: [header, ...fileLines].join(`
+`), originalSize };
+};
+var gitLogHandler = (_toolName, output) => {
+  const stdout = extractStdout(output);
+  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const lines = stdout.trim().split(`
+`).filter((l) => l.trim());
+  if (lines.length === 0) {
+    return { summary: "[git log \u2014 no commits]", originalSize };
+  }
+  const isOneline = lines.every((l) => /^[0-9a-f]{6,40}\s/.test(l.trim()));
+  if (isOneline) {
+    const total2 = lines.length;
+    const shown2 = lines.slice(0, MAX_LOG_COMMITS);
+    const overflow2 = total2 > MAX_LOG_COMMITS ? `
+\u2026 (+${total2 - MAX_LOG_COMMITS} more commits)` : "";
+    const summary = `git log \u2014 ${total2} commit${total2 === 1 ? "" : "s"}
+` + shown2.map((l) => `  ${l}`).join(`
+`) + overflow2;
+    return { summary, originalSize };
+  }
+  const commits = [];
+  let hash = "";
+  let seenBlank = false;
+  for (const line of stdout.split(`
+`)) {
+    if (line.startsWith("commit ")) {
+      hash = line.slice(7, 14);
+      seenBlank = false;
+    } else if (hash && line.trim() === "" && !seenBlank) {
+      seenBlank = true;
+    } else if (hash && seenBlank && line.startsWith("    ") && line.trim()) {
+      const subject = line.trim().slice(0, 72);
+      commits.push(`  ${hash}  ${subject}`);
+      hash = "";
+      seenBlank = false;
+    }
+  }
+  const total = commits.length;
+  const shown = commits.slice(0, MAX_LOG_COMMITS);
+  const overflow = total > MAX_LOG_COMMITS ? `
+\u2026 (+${total - MAX_LOG_COMMITS} more commits)` : "";
+  const header = `git log \u2014 ${total} commit${total === 1 ? "" : "s"}`;
+  return {
+    summary: [header, ...shown].join(`
+`) + overflow,
+    originalSize
+  };
+};
+var TERRAFORM_RESOURCE_RE = /^\s+#\s+(.+?)\s+will\s+be\s+(created|destroyed|updated in-place|replaced)/;
+var TERRAFORM_PLAN_SUMMARY_RE = /^Plan:\s+.+$/m;
+var TERRAFORM_SYMBOL = {
+  created: "+",
+  destroyed: "-",
+  "updated in-place": "~",
+  replaced: "-/+"
+};
+var terraformPlanHandler = (toolName, output) => {
+  const stdout = extractStdout(output);
+  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const summaryMatch = stdout.match(TERRAFORM_PLAN_SUMMARY_RE);
+  const summaryLine = summaryMatch ? summaryMatch[0] : null;
+  const resources = [];
+  for (const line of stdout.split(`
+`)) {
+    const match = line.match(TERRAFORM_RESOURCE_RE);
+    if (match) {
+      const [, resource, action] = match;
+      const symbol = TERRAFORM_SYMBOL[action] ?? "?";
+      resources.push(`  ${symbol} ${resource}`);
+    }
+  }
+  if (!summaryLine && resources.length === 0) {
+    return shellHandler(toolName, output);
+  }
+  const lines = ["terraform plan"];
+  if (summaryLine)
+    lines.push(`  ${summaryLine}`);
+  lines.push(...resources.slice(0, MAX_TERRAFORM_RESOURCES));
+  if (resources.length > MAX_TERRAFORM_RESOURCES) {
+    lines.push(`  \u2026 (+${resources.length - MAX_TERRAFORM_RESOURCES} more resources)`);
+  }
+  return { summary: lines.join(`
+`), originalSize };
+};
+function getBashHandler(input) {
+  const command = extractCommand(input);
+  if (!command)
+    return shellHandler;
+  if (/^git\s+(diff|show)(\s|$)/.test(command))
+    return gitDiffHandler;
+  if (/^git\s+log(\s|$)/.test(command))
+    return gitLogHandler;
+  if (/^terraform\s+plan(\s|$)/.test(command))
+    return terraformPlanHandler;
+  return shellHandler;
+}
+
 // src/handlers/linear.ts
 var PRIORITY_LABEL = {
   0: "No Priority",
@@ -6022,7 +6185,10 @@ var genericHandler = (_toolName, output) => {
 };
 
 // src/handlers/index.ts
-function getHandler(toolName, output) {
+function getHandler(toolName, output, input) {
+  if (toolName === "Bash") {
+    return getBashHandler(input);
+  }
   if (toolName.includes("playwright") && toolName.includes("snapshot")) {
     return playwrightHandler;
   }
@@ -6092,7 +6258,7 @@ ${cached2.summary}`,
       };
     }
   }
-  const handler = getHandler(tool_name, tool_response);
+  const handler = getHandler(tool_name, tool_response, tool_input);
   const { summary, originalSize } = handler(tool_name, tool_response);
   const summarySize = Buffer.byteLength(summary, "utf8");
   if (summarySize >= originalSize) {
