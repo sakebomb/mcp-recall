@@ -5200,6 +5200,97 @@ function countAndDelete(db, where, params) {
   }
   return count;
 }
+function getContext(db, project_key, opts = {}) {
+  const days = opts.days ?? 7;
+  const limit = opts.limit ?? 5;
+  const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
+  const today = new Date().toISOString().slice(0, 10);
+  const pinned = db.prepare(`
+    SELECT * FROM stored_outputs
+    WHERE project_key = ? AND pinned = 1
+    ORDER BY last_accessed DESC NULLS LAST, created_at DESC
+  `).all(project_key);
+  const notes = db.prepare(`
+    SELECT * FROM stored_outputs
+    WHERE project_key = ? AND pinned = 0 AND tool_name = 'recall__note'
+    ORDER BY created_at DESC
+    LIMIT 10
+  `).all(project_key);
+  const recent = db.prepare(`
+    SELECT * FROM stored_outputs
+    WHERE project_key = ? AND pinned = 0 AND tool_name != 'recall__note'
+      AND last_accessed >= ?
+    ORDER BY last_accessed DESC
+    LIMIT ?
+  `).all(project_key, cutoff, limit);
+  const sessionDays = getSessionDays(db);
+  const pastDays = sessionDays.filter((d) => d < today);
+  let last_session = null;
+  if (pastDays.length > 0) {
+    const lastDate = pastDays[0];
+    const summary = getSessionSummary(db, project_key, { date: lastDate });
+    if (summary.stored_count > 0) {
+      last_session = {
+        date: lastDate,
+        stored_count: summary.stored_count,
+        total_original_bytes: summary.total_original_bytes,
+        total_summary_bytes: summary.total_summary_bytes
+      };
+    }
+  }
+  return { pinned, notes, recent, last_session };
+}
+function getSessionSummary(db, project_key, opts = {}) {
+  let filter;
+  let filterParams;
+  let label;
+  if (opts.session_id) {
+    filter = "session_id = ?";
+    filterParams = [opts.session_id];
+    label = opts.session_id;
+  } else {
+    const date = opts.date ?? new Date().toISOString().slice(0, 10);
+    const startOfDay = Math.floor(new Date(`${date}T00:00:00Z`).getTime() / 1000);
+    const endOfDay = startOfDay + 86400;
+    filter = "created_at >= ? AND created_at < ?";
+    filterParams = [startOfDay, endOfDay];
+    label = date;
+  }
+  const base = `WHERE project_key = ? AND ${filter}`;
+  const bp = [project_key, ...filterParams];
+  const agg = db.prepare(`
+    SELECT
+      COUNT(*) as stored_count,
+      COALESCE(SUM(original_size), 0) as total_original_bytes,
+      COALESCE(SUM(summary_size), 0) as total_summary_bytes,
+      COUNT(CASE WHEN access_count > 0 THEN 1 END) as accessed_count,
+      COALESCE(SUM(access_count), 0) as total_accesses
+    FROM stored_outputs ${base}
+  `).get(...bp);
+  const tool_counts = db.prepare(`
+    SELECT tool_name, COUNT(*) as count
+    FROM stored_outputs ${base}
+    GROUP BY tool_name
+    ORDER BY count DESC
+  `).all(...bp);
+  const top_accessed = db.prepare(`
+    SELECT id, tool_name, summary, access_count
+    FROM stored_outputs ${base} AND access_count > 0
+    ORDER BY access_count DESC
+    LIMIT 5
+  `).all(...bp);
+  const pinned = db.prepare(`
+    SELECT id, tool_name, summary
+    FROM stored_outputs ${base} AND pinned = 1
+    ORDER BY created_at DESC
+  `).all(...bp);
+  const notes = db.prepare(`
+    SELECT id, summary
+    FROM stored_outputs ${base} AND tool_name = 'recall__note'
+    ORDER BY created_at DESC
+  `).all(...bp);
+  return { label, ...agg, tool_counts, top_accessed, pinned, notes };
+}
 function pruneExpired(db, project_key, calendar_days) {
   const cutoff = Math.floor(Date.now() / 1000) - calendar_days * 86400;
   return countAndDelete(db, "created_at < ? AND project_key = ? AND pinned = 0", [cutoff, project_key]);
@@ -5207,8 +5298,77 @@ function pruneExpired(db, project_key, calendar_days) {
 function recordSession(db, date) {
   db.prepare(`INSERT OR IGNORE INTO sessions (date) VALUES (?)`).run(date);
 }
+function getSessionDays(db) {
+  return db.prepare(`SELECT date FROM sessions ORDER BY date DESC`).all().map((r) => r.date);
+}
+
+// src/tools.ts
+function formatBytes(bytes) {
+  if (bytes < 1024)
+    return `${bytes}B`;
+  if (bytes < 1024 * 1024)
+    return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+function formatDate(unixSecs) {
+  return new Date(unixSecs * 1000).toISOString().slice(0, 10);
+}
+function reductionPct(original, summary) {
+  if (original === 0)
+    return "0%";
+  return `${((1 - summary / original) * 100).toFixed(0)}%`;
+}
+function toolContext(db, projectKey, args) {
+  const data = getContext(db, projectKey, args);
+  const today = new Date().toISOString().slice(0, 10);
+  const isEmpty = data.pinned.length === 0 && data.notes.length === 0 && data.recent.length === 0 && data.last_session === null;
+  if (isEmpty) {
+    return `[recall: no context available yet \u2014 use recall tools to build up your context store]`;
+  }
+  const lines = [
+    `Context \u2014 ${today}`,
+    "\u2550".repeat(36)
+  ];
+  if (data.pinned.length > 0) {
+    lines.push("", `Pinned (${data.pinned.length}):`);
+    for (const item of data.pinned) {
+      const excerpt = item.summary.slice(0, 100).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > 100 ? "\u2026" : "";
+      lines.push(`  \uD83D\uDCCC ${item.id}  ${item.tool_name.padEnd(40)}  ${formatDate(item.created_at)}`);
+      lines.push(`    ${excerpt}${ellipsis}`);
+    }
+  }
+  if (data.notes.length > 0) {
+    lines.push("", `Notes (${data.notes.length}):`);
+    for (const note of data.notes) {
+      const excerpt = note.summary.slice(0, 100).replace(/\n/g, " ");
+      const ellipsis = note.summary.length > 100 ? "\u2026" : "";
+      lines.push(`  ${note.id}  ${formatDate(note.created_at)}`);
+      lines.push(`    ${excerpt}${ellipsis}`);
+    }
+  }
+  if (data.recent.length > 0) {
+    const days = args.days ?? 7;
+    lines.push("", `Recently accessed (last ${days} day${days === 1 ? "" : "s"}, ${data.recent.length} item${data.recent.length === 1 ? "" : "s"}):`);
+    for (const item of data.recent) {
+      const excerpt = item.summary.slice(0, 100).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > 100 ? "\u2026" : "";
+      lines.push(`  ${item.id}  ${item.tool_name.padEnd(40)}  ${formatDate(item.created_at)}  \xD7${item.access_count}`);
+      lines.push(`    ${excerpt}${ellipsis}`);
+    }
+  }
+  if (data.last_session) {
+    const s = data.last_session;
+    const reductionStr = reductionPct(s.total_original_bytes, s.total_summary_bytes);
+    lines.push("", `Last session (${s.date}):`);
+    lines.push(`  ${s.stored_count} item${s.stored_count === 1 ? "" : "s"} stored \xB7 ${formatBytes(s.total_original_bytes)} \u2192 ${formatBytes(s.total_summary_bytes)} (${reductionStr} reduction)`);
+  }
+  return lines.join(`
+`);
+}
 
 // src/hooks/session-start.ts
+var INJECT_MAX_CHARS = 2000;
 function handleSessionStart(raw) {
   const input = JSON.parse(raw);
   const config = loadConfig();
@@ -5217,6 +5377,17 @@ function handleSessionStart(raw) {
   const today = new Date().toISOString().slice(0, 10);
   recordSession(db, today);
   pruneExpired(db, projectKey, config.store.expire_after_session_days);
+  const data = getContext(db, projectKey);
+  const isEmpty = data.pinned.length === 0 && data.notes.length === 0 && data.recent.length === 0 && data.last_session === null;
+  if (!isEmpty) {
+    let snapshot = toolContext(db, projectKey, {});
+    if (snapshot.length > INJECT_MAX_CHARS) {
+      snapshot = snapshot.slice(0, INJECT_MAX_CHARS) + `
+\u2026 (truncated \u2014 call recall__context for the full view)`;
+    }
+    process.stdout.write(snapshot + `
+`);
+  }
 }
 
 // src/hooks/post-tool-use.ts
@@ -5881,7 +6052,7 @@ function getHandler(toolName, output) {
 }
 
 // src/hooks/post-tool-use.ts
-function formatBytes(bytes) {
+function formatBytes2(bytes) {
   if (bytes < 1024)
     return `${bytes}B`;
   if (bytes < 1024 * 1024)
@@ -5934,7 +6105,7 @@ ${cached2.summary}`,
   });
   evictIfNeeded(db, projectKey, config.store.max_size_mb);
   const reduction = ((1 - summarySize / originalSize) * 100).toFixed(0);
-  const header = `[recall:${stored.id} \xB7 ${formatBytes(originalSize)}\u2192${formatBytes(summarySize)} (${reduction}% reduction)]`;
+  const header = `[recall:${stored.id} \xB7 ${formatBytes2(originalSize)}\u2192${formatBytes2(summarySize)} (${reduction}% reduction)]`;
   return {
     updatedMCPToolOutput: `${header}
 ${summary}`,
