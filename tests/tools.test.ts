@@ -1,8 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { getDb, closeDb, storeOutput, recordSession, type StoreInput } from "../src/db/index";
+import { getDb, closeDb, storeOutput, pinOutput, recordSession, type StoreInput } from "../src/db/index";
 import {
   toolRetrieve,
   toolSearch,
+  toolPin,
+  toolNote,
+  toolExport,
   toolForget,
   toolListStored,
   toolStats,
@@ -229,6 +232,192 @@ describe("MCP tool handlers", () => {
       storeOutput(db, makeInput({ original_size: 40000, summary: "x".repeat(200) }));
       const result = toolStats(db, PROJECT_KEY);
       expect(result).toContain("Tokens saved");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // toolRetrieve — updated behavior
+  // -------------------------------------------------------------------------
+
+  describe("toolRetrieve (v2)", () => {
+    it("increments access_count on retrieve", () => {
+      const stored = storeOutput(db, makeInput());
+      expect(stored.access_count).toBe(0);
+      toolRetrieve(db, { id: stored.id });
+      const row = db.prepare("SELECT access_count FROM stored_outputs WHERE id = ?").get(stored.id) as { access_count: number };
+      expect(row.access_count).toBe(1);
+    });
+
+    it("returns FTS snippet when query matches full_content", () => {
+      const stored = storeOutput(db, makeInput({
+        full_content: "The deployment pipeline uses kubernetes and helm charts",
+      }));
+      const result = toolRetrieve(db, { id: stored.id, query: "kubernetes" });
+      expect(result).toContain("kubernetes");
+    });
+
+    it("falls back to full_content slice when query has no FTS match", () => {
+      const stored = storeOutput(db, makeInput({ full_content: "hello world content" }));
+      const result = toolRetrieve(db, { id: stored.id, query: "zzznomatch" });
+      expect(result).toContain("hello world content");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // toolPin
+  // -------------------------------------------------------------------------
+
+  describe("toolPin", () => {
+    it("pins an item and returns confirmation", () => {
+      const stored = storeOutput(db, makeInput());
+      const result = toolPin(db, PROJECT_KEY, { id: stored.id });
+      expect(result).toContain("pinned");
+      expect(result).toContain(stored.id);
+    });
+
+    it("unpins when pinned: false", () => {
+      const stored = storeOutput(db, makeInput());
+      pinOutput(db, stored.id, PROJECT_KEY, true);
+      const result = toolPin(db, PROJECT_KEY, { id: stored.id, pinned: false });
+      expect(result).toContain("unpinned");
+    });
+
+    it("returns not-found for unknown id", () => {
+      const result = toolPin(db, PROJECT_KEY, { id: "recall_00000000" });
+      expect(result).toContain("no item found");
+    });
+
+    it("defaults pinned to true when omitted", () => {
+      const stored = storeOutput(db, makeInput());
+      toolPin(db, PROJECT_KEY, { id: stored.id });
+      const row = db.prepare("SELECT pinned FROM stored_outputs WHERE id = ?").get(stored.id) as { pinned: number };
+      expect(row.pinned).toBe(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // toolNote
+  // -------------------------------------------------------------------------
+
+  describe("toolNote", () => {
+    it("stores a note with tool_name recall__note", () => {
+      toolNote(db, PROJECT_KEY, { text: "Important finding about the auth flow" });
+      const rows = db.prepare("SELECT tool_name FROM stored_outputs WHERE project_key = ?").all(PROJECT_KEY) as Array<{ tool_name: string }>;
+      expect(rows.some((r) => r.tool_name === "recall__note")).toBe(true);
+    });
+
+    it("returns stored id in response", () => {
+      const result = toolNote(db, PROJECT_KEY, { text: "some note text" });
+      expect(result).toMatch(/recall_[0-9a-f]{8}/);
+    });
+
+    it("includes title in summary when provided", () => {
+      toolNote(db, PROJECT_KEY, { text: "content here", title: "My Finding" });
+      const row = db.prepare("SELECT summary FROM stored_outputs WHERE tool_name = 'recall__note'").get() as { summary: string };
+      expect(row.summary).toContain("My Finding");
+    });
+
+    it("uses (note) as default title when none given", () => {
+      toolNote(db, PROJECT_KEY, { text: "untitled note" });
+      const row = db.prepare("SELECT summary FROM stored_outputs WHERE tool_name = 'recall__note'").get() as { summary: string };
+      expect(row.summary).toContain("(note)");
+    });
+
+    it("stores full text as full_content", () => {
+      const text = "The full text of this important note";
+      toolNote(db, PROJECT_KEY, { text });
+      const row = db.prepare("SELECT full_content FROM stored_outputs WHERE tool_name = 'recall__note'").get() as { full_content: string };
+      expect(row.full_content).toBe(text);
+    });
+
+    it("truncates summary at 200 chars with ellipsis", () => {
+      const text = "x".repeat(300);
+      toolNote(db, PROJECT_KEY, { text });
+      const row = db.prepare("SELECT summary FROM stored_outputs WHERE tool_name = 'recall__note'").get() as { summary: string };
+      expect(row.summary).toContain("…");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // toolExport
+  // -------------------------------------------------------------------------
+
+  describe("toolExport", () => {
+    it("returns no-items message when store is empty", () => {
+      const result = toolExport(db, PROJECT_KEY);
+      expect(result).toContain("no items to export");
+    });
+
+    it("returns JSON array of stored items", () => {
+      storeOutput(db, makeInput());
+      const result = toolExport(db, PROJECT_KEY);
+      const parsed = JSON.parse(result) as unknown[];
+      expect(Array.isArray(parsed)).toBe(true);
+      expect(parsed.length).toBe(1);
+    });
+
+    it("exported items include id, tool_name, summary, and full_content", () => {
+      storeOutput(db, makeInput({ summary: "exported summary" }));
+      const result = toolExport(db, PROJECT_KEY);
+      const parsed = JSON.parse(result) as Array<Record<string, unknown>>;
+      const item = parsed[0]!;
+      expect(item).toHaveProperty("id");
+      expect(item).toHaveProperty("tool_name");
+      expect(item).toHaveProperty("summary", "exported summary");
+      expect(item).toHaveProperty("full_content");
+    });
+
+    it("orders items oldest-first", () => {
+      const now = Math.floor(Date.now() / 1000);
+      db.prepare(`INSERT INTO stored_outputs (id,project_key,session_id,tool_name,summary,full_content,original_size,summary_size,created_at) VALUES ('recall_exp00001',?,?,?,?,?,100,3,?)`).run(PROJECT_KEY, "s", "mcp__tool", "older", "c", now - 10);
+      db.prepare(`INSERT INTO stored_outputs (id,project_key,session_id,tool_name,summary,full_content,original_size,summary_size,created_at) VALUES ('recall_exp00002',?,?,?,?,?,100,3,?)`).run(PROJECT_KEY, "s", "mcp__tool", "newer", "c", now);
+      const parsed = JSON.parse(toolExport(db, PROJECT_KEY)) as Array<{ summary: string }>;
+      expect(parsed[0]!.summary).toBe("older");
+      expect(parsed[1]!.summary).toBe("newer");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // toolForget (v2) — pin awareness
+  // -------------------------------------------------------------------------
+
+  describe("toolForget (v2)", () => {
+    it("skips pinned items by default", () => {
+      const stored = storeOutput(db, makeInput());
+      pinOutput(db, stored.id, PROJECT_KEY, true);
+      storeOutput(db, makeInput());
+      const result = toolForget(db, PROJECT_KEY, { all: true, confirmed: true });
+      expect(result).toContain("deleted 1 item");
+      expect(db.prepare("SELECT id FROM stored_outputs WHERE id = ?").get(stored.id)).not.toBeNull();
+    });
+
+    it("deletes pinned items when force: true", () => {
+      const stored = storeOutput(db, makeInput());
+      pinOutput(db, stored.id, PROJECT_KEY, true);
+      toolForget(db, PROJECT_KEY, { all: true, confirmed: true, force: true });
+      expect(db.prepare("SELECT id FROM stored_outputs WHERE id = ?").get(stored.id)).toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // toolListStored (v2) — sort: accessed
+  // -------------------------------------------------------------------------
+
+  describe("toolListStored (v2)", () => {
+    it("sorts by access_count descending when sort=accessed", () => {
+      const a = storeOutput(db, makeInput({ summary: "item a" }));
+      const b = storeOutput(db, makeInput({ summary: "item b" }));
+      // Give item b more accesses
+      db.prepare("UPDATE stored_outputs SET access_count = 5 WHERE id = ?").run(b.id);
+      const result = toolListStored(db, PROJECT_KEY, { sort: "accessed" });
+      expect(result.indexOf(b.id)).toBeLessThan(result.indexOf(a.id));
+    });
+
+    it("shows pin indicator for pinned items", () => {
+      const stored = storeOutput(db, makeInput());
+      pinOutput(db, stored.id, PROJECT_KEY, true);
+      const result = toolListStored(db, PROJECT_KEY, {});
+      expect(result).toContain("📌");
     });
   });
 });

@@ -7,11 +7,16 @@
 import type { Database } from "bun:sqlite";
 import {
   retrieveOutput,
+  retrieveSnippet,
+  recordAccess,
+  pinOutput,
   searchOutputs,
   listOutputs,
   forgetOutputs,
   getStats,
   getSessionDays,
+  storeOutput,
+  type StoredOutput,
   type ForgetOptions,
 } from "./db/index";
 import { loadConfig } from "./config";
@@ -33,6 +38,10 @@ function formatDate(unixSecs: number): string {
 function reductionPct(original: number, summary: number): string {
   if (original === 0) return "0%";
   return `${((1 - summary / original) * 100).toFixed(0)}%`;
+}
+
+function itemHeader(item: StoredOutput): string {
+  return `[recall:${item.id} · ${item.tool_name} · ${formatDate(item.created_at)} · ${formatBytes(item.original_size)}→${formatBytes(item.summary_size)}]`;
 }
 
 // ---------------------------------------------------------------------------
@@ -57,16 +66,21 @@ export function toolRetrieve(
     return `[recall: no item found with id "${args.id}"]`;
   }
 
-  const header = `[recall:${item.id} · ${item.tool_name} · ${formatDate(item.created_at)} · ${formatBytes(item.original_size)}→${formatBytes(item.summary_size)}]`;
+  recordAccess(db, args.id);
+  const header = itemHeader(item);
 
-  // With a query, return full content (capped) so Claude can find more detail
   if (args.query) {
+    // Try FTS snippet first for a focused, relevant excerpt
+    const snippet = retrieveSnippet(db, args.id, args.query);
+    if (snippet) {
+      return `${header}\n${snippet}`;
+    }
+    // No FTS match: fall back to full content capped at max_bytes
     const content = item.full_content.slice(0, cap);
     const truncated = item.full_content.length > cap ? `\n…(truncated at ${formatBytes(cap)})` : "";
     return `${header}\n${content}${truncated}`;
   }
 
-  // Without a query, return the summary
   return `${header}\n${item.summary}`;
 }
 
@@ -115,6 +129,79 @@ export function toolSearch(
 }
 
 // ---------------------------------------------------------------------------
+// recall__pin
+// ---------------------------------------------------------------------------
+
+export interface PinArgs {
+  id: string;
+  pinned?: boolean; // defaults to true
+}
+
+export function toolPin(
+  db: Database,
+  projectKey: string,
+  args: PinArgs
+): string {
+  const pinned = args.pinned ?? true;
+  const success = pinOutput(db, args.id, projectKey, pinned);
+  if (!success) {
+    return `[recall: no item found with id "${args.id}"]`;
+  }
+  return `[recall: ${pinned ? "pinned" : "unpinned"} ${args.id}]`;
+}
+
+// ---------------------------------------------------------------------------
+// recall__note
+// ---------------------------------------------------------------------------
+
+export interface NoteArgs {
+  text: string;
+  title?: string;
+}
+
+export function toolNote(
+  db: Database,
+  projectKey: string,
+  args: NoteArgs
+): string {
+  const title = args.title ?? "(note)";
+  const excerpt = args.text.slice(0, 200);
+  const ellipsis = args.text.length > 200 ? "…" : "";
+  const summary = `${title}: ${excerpt}${ellipsis}`;
+  const originalSize = Buffer.byteLength(args.text, "utf8");
+  const sessionId = new Date().toISOString().slice(0, 10);
+
+  const stored = storeOutput(db, {
+    project_key: projectKey,
+    session_id: sessionId,
+    tool_name: "recall__note",
+    summary,
+    full_content: args.text,
+    original_size: originalSize,
+  });
+
+  return `[recall: note stored as ${stored.id}]`;
+}
+
+// ---------------------------------------------------------------------------
+// recall__export
+// ---------------------------------------------------------------------------
+
+export function toolExport(db: Database, projectKey: string): string {
+  const items = db
+    .prepare(
+      `SELECT * FROM stored_outputs WHERE project_key = ? ORDER BY created_at ASC`
+    )
+    .all(projectKey) as StoredOutput[];
+
+  if (items.length === 0) {
+    return `[recall: no items to export]`;
+  }
+
+  return JSON.stringify(items, null, 2);
+}
+
+// ---------------------------------------------------------------------------
 // recall__forget
 // ---------------------------------------------------------------------------
 
@@ -125,6 +212,7 @@ export interface ForgetArgs {
   older_than_days?: number;
   all?: boolean;
   confirmed?: boolean;
+  force?: boolean;
 }
 
 export function toolForget(
@@ -142,6 +230,7 @@ export function toolForget(
     session_id: args.session_id,
     older_than_days: args.older_than_days,
     all: args.all,
+    force: args.force,
   };
 
   const deleted = forgetOutputs(db, projectKey, options);
@@ -173,7 +262,12 @@ export function toolListStored(
   const offset = args.offset ?? 0;
 
   const order =
-    args.sort === "size" ? "original_size DESC" : "created_at DESC";
+    args.sort === "size"
+      ? "original_size DESC"
+      : args.sort === "accessed"
+      ? "access_count DESC, last_accessed DESC NULLS LAST, created_at DESC"
+      : "created_at DESC";
+
   const sql = `
     SELECT * FROM stored_outputs
     WHERE project_key = ?
@@ -194,7 +288,8 @@ export function toolListStored(
 
   const rows = items.map((item) => {
     const reduction = reductionPct(item.original_size, item.summary_size);
-    return `${item.id}  ${item.tool_name.padEnd(40)}  ${formatDate(item.created_at)}  ${formatBytes(item.original_size).padStart(7)}→${formatBytes(item.summary_size).padEnd(8)}  ${reduction}`;
+    const pin = item.pinned ? " 📌" : "";
+    return `${item.id}  ${item.tool_name.padEnd(40)}  ${formatDate(item.created_at)}  ${formatBytes(item.original_size).padStart(7)}→${formatBytes(item.summary_size).padEnd(8)}  ${reduction}${pin}`;
   });
 
   const header = `${"ID".padEnd(16)}  ${"Tool".padEnd(40)}  ${"Date".padEnd(10)}  ${"Size".padStart(7)} ${"→".padEnd(9)}  Red.`;
