@@ -12,7 +12,7 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 
 ## Summary
 
-**231 tests across 8 files, 0 failures.**
+**247 tests across 8 files, 0 failures.**
 
 | File | Tests | Phase |
 |------|-------|-------|
@@ -21,7 +21,7 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 | `tests/denylist.test.ts` | 14 | 2 |
 | `tests/secrets.test.ts` | 8 | 2 |
 | `tests/handlers.test.ts` | 72 | 3 + 2d |
-| `tests/db.test.ts` | 52 | 4 + 2a |
+| `tests/db.test.ts` | 68 | 4 + 2a + v3 |
 | `tests/hooks.test.ts` | 17 | 5 + 2b |
 | `tests/tools.test.ts` | 45 | 6 + 2c |
 
@@ -163,7 +163,7 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 | slackHandler: falls back gracefully for unrecognised JSON shapes | excerpt returned |
 | slackHandler: reports originalSize in bytes | byte count accurate |
 
-### `tests/db.test.ts` — 52 tests
+### `tests/db.test.ts` — 68 tests
 | Test | Description |
 |------|-------------|
 | storeOutput: returns a stored output with generated id | `recall_` + 8 hex chars |
@@ -218,6 +218,22 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 | retrieveSnippet: returns null for unknown id | missing ID handled |
 | retrieveSnippet: returns a text excerpt when query matches full_content | FTS snippet |
 | retrieveSnippet: returns null when query does not match | no false match |
+| chunkText: returns empty array for empty string | empty input handled |
+| chunkText: returns single chunk for text shorter than CHUNK_SIZE | no split needed |
+| chunkText: returns single chunk for text exactly CHUNK_SIZE | boundary case |
+| chunkText: splits text longer than CHUNK_SIZE into multiple chunks | split triggered |
+| chunkText: each chunk is at most CHUNK_SIZE characters | cap enforced |
+| chunkText: consecutive chunks overlap by CHUNK_OVERLAP characters | overlap verified |
+| chunkText: last chunk contains the end of the text | no truncation at tail |
+| content_chunks: stores chunks when an item is stored | multi-chunk for long content |
+| content_chunks: stores a single chunk for short content | single chunk for short content |
+| content_chunks: chunk count matches chunkText output for the stored content | count consistent |
+| content_chunks: deletes chunks when the item is deleted | cascade DELETE trigger |
+| retrieveSnippet (chunked): returns the matching chunk when query matches full_content | chunk-based path |
+| retrieveSnippet (chunked): returned content is the full chunk, not just a short excerpt | full chunk width |
+| retrieveSnippet (chunked): returns the chunk containing the match for a multi-chunk document | correct chunk selected |
+| retrieveSnippet (chunked): falls back to legacy FTS snippet for items stored without chunks | backward compatibility |
+| retrieveSnippet (chunked): returns null when query matches no chunk and no legacy FTS entry | no false match |
 
 ### `tests/hooks.test.ts` — 17 tests
 | Test | Description |
