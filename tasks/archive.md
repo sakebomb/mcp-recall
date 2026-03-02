@@ -99,3 +99,19 @@ Completed work.
 - Merged via PR #23
 
 **v2 total: 231 tests, 0 failures**
+
+---
+
+## 2026-03-02 — v3
+
+### v3 — FTS Chunking
+
+- `src/db/index.ts` — new `content_chunks` FTS5 table; INSERT trigger on `stored_outputs` populates chunks; DELETE cascade trigger cleans up on item removal
+- `CHUNK_SIZE = 512`, `CHUNK_OVERLAP = 64` — overlapping windows for precise retrieval
+- `chunkText(text)` — splits text into overlapping fixed-size character chunks; short texts return single-element array
+- `storeChunks(db, id, full_content)` — called by `storeOutput` to populate `content_chunks` after every insert
+- `retrieveSnippet` updated — chunk-based path first (returns best matching chunk verbatim via `content_chunks MATCH ? AND output_id = ?`); falls back to legacy `snippet()` on `outputs_fts` for items stored before chunking
+- `tests/db.test.ts` — 68 tests (+16): `chunkText` (7), `content_chunks` storage/deletion (4), `retrieveSnippet (chunked)` (5)
+- Merged via PR #26
+
+**v3 total: 247 tests, 0 failures**
