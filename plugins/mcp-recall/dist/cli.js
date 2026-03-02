@@ -5455,6 +5455,25 @@ var ANSI_RE = /[\x1b\x9b][\[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nq
 function stripAnsi(text) {
   return text.replace(ANSI_RE, "");
 }
+var SSH_NOISE_RE = /^\*\* .+/;
+function stripSshNoise(text) {
+  const lines = text.split(`
+`);
+  const filtered = lines.filter((line) => !SSH_NOISE_RE.test(line));
+  const result = [];
+  let prevBlank = false;
+  for (const line of filtered) {
+    const blank = line.trim() === "";
+    if (blank && prevBlank)
+      continue;
+    result.push(line);
+    prevBlank = blank;
+  }
+  while (result.length > 0 && result[0].trim() === "")
+    result.shift();
+  return result.join(`
+`);
+}
 function trimTrailingEmpty(lines) {
   let end = lines.length;
   while (end > 0 && lines[end - 1].trim() === "")
@@ -5489,8 +5508,8 @@ var shellHandler = (_toolName, output) => {
   const originalSize = Buffer.byteLength(raw, "utf8");
   const structured = parseStructured(raw);
   if (structured) {
-    const stdout = stripAnsi(structured.stdout ?? structured.output ?? "");
-    const stderr = stripAnsi(structured.stderr ?? "");
+    const stdout = stripSshNoise(stripAnsi(structured.stdout ?? structured.output ?? ""));
+    const stderr = stripSshNoise(stripAnsi(structured.stderr ?? ""));
     const exitCode = structured.returncode ?? structured.exit_code;
     const exitStr = exitCode !== undefined ? `exit:${exitCode} \xB7 ` : "";
     const stdoutFmt = formatLines(stdout, HEAD_STDOUT);
@@ -5508,7 +5527,7 @@ var shellHandler = (_toolName, output) => {
     return { summary: parts.join(`
 `), originalSize };
   }
-  const text = stripAnsi(raw);
+  const text = stripSshNoise(stripAnsi(raw));
   const fmt = formatLines(text, HEAD_STDOUT);
   return {
     summary: `[bash \xB7 ${fmt.header}]
@@ -5838,7 +5857,7 @@ function getHandler(toolName, output) {
   if (toolName.startsWith("mcp__filesystem__") || toolName.includes("read_file") || toolName.includes("get_file")) {
     return filesystemHandler;
   }
-  if (toolName.includes("bash") || toolName.includes("shell") || toolName.includes("terminal") || toolName.includes("run_command")) {
+  if (toolName.includes("bash") || toolName.includes("shell") || toolName.includes("terminal") || toolName.includes("run_command") || toolName.includes("ssh_exec") || toolName.includes("exec_command") || toolName.includes("remote_exec") || toolName.includes("container_exec")) {
     return shellHandler;
   }
   if (toolName.includes("linear")) {

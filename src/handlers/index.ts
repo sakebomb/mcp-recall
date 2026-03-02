@@ -20,7 +20,7 @@ export { extractText } from "./types";
  *   1. Playwright browser_snapshot → playwright handler
  *   2. GitHub tools               → github handler
  *   3. Filesystem tools           → filesystem handler
- *   4. Shell/bash tools           → shell handler
+ *   4. Shell/bash/remote-exec     → shell handler
  *   5. Linear tools               → linear handler
  *   6. Slack tools                → slack handler
  *   7. CSV tools (name-based)     → csv handler
@@ -49,7 +49,11 @@ export function getHandler(toolName: string, output: unknown): Handler {
     toolName.includes("bash") ||
     toolName.includes("shell") ||
     toolName.includes("terminal") ||
-    toolName.includes("run_command")
+    toolName.includes("run_command") ||
+    toolName.includes("ssh_exec") ||
+    toolName.includes("exec_command") ||
+    toolName.includes("remote_exec") ||
+    toolName.includes("container_exec")
   ) {
     return shellHandler;
   }

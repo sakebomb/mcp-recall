@@ -2,7 +2,7 @@ import { describe, it, expect } from "bun:test";
 import { playwrightHandler } from "../src/handlers/playwright";
 import { githubHandler } from "../src/handlers/github";
 import { filesystemHandler } from "../src/handlers/filesystem";
-import { shellHandler, stripAnsi } from "../src/handlers/shell";
+import { shellHandler, stripAnsi, stripSshNoise } from "../src/handlers/shell";
 import { csvHandler, looksLikeCsv } from "../src/handlers/csv";
 import { linearHandler } from "../src/handlers/linear";
 import { slackHandler } from "../src/handlers/slack";
@@ -660,5 +660,82 @@ describe("shellHandler", () => {
 
   it("routes terminal tools to shell handler", () => {
     expect(getHandler("mcp__terminal__execute", "output")).toBe(shellHandler);
+  });
+
+  it("routes ssh_exec tools to shell handler", () => {
+    expect(getHandler("mcp__mcp-remote-exec__ssh_exec_command", "output")).toBe(shellHandler);
+  });
+
+  it("routes exec_command tools to shell handler", () => {
+    expect(getHandler("mcp__mcp-remote-exec__proxmox_container_exec_command", "output")).toBe(shellHandler);
+  });
+
+  it("routes remote_exec tools to shell handler", () => {
+    expect(getHandler("mcp__remote_exec__run", "output")).toBe(shellHandler);
+  });
+
+  it("routes container_exec tools to shell handler", () => {
+    expect(getHandler("mcp__docker__container_exec", "output")).toBe(shellHandler);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// stripSshNoise
+// ---------------------------------------------------------------------------
+
+describe("stripSshNoise", () => {
+  const PQ_WARNING = [
+    "** WARNING: connection is not using a post-quantum key exchange algorithm.",
+    "** This session may be vulnerable to \"store now, decrypt later\" attacks.",
+    "** The server may need to be upgraded. See https://openssh.com/pq.html for details.",
+  ].join("\n");
+
+  it("removes post-quantum SSH warning lines", () => {
+    const result = stripSshNoise(PQ_WARNING);
+    expect(result).toBe("");
+  });
+
+  it("preserves real output after the warning block", () => {
+    const input = `${PQ_WARNING}\nuid=0(root) gid=0(root) groups=0(root)`;
+    const result = stripSshNoise(input);
+    expect(result).toBe("uid=0(root) gid=0(root) groups=0(root)");
+  });
+
+  it("collapses blank lines left behind by removed noise", () => {
+    const input = `${PQ_WARNING}\n\nreal output`;
+    const result = stripSshNoise(input);
+    expect(result).toBe("real output");
+  });
+
+  it("leaves plain output unchanged", () => {
+    const input = "uid=0(root) gid=0(root)";
+    expect(stripSshNoise(input)).toBe(input);
+  });
+
+  it("does not strip lines with ** that are real output", () => {
+    // Lines that start with ** followed by a space are stripped; lines that
+    // just contain ** or start with ** without a trailing space are kept.
+    const input = "**bold text** still present";
+    expect(stripSshNoise(input)).toBe(input);
+  });
+
+  it("shellHandler strips SSH noise from plain string output", () => {
+    const input = `${PQ_WARNING}\nHello, world!`;
+    const { summary } = shellHandler("mcp__mcp-remote-exec__ssh_exec_command", input);
+    expect(summary).toContain("Hello, world!");
+    expect(summary).not.toContain("post-quantum");
+  });
+
+  it("shellHandler strips SSH noise from structured stderr", () => {
+    const input = JSON.stringify({
+      stdout: "Hello, world!",
+      stderr: PQ_WARNING,
+      returncode: 0,
+    });
+    const { summary } = shellHandler("mcp__mcp-remote-exec__ssh_exec_command", input);
+    // SSH noise in stderr should be stripped — no stderr section should appear
+    expect(summary).not.toContain("stderr:");
+    expect(summary).not.toContain("post-quantum");
+    expect(summary).toContain("Hello, world!");
   });
 });
