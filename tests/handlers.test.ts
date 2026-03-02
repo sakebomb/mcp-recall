@@ -2,6 +2,7 @@ import { describe, it, expect } from "bun:test";
 import { playwrightHandler } from "../src/handlers/playwright";
 import { githubHandler } from "../src/handlers/github";
 import { filesystemHandler } from "../src/handlers/filesystem";
+import { shellHandler, stripAnsi } from "../src/handlers/shell";
 import { csvHandler, looksLikeCsv } from "../src/handlers/csv";
 import { linearHandler } from "../src/handlers/linear";
 import { slackHandler } from "../src/handlers/slack";
@@ -564,5 +565,100 @@ describe("slackHandler", () => {
   it("reports originalSize in bytes", () => {
     const { originalSize } = slackHandler("mcp__slack__get_messages", MESSAGES_WRAPPER);
     expect(originalSize).toBe(Buffer.byteLength(MESSAGES_WRAPPER, "utf8"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// stripAnsi
+// ---------------------------------------------------------------------------
+
+describe("stripAnsi", () => {
+  it("removes color escape sequences", () => {
+    expect(stripAnsi("\x1b[32mhello\x1b[0m")).toBe("hello");
+  });
+
+  it("removes bold and reset sequences", () => {
+    expect(stripAnsi("\x1b[1mbold\x1b[0m text")).toBe("bold text");
+  });
+
+  it("leaves plain text unchanged", () => {
+    expect(stripAnsi("plain output")).toBe("plain output");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// shellHandler
+// ---------------------------------------------------------------------------
+
+describe("shellHandler", () => {
+  it("includes line count in header for plain output", () => {
+    const input = "line1\nline2\nline3";
+    const { summary } = shellHandler("mcp__bash__execute", input);
+    expect(summary).toContain("3 lines");
+  });
+
+  it("strips ANSI codes from plain output", () => {
+    const input = "\x1b[32mgreen text\x1b[0m\nnormal text";
+    const { summary } = shellHandler("mcp__bash__execute", input);
+    expect(summary).toContain("green text");
+    expect(summary).not.toContain("\x1b[");
+  });
+
+  it("truncates at 50 lines with overflow count", () => {
+    const input = Array.from({ length: 60 }, (_, i) => `line${i + 1}`).join("\n");
+    const { summary } = shellHandler("mcp__bash__execute", input);
+    expect(summary).toContain("line1");
+    expect(summary).toContain("+10 more lines");
+    expect(summary).not.toContain("line60");
+  });
+
+  it("handles structured stdout/stderr output", () => {
+    const input = JSON.stringify({ stdout: "hello world", stderr: "", returncode: 0 });
+    const { summary } = shellHandler("mcp__bash__execute", input);
+    expect(summary).toContain("hello world");
+    expect(summary).toContain("exit:0");
+  });
+
+  it("shows exit code in header", () => {
+    const input = JSON.stringify({ stdout: "output", returncode: 1 });
+    const { summary } = shellHandler("mcp__bash__execute", input);
+    expect(summary).toContain("exit:1");
+  });
+
+  it("shows stderr section when stderr is non-empty", () => {
+    const input = JSON.stringify({ stdout: "ok", stderr: "warning: something", returncode: 0 });
+    const { summary } = shellHandler("mcp__bash__execute", input);
+    expect(summary).toContain("stderr:");
+    expect(summary).toContain("warning: something");
+  });
+
+  it("handles alternate output field name", () => {
+    const input = JSON.stringify({ output: "result text", exit_code: 0 });
+    const { summary } = shellHandler("mcp__bash__execute", input);
+    expect(summary).toContain("result text");
+    expect(summary).toContain("exit:0");
+  });
+
+  it("handles empty output gracefully", () => {
+    const { summary } = shellHandler("mcp__bash__execute", "");
+    expect(summary).toContain("0 lines");
+  });
+
+  it("reports originalSize in bytes", () => {
+    const input = "line1\nline2";
+    const { originalSize } = shellHandler("mcp__bash__execute", input);
+    expect(originalSize).toBe(Buffer.byteLength(input, "utf8"));
+  });
+
+  it("routes bash tools to shell handler", () => {
+    expect(getHandler("mcp__bash__execute", "output")).toBe(shellHandler);
+  });
+
+  it("routes shell tools to shell handler", () => {
+    expect(getHandler("mcp__shell__run", "output")).toBe(shellHandler);
+  });
+
+  it("routes terminal tools to shell handler", () => {
+    expect(getHandler("mcp__terminal__execute", "output")).toBe(shellHandler);
   });
 });
