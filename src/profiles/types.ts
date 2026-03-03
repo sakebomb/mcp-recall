@@ -28,6 +28,11 @@ export interface ProfileMeta {
 export interface ProfileSpec {
   profile: ProfileMeta;
   strategy: ProfileStrategy;
+  /** Hints used by `mcp-recall profiles retrain`. Ignored by the compression engine. */
+  retrain?: {
+    /** Max field-path depth for corpus analysis (default 3 = a.b.c). */
+    max_depth?: number;
+  };
 }
 
 export type ProfileTier = "user" | "community" | "bundled";
