@@ -14,6 +14,7 @@ import {
   listOutputs,
   forgetOutputs,
   getStats,
+  getToolBreakdown,
   getSuggestions,
   getSessionDays,
   getSessionSummary,
@@ -505,6 +506,23 @@ export function toolStats(
     `  ~Tokens saved:     ~${tokensSaved.toLocaleString()}`,
     `  Session days:      ${sessionDays.length}`,
   ];
+
+  // Per-tool breakdown
+  const breakdown = getToolBreakdown(db, projectKey);
+  if (breakdown.length > 0) {
+    lines.push("", "By tool (sorted by original size):");
+    const colW = Math.min(40, Math.max(...breakdown.map((r) => r.tool_name.length)));
+    for (const row of breakdown) {
+      const reduction =
+        row.original_bytes > 0
+          ? `${((1 - row.summary_bytes / row.original_bytes) * 100).toFixed(0)}%`
+          : " —";
+      lines.push(
+        `  ${row.tool_name.padEnd(colW)}  ${String(row.items).padStart(4)} item${row.items === 1 ? " " : "s"}` +
+          `  ${formatBytes(row.original_bytes).padStart(8)} → ${formatBytes(row.summary_bytes).padEnd(8)}  ${reduction.padStart(4)}`
+      );
+    }
+  }
 
   const suggestions = getSuggestions(db, projectKey, {
     pin_threshold: args.pin_threshold,

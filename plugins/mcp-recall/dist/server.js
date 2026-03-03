@@ -19726,6 +19726,19 @@ function getStats(db, project_key) {
   const compression_ratio = row.total_original_bytes > 0 ? row.total_summary_bytes / row.total_original_bytes : 0;
   return { ...row, compression_ratio };
 }
+function getToolBreakdown(db, project_key) {
+  return db.prepare(`
+    SELECT
+      tool_name,
+      COUNT(*)                       AS items,
+      COALESCE(SUM(original_size),0) AS original_bytes,
+      COALESCE(SUM(summary_size),0)  AS summary_bytes
+    FROM stored_outputs
+    WHERE project_key = ?
+    GROUP BY tool_name
+    ORDER BY original_bytes DESC
+  `).all(project_key);
+}
 function getSuggestions(db, project_key, opts = {}) {
   const threshold = opts.pin_threshold ?? 5;
   const staleDays = opts.stale_days ?? 3;
@@ -21166,6 +21179,15 @@ function toolStats(db, projectKey, args = {}) {
     `  ~Tokens saved:     ~${tokensSaved.toLocaleString()}`,
     `  Session days:      ${sessionDays.length}`
   ];
+  const breakdown = getToolBreakdown(db, projectKey);
+  if (breakdown.length > 0) {
+    lines.push("", "By tool (sorted by original size):");
+    const colW = Math.min(40, Math.max(...breakdown.map((r) => r.tool_name.length)));
+    for (const row of breakdown) {
+      const reduction = row.original_bytes > 0 ? `${((1 - row.summary_bytes / row.original_bytes) * 100).toFixed(0)}%` : " \u2014";
+      lines.push(`  ${row.tool_name.padEnd(colW)}  ${String(row.items).padStart(4)} item${row.items === 1 ? " " : "s"}` + `  ${formatBytes(row.original_bytes).padStart(8)} \u2192 ${formatBytes(row.summary_bytes).padEnd(8)}  ${reduction.padStart(4)}`);
+    }
+  }
   const suggestions = getSuggestions(db, projectKey, {
     pin_threshold: args.pin_threshold,
     stale_days: args.stale_days

@@ -328,6 +328,37 @@ describe("MCP tool handlers", () => {
       const result = toolStats(db, PROJECT_KEY, { pin_threshold: 1 });
       expect(result).not.toContain("Consider pinning");
     });
+
+    it("shows per-tool breakdown section", () => {
+      storeOutput(db, makeInput({ tool_name: "mcp__github__list_issues", original_size: 8000 }));
+      storeOutput(db, makeInput({ tool_name: "mcp__github__list_issues", original_size: 4000 }));
+      storeOutput(db, makeInput({ tool_name: "mcp__playwright__snapshot", original_size: 20000 }));
+      const result = toolStats(db, PROJECT_KEY);
+      expect(result).toContain("By tool");
+      // Playwright row appears first (larger original size)
+      expect(result.indexOf("mcp__playwright__snapshot")).toBeLessThan(
+        result.indexOf("mcp__github__list_issues")
+      );
+    });
+
+    it("per-tool breakdown shows item count and reduction percentage", () => {
+      storeOutput(db, makeInput({ tool_name: "mcp__github__list_issues", original_size: 10000 }));
+      const result = toolStats(db, PROJECT_KEY);
+      expect(result).toContain("1 item");
+      expect(result).toContain("%");
+    });
+
+    it("per-tool breakdown lists each distinct tool_name once", () => {
+      storeOutput(db, makeInput({ tool_name: "mcp__tool_a", original_size: 1000 }));
+      storeOutput(db, makeInput({ tool_name: "mcp__tool_a", original_size: 1000 }));
+      storeOutput(db, makeInput({ tool_name: "mcp__tool_b", original_size: 500 }));
+      const result = toolStats(db, PROJECT_KEY);
+      // Each tool name appears exactly once in the breakdown
+      const countA = (result.match(/mcp__tool_a/g) ?? []).length;
+      const countB = (result.match(/mcp__tool_b/g) ?? []).length;
+      expect(countA).toBe(1);
+      expect(countB).toBe(1);
+    });
   });
 
   // -------------------------------------------------------------------------

@@ -538,6 +538,29 @@ export function getStats(db: Database, project_key: string): Stats {
   return { ...row, compression_ratio };
 }
 
+/** Per-tool row returned by {@link getToolBreakdown}. */
+export interface ToolBreakdownRow {
+  tool_name: string;
+  items: number;
+  original_bytes: number;
+  summary_bytes: number;
+}
+
+/** Returns per-tool storage stats, sorted by original_bytes desc. */
+export function getToolBreakdown(db: Database, project_key: string): ToolBreakdownRow[] {
+  return db.prepare(`
+    SELECT
+      tool_name,
+      COUNT(*)                       AS items,
+      COALESCE(SUM(original_size),0) AS original_bytes,
+      COALESCE(SUM(summary_size),0)  AS summary_bytes
+    FROM stored_outputs
+    WHERE project_key = ?
+    GROUP BY tool_name
+    ORDER BY original_bytes DESC
+  `).all(project_key) as ToolBreakdownRow[];
+}
+
 /** Options for {@link getSuggestions}. */
 export interface SuggestionsOptions {
   /** Access-count threshold above which a non-pinned item is a pin candidate (default 5). */
