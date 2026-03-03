@@ -39,6 +39,7 @@ Sessions that used to hit context limits in 30 minutes routinely run for 3+ hour
                            │ (miss)
                ┌───────────┴────────────┐
                │   Compression handler  │
+               │   (TOML profile first) │
                │                        │
                │  Playwright → elements │
                │  GitHub     → key fields│
@@ -330,13 +331,16 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for project structure, workflow, and how 
 
 ## What's next
 
-Community contributions welcome — see the [open issues](https://github.com/sakebomb/mcp-recall/issues) for planned handlers:
+The easiest way to contribute is a TOML profile — no TypeScript, no clone of this repo needed. If you use an MCP that isn't covered, check the [community profiles repo](https://github.com/sakebomb/mcp-recall-profiles) or open a [profile request](https://github.com/sakebomb/mcp-recall/issues/new?template=profile-request.md).
 
-- [Jira](https://github.com/sakebomb/mcp-recall/issues/49) — issue fields, description excerpt, comment count
+Open requests (profiles preferred):
+
 - [Notion](https://github.com/sakebomb/mcp-recall/issues/50) — extract readable text from block metadata
 - [Database results](https://github.com/sakebomb/mcp-recall/issues/51) — column names + first N rows
 - [Sentry](https://github.com/sakebomb/mcp-recall/issues/52) — exception type, message, top stack frames
 - [GitLab](https://github.com/sakebomb/mcp-recall/issues/53) — mirrors the GitHub handler
+
+TypeScript handlers are welcome for tools with complex, non-JSON output (HTML, DOM trees, binary formats) — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
