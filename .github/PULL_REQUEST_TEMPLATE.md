@@ -6,7 +6,7 @@
 
 ## Test plan
 
-- [ ] `bun test` passes (276 tests)
+- [ ] `bun test` passes
 - [ ] `bun run typecheck` passes
 - [ ] `bun run build` run (if any `src/` files changed — pre-commit hook does this automatically)
 - [ ] New tests added for new behaviour
