@@ -233,4 +233,4 @@ max_depth = 4  # default: 3 (paths of form a, a.b, a.b.c)
 
 CLI `--depth N` always takes precedence over this value.
 
-→ [retrain guide](retrain.md)
+→ [retrain guide](retrain.md) · [AI authoring guide](ai-profile-guide.md)

@@ -42,12 +42,13 @@ Sessions that used to hit context limits in 30 minutes routinely run for 3+ hour
                │   (TOML profile first) │
                │                        │
                │  Playwright → elements │
-               │  GitHub     → key fields│
+               │  GitHub     → fields   │
                │  Shell      → 50 lines │
                │  Linear     → issues   │
                │  Slack      → messages │
-               │  CSV        → row/col  │
+               │  Tavily     → answer   │
                │  Filesystem → 50 lines │
+               │  CSV        → row/col  │
                │  JSON       → depth 3  │
                │  Text       → 500 chars│
                └──────┬─────────────────┘
@@ -113,7 +114,7 @@ Across a full session: 315 KB of tool output → 5.4 KB delivered to context.
 - [Claude Code](https://claude.ai/claude-code) installed
 - [Bun](https://bun.sh) installed — `curl -fsSL https://bun.sh/install | bash`
 
-### Install
+### Quick start
 
 ```bash
 # Register mcp-recall as a plugin marketplace (one-time)
@@ -303,7 +304,7 @@ mcp-recall never breaks a tool call. Every failure mode — hook crash, SQLite e
 
 ## Profile system
 
-Declarative TOML profiles extend compression to any MCP — no TypeScript required. Community profiles are shared at **[sakebomb/mcp-recall-profiles](https://github.com/sakebomb/mcp-recall-profiles)** (9 profiles: Jira, Confluence, Gmail, AWS, GCP, Figma, Vercel, HubSpot, Google Calendar).
+Declarative TOML profiles extend compression to any MCP — no TypeScript required. **[18 community profiles](https://github.com/sakebomb/mcp-recall-profiles)** cover Jira, Stripe, Shopify, Datadog, Notion, Teams, and more.
 
 ```bash
 mcp-recall learn                    # auto-generate profiles from your installed MCPs
@@ -313,7 +314,7 @@ mcp-recall profiles test <tool>     # apply a profile and show compression resul
 mcp-recall profiles list            # show all installed profiles
 ```
 
-→ [Profile schema](docs/profile-schema.md) · [retrain guide](docs/retrain.md) · [Contributing a profile](CONTRIBUTING.md#contributing-a-profile)
+→ [Profile schema](docs/profile-schema.md) · [retrain guide](docs/retrain.md) · [AI profile guide](docs/ai-profile-guide.md) · [Contributing a profile](CONTRIBUTING.md#contributing-a-profile)
 
 ---
 
@@ -336,7 +337,6 @@ The easiest way to contribute is a TOML profile — no TypeScript, no clone of t
 
 Open requests (profiles preferred):
 
-- [Notion](https://github.com/sakebomb/mcp-recall/issues/50) — extract readable text from block metadata
 - [Database results](https://github.com/sakebomb/mcp-recall/issues/51) — column names + first N rows
 - [Sentry](https://github.com/sakebomb/mcp-recall/issues/52) — exception type, message, top stack frames
 - [GitLab](https://github.com/sakebomb/mcp-recall/issues/53) — mirrors the GitHub handler
