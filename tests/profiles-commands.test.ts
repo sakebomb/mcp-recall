@@ -1,8 +1,8 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, writeFileSync, rmSync } from "fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { patternsOverlap } from "../src/profiles/commands";
+import { patternsOverlap, testProfile } from "../src/profiles/commands";
 import { clearProfileCache } from "../src/profiles/loader";
 
 // ── patternsOverlap ───────────────────────────────────────────────────────────
@@ -34,6 +34,84 @@ describe("patternsOverlap", () => {
 
   test("two wildcards with completely different prefixes do not overlap", () => {
     expect(patternsOverlap("mcp__jira__*", "mcp__notion__*")).toBe(false);
+  });
+});
+
+// ── testProfile ───────────────────────────────────────────────────────────────
+
+describe("testProfile", () => {
+  let userDir: string;
+
+  beforeEach(() => {
+    userDir = mkdtempSync(join(tmpdir(), "recall-test-"));
+    clearProfileCache();
+    process.env.RECALL_USER_PROFILES_PATH = userDir;
+    process.env.RECALL_COMMUNITY_PROFILES_PATH = join(tmpdir(), "nonexistent-c");
+    process.env.RECALL_BUNDLED_PROFILES_PATH = join(tmpdir(), "nonexistent-b");
+  });
+
+  afterEach(() => {
+    rmSync(userDir, { recursive: true, force: true });
+    delete process.env.RECALL_USER_PROFILES_PATH;
+    delete process.env.RECALL_COMMUNITY_PROFILES_PATH;
+    delete process.env.RECALL_BUNDLED_PROFILES_PATH;
+    clearProfileCache();
+  });
+
+  test("matches loaded profile when tool name matches pattern", () => {
+    writeFileSync(
+      join(userDir, "jira.toml"),
+      `[profile]
+id = "mcp__jira"
+version = "1.0.0"
+description = "Jira"
+mcp_pattern = "mcp__jira__*"
+[strategy]
+type = "json_extract"
+fields = ["key", "summary"]`
+    );
+
+    const content = JSON.stringify({
+      key: "PROJ-123",
+      summary: "Fix login bug",
+      description: "Long description that should be dropped by the extractor",
+    });
+    const result = testProfile("mcp__jira__search_issues", content);
+
+    expect(result.toolName).toBe("mcp__jira__search_issues");
+    expect(result.matchedProfile).not.toBeNull();
+    expect(result.matchedProfile!.spec.profile.id).toBe("mcp__jira");
+    expect(result.inputBytes).toBeGreaterThan(0);
+    expect(result.outputBytes).toBeGreaterThan(0);
+    expect(typeof result.summary).toBe("string");
+    expect(result.summary.length).toBeGreaterThan(0);
+  });
+
+  test("returns null matchedProfile when no profile matches", () => {
+    const content = JSON.stringify({ foo: "bar" });
+    const result = testProfile("mcp__unknown__no_match_here", content);
+
+    expect(result.toolName).toBe("mcp__unknown__no_match_here");
+    expect(result.matchedProfile).toBeNull();
+    expect(typeof result.handlerName).toBe("string");
+    expect(result.handlerName.length).toBeGreaterThan(0);
+    expect(typeof result.summary).toBe("string");
+    expect(result.summary.length).toBeGreaterThan(0);
+  });
+
+  test("reductionPct is 0 when originalSize is 0", () => {
+    const result = testProfile("mcp__unknown__tool", "");
+    expect(result.reductionPct).toBe(0);
+  });
+
+  test("inputBytes and outputBytes are non-negative integers", () => {
+    const content = JSON.stringify({ message: "hello world", count: 42 });
+    const result = testProfile("mcp__unknown__tool", content);
+
+    expect(result.inputBytes).toBeGreaterThanOrEqual(0);
+    expect(result.outputBytes).toBeGreaterThanOrEqual(0);
+    expect(Number.isInteger(result.inputBytes)).toBe(true);
+    expect(Number.isInteger(result.outputBytes)).toBe(true);
   });
 });
 
