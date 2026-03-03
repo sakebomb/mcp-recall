@@ -332,6 +332,7 @@ export function toolContext(
     data.pinned.length === 0 &&
     data.notes.length === 0 &&
     data.recent.length === 0 &&
+    data.hot.length === 0 &&
     data.last_session === null;
 
   if (isEmpty) {
@@ -367,6 +368,17 @@ export function toolContext(
     const days = args.days ?? 7;
     lines.push("", `Recently accessed (last ${days} day${days === 1 ? "" : "s"}, ${data.recent.length} item${data.recent.length === 1 ? "" : "s"}):`);
     for (const item of data.recent) {
+      const excerpt = item.summary.slice(0, 100).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > 100 ? "…" : "";
+      lines.push(`  ${item.id}  ${item.tool_name.padEnd(40)}  ${formatDate(item.created_at)}  ×${item.access_count}`);
+      lines.push(`    ${excerpt}${ellipsis}`);
+    }
+  }
+
+  if (data.hot.length > 0) {
+    const date = data.last_session?.date ?? "";
+    lines.push("", `Hot from last session (${date}, ${data.hot.length} item${data.hot.length === 1 ? "" : "s"}):`);
+    for (const item of data.hot) {
       const excerpt = item.summary.slice(0, 100).replace(/\n/g, " ");
       const ellipsis = item.summary.length > 100 ? "…" : "";
       lines.push(`  ${item.id}  ${item.tool_name.padEnd(40)}  ${formatDate(item.created_at)}  ×${item.access_count}`);

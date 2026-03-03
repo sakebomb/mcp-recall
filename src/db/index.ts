@@ -76,11 +76,12 @@ export interface ContextOptions {
   limit?: number;  // max items in recently accessed section (default 5)
 }
 
-/** Data returned by {@link getContext}: four isolated sections with no overlap. */
+/** Data returned by {@link getContext}: five isolated sections with no overlap. */
 export interface ContextData {
   pinned: StoredOutput[];
   notes: StoredOutput[];
   recent: StoredOutput[];
+  hot: StoredOutput[];
   last_session: {
     date: string;
     stored_count: number;
@@ -631,8 +632,9 @@ export function getContext(
   const sessionDays = getSessionDays(db);
   const pastDays = sessionDays.filter((d) => d < today);
   let last_session = null;
+  let lastDate: string | null = null;
   if (pastDays.length > 0) {
-    const lastDate = pastDays[0]!;
+    lastDate = pastDays[0]!;
     const summary = getSessionSummary(db, project_key, { date: lastDate });
     if (summary.stored_count > 0) {
       last_session = {
@@ -644,7 +646,32 @@ export function getContext(
     }
   }
 
-  return { pinned, notes, recent, last_session };
+  // 5. Hot items from the last session — top accessed, not already surfaced above.
+  //    Only items with access_count > 0 are included; falls naturally out of the recent
+  //    window when lastDate is older than `days` days.
+  const hot: StoredOutput[] = [];
+  if (lastDate) {
+    const startOfDay = Math.floor(new Date(`${lastDate}T00:00:00Z`).getTime() / 1000);
+    const endOfDay = startOfDay + 86400;
+    const excludeIds = [...pinned, ...notes, ...recent].map((i) => i.id);
+    const notIn = excludeIds.length > 0
+      ? `AND id NOT IN (${excludeIds.map(() => "?").join(",")})`
+      : "";
+    const rows = db.prepare(`
+      SELECT * FROM stored_outputs
+      WHERE project_key = ?
+        AND pinned = 0
+        AND tool_name != 'recall__note'
+        AND created_at >= ? AND created_at < ?
+        AND access_count > 0
+        ${notIn}
+      ORDER BY access_count DESC
+      LIMIT 5
+    `).all(project_key, startOfDay, endOfDay, ...excludeIds) as StoredOutput[];
+    hot.push(...rows);
+  }
+
+  return { pinned, notes, recent, hot, last_session };
 }
 
 /**

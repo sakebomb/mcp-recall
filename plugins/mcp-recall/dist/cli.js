@@ -5237,8 +5237,9 @@ function getContext(db, project_key, opts = {}) {
   const sessionDays = getSessionDays(db);
   const pastDays = sessionDays.filter((d) => d < today);
   let last_session = null;
+  let lastDate = null;
   if (pastDays.length > 0) {
-    const lastDate = pastDays[0];
+    lastDate = pastDays[0];
     const summary = getSessionSummary(db, project_key, { date: lastDate });
     if (summary.stored_count > 0) {
       last_session = {
@@ -5249,7 +5250,26 @@ function getContext(db, project_key, opts = {}) {
       };
     }
   }
-  return { pinned, notes, recent, last_session };
+  const hot = [];
+  if (lastDate) {
+    const startOfDay = Math.floor(new Date(`${lastDate}T00:00:00Z`).getTime() / 1000);
+    const endOfDay = startOfDay + 86400;
+    const excludeIds = [...pinned, ...notes, ...recent].map((i) => i.id);
+    const notIn = excludeIds.length > 0 ? `AND id NOT IN (${excludeIds.map(() => "?").join(",")})` : "";
+    const rows = db.prepare(`
+      SELECT * FROM stored_outputs
+      WHERE project_key = ?
+        AND pinned = 0
+        AND tool_name != 'recall__note'
+        AND created_at >= ? AND created_at < ?
+        AND access_count > 0
+        ${notIn}
+      ORDER BY access_count DESC
+      LIMIT 5
+    `).all(project_key, startOfDay, endOfDay, ...excludeIds);
+    hot.push(...rows);
+  }
+  return { pinned, notes, recent, hot, last_session };
 }
 function getSessionSummary(db, project_key, opts = {}) {
   let filter;
@@ -5332,7 +5352,7 @@ function reductionPct(original, summary) {
 function toolContext(db, projectKey, args) {
   const data = getContext(db, projectKey, args);
   const today = new Date().toISOString().slice(0, 10);
-  const isEmpty = data.pinned.length === 0 && data.notes.length === 0 && data.recent.length === 0 && data.last_session === null;
+  const isEmpty = data.pinned.length === 0 && data.notes.length === 0 && data.recent.length === 0 && data.hot.length === 0 && data.last_session === null;
   if (isEmpty) {
     return `[recall: no context available yet \u2014 use recall tools to build up your context store]`;
   }
@@ -5368,6 +5388,16 @@ function toolContext(db, projectKey, args) {
       lines.push(`    ${excerpt}${ellipsis}`);
     }
   }
+  if (data.hot.length > 0) {
+    const date = data.last_session?.date ?? "";
+    lines.push("", `Hot from last session (${date}, ${data.hot.length} item${data.hot.length === 1 ? "" : "s"}):`);
+    for (const item of data.hot) {
+      const excerpt = item.summary.slice(0, 100).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > 100 ? "\u2026" : "";
+      lines.push(`  ${item.id}  ${item.tool_name.padEnd(40)}  ${formatDate(item.created_at)}  \xD7${item.access_count}`);
+      lines.push(`    ${excerpt}${ellipsis}`);
+    }
+  }
   if (data.last_session) {
     const s = data.last_session;
     const reductionStr = reductionPct(s.total_original_bytes, s.total_summary_bytes);
@@ -5397,7 +5427,7 @@ function handleSessionStart(raw) {
   recordSession(db, today);
   pruneExpired(db, projectKey, config.store.expire_after_session_days);
   const data = getContext(db, projectKey);
-  const isEmpty = data.pinned.length === 0 && data.notes.length === 0 && data.recent.length === 0 && data.last_session === null;
+  const isEmpty = data.pinned.length === 0 && data.notes.length === 0 && data.recent.length === 0 && data.hot.length === 0 && data.last_session === null;
   if (!isEmpty) {
     let snapshot = toolContext(db, projectKey, {});
     if (snapshot.length > INJECT_MAX_CHARS) {

@@ -652,5 +652,32 @@ describe("MCP tool handlers", () => {
       // Only pinned item exists; recently accessed query excludes pinned=1
       expect(result).not.toContain("Recently accessed");
     });
+
+    it("shows hot items from a past session", () => {
+      const old = new Date(Date.now() - 14 * 86400 * 1000).toISOString().slice(0, 10);
+      const startOfOld = Math.floor(new Date(`${old}T00:00:00Z`).getTime() / 1000);
+      db.prepare(
+        `INSERT INTO stored_outputs
+           (id,project_key,session_id,tool_name,summary,full_content,original_size,summary_size,created_at,access_count)
+         VALUES ('recall_ctx_hot1',?,?,?,?,?,4096,64,?,3)`
+      ).run(PROJECT_KEY, "sess-old", "mcp__github__list_issues", "hot item summary", "full content", startOfOld + 3600);
+      recordSession(db, old);
+      const result = toolContext(db, PROJECT_KEY, {});
+      expect(result).toContain(`Hot from last session (${old}`);
+      expect(result).toContain("recall_ctx_hot1");
+      expect(result).toContain("×3");
+    });
+
+    it("hot section absent when accessed items fall within the recent window", () => {
+      const stored = storeOutput(db, makeInput());
+      recordAccess(db, stored.id); // last_accessed = now, within 7-day recent window
+      const yesterday = new Date(Date.now() - 86400 * 1000).toISOString().slice(0, 10);
+      recordSession(db, yesterday);
+      // stored was created today, not yesterday — so hot query (yesterday's date range) won't match it
+      // and recent will show it because last_accessed is fresh
+      const result = toolContext(db, PROJECT_KEY, {});
+      expect(result).toContain("Recently accessed");
+      expect(result).not.toContain("Hot from last session");
+    });
   });
 });
