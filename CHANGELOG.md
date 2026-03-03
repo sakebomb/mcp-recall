@@ -4,6 +4,18 @@ All notable changes to mcp-recall are documented here.
 
 ---
 
+## v1.4.0 — 2026-03-03
+
+### Three new TypeScript compression handlers
+
+**GitLab** (`mcp__gitlab__*`) — mirrors the GitHub handler with GitLab field names: `iid` (internal ID), `title`, `state`, `description` excerpt (200 chars), `labels` (plain string array), `web_url`. Single items and arrays (first 10 + overflow count).
+
+**Database query results** (tool name contains `postgres`, `mysql`, `sqlite`, or `database`) — handles three common response shapes: node-postgres `{rows, fields}`, bare array of row objects, and `{results}` wrapper. Emits row/column count header, column names, and first 10 rows as `col=value` pairs.
+
+**Sentry error events** (tool name contains `sentry`) — extracts exception type + message, level, environment, release, and abbreviated event ID. Shows the last 8 stack frames (innermost/most relevant). Drops breadcrumbs, SDK metadata, and full request headers — typically reduces 15–50 KB events by 95%+.
+
+---
+
 ## v1.3.0 — 2026-03-03
 
 ### `mcp-recall profiles test`
