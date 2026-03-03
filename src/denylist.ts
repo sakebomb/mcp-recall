@@ -5,8 +5,20 @@ import type { RecallConfig } from "./config";
  * Uses glob syntax: * matches any sequence of characters.
  */
 export const BUILTIN_PATTERNS: string[] = [
+  // own tools — never intercept
   "mcp__recall__*",
+  // password managers — explicit entries because PM tool names (e.g. get_item,
+  // list_logins, vault read) don't always contain keyword patterns below
   "mcp__1password__*",
+  "mcp__bitwarden__*",
+  "mcp__lastpass__*",
+  "mcp__dashlane__*",
+  "mcp__keeper__*",
+  "mcp__hashicorp_vault__*",
+  "mcp__vault__*",
+  "mcp__doppler__*",
+  "mcp__infisical__*",
+  // keyword patterns — catch remaining credential-adjacent tool names
   "*secret*",
   "*token*",
   "*password*",

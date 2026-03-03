@@ -90,6 +90,12 @@ plugins/mcp-recall/     Marketplace-installable plugin bundle
 
 ## Denylist Defaults (never store outputs from)
 
-- `mcp__1password__.*`
-- Tool names matching: `*secret*`, `*token*`, `*password*`, `*credential*`, `*key*`, `*auth*`, `*env*`
-- `mcp__recall__.*` (never intercept own tools)
+Password managers (explicit — tool names like `get_item`, `list_logins`, `vault read` don't match keyword patterns):
+- `mcp__1password__*`, `mcp__bitwarden__*`, `mcp__lastpass__*`, `mcp__dashlane__*`, `mcp__keeper__*`
+- `mcp__hashicorp_vault__*`, `mcp__vault__*`, `mcp__doppler__*`, `mcp__infisical__*`
+
+Keyword patterns (catch remaining credential-adjacent tool names):
+- `*secret*`, `*token*`, `*password*`, `*credential*`, `*key*`, `*auth*`, `*env*`
+
+Own tools:
+- `mcp__recall__*` (never intercept own tools)
