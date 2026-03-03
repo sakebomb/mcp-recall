@@ -14,6 +14,7 @@ import { getBashHandler, gitDiffHandler, gitLogHandler, terraformPlanHandler } f
 import { tavilyHandler } from "../src/handlers/tavily";
 import { databaseHandler } from "../src/handlers/database";
 import { sentryHandler } from "../src/handlers/sentry";
+import { stripeHandler } from "../src/handlers/stripe";
 
 // ---------------------------------------------------------------------------
 // extractText
@@ -1314,5 +1315,130 @@ describe("sentryHandler", () => {
   it("routes sentry tools to sentry handler", () => {
     expect(getHandler("mcp__sentry__get_issue", "{}")).toBe(sentryHandler);
     expect(getHandler("mcp__sentry__list_issues", "{}")).toBe(sentryHandler);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// stripeHandler
+// ---------------------------------------------------------------------------
+
+const STRIPE_CUSTOMERS = JSON.stringify({
+  object: "list",
+  data: [
+    { id: "cus_JW2RJx1dRFf8kZ", name: "Daniel Sheena", email: "daniel@sabanahome.com", phone: "+15168847383" },
+    { id: "cus_JJXYpwnDxyf1QS", name: "Mazak Optonics", email: "dcreekmur@mazaklaser.com", phone: null },
+  ],
+});
+
+const STRIPE_INVOICES = JSON.stringify({
+  object: "list",
+  data: [
+    {
+      id: "in_1It0i5Gvh8VjBGyd8Z04Lk55",
+      status: "open",
+      amount_due: 250000,
+      amount_paid: 0,
+      currency: "usd",
+      customer_name: "Daniel Sheena",
+      billing_reason: "manual",
+    },
+    {
+      id: "in_1It0MrGvh8VjBGydGmuXRvFS",
+      status: "draft",
+      amount_due: 0,
+      amount_paid: 0,
+      currency: "usd",
+      customer_name: "Daniel Sheena",
+      billing_reason: "manual",
+    },
+  ],
+});
+
+const STRIPE_PAYMENT_INTENTS = JSON.stringify({
+  object: "list",
+  data: [
+    { id: "pi_1It0j3Gvh8VjBGydhyPkvVKe", amount: 250000, currency: "usd", status: "requires_payment_method", customer: "cus_JW2RJx1dRFf8kZ" },
+    { id: "pi_1IQGk6Gvh8VjBGydTy5c9A4O", amount: 40000,  currency: "usd", status: "succeeded", customer: null },
+  ],
+});
+
+const STRIPE_BALANCE = JSON.stringify({
+  object: "balance",
+  available: [{ amount: 50000, currency: "usd" }],
+  pending:   [{ amount: 10000, currency: "usd" }],
+});
+
+describe("stripeHandler", () => {
+  it("formats customer list with name and email", () => {
+    const { summary } = stripeHandler("mcp__stripe__list_customers", STRIPE_CUSTOMERS);
+    expect(summary).toContain("cus_JW2RJx1dRFf8kZ");
+    expect(summary).toContain("Daniel Sheena");
+    expect(summary).toContain("daniel@sabanahome.com");
+  });
+
+  it("formats invoice amounts as dollars, not cents", () => {
+    const { summary } = stripeHandler("mcp__stripe__list_invoices", STRIPE_INVOICES);
+    expect(summary).toContain("$2,500.00");
+    expect(summary).not.toContain("250000");
+  });
+
+  it("formats payment intent amounts as dollars", () => {
+    const { summary } = stripeHandler("mcp__stripe__list_payment_intents", STRIPE_PAYMENT_INTENTS);
+    expect(summary).toContain("$2,500.00");
+    expect(summary).toContain("$400.00");
+    expect(summary).not.toContain("250000");
+  });
+
+  it("shows invoice status and billing reason", () => {
+    const { summary } = stripeHandler("mcp__stripe__list_invoices", STRIPE_INVOICES);
+    expect(summary).toContain("[open]");
+    expect(summary).toContain("due: $2,500.00");
+  });
+
+  it("formats balance with dollar amounts", () => {
+    const { summary } = stripeHandler("mcp__stripe__retrieve_balance", STRIPE_BALANCE);
+    expect(summary).toContain("available: $500.00");
+    expect(summary).toContain("pending: $100.00");
+  });
+
+  it("handles empty list gracefully", () => {
+    const { summary } = stripeHandler("mcp__stripe__list_subscriptions", JSON.stringify({ object: "list", data: [] }));
+    expect(summary).toBe("No items.");
+  });
+
+  it("handles bare empty array", () => {
+    const { summary } = stripeHandler("mcp__stripe__list_subscriptions", "[]");
+    expect(summary).toBe("No items.");
+  });
+
+  it("handles single object (create_customer response)", () => {
+    const single = JSON.stringify({ id: "cus_new123", name: "New User", email: "new@example.com" });
+    const { summary } = stripeHandler("mcp__stripe__create_customer", single);
+    expect(summary).toContain("cus_new123");
+    expect(summary).toContain("New User");
+  });
+
+  it("formats JPY amounts without decimal (zero-decimal currency)", () => {
+    const jpy = JSON.stringify({
+      object: "list",
+      data: [{ id: "pi_jpy", amount: 1500, currency: "jpy", status: "succeeded" }],
+    });
+    const { summary } = stripeHandler("mcp__stripe__list_payment_intents", jpy);
+    expect(summary).toContain("¥1,500");
+    expect(summary).not.toContain("¥15.00");
+  });
+
+  it("returns overflow count for more than 10 items", () => {
+    const items = Array.from({ length: 13 }, (_, i) => ({
+      id: `cus_${i}`, name: `Customer ${i}`, email: `c${i}@example.com`,
+    }));
+    const { summary } = stripeHandler("mcp__stripe__list_customers", JSON.stringify({ object: "list", data: items }));
+    expect(summary).toContain("…and 3 more");
+  });
+
+  it("routes mcp__stripe__* to stripeHandler", () => {
+    expect(getHandler("mcp__stripe__list_customers", "{}")).toBe(stripeHandler);
+    expect(getHandler("mcp__stripe__list_invoices", "{}")).toBe(stripeHandler);
+    expect(getHandler("mcp__stripe__retrieve_balance", "{}")).toBe(stripeHandler);
   });
 });
