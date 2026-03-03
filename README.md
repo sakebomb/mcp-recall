@@ -303,7 +303,7 @@ mcp-recall never breaks a tool call. Every failure mode — hook crash, SQLite e
 
 ## Profile system
 
-Declarative TOML profiles extend compression to any MCP — no TypeScript required. Community profiles are shared at **[sakebomb/mcp-recall-profiles](https://github.com/sakebomb/mcp-recall-profiles)** (9 profiles: Jira, Confluence, Gmail, AWS, GCP, Figma, Vercel, HubSpot, Google Calendar).
+Declarative TOML profiles extend compression to any MCP — no TypeScript required. Community profiles are shared at **[sakebomb/mcp-recall-profiles](https://github.com/sakebomb/mcp-recall-profiles)** (18 profiles: Jira, Confluence, Gmail, AWS, GCP, Figma, Vercel, HubSpot, Google Calendar, Notion, Stripe, Airtable, Grafana, Datadog, Xero, Chargebee, Teams, Shopify).
 
 ```bash
 mcp-recall learn                    # auto-generate profiles from your installed MCPs
