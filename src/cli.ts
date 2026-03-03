@@ -10,6 +10,7 @@ import { handleSessionStart } from "./hooks/session-start";
 import { handlePostToolUse } from "./hooks/post-tool-use";
 import { handleProfilesCommand } from "./profiles/commands";
 import { handleLearnCommand } from "./learn/index";
+import { installCommand, uninstallCommand, statusCommand } from "./install/index";
 
 const subcommand = process.argv[2];
 
@@ -22,6 +23,22 @@ async function main(): Promise<void> {
 
   if (subcommand === "learn") {
     await handleLearnCommand(process.argv.slice(3));
+    process.exit(0);
+  }
+
+  if (subcommand === "install") {
+    const dryRun = process.argv.includes("--dry-run");
+    await installCommand({ dryRun });
+    process.exit(0);
+  }
+
+  if (subcommand === "uninstall") {
+    await uninstallCommand();
+    process.exit(0);
+  }
+
+  if (subcommand === "status") {
+    await statusCommand();
     process.exit(0);
   }
 
