@@ -7976,6 +7976,273 @@ Next steps:`);
   }
 }
 
+// src/install/index.ts
+import { existsSync } from "fs";
+import { mkdir, rename, readFile } from "fs/promises";
+import path from "path";
+import os from "os";
+var BOLD = "\x1B[1m";
+var GREEN = "\x1B[32m";
+var YELLOW = "\x1B[33m";
+var RED = "\x1B[31m";
+var DIM = "\x1B[2m";
+var RESET = "\x1B[0m";
+function defaultClaudeJsonPath() {
+  return path.join(os.homedir(), ".claude.json");
+}
+function defaultSettingsPath() {
+  return path.join(os.homedir(), ".claude", "settings.json");
+}
+function detectPaths() {
+  const isBuilt = import.meta.path.endsWith(".js");
+  const distDir = isBuilt ? import.meta.dir : path.resolve(import.meta.dir, "../../plugins/mcp-recall/dist");
+  return {
+    serverJs: path.join(distDir, "server.js"),
+    cliJs: path.join(distDir, "cli.js")
+  };
+}
+async function readJsonFile(filePath) {
+  try {
+    const content = await readFile(filePath, "utf8");
+    return JSON.parse(content);
+  } catch (e) {
+    if (e.code === "ENOENT")
+      return {};
+    throw new Error(`Cannot parse ${filePath}: ${e.message}`);
+  }
+}
+async function writeJsonFile(filePath, data) {
+  const dir = path.dirname(filePath);
+  await mkdir(dir, { recursive: true });
+  const content = JSON.stringify(data, null, 2) + `
+`;
+  const tmp = filePath + ".tmp";
+  await Bun.write(tmp, content);
+  await rename(tmp, filePath);
+}
+var SESSION_START_MARKER = "session-start";
+var POST_TOOL_USE_MARKER = "post-tool-use";
+var POST_TOOL_USE_MATCHER = "(mcp__(?!recall__).*|Bash)";
+function makeSessionStartEntry(cliJs) {
+  return {
+    hooks: [{ type: "command", command: `bun ${cliJs} session-start`, timeout: 10 }]
+  };
+}
+function makePostToolUseEntry(cliJs) {
+  return {
+    matcher: POST_TOOL_USE_MATCHER,
+    hooks: [{ type: "command", command: `bun ${cliJs} post-tool-use`, timeout: 10 }]
+  };
+}
+function isOurSessionStartHook(entry) {
+  if (!entry || typeof entry !== "object")
+    return false;
+  const hooks = entry["hooks"];
+  if (!Array.isArray(hooks))
+    return false;
+  return hooks.some((h) => {
+    const cmd = h["command"];
+    return typeof cmd === "string" && cmd.includes("recall") && cmd.includes(SESSION_START_MARKER);
+  });
+}
+function isOurPostToolUseHook(entry) {
+  if (!entry || typeof entry !== "object")
+    return false;
+  const e = entry;
+  if (e["matcher"] !== POST_TOOL_USE_MATCHER)
+    return false;
+  const hooks = e["hooks"];
+  if (!Array.isArray(hooks))
+    return false;
+  return hooks.some((h) => {
+    const cmd = h["command"];
+    return typeof cmd === "string" && cmd.includes("recall") && cmd.includes(POST_TOOL_USE_MARKER);
+  });
+}
+async function installCommand(opts = {}) {
+  const {
+    dryRun = false,
+    claudeJsonPath = defaultClaudeJsonPath(),
+    settingsPath = defaultSettingsPath()
+  } = opts;
+  const paths = detectPaths();
+  if (!existsSync(paths.serverJs) || !existsSync(paths.cliJs)) {
+    console.error(`${RED}\u2717 Build artifacts not found.${RESET}`);
+    console.error(`  Expected: ${DIM}${paths.serverJs}${RESET}`);
+    console.error(`  Run ${BOLD}bun run build${RESET} first.`);
+    process.exit(1);
+  }
+  if (dryRun) {
+    console.log(`${DIM}dry run \u2014 no files will be modified${RESET}
+`);
+  }
+  let anyChange = false;
+  const claudeJson = await readJsonFile(claudeJsonPath);
+  const mcpServers = claudeJson["mcpServers"] ?? {};
+  const newServer = { type: "stdio", command: "bun", args: [paths.serverJs] };
+  const existing = mcpServers["recall"];
+  const currentServerPath = existing?.["args"]?.[0];
+  if (!existing) {
+    if (!dryRun) {
+      claudeJson["mcpServers"] = { ...mcpServers, recall: newServer };
+      await writeJsonFile(claudeJsonPath, claudeJson);
+    }
+    console.log(`${GREEN}\u2713${RESET} MCP server registered     ${DIM}(${claudeJsonPath})${RESET}`);
+    anyChange = true;
+  } else if (currentServerPath !== paths.serverJs) {
+    if (!dryRun) {
+      claudeJson["mcpServers"] = { ...mcpServers, recall: newServer };
+      await writeJsonFile(claudeJsonPath, claudeJson);
+    }
+    console.log(`${YELLOW}\u21BA${RESET} MCP server path updated    ${DIM}(${claudeJsonPath})${RESET}`);
+    anyChange = true;
+  } else {
+    console.log(`${DIM}\u2139 MCP server already registered${RESET}`);
+  }
+  const settings = await readJsonFile(settingsPath);
+  const hooks = settings["hooks"] ?? {};
+  let settingsChanged = false;
+  const ssHooks = hooks["SessionStart"] ?? [];
+  const ssIdx = ssHooks.findIndex(isOurSessionStartHook);
+  const newSS = makeSessionStartEntry(paths.cliJs);
+  if (ssIdx === -1) {
+    hooks["SessionStart"] = [...ssHooks, newSS];
+    settingsChanged = true;
+    anyChange = true;
+    console.log(`${GREEN}\u2713${RESET} SessionStart hook added    ${DIM}(${settingsPath})${RESET}`);
+  } else {
+    const currentCmd = ssHooks[ssIdx]?.hooks?.[0]?.command;
+    if (currentCmd !== newSS.hooks[0].command) {
+      ssHooks[ssIdx] = newSS;
+      hooks["SessionStart"] = ssHooks;
+      settingsChanged = true;
+      anyChange = true;
+      console.log(`${YELLOW}\u21BA${RESET} SessionStart hook updated   ${DIM}(${settingsPath})${RESET}`);
+    } else {
+      console.log(`${DIM}\u2139 SessionStart hook already registered${RESET}`);
+    }
+  }
+  const ptuHooks = hooks["PostToolUse"] ?? [];
+  const ptuIdx = ptuHooks.findIndex(isOurPostToolUseHook);
+  const newPTU = makePostToolUseEntry(paths.cliJs);
+  if (ptuIdx === -1) {
+    hooks["PostToolUse"] = [...ptuHooks, newPTU];
+    settingsChanged = true;
+    anyChange = true;
+    console.log(`${GREEN}\u2713${RESET} PostToolUse hook added     ${DIM}(${settingsPath})${RESET}`);
+  } else {
+    const currentCmd = ptuHooks[ptuIdx]?.hooks?.[0]?.command;
+    if (currentCmd !== newPTU.hooks[0].command) {
+      ptuHooks[ptuIdx] = newPTU;
+      hooks["PostToolUse"] = ptuHooks;
+      settingsChanged = true;
+      anyChange = true;
+      console.log(`${YELLOW}\u21BA${RESET} PostToolUse hook updated    ${DIM}(${settingsPath})${RESET}`);
+    } else {
+      console.log(`${DIM}\u2139 PostToolUse hook already registered${RESET}`);
+    }
+  }
+  if (settingsChanged && !dryRun) {
+    settings["hooks"] = hooks;
+    await writeJsonFile(settingsPath, settings);
+  }
+  if (anyChange && !dryRun) {
+    console.log(`
+Restart Claude Code to activate mcp-recall.`);
+  }
+}
+async function uninstallCommand(opts = {}) {
+  const {
+    claudeJsonPath = defaultClaudeJsonPath(),
+    settingsPath = defaultSettingsPath()
+  } = opts;
+  let anyChange = false;
+  const claudeJson = await readJsonFile(claudeJsonPath);
+  const mcpServers = claudeJson["mcpServers"];
+  if (mcpServers?.["recall"]) {
+    delete mcpServers["recall"];
+    await writeJsonFile(claudeJsonPath, claudeJson);
+    console.log(`${GREEN}\u2713${RESET} Removed mcpServers.recall  ${DIM}(${claudeJsonPath})${RESET}`);
+    anyChange = true;
+  } else {
+    console.log(`${DIM}\u2139 mcpServers.recall not present${RESET}`);
+  }
+  const settings = await readJsonFile(settingsPath);
+  const hooks = settings["hooks"] ?? {};
+  let settingsChanged = false;
+  const ssHooks = hooks["SessionStart"] ?? [];
+  const ssIdx = ssHooks.findIndex(isOurSessionStartHook);
+  if (ssIdx !== -1) {
+    hooks["SessionStart"] = ssHooks.filter((_, i) => i !== ssIdx);
+    settingsChanged = true;
+    anyChange = true;
+    console.log(`${GREEN}\u2713${RESET} Removed SessionStart hook   ${DIM}(${settingsPath})${RESET}`);
+  } else {
+    console.log(`${DIM}\u2139 SessionStart hook not present${RESET}`);
+  }
+  const ptuHooks = hooks["PostToolUse"] ?? [];
+  const ptuIdx = ptuHooks.findIndex(isOurPostToolUseHook);
+  if (ptuIdx !== -1) {
+    hooks["PostToolUse"] = ptuHooks.filter((_, i) => i !== ptuIdx);
+    settingsChanged = true;
+    anyChange = true;
+    console.log(`${GREEN}\u2713${RESET} Removed PostToolUse hook    ${DIM}(${settingsPath})${RESET}`);
+  } else {
+    console.log(`${DIM}\u2139 PostToolUse hook not present${RESET}`);
+  }
+  if (settingsChanged) {
+    settings["hooks"] = hooks;
+    await writeJsonFile(settingsPath, settings);
+  }
+  if (anyChange) {
+    console.log(`
+Restart Claude Code to deactivate mcp-recall.`);
+  }
+}
+async function statusCommand(opts = {}) {
+  const {
+    claudeJsonPath = defaultClaudeJsonPath(),
+    settingsPath = defaultSettingsPath()
+  } = opts;
+  const recallPaths = detectPaths();
+  function tick(ok) {
+    return ok ? `${GREEN}\u2713${RESET}` : `${RED}\u2717${RESET}`;
+  }
+  function pad(s, n) {
+    return s + " ".repeat(Math.max(0, n - s.length));
+  }
+  const claudeJson = await readJsonFile(claudeJsonPath);
+  const settings = await readJsonFile(settingsPath);
+  const hooks = settings["hooks"] ?? {};
+  const mcpServers = claudeJson["mcpServers"];
+  const serverRegistered = !!mcpServers?.["recall"];
+  const ssRegistered = (hooks["SessionStart"] ?? []).some(isOurSessionStartHook);
+  const ptuRegistered = (hooks["PostToolUse"] ?? []).some(isOurPostToolUseHook);
+  const serverExists = existsSync(recallPaths.serverJs);
+  const cliExists = existsSync(recallPaths.cliJs);
+  const fullyInstalled = serverRegistered && ssRegistered && ptuRegistered && serverExists && cliExists;
+  const label = fullyInstalled ? `${GREEN}installed${RESET}` : serverRegistered || ssRegistered || ptuRegistered ? `${YELLOW}partial / stale${RESET}` : `${RED}not installed${RESET}`;
+  console.log(`
+Installation: ${BOLD}${label}${RESET}
+`);
+  console.log(`  ${pad("~/.claude.json", 30)}  ${tick(serverRegistered)} mcpServers.recall`);
+  console.log(`  ${pad("~/.claude/settings.json", 30)}  ${tick(ssRegistered)} SessionStart hook`);
+  console.log(`  ${pad("", 30)}  ${tick(ptuRegistered)} PostToolUse hook`);
+  console.log("");
+  console.log(`  ${pad("Build artifacts", 30)}`);
+  console.log(`  ${pad("  dist/server.js", 30)}  ${tick(serverExists)} ${DIM}${recallPaths.serverJs}${RESET}`);
+  console.log(`  ${pad("  dist/cli.js", 30)}  ${tick(cliExists)} ${DIM}${recallPaths.cliJs}${RESET}`);
+  if (!fullyInstalled) {
+    console.log("");
+    if (!serverExists || !cliExists) {
+      console.log(`  Run ${BOLD}bun run build${RESET} then ${BOLD}mcp-recall install${RESET}`);
+    } else {
+      console.log(`  Run ${BOLD}mcp-recall install${RESET}`);
+    }
+  }
+  console.log("");
+}
+
 // src/cli.ts
 var subcommand = process.argv[2];
 async function main() {
@@ -7985,6 +8252,19 @@ async function main() {
   }
   if (subcommand === "learn") {
     await handleLearnCommand(process.argv.slice(3));
+    process.exit(0);
+  }
+  if (subcommand === "install") {
+    const dryRun = process.argv.includes("--dry-run");
+    await installCommand({ dryRun });
+    process.exit(0);
+  }
+  if (subcommand === "uninstall") {
+    await uninstallCommand();
+    process.exit(0);
+  }
+  if (subcommand === "status") {
+    await statusCommand();
     process.exit(0);
   }
   const raw = await Bun.stdin.text();
