@@ -1,29 +1,36 @@
-# Demo
+# demo/
 
-To generate `demo.gif`:
+Files in this directory:
 
-1. Install [vhs](https://github.com/charmbracelet/vhs):
-   ```bash
-   brew install vhs        # macOS
-   # or
-   go install github.com/charmbracelet/vhs@latest
-   ```
+| File | Purpose |
+|---|---|
+| `demo.gif` | Main README demo — tests passing, Playwright compression, stats, search |
+| `demo.tape` | vhs script to regenerate `demo.gif` |
+| `proof.gif` | Two-scene proof of real compression — raw GitHub API JSON vs. what Claude receives |
+| `proof.tape` | vhs script to regenerate `proof.gif` |
+| `show-compression.ts` | Script that reads a cached tool response, runs it through the handler, and prints the compact summary with before/after/reduction stats. Used by `proof.tape` |
+| `bench.ts` | Compression benchmark — fetches live GitHub issues (public API, no auth) + runs fixture data through every handler. Prints a before/after table. `--summary` flag prints the GitHub summary only |
+| `sample-compression.txt` | Pre-recorded Playwright compression output for `demo.tape` Scene 2 |
+| `sample-stats.txt` | Pre-recorded `recall__stats` output for `demo.tape` Scene 3 |
+| `sample-search.txt` | Pre-recorded `recall__search` output for `demo.tape` Scene 4 |
 
-2. Run the tape:
-   ```bash
-   vhs demo/demo.tape
-   ```
+## Regenerating the GIFs
 
-3. The output is `demo/demo.gif` — add it to the README:
-   ```markdown
-   ![mcp-recall demo](demo/demo.gif)
-   ```
+Requires [vhs](https://github.com/charmbracelet/vhs):
 
-The tape shows three scenes:
-1. `bun test` — 329 tests passing
-2. A Playwright snapshot compressed from 56.2KB → 299B (99% reduction)
-3. `recall__stats` and `recall__search` output
+```bash
+brew install vhs        # macOS
+go install github.com/charmbracelet/vhs@latest  # or via Go
+```
 
-**Note**: The sample output files (`sample-stats.txt`, `sample-search.txt`) use realistic but
-pre-recorded data. For a live demo showing real Claude session compression, screen-record an
-actual session using OBS or macOS screen recording, then trim to the relevant moments.
+```bash
+vhs demo/demo.tape      # → demo/demo.gif
+vhs demo/proof.tape     # → demo/proof.gif  (requires internet: curl fetches GitHub API)
+```
+
+## Running the benchmark
+
+```bash
+bun demo/bench.ts               # compression table for all handlers
+bun demo/bench.ts --summary     # print GitHub list_issues summary only
+```
