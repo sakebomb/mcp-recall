@@ -6,19 +6,7 @@ Active work and upcoming tasks.
 
 _nothing in progress_
 
-## Up Next — post v1.1 merge
-
-### Seed profiles for Vercel, HubSpot, Calendar (#64–#66)
-
-Add TOML profiles to `sakebomb/mcp-recall-profiles` (clone to `/home/sakebomb/git/mcp-recall-profiles`):
-
-- `profiles/mcp__vercel/default.toml` — `json_extract`, deployments/projects list
-- `profiles/mcp__hubspot/default.toml` — `json_extract`, contacts/deals/companies list
-- `profiles/mcp__google_calendar/default.toml` — `json_extract`, events list (`items`, `events` paths)
-
-After writing: `bun run validate && bun run manifest`, commit, push to main.
-
----
+## Up Next
 
 ### #58 — Hot cache / smarter SessionStart (P3)
 
