@@ -82,8 +82,9 @@ This applies when running without `--depth`. CLI `--depth` always takes preceden
 1. Use a MCP for a session or two (mcp-recall needs stored outputs to analyse)
 2. `mcp-recall profiles retrain` — review suggestions
 3. `mcp-recall profiles retrain --apply` — append the fields you want
-4. `mcp-recall profiles feed <path>` — preview and copy for submission
-5. Open a PR to [sakebomb/mcp-recall-profiles](https://github.com/sakebomb/mcp-recall-profiles)
+4. `mcp-recall profiles test <tool> --stored <id>` — verify the profile compresses as expected
+5. `mcp-recall profiles feed <path>` — preview and copy for submission
+6. Open a PR to [sakebomb/mcp-recall-profiles](https://github.com/sakebomb/mcp-recall-profiles)
 
 → [Contributing a profile](../CONTRIBUTING.md#contributing-a-profile)
 
