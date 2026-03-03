@@ -16,6 +16,7 @@ import {
   pruneExpired,
   recordSession,
   getSessionDays,
+  getContext,
   chunkText,
   CHUNK_SIZE,
   CHUNK_OVERLAP,
@@ -676,6 +677,83 @@ describe("db", () => {
     it("returns null when query matches no chunk and no legacy FTS entry", () => {
       const stored = storeOutput(db, makeInput({ full_content: "completely different content" }));
       expect(retrieveSnippet(db, stored.id, "zzznomatch")).toBeNull();
+    });
+  });
+
+  describe("getContext hot section", () => {
+    // Helper: insert a row directly so we can control created_at / access_count.
+    function insertRow(
+      id: string,
+      createdAt: number,
+      accessCount: number,
+      lastAccessed: number | null = null,
+      toolName = "mcp__github__list_issues",
+      pinned = 0
+    ) {
+      db.prepare(`
+        INSERT INTO stored_outputs
+          (id, project_key, session_id, tool_name, summary, full_content,
+           original_size, summary_size, created_at, access_count, last_accessed, pinned)
+        VALUES (?, ?, 'sess', ?, 'a summary', 'full content', 1024, 64, ?, ?, ?, ?)
+      `).run(id, PROJECT_KEY, toolName, createdAt, accessCount, lastAccessed, pinned);
+    }
+
+    function oldDate(daysAgo: number): { date: string; start: number } {
+      const date = new Date(Date.now() - daysAgo * 86400 * 1000).toISOString().slice(0, 10);
+      const start = Math.floor(new Date(`${date}T00:00:00Z`).getTime() / 1000);
+      return { date, start };
+    }
+
+    it("hot is empty when there is no last session", () => {
+      const data = getContext(db, PROJECT_KEY);
+      expect(data.hot).toEqual([]);
+    });
+
+    it("hot is empty when last session items have access_count of 0", () => {
+      const { date, start } = oldDate(14);
+      insertRow("recall_hot_t1", start + 3600, 0);
+      recordSession(db, date);
+      const data = getContext(db, PROJECT_KEY);
+      expect(data.hot).toEqual([]);
+    });
+
+    it("hot returns accessed items from last session ordered by access_count desc", () => {
+      const { date, start } = oldDate(14);
+      insertRow("recall_hot_t2a", start + 3600, 5);
+      insertRow("recall_hot_t2b", start + 3601, 1);
+      insertRow("recall_hot_t2c", start + 3602, 3);
+      recordSession(db, date);
+      const data = getContext(db, PROJECT_KEY);
+      expect(data.hot).toHaveLength(3);
+      expect(data.hot[0]!.id).toBe("recall_hot_t2a");
+      expect(data.hot[1]!.id).toBe("recall_hot_t2c");
+      expect(data.hot[2]!.id).toBe("recall_hot_t2b");
+    });
+
+    it("hot excludes items that already appear in recent", () => {
+      const { date, start } = oldDate(14);
+      const recentAccess = Math.floor(Date.now() / 1000) - 3600; // 1 hour ago
+      insertRow("recall_hot_t3", start + 3600, 3, recentAccess);
+      recordSession(db, date);
+      const data = getContext(db, PROJECT_KEY);
+      expect(data.recent.some((i) => i.id === "recall_hot_t3")).toBe(true);
+      expect(data.hot.some((i) => i.id === "recall_hot_t3")).toBe(false);
+    });
+
+    it("hot excludes notes", () => {
+      const { date, start } = oldDate(14);
+      insertRow("recall_hot_t4", start + 3600, 2, null, "recall__note");
+      recordSession(db, date);
+      const data = getContext(db, PROJECT_KEY);
+      expect(data.hot).toEqual([]);
+    });
+
+    it("hot excludes pinned items", () => {
+      const { date, start } = oldDate(14);
+      insertRow("recall_hot_t5", start + 3600, 2, null, "mcp__tool", 1);
+      recordSession(db, date);
+      const data = getContext(db, PROJECT_KEY);
+      expect(data.hot).toEqual([]);
     });
   });
 });

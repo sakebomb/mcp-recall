@@ -30,6 +30,7 @@ export function handleSessionStart(raw: string): void {
     data.pinned.length === 0 &&
     data.notes.length === 0 &&
     data.recent.length === 0 &&
+    data.hot.length === 0 &&
     data.last_session === null;
 
   if (!isEmpty) {
