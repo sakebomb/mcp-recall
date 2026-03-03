@@ -55,6 +55,33 @@ mcp-recall must never break a tool call under any failure condition. Every new c
 - [ ] PR title < 70 characters
 - [ ] PR body includes `## Summary` and `## Test plan`
 
+## Contributing a profile
+
+The easier contribution path — declarative TOML, no TypeScript, no clone of this repo needed. Profiles live in [sakebomb/mcp-recall-profiles](https://github.com/sakebomb/mcp-recall-profiles).
+
+### Option A — use `retrain` to generate suggestions from your own usage data
+
+If you've been using an MCP with mcp-recall already, it likely has stored outputs you can analyse:
+
+```bash
+mcp-recall profiles retrain          # see what fields appear frequently
+mcp-recall profiles retrain --apply  # append suggestions to matching profiles
+```
+
+Review the additions, then prepare for submission:
+
+```bash
+mcp-recall profiles feed ~/.config/mcp-recall/profiles/mcp__myservice/default.toml
+```
+
+→ [Full retrain guide](docs/retrain.md)
+
+### Option B — write a profile from scratch
+
+See [docs/profile-schema.md](docs/profile-schema.md) for the full schema and [sakebomb/mcp-recall-profiles/CONTRIBUTING.md](https://github.com/sakebomb/mcp-recall-profiles/blob/main/CONTRIBUTING.md) for the submission checklist.
+
+---
+
 ## Adding a compression handler
 
 Handlers are the best way to contribute. Each one targets a specific MCP tool (or family of tools) and reduces its output to an actionable summary. The community issues [#49](https://github.com/sakebomb/mcp-recall/issues/49)–[#53](https://github.com/sakebomb/mcp-recall/issues/53) and [#59](https://github.com/sakebomb/mcp-recall/issues/59)–[#66](https://github.com/sakebomb/mcp-recall/issues/66) are all open for contribution. Comment on one to claim it before starting.

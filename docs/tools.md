@@ -12,8 +12,8 @@ Session orientation — call this at the start of every session.
 recall__context(days?, limit?)
 ```
 
-- Returns pinned items, unpinned notes, recently accessed items, and a one-line last-session headline
-- Each item appears in exactly one section — pinned items are never duplicated in recently accessed
+- Returns pinned items, unpinned notes, recently accessed items, hot items from the last session, and a one-line last-session headline
+- Each item appears in exactly one section — nothing is duplicated across sections
 - `days` — lookback window for recently accessed items (default: 7)
 - `limit` — max recently accessed items to show (default: 5)
 
@@ -34,6 +34,10 @@ Notes (1):
 Recently accessed (last 7 days, 2 items):
   recall_ef56  mcp__github__list_issues    2026-03-02  ×3
     #42 "Add session summary" [open]…
+
+Hot from last session (2026-03-01, 2 items):
+  recall_gh78  mcp__playwright__browser_snapshot  2026-03-01  ×4
+    Page: Dashboard · 12 interactive elements…
 
 Last session (2026-03-01):
   12 items stored · 847KB → 23KB (97% reduction)
@@ -116,6 +120,11 @@ Session stats for current project:
   Saved:             98.2% reduction
   ~Tokens saved:     ~84,000
   Session days:      4
+
+By tool (sorted by original size):
+  mcp__playwright__browser_snapshot    4 items    215KB →  1.2KB    99%
+  mcp__github__list_issues             3 items    106KB →  3.3KB    97%
+  mcp__filesystem__read_file           2 items     21KB →  4.4KB    79%
 
 Suggestions:
   📌 Pin candidates (accessed ≥5×): recall_ab12 mcp__playwright__browser_snapshot

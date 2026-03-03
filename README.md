@@ -302,25 +302,16 @@ mcp-recall never breaks a tool call. Every failure mode — hook crash, SQLite e
 
 ## Profile system
 
-mcp-recall compresses tool outputs using declarative TOML profiles — no TypeScript required.
-
-**Auto-generate profiles for all your installed MCPs:**
+Declarative TOML profiles extend compression to any MCP — no TypeScript required. Community profiles are shared at **[sakebomb/mcp-recall-profiles](https://github.com/sakebomb/mcp-recall-profiles)** (9 profiles: Jira, Confluence, Gmail, AWS, GCP, Figma, Vercel, HubSpot, Google Calendar).
 
 ```bash
-mcp-recall learn
+mcp-recall learn                    # auto-generate profiles from your installed MCPs
+mcp-recall profiles seed            # install community profiles for detected MCPs
+mcp-recall profiles retrain         # suggest field additions using your stored data
+mcp-recall profiles list            # show all installed profiles
 ```
 
-**Browse and manage profiles:**
-
-```bash
-mcp-recall profiles list              # show all installed profiles
-mcp-recall profiles seed              # install community profiles for detected MCPs
-mcp-recall profiles install mcp__jira # install a specific community profile
-mcp-recall profiles feed profile.toml # contribute a profile back to the community
-mcp-recall profiles check             # detect pattern conflicts
-```
-
-Community profiles live at [sakebomb/mcp-recall-profiles](https://github.com/sakebomb/mcp-recall-profiles). Anyone can contribute a TOML profile without writing TypeScript — see [docs/profile-schema.md](docs/profile-schema.md) for the schema.
+→ [Profile schema](docs/profile-schema.md) · [retrain guide](docs/retrain.md) · [Contributing a profile](CONTRIBUTING.md#contributing-a-profile)
 
 ---
 
