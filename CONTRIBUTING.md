@@ -68,7 +68,13 @@ mcp-recall profiles retrain          # see what fields appear frequently
 mcp-recall profiles retrain --apply  # append suggestions to matching profiles
 ```
 
-Review the additions, then prepare for submission:
+Verify the updated profile compresses as expected:
+
+```bash
+mcp-recall profiles test mcp__myservice__some_tool --stored <recall_id>
+```
+
+Then prepare for submission:
 
 ```bash
 mcp-recall profiles feed ~/.config/mcp-recall/profiles/mcp__myservice/default.toml

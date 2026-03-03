@@ -7335,6 +7335,94 @@ ${conflicts.length} conflict(s):
 `);
   }
 }
+function formatBytes3(bytes) {
+  if (bytes < 1024)
+    return `${bytes} B`;
+  if (bytes < 1024 * 1024)
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+function testProfile(toolName, content) {
+  const profiles = loadProfiles();
+  const matchedProfile = resolveProfile(toolName, profiles);
+  const handler = getHandler(toolName, content);
+  const { summary, originalSize } = handler(toolName, content);
+  const outputBytes = Buffer.byteLength(summary, "utf8");
+  const reductionPct2 = originalSize > 0 ? Math.round((1 - outputBytes / originalSize) * 100) : 0;
+  return { toolName, matchedProfile, handlerName: handler.name, inputBytes: originalSize, outputBytes, reductionPct: reductionPct2, summary };
+}
+function cmdTest(args) {
+  let toolName;
+  let storedId;
+  let inputFile;
+  for (let i = 0;i < args.length; i++) {
+    if (args[i] === "--stored" && args[i + 1]) {
+      storedId = args[++i];
+    } else if (args[i] === "--input" && args[i + 1]) {
+      inputFile = args[++i];
+    } else if (!args[i].startsWith("-")) {
+      toolName = args[i];
+    }
+  }
+  if (!toolName) {
+    console.error("Usage: mcp-recall profiles test <tool_name> [--stored <id>] [--input <file>]");
+    console.error(`
+Examples:`);
+    console.error("  mcp-recall profiles test mcp__jira__search_issues --stored recall_abc123");
+    console.error("  mcp-recall profiles test mcp__stripe__list_customers --input fixture.json");
+    process.exit(1);
+  }
+  if (!storedId && !inputFile) {
+    console.error(`Provide --stored <recall_id> or --input <file>
+`);
+    console.error(`To find a stored item:  recall__list_stored(tool: "${toolName}")`);
+    process.exit(1);
+  }
+  let content;
+  let contentSource;
+  if (storedId) {
+    const projectKey = getProjectKey(process.cwd());
+    const db = getDb(defaultDbPath(projectKey));
+    const row = db.prepare("SELECT full_content FROM stored_outputs WHERE id = ?").get(storedId);
+    if (!row) {
+      console.error(`No stored item found: ${storedId}`);
+      process.exit(1);
+    }
+    content = row.full_content;
+    contentSource = `stored:${storedId}`;
+  } else {
+    try {
+      content = readFileSync4(inputFile, "utf8");
+    } catch {
+      console.error(`Cannot read: ${inputFile}`);
+      process.exit(1);
+    }
+    contentSource = inputFile;
+  }
+  const result = testProfile(toolName, content);
+  if (result.matchedProfile) {
+    const p = result.matchedProfile;
+    console.log(`
+Profile:  ${p.spec.profile.id} (${p.tier}) \u2014 ${p.patterns.join(", ")}`);
+    console.log(`File:     ${p.filePath}`);
+    console.log(`Strategy: ${p.spec.strategy.type}`);
+  } else {
+    console.log(`
+No profile match for ${toolName}`);
+    console.log(`Handler:  ${result.handlerName} (TypeScript fallback)`);
+    console.log(`
+To add a profile:`);
+    console.log(`  mcp-recall learn`);
+    console.log(`  https://github.com/sakebomb/mcp-recall/blob/main/docs/profile-schema.md`);
+  }
+  console.log(`
+Input:  ${formatBytes3(result.inputBytes)}  (${contentSource})`);
+  console.log("\u2500".repeat(60));
+  console.log(result.summary);
+  console.log("\u2500".repeat(60));
+  console.log(`Output: ${formatBytes3(result.outputBytes)}  (${result.reductionPct}% reduction)
+`);
+}
 async function handleProfilesCommand(args) {
   const cmd = args[0];
   const rest = args.slice(1);
@@ -7363,6 +7451,9 @@ async function handleProfilesCommand(args) {
     case "retrain":
       await handleRetrainCommand(rest);
       break;
+    case "test":
+      cmdTest(rest);
+      break;
     default:
       console.error(`Unknown subcommand: ${cmd ?? "(none)"}
 `);
@@ -7377,6 +7468,7 @@ async function handleProfilesCommand(args) {
       console.error("  feed [path]       Contribute a local profile to the community");
       console.error("  check             Detect pattern conflicts");
       console.error("  retrain [--apply] [--depth N] [filter]  Suggest profile improvements from stored corpus");
+      console.error("  test <tool> [--stored <id>] [--input <file>]  Test a profile against real input");
       process.exit(1);
   }
 }
