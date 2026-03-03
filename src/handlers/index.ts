@@ -11,6 +11,7 @@ import { csvHandler, looksLikeCsv } from "./csv";
 import { jsonHandler } from "./json";
 import { genericHandler } from "./generic";
 import { extractText } from "./types";
+import { getProfileHandler } from "../profiles";
 
 export type { CompressionResult, Handler } from "./types";
 export { extractText } from "./types";
@@ -19,18 +20,20 @@ export { extractText } from "./types";
  * Returns the appropriate compression handler for a given MCP tool name.
  *
  * Dispatch order:
- *   1. Native Bash tool              → bash handler (CLI-aware, routes on command)
- *   2. Playwright browser_snapshot   → playwright handler
- *   3. GitHub tools                  → github handler
- *   4. Filesystem tools              → filesystem handler
- *   5. Shell/bash/remote-exec        → shell handler
- *   6. Linear tools                  → linear handler
- *   7. Slack tools                   → slack handler
- *   8. Tavily search/research        → tavily handler
- *   9. CSV tools (name-based)        → csv handler
- *  10. Unmatched with JSON output    → json handler
- *  11. CSV content-based fallback    → csv handler
- *  12. Everything else               → generic handler
+ *   1. Native Bash tool                     → bash handler (CLI-aware, routes on command)
+ *   2. User / community profile match       → profile handler (beats TypeScript handlers)
+ *   3. Playwright browser_snapshot          → playwright handler
+ *   4. GitHub tools                         → github handler
+ *   5. Filesystem tools                     → filesystem handler
+ *   6. Shell/bash/remote-exec               → shell handler
+ *   7. Linear tools                         → linear handler
+ *   8. Slack tools                          → slack handler
+ *   9. Tavily search/research               → tavily handler
+ *  10. CSV tools (name-based)               → csv handler
+ *  11. Bundled profile match                → profile handler
+ *  12. Unmatched with JSON output           → json handler
+ *  13. CSV content-based fallback           → csv handler
+ *  14. Everything else                      → generic handler
  *
  * `input` (tool_input) is used for the Bash tool to route on the command string.
  */
@@ -39,6 +42,10 @@ export function getHandler(toolName: string, output: unknown, input?: unknown): 
   if (toolName === "Bash") {
     return getBashHandler(input);
   }
+
+  // User and community profiles beat TypeScript handlers
+  const highPriorityProfile = getProfileHandler(toolName, ["user", "community"]);
+  if (highPriorityProfile) return highPriorityProfile;
 
   if (toolName.includes("playwright") && toolName.includes("snapshot")) {
     return playwrightHandler;
@@ -84,6 +91,10 @@ export function getHandler(toolName: string, output: unknown, input?: unknown): 
   if (toolName.includes("csv")) {
     return csvHandler;
   }
+
+  // Bundled profiles — for tools without a TypeScript handler
+  const bundledProfile = getProfileHandler(toolName, ["bundled"]);
+  if (bundledProfile) return bundledProfile;
 
   // Content-based fallbacks
   const text = extractText(output);
