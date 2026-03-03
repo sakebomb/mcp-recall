@@ -8,17 +8,7 @@ _nothing in progress_
 
 ## Up Next
 
-### #58 — Hot cache / smarter SessionStart (P3)
-
-SessionStart currently injects pinned items + notes. Enhancement: also preload the top-N most-accessed items from the last session into context, reducing cold-start retrieval latency.
-
-Files: `src/hooks/session-start.ts`, `src/db/index.ts`
-
----
-
-### `mcp-recall profiles retrain` (future)
-
-Analyze the stored SQLite corpus for a project to improve extraction rules for existing profiles. Reads `recall_outputs` grouped by `tool_name`, samples stored content, suggests better `items_path` / `fields`.
+_nothing scheduled — see backlog below_
 
 ---
 
