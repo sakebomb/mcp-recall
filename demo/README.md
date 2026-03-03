@@ -14,6 +14,14 @@ Files in this directory:
 | `sample-stats.txt` | Pre-recorded `recall__stats` output for `demo.tape` Scene 3 |
 | `sample-search.txt` | Pre-recorded `recall__search` output for `demo.tape` Scene 4 |
 
+## demo.gif
+
+![mcp-recall demo](demo.gif)
+
+## proof.gif
+
+![mcp-recall proof](proof.gif)
+
 ## Regenerating the GIFs
 
 Requires [vhs](https://github.com/charmbracelet/vhs):
