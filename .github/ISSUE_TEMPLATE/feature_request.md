@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Propose a new handler, tool, or behaviour change
+about: Propose a new tool, behaviour change, or TypeScript handler. For MCP compression profiles, use the Profile request template instead.
 labels: feature, P3: Low
 ---
 

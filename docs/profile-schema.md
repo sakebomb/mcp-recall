@@ -217,3 +217,20 @@ mcp_pattern = "mcp__myservice__*"
 type      = "text_truncate"
 max_chars = 600
 ```
+
+---
+
+## `[retrain]` — optional
+
+Controls how `mcp-recall profiles retrain` analyses this profile. If omitted, the command-line defaults apply.
+
+```toml
+[retrain]
+max_depth = 4  # default: 3 (paths of form a, a.b, a.b.c)
+```
+
+`max_depth` sets the maximum dot-notation depth when scanning stored outputs for frequent field paths. The default of 3 covers the vast majority of APIs. Increase it for MCPs with deeply nested responses (e.g. Jira's `fields.status.statusCategory.name` requires depth 4).
+
+CLI `--depth N` always takes precedence over this value.
+
+→ [retrain guide](retrain.md)

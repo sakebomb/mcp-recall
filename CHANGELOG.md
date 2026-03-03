@@ -4,6 +4,89 @@ All notable changes to mcp-recall are documented here.
 
 ---
 
+## v1.2.0 — 2026-03-03
+
+### Hot cache in `recall__context`
+
+The context snapshot injected at session start now includes a **"Hot from last session"** section: the top accessed items from the previous session, ordered by access count. Items already in pinned, notes, or recent are excluded so nothing appears twice. Helps orient Claude toward the output it retrieved most heavily in the previous session.
+
+### Per-tool breakdown in `recall__stats`
+
+`recall__stats` now includes a **"By tool"** table sorted by original size, showing item count, raw → compressed sizes, and reduction percentage for every tool in the store. Makes it easy to see which MCPs are generating the most context pressure.
+
+### `mcp-recall profiles retrain`
+
+New subcommand: scans stored session data and suggests field paths to add to existing `json_extract` profiles, using frequency analysis across real tool outputs.
+
+```bash
+mcp-recall profiles retrain            # dry-run — print suggestions
+mcp-recall profiles retrain --apply    # append new fields to matching profiles
+mcp-recall profiles retrain --depth 4  # scan deeper (default: 3 levels, a.b.c)
+mcp-recall profiles retrain jira       # limit to tools matching "jira"
+```
+
+Suggestions require ≥3 stored outputs. Fields appearing in ≥50% of outputs are shown with frequency percentages. `--apply` is additive (never removes existing fields) and bumps the patch version automatically.
+
+Per-profile depth override: add `[retrain] max_depth = N` to any profile TOML.
+
+→ [Full retrain guide](docs/retrain.md)
+
+### Community profiles
+
+Three new profiles added to [sakebomb/mcp-recall-profiles](https://github.com/sakebomb/mcp-recall-profiles): **Vercel**, **HubSpot**, **Google Calendar**. Total: 9 profiles.
+
+### Stats
+
+431 tests, 0 failures (+35 new tests).
+
+---
+
+## v1.1.0 — 2026-03-03
+
+### TOML profile system
+
+Declarative TOML profiles extend compression to any MCP — no TypeScript required. Three strategies: `json_extract` (extract specific fields), `json_truncate` (depth-limited rendering), `text_truncate` (character cap). Priority chain: user → community → bundled → TypeScript handlers → generic.
+
+User profiles: `~/.config/mcp-recall/profiles/<id>/default.toml`
+
+### `mcp-recall profiles` CLI
+
+Seven subcommands for managing profiles:
+
+```bash
+mcp-recall profiles list              # show all installed profiles
+mcp-recall profiles seed              # install community profiles for detected MCPs
+mcp-recall profiles install <id>      # install a specific community profile
+mcp-recall profiles update            # update all installed community profiles
+mcp-recall profiles remove <id>       # remove a community profile
+mcp-recall profiles feed profile.toml # contribute a profile to the community
+mcp-recall profiles check             # detect pattern conflicts
+```
+
+### `mcp-recall learn`
+
+Auto-generates TOML profile templates by spawning each MCP server, calling `tools/list`, and inferring field names from tool names and descriptions.
+
+```bash
+mcp-recall learn            # generate profiles for all MCPs in ~/.claude.json
+mcp-recall learn --dry-run  # preview without writing
+mcp-recall learn jira       # generate for a specific server
+```
+
+### Bundled Jira profile
+
+`profiles/mcp__jira/default.toml` ships with mcp-recall — Jira compression works with no install step.
+
+### Community profiles repo
+
+Shared profiles at [sakebomb/mcp-recall-profiles](https://github.com/sakebomb/mcp-recall-profiles). Launch profiles: Jira (bundled), Confluence, Gmail, AWS, GCP, Figma.
+
+### Stats
+
+396 tests, 0 failures (+51 new tests).
+
+---
+
 ## v1.0.0 — 2026-03-02
 
 Initial public release.
