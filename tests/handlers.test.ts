@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { playwrightHandler } from "../src/handlers/playwright";
 import { githubHandler } from "../src/handlers/github";
+import { gitlabHandler } from "../src/handlers/gitlab";
 import { filesystemHandler } from "../src/handlers/filesystem";
 import { shellHandler, stripAnsi, stripSshNoise } from "../src/handlers/shell";
 import { csvHandler, looksLikeCsv } from "../src/handlers/csv";
@@ -11,6 +12,8 @@ import { genericHandler } from "../src/handlers/generic";
 import { getHandler, extractText } from "../src/handlers/index";
 import { getBashHandler, gitDiffHandler, gitLogHandler, terraformPlanHandler } from "../src/handlers/bash";
 import { tavilyHandler } from "../src/handlers/tavily";
+import { databaseHandler } from "../src/handlers/database";
+import { sentryHandler } from "../src/handlers/sentry";
 
 // ---------------------------------------------------------------------------
 // extractText
@@ -1036,5 +1039,280 @@ describe("tavilyHandler", () => {
     expect(getHandler("mcp__tavily__tavily_search", "{}")).toBe(tavilyHandler);
     expect(getHandler("mcp__tavily__tavily_research", "{}")).toBe(tavilyHandler);
     expect(getHandler("mcp__tavily__tavily_extract", "{}")).toBe(tavilyHandler);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// gitlabHandler
+// ---------------------------------------------------------------------------
+
+describe("gitlabHandler", () => {
+  const SINGLE_ISSUE = JSON.stringify({
+    iid: 12,
+    title: "Fix the pipeline",
+    state: "opened",
+    web_url: "https://gitlab.com/org/repo/-/issues/12",
+    labels: ["bug", "P1"],
+    description: "The pipeline fails on merge requests targeting the main branch.",
+  });
+
+  it("summarises a single issue with iid", () => {
+    const { summary } = gitlabHandler("mcp__gitlab__get_issue", SINGLE_ISSUE);
+    expect(summary).toContain("!12");
+    expect(summary).toContain('"Fix the pipeline"');
+    expect(summary).toContain("[opened]");
+  });
+
+  it("includes web_url", () => {
+    const { summary } = gitlabHandler("mcp__gitlab__get_issue", SINGLE_ISSUE);
+    expect(summary).toContain("https://gitlab.com/org/repo/-/issues/12");
+  });
+
+  it("includes labels as plain strings", () => {
+    const { summary } = gitlabHandler("mcp__gitlab__get_issue", SINGLE_ISSUE);
+    expect(summary).toContain("bug");
+    expect(summary).toContain("P1");
+  });
+
+  it("includes description excerpt", () => {
+    const { summary } = gitlabHandler("mcp__gitlab__get_issue", SINGLE_ISSUE);
+    expect(summary).toContain("pipeline fails on merge requests");
+  });
+
+  it("truncates long descriptions with ellipsis", () => {
+    const item = JSON.stringify({ iid: 1, title: "T", state: "opened", description: "x".repeat(300) });
+    const { summary } = gitlabHandler("mcp__gitlab__get_issue", item);
+    expect(summary).toContain("…");
+  });
+
+  it("summarises an array of items", () => {
+    const arr = JSON.stringify([
+      { iid: 1, title: "First MR", state: "merged" },
+      { iid: 2, title: "Second MR", state: "opened" },
+    ]);
+    const { summary } = gitlabHandler("mcp__gitlab__list_merge_requests", arr);
+    expect(summary).toContain("!1");
+    expect(summary).toContain("!2");
+  });
+
+  it("truncates arrays longer than 10 items", () => {
+    const items = Array.from({ length: 15 }, (_, i) => ({ iid: i + 1, title: `Item ${i + 1}`, state: "opened" }));
+    const { summary } = gitlabHandler("mcp__gitlab__list_issues", JSON.stringify(items));
+    expect(summary).toContain("5 more");
+  });
+
+  it("falls back gracefully for non-JSON text", () => {
+    const { summary } = gitlabHandler("mcp__gitlab__get_file", "plain text response");
+    expect(summary).toContain("plain text response");
+  });
+
+  it("reports originalSize in bytes", () => {
+    const { originalSize } = gitlabHandler("mcp__gitlab__get_issue", SINGLE_ISSUE);
+    expect(originalSize).toBe(Buffer.byteLength(SINGLE_ISSUE, "utf8"));
+  });
+
+  it("routes gitlab tools to gitlab handler", () => {
+    expect(getHandler("mcp__gitlab__list_issues", "{}")).toBe(gitlabHandler);
+    expect(getHandler("mcp__gitlab__get_merge_request", "{}")).toBe(gitlabHandler);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// databaseHandler
+// ---------------------------------------------------------------------------
+
+describe("databaseHandler", () => {
+  const NODE_PG = JSON.stringify({
+    rows: [
+      { id: 1, name: "Alice", email: "alice@example.com" },
+      { id: 2, name: "Bob", email: "bob@example.com" },
+    ],
+    fields: [{ name: "id" }, { name: "name" }, { name: "email" }],
+    rowCount: 2,
+  });
+
+  const BARE_ARRAY = JSON.stringify([
+    { id: 1, status: "active", amount: 100 },
+    { id: 2, status: "closed", amount: 200 },
+    { id: 3, status: "active", amount: 300 },
+  ]);
+
+  const RESULTS_WRAPPER = JSON.stringify({
+    results: [
+      { user_id: 10, score: 99 },
+      { user_id: 11, score: 88 },
+    ],
+  });
+
+  it("handles node-postgres shape with fields array", () => {
+    const { summary } = databaseHandler("mcp__postgres__query", NODE_PG);
+    expect(summary).toContain("2 rows");
+    expect(summary).toContain("3 cols");
+    expect(summary).toContain("id");
+    expect(summary).toContain("Alice");
+  });
+
+  it("handles bare array of row objects", () => {
+    const { summary } = databaseHandler("mcp__postgres__query", BARE_ARRAY);
+    expect(summary).toContain("3 rows");
+    expect(summary).toContain("status");
+    expect(summary).toContain("active");
+  });
+
+  it("handles results wrapper shape", () => {
+    const { summary } = databaseHandler("mcp__mysql__execute", RESULTS_WRAPPER);
+    expect(summary).toContain("2 rows");
+    expect(summary).toContain("user_id");
+    expect(summary).toContain("99");
+  });
+
+  it("includes column names header", () => {
+    const { summary } = databaseHandler("mcp__postgres__query", NODE_PG);
+    expect(summary).toContain("headers:");
+    expect(summary).toContain("name");
+    expect(summary).toContain("email");
+  });
+
+  it("returns empty result set message for zero rows", () => {
+    const empty = JSON.stringify({ rows: [], fields: [{ name: "id" }] });
+    const { summary } = databaseHandler("mcp__postgres__query", empty);
+    expect(summary).toContain("0 rows");
+    expect(summary).toContain("empty result set");
+  });
+
+  it("caps preview at 10 rows with overflow count", () => {
+    const rows = Array.from({ length: 15 }, (_, i) => ({ id: i + 1, val: `v${i}` }));
+    const input = JSON.stringify({ rows, fields: [{ name: "id" }, { name: "val" }] });
+    const { summary } = databaseHandler("mcp__postgres__query", input);
+    expect(summary).toContain("5 more rows");
+  });
+
+  it("falls back gracefully for non-JSON text", () => {
+    const { summary } = databaseHandler("mcp__postgres__query", "ERROR: relation not found");
+    expect(summary).toContain("ERROR: relation not found");
+  });
+
+  it("reports originalSize in bytes", () => {
+    const { originalSize } = databaseHandler("mcp__postgres__query", NODE_PG);
+    expect(originalSize).toBe(Buffer.byteLength(NODE_PG, "utf8"));
+  });
+
+  it("routes postgres tools to database handler", () => {
+    expect(getHandler("mcp__postgres__query", "{}")).toBe(databaseHandler);
+    expect(getHandler("mcp__postgres-fitgait__query", "{}")).toBe(databaseHandler);
+  });
+
+  it("routes mysql tools to database handler", () => {
+    expect(getHandler("mcp__mysql__execute", "{}")).toBe(databaseHandler);
+  });
+
+  it("routes sqlite tools to database handler", () => {
+    expect(getHandler("mcp__sqlite__run_query", "{}")).toBe(databaseHandler);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sentryHandler
+// ---------------------------------------------------------------------------
+
+const SENTRY_EVENT = JSON.stringify({
+  event_id: "abc123def456",
+  level: "error",
+  environment: "production",
+  release: "app@2.1.0",
+  exception: {
+    values: [
+      {
+        type: "TypeError",
+        value: "Cannot read properties of undefined (reading 'id')",
+        stacktrace: {
+          frames: [
+            { filename: "node_modules/express/lib/router.js", function: "next", lineno: 136 },
+            { filename: "src/middleware/auth.ts", function: "verifyToken", lineno: 42 },
+            { filename: "src/routes/users.ts", function: "getUser", lineno: 88 },
+            { filename: "src/controllers/user.ts", function: "fetchById", lineno: 23 },
+          ],
+        },
+      },
+    ],
+  },
+  breadcrumbs: { values: Array.from({ length: 100 }, (_, i) => ({ message: `breadcrumb ${i}` })) },
+  sdk: { name: "sentry.javascript.node", version: "7.0.0", packages: [] },
+  request: { headers: { "x-forwarded-for": "1.2.3.4", authorization: "Bearer token123" } },
+});
+
+describe("sentryHandler", () => {
+  it("includes exception type and value", () => {
+    const { summary } = sentryHandler("mcp__sentry__get_issue", SENTRY_EVENT);
+    expect(summary).toContain("TypeError");
+    expect(summary).toContain("Cannot read properties of undefined");
+  });
+
+  it("includes level, environment, and release", () => {
+    const { summary } = sentryHandler("mcp__sentry__get_issue", SENTRY_EVENT);
+    expect(summary).toContain("[error]");
+    expect(summary).toContain("env:production");
+    expect(summary).toContain("release:app@2.1.0");
+  });
+
+  it("includes abbreviated event_id", () => {
+    const { summary } = sentryHandler("mcp__sentry__get_issue", SENTRY_EVENT);
+    expect(summary).toContain("id:abc123de");
+  });
+
+  it("includes stack frame filenames and line numbers", () => {
+    const { summary } = sentryHandler("mcp__sentry__get_issue", SENTRY_EVENT);
+    expect(summary).toContain("src/routes/users.ts");
+    expect(summary).toContain(":88");
+    expect(summary).toContain("getUser");
+  });
+
+  it("drops breadcrumbs and SDK info — summary is much smaller than original", () => {
+    const { summary, originalSize } = sentryHandler("mcp__sentry__get_issue", SENTRY_EVENT);
+    expect(Buffer.byteLength(summary, "utf8")).toBeLessThan(originalSize * 0.2);
+  });
+
+  it("caps stack frames at MAX_FRAMES showing last (innermost) frames", () => {
+    const manyFrames = Array.from({ length: 20 }, (_, i) => ({
+      filename: `src/file${i}.ts`,
+      function: `fn${i}`,
+      lineno: i * 10,
+    }));
+    const input = JSON.stringify({
+      level: "error",
+      exception: {
+        values: [{ type: "Error", value: "boom", stacktrace: { frames: manyFrames } }],
+      },
+    });
+    const { summary } = sentryHandler("mcp__sentry__get_issue", input);
+    // Should show last 8 frames (indices 12-19)
+    expect(summary).toContain("src/file19.ts");
+    expect(summary).toContain("src/file12.ts");
+    expect(summary).not.toContain("src/file11.ts");
+  });
+
+  it("handles array of events", () => {
+    const arr = JSON.stringify([
+      { level: "error", exception: { values: [{ type: "TypeError", value: "msg 1", stacktrace: { frames: [] } }] } },
+      { level: "warning", exception: { values: [{ type: "RangeError", value: "msg 2", stacktrace: { frames: [] } }] } },
+    ]);
+    const { summary } = sentryHandler("mcp__sentry__list_issues", arr);
+    expect(summary).toContain("TypeError");
+    expect(summary).toContain("RangeError");
+  });
+
+  it("falls back gracefully for non-JSON text", () => {
+    const { summary } = sentryHandler("mcp__sentry__get_issue", "plain error text");
+    expect(summary).toContain("plain error text");
+  });
+
+  it("reports originalSize in bytes", () => {
+    const { originalSize } = sentryHandler("mcp__sentry__get_issue", SENTRY_EVENT);
+    expect(originalSize).toBe(Buffer.byteLength(SENTRY_EVENT, "utf8"));
+  });
+
+  it("routes sentry tools to sentry handler", () => {
+    expect(getHandler("mcp__sentry__get_issue", "{}")).toBe(sentryHandler);
+    expect(getHandler("mcp__sentry__list_issues", "{}")).toBe(sentryHandler);
   });
 });

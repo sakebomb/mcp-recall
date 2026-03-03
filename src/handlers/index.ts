@@ -1,12 +1,15 @@
 import type { Handler } from "./types";
 import { playwrightHandler } from "./playwright";
 import { githubHandler } from "./github";
+import { gitlabHandler } from "./gitlab";
 import { filesystemHandler } from "./filesystem";
 import { shellHandler } from "./shell";
 import { getBashHandler } from "./bash";
 import { linearHandler } from "./linear";
 import { slackHandler } from "./slack";
 import { tavilyHandler } from "./tavily";
+import { databaseHandler } from "./database";
+import { sentryHandler } from "./sentry";
 import { csvHandler, looksLikeCsv } from "./csv";
 import { jsonHandler } from "./json";
 import { genericHandler } from "./generic";
@@ -24,16 +27,19 @@ export { extractText } from "./types";
  *   2. User / community profile match       → profile handler (beats TypeScript handlers)
  *   3. Playwright browser_snapshot          → playwright handler
  *   4. GitHub tools                         → github handler
- *   5. Filesystem tools                     → filesystem handler
- *   6. Shell/bash/remote-exec               → shell handler
- *   7. Linear tools                         → linear handler
- *   8. Slack tools                          → slack handler
- *   9. Tavily search/research               → tavily handler
- *  10. CSV tools (name-based)               → csv handler
- *  11. Bundled profile match                → profile handler
- *  12. Unmatched with JSON output           → json handler
- *  13. CSV content-based fallback           → csv handler
- *  14. Everything else                      → generic handler
+ *   5. GitLab tools                         → gitlab handler
+ *   6. Filesystem tools                     → filesystem handler
+ *   7. Shell/bash/remote-exec               → shell handler
+ *   8. Linear tools                         → linear handler
+ *   9. Slack tools                          → slack handler
+ *  10. Tavily search/research               → tavily handler
+ *  11. Database query tools                 → database handler
+ *  12. Sentry tools                         → sentry handler
+ *  13. CSV tools (name-based)               → csv handler
+ *  14. Bundled profile match                → profile handler
+ *  15. Unmatched with JSON output           → json handler
+ *  16. CSV content-based fallback           → csv handler
+ *  17. Everything else                      → generic handler
  *
  * `input` (tool_input) is used for the Bash tool to route on the command string.
  */
@@ -53,6 +59,10 @@ export function getHandler(toolName: string, output: unknown, input?: unknown): 
 
   if (toolName.startsWith("mcp__github__")) {
     return githubHandler;
+  }
+
+  if (toolName.startsWith("mcp__gitlab__")) {
+    return gitlabHandler;
   }
 
   if (
@@ -86,6 +96,19 @@ export function getHandler(toolName: string, output: unknown, input?: unknown): 
 
   if (toolName.includes("tavily")) {
     return tavilyHandler;
+  }
+
+  if (
+    toolName.includes("postgres") ||
+    toolName.includes("mysql") ||
+    toolName.includes("sqlite") ||
+    toolName.includes("database")
+  ) {
+    return databaseHandler;
+  }
+
+  if (toolName.includes("sentry")) {
+    return sentryHandler;
   }
 
   if (toolName.includes("csv")) {

@@ -5682,6 +5682,63 @@ var githubHandler = (_toolName, output) => {
   return { summary: String(parsed), originalSize };
 };
 
+// src/handlers/gitlab.ts
+var DESCRIPTION_EXCERPT_CHARS = 200;
+function summariseItem2(item) {
+  const parts = [];
+  if (typeof item["iid"] === "number")
+    parts.push(`!${item["iid"]}`);
+  else if (typeof item["id"] === "number" && !item["iid"])
+    parts.push(`#${item["id"]}`);
+  if (typeof item["title"] === "string")
+    parts.push(`"${item["title"]}"`);
+  if (typeof item["state"] === "string")
+    parts.push(`[${item["state"]}]`);
+  if (typeof item["name"] === "string" && !item["title"])
+    parts.push(item["name"]);
+  if (typeof item["web_url"] === "string")
+    parts.push(item["web_url"]);
+  const labels = item["labels"];
+  if (Array.isArray(labels) && labels.length > 0) {
+    const names = labels.map((l) => String(l)).join(", ");
+    parts.push(`labels: ${names}`);
+  }
+  const body = item["description"] ?? item["body"];
+  if (typeof body === "string" && body.length > 0) {
+    const excerpt = body.slice(0, DESCRIPTION_EXCERPT_CHARS).trimEnd();
+    const truncated = body.length > DESCRIPTION_EXCERPT_CHARS ? "\u2026" : "";
+    parts.push(`description: ${excerpt}${truncated}`);
+  }
+  return parts.join(" \xB7 ");
+}
+var gitlabHandler = (_toolName, output) => {
+  const raw = extractText(output);
+  const originalSize = Buffer.byteLength(raw, "utf8");
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    const excerpt = raw.slice(0, 500).trimEnd();
+    return {
+      summary: excerpt.length < raw.length ? `${excerpt}
+\u2026` : excerpt,
+      originalSize
+    };
+  }
+  if (Array.isArray(parsed)) {
+    const items = parsed;
+    const lines = items.slice(0, 10).map((item) => typeof item === "object" && item !== null ? summariseItem2(item) : String(item));
+    const more = items.length > 10 ? `
+\u2026and ${items.length - 10} more` : "";
+    return { summary: lines.join(`
+`) + more, originalSize };
+  }
+  if (typeof parsed === "object" && parsed !== null) {
+    return { summary: summariseItem2(parsed), originalSize };
+  }
+  return { summary: String(parsed), originalSize };
+};
+
 // src/handlers/filesystem.ts
 var HEAD_LINES = 50;
 var filesystemHandler = (_toolName, output) => {
@@ -6223,8 +6280,154 @@ var tavilyHandler = (_toolName, output) => {
 `), originalSize };
 };
 
+// src/handlers/database.ts
+var MAX_PREVIEW_ROWS = 10;
+var MAX_COLS_DISPLAY = 8;
+function formatRow(index, row, cols) {
+  const pairs = cols.slice(0, MAX_COLS_DISPLAY).map((col) => {
+    const val = row[col];
+    const str = val === null || val === undefined ? "NULL" : String(val);
+    return `${col}=${str.length > 50 ? str.slice(0, 50) + "\u2026" : str}`;
+  }).join(", ");
+  const overflow = cols.length > MAX_COLS_DISPLAY ? ` [+${cols.length - MAX_COLS_DISPLAY} cols]` : "";
+  return `  row ${index + 1}: ${pairs}${overflow}`;
+}
+function extractRows(parsed) {
+  if (typeof parsed === "object" && parsed !== null && Array.isArray(parsed["rows"])) {
+    const obj = parsed;
+    const rows = obj["rows"].filter((r) => typeof r === "object" && r !== null);
+    const fields = obj["fields"];
+    let cols;
+    if (Array.isArray(fields) && fields.length > 0) {
+      cols = fields.map((f) => typeof f === "object" && f !== null && typeof f["name"] === "string" ? String(f["name"]) : "").filter(Boolean);
+    } else {
+      cols = rows.length > 0 ? Object.keys(rows[0]) : [];
+    }
+    return { rows, cols };
+  }
+  if (typeof parsed === "object" && parsed !== null && Array.isArray(parsed["results"])) {
+    const rows = parsed["results"].filter((r) => typeof r === "object" && r !== null);
+    const cols = rows.length > 0 ? Object.keys(rows[0]) : [];
+    return { rows, cols };
+  }
+  if (Array.isArray(parsed)) {
+    const rows = parsed.filter((r) => typeof r === "object" && r !== null);
+    const cols = rows.length > 0 ? Object.keys(rows[0]) : [];
+    return { rows, cols };
+  }
+  return null;
+}
+var databaseHandler = (_toolName, output) => {
+  const raw = extractText(output);
+  const originalSize = Buffer.byteLength(raw, "utf8");
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    const excerpt = raw.slice(0, 500).trimEnd();
+    return {
+      summary: excerpt.length < raw.length ? `${excerpt}
+\u2026` : excerpt,
+      originalSize
+    };
+  }
+  const extracted = extractRows(parsed);
+  if (!extracted) {
+    const excerpt = raw.slice(0, 500).trimEnd();
+    return {
+      summary: excerpt.length < raw.length ? `${excerpt}
+\u2026` : excerpt,
+      originalSize
+    };
+  }
+  const { rows, cols } = extracted;
+  if (rows.length === 0) {
+    return { summary: `[0 rows \xD7 ${cols.length} cols]
+(empty result set)`, originalSize };
+  }
+  const colHeader = `headers: ${cols.slice(0, MAX_COLS_DISPLAY).join(", ")}` + (cols.length > MAX_COLS_DISPLAY ? ` [+${cols.length - MAX_COLS_DISPLAY} more]` : "");
+  const previewRows = rows.slice(0, MAX_PREVIEW_ROWS).map((row, i) => formatRow(i, row, cols));
+  const more = rows.length > MAX_PREVIEW_ROWS ? `
+[\u2026${rows.length - MAX_PREVIEW_ROWS} more rows]` : "";
+  const summary = [
+    `[${rows.length} rows \xD7 ${cols.length} cols]`,
+    colHeader,
+    ...previewRows
+  ].join(`
+`) + more;
+  return { summary, originalSize };
+};
+
+// src/handlers/sentry.ts
+var MAX_FRAMES = 8;
+function formatFrame(frame) {
+  const location = [frame.filename, frame.lineno ? `:${frame.lineno}` : ""].join("");
+  const fn = frame.function ?? "<anonymous>";
+  return `  ${location} in ${fn}`;
+}
+function summariseSentryEvent(event) {
+  const parts = [];
+  const exceptionObj = event["exception"];
+  const values = exceptionObj?.["values"];
+  const firstException = values?.[0];
+  if (firstException) {
+    const type = firstException.type ?? "Error";
+    const msg = firstException.value ?? "(no message)";
+    parts.push(`${type}: ${msg}`);
+  }
+  const meta = [];
+  if (typeof event["level"] === "string")
+    meta.push(`[${event["level"]}]`);
+  if (typeof event["environment"] === "string")
+    meta.push(`env:${event["environment"]}`);
+  if (typeof event["release"] === "string")
+    meta.push(`release:${event["release"]}`);
+  if (typeof event["event_id"] === "string")
+    meta.push(`id:${event["event_id"].slice(0, 8)}`);
+  if (meta.length > 0)
+    parts.push(meta.join(" "));
+  const frames = firstException?.stacktrace?.frames;
+  if (frames && frames.length > 0) {
+    const relevant = frames.slice(-MAX_FRAMES);
+    const skipped = frames.length - relevant.length;
+    const header = skipped > 0 ? `Stack (last ${relevant.length} of ${frames.length} frames):` : `Stack (${frames.length} frame${frames.length === 1 ? "" : "s"}):`;
+    parts.push(header);
+    parts.push(...relevant.map(formatFrame));
+  }
+  return parts.join(`
+`);
+}
+var sentryHandler = (_toolName, output) => {
+  const raw = extractText(output);
+  const originalSize = Buffer.byteLength(raw, "utf8");
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    const excerpt = raw.slice(0, 500).trimEnd();
+    return {
+      summary: excerpt.length < raw.length ? `${excerpt}
+\u2026` : excerpt,
+      originalSize
+    };
+  }
+  if (Array.isArray(parsed)) {
+    const events = parsed;
+    const lines = events.slice(0, 5).map((e) => typeof e === "object" && e !== null ? summariseSentryEvent(e) : String(e));
+    const more = events.length > 5 ? `
+\u2026and ${events.length - 5} more` : "";
+    return { summary: lines.join(`
+---
+`) + more, originalSize };
+  }
+  if (typeof parsed === "object" && parsed !== null) {
+    return { summary: summariseSentryEvent(parsed), originalSize };
+  }
+  return { summary: String(parsed), originalSize };
+};
+
 // src/handlers/csv.ts
-var MAX_PREVIEW_ROWS = 5;
+var MAX_PREVIEW_ROWS2 = 5;
 function splitCsvRow(row) {
   const fields = [];
   let current = "";
@@ -6253,14 +6456,14 @@ var csvHandler = (_toolName, output) => {
   const headerCols = splitCsvRow(lines[0]);
   const dataRows = lines.slice(1);
   const totalRows = dataRows.length;
-  const previewLines = dataRows.slice(0, MAX_PREVIEW_ROWS).map((line, i) => {
+  const previewLines = dataRows.slice(0, MAX_PREVIEW_ROWS2).map((line, i) => {
     const vals = splitCsvRow(line);
     const pairs = headerCols.slice(0, 5).map((col, ci) => `${col}=${vals[ci] ?? ""}`).join(", ");
     const overflow = headerCols.length > 5 ? ` [+${headerCols.length - 5} cols]` : "";
     return `  row ${i + 1}: ${pairs}${overflow}`;
   });
-  const more = totalRows > MAX_PREVIEW_ROWS ? `
-[\u2026${totalRows - MAX_PREVIEW_ROWS} more rows]` : "";
+  const more = totalRows > MAX_PREVIEW_ROWS2 ? `
+[\u2026${totalRows - MAX_PREVIEW_ROWS2} more rows]` : "";
   const summary = [
     `[${totalRows} rows \xD7 ${headerCols.length} cols]`,
     `headers: ${headerCols.slice(0, 10).join(", ")}${headerCols.length > 10 ? ` [+${headerCols.length - 10} more]` : ""}`,
@@ -6642,6 +6845,9 @@ function getHandler(toolName, output, input) {
   if (toolName.startsWith("mcp__github__")) {
     return githubHandler;
   }
+  if (toolName.startsWith("mcp__gitlab__")) {
+    return gitlabHandler;
+  }
   if (toolName.startsWith("mcp__filesystem__") || toolName.includes("read_file") || toolName.includes("get_file")) {
     return filesystemHandler;
   }
@@ -6656,6 +6862,12 @@ function getHandler(toolName, output, input) {
   }
   if (toolName.includes("tavily")) {
     return tavilyHandler;
+  }
+  if (toolName.includes("postgres") || toolName.includes("mysql") || toolName.includes("sqlite") || toolName.includes("database")) {
+    return databaseHandler;
+  }
+  if (toolName.includes("sentry")) {
+    return sentryHandler;
   }
   if (toolName.includes("csv")) {
     return csvHandler;
