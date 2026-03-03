@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { getDb, closeDb, storeOutput, type StoreInput } from "../src/db/index";
+import { getDb, storeOutput, type StoreInput } from "../src/db/index";
 import {
   detectItemsPath,
   collectFieldPaths,
@@ -217,7 +217,6 @@ describe("retrainProfile", () => {
   });
 
   afterEach(() => {
-    closeDb(db);
     delete process.env.RECALL_DB_PATH;
   });
 
