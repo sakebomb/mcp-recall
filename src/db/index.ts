@@ -561,6 +561,24 @@ export function getToolBreakdown(db: Database, project_key: string): ToolBreakdo
   `).all(project_key) as ToolBreakdownRow[];
 }
 
+/**
+ * Returns the most recent `limit` stored outputs for an exact tool_name match.
+ * Used by `mcp-recall profiles retrain` to sample real output corpus.
+ */
+export function sampleOutputs(
+  db: Database,
+  project_key: string,
+  tool_name: string,
+  limit: number
+): StoredOutput[] {
+  return db.prepare(`
+    SELECT * FROM stored_outputs
+    WHERE project_key = ? AND tool_name = ?
+    ORDER BY created_at DESC
+    LIMIT ?
+  `).all(project_key, tool_name, limit) as StoredOutput[];
+}
+
 /** Options for {@link getSuggestions}. */
 export interface SuggestionsOptions {
   /** Access-count threshold above which a non-pinned item is a pin candidate (default 5). */

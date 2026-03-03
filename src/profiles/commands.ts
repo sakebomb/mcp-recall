@@ -16,6 +16,7 @@ import { homedir } from "os";
 import { parse } from "smol-toml";
 import { loadProfiles, clearProfileCache } from "./loader";
 import type { LoadedProfile } from "./types";
+import { handleRetrainCommand } from "../learn/retrain";
 
 const MANIFEST_URL =
   "https://raw.githubusercontent.com/sakebomb/mcp-recall-profiles/main/manifest.json";
@@ -448,6 +449,9 @@ export async function handleProfilesCommand(args: string[]): Promise<void> {
     case "check":
       cmdCheck();
       break;
+    case "retrain":
+      await handleRetrainCommand(rest);
+      break;
     default:
       console.error(`Unknown subcommand: ${cmd ?? "(none)"}\n`);
       console.error("Usage: mcp-recall profiles <command>\n");
@@ -459,6 +463,7 @@ export async function handleProfilesCommand(args: string[]): Promise<void> {
       console.error("  seed              Install profiles for all detected MCPs");
       console.error("  feed [path]       Contribute a local profile to the community");
       console.error("  check             Detect pattern conflicts");
+      console.error("  retrain [--apply] [--depth N] [filter]  Suggest profile improvements from stored corpus");
       process.exit(1);
   }
 }

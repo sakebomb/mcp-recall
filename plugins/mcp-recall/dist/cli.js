@@ -5211,6 +5211,27 @@ function countAndDelete(db, where, params) {
   }
   return count;
 }
+function getToolBreakdown(db, project_key) {
+  return db.prepare(`
+    SELECT
+      tool_name,
+      COUNT(*)                       AS items,
+      COALESCE(SUM(original_size),0) AS original_bytes,
+      COALESCE(SUM(summary_size),0)  AS summary_bytes
+    FROM stored_outputs
+    WHERE project_key = ?
+    GROUP BY tool_name
+    ORDER BY original_bytes DESC
+  `).all(project_key);
+}
+function sampleOutputs(db, project_key, tool_name, limit) {
+  return db.prepare(`
+    SELECT * FROM stored_outputs
+    WHERE project_key = ? AND tool_name = ?
+    ORDER BY created_at DESC
+    LIMIT ?
+  `).all(project_key, tool_name, limit);
+}
 function getContext(db, project_key, opts = {}) {
   const days = opts.days ?? 7;
   const limit = opts.limit ?? 5;
@@ -6714,9 +6735,282 @@ ${summary}`,
 }
 
 // src/profiles/commands.ts
-import { readFileSync as readFileSync3, writeFileSync, mkdirSync as mkdirSync2, readdirSync as readdirSync2, statSync as statSync2, rmSync } from "fs";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync2, statSync as statSync2, rmSync } from "fs";
 import { join as join4 } from "path";
 import { homedir as homedir4 } from "os";
+
+// src/learn/retrain.ts
+import { readFileSync as readFileSync3, writeFileSync } from "fs";
+var MIN_SAMPLES = 3;
+var MAX_SAMPLES = 5;
+var DEFAULT_DEPTH = 3;
+var MIN_FIELD_PCT = 0.5;
+var ALL_TIERS = ["user", "community", "bundled"];
+function detectItemsPath(parsed) {
+  if (Array.isArray(parsed))
+    return { path: "", items: parsed };
+  if (parsed === null || typeof parsed !== "object")
+    return null;
+  const obj = parsed;
+  let best = null;
+  for (const [key, val] of Object.entries(obj)) {
+    if (Array.isArray(val) && val.length > (best?.score ?? 0)) {
+      best = { path: key, items: val, score: val.length };
+    }
+    if (val !== null && typeof val === "object" && !Array.isArray(val)) {
+      for (const [key2, val2] of Object.entries(val)) {
+        if (Array.isArray(val2) && val2.length > (best?.score ?? 0)) {
+          best = { path: `${key}.${key2}`, items: val2, score: val2.length };
+        }
+      }
+    }
+  }
+  return best ? { path: best.path, items: best.items } : null;
+}
+function traverseObject(obj, prefix, depth, maxDepth, paths) {
+  if (depth >= maxDepth)
+    return;
+  for (const [key, val] of Object.entries(obj)) {
+    if (val === null || val === undefined)
+      continue;
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (typeof val === "string" || typeof val === "number" || typeof val === "boolean") {
+      if (val !== "")
+        paths.add(path);
+    } else if (typeof val === "object" && !Array.isArray(val)) {
+      traverseObject(val, path, depth + 1, maxDepth, paths);
+    }
+  }
+}
+function collectFieldPaths(items, maxDepth) {
+  const counts = new Map;
+  for (const item of items) {
+    if (item === null || typeof item !== "object" || Array.isArray(item))
+      continue;
+    const paths = new Set;
+    traverseObject(item, "", 0, maxDepth, paths);
+    for (const p of paths)
+      counts.set(p, (counts.get(p) ?? 0) + 1);
+  }
+  return counts;
+}
+function scoreFields(pathMap, totalItems) {
+  if (totalItems === 0)
+    return [];
+  return Array.from(pathMap.entries()).map(([path, count]) => ({ path, pct: count / totalItems })).filter(({ pct }) => pct >= MIN_FIELD_PCT).sort((a, b) => b.pct - a.pct);
+}
+function bumpPatch(version) {
+  const parts = version.split(".").map(Number);
+  if (parts.length !== 3 || parts.some(isNaN))
+    return version;
+  return `${parts[0]}.${parts[1]}.${parts[2] + 1}`;
+}
+function applyRetrainToToml(tomlContent, newFields, date) {
+  let result = tomlContent;
+  const firstContentIdx = result.search(/^[^\s#]/m);
+  const retrainLine = `# Retrained: ${date}
+`;
+  if (firstContentIdx <= 0) {
+    result = retrainLine + result;
+  } else {
+    result = result.slice(0, firstContentIdx) + retrainLine + result.slice(firstContentIdx);
+  }
+  if (newFields.length > 0) {
+    const openMatch = result.match(/^(\s*fields\s*=\s*\[)/m);
+    if (openMatch?.index !== undefined) {
+      const afterOpen = openMatch.index + openMatch[0].length;
+      const closeIdx = result.indexOf("]", afterOpen);
+      if (closeIdx !== -1) {
+        const block = result.slice(afterOpen, closeIdx);
+        const indentMatch = block.match(/^(\s+)/m);
+        const indent = indentMatch ? indentMatch[1] : "  ";
+        const newLines = newFields.map((f) => `${indent}"${f}",`).join(`
+`);
+        result = result.slice(0, closeIdx) + newLines + `
+` + result.slice(closeIdx);
+      }
+    }
+  }
+  result = result.replace(/^(\s*version\s*=\s*")([^"]+)(")/m, (_, before, ver, after) => `${before}${bumpPatch(ver)}${after}`);
+  return result;
+}
+function retrainProfile(samples, profile, maxDepth) {
+  const base = {
+    toolName: samples[0]?.tool_name ?? "",
+    profileId: profile.spec.profile.id,
+    profileTier: profile.tier,
+    profileFilePath: profile.filePath,
+    strategyType: profile.spec.strategy.type,
+    sampleCount: samples.length,
+    currentItemsPath: profile.spec.strategy.items_path ?? []
+  };
+  if (profile.spec.strategy.type !== "json_extract") {
+    return { ...base, fields: [], newFields: [], detectedItemsPath: null, itemCount: 0 };
+  }
+  const currentFields = new Set(profile.spec.strategy.fields ?? []);
+  const allItems = [];
+  let detectedPath = null;
+  let detectedPathCount = 0;
+  for (const sample of samples) {
+    let parsed;
+    try {
+      parsed = JSON.parse(sample.full_content);
+    } catch {
+      continue;
+    }
+    const detected = detectItemsPath(parsed);
+    if (detected) {
+      allItems.push(...detected.items);
+      if (detected.path === (detectedPath ?? detected.path)) {
+        detectedPathCount++;
+        detectedPath = detected.path;
+      }
+    }
+  }
+  if (allItems.length === 0) {
+    return {
+      ...base,
+      fields: [],
+      newFields: [],
+      detectedItemsPath: detectedPath,
+      itemCount: 0,
+      error: "no parseable JSON items found in samples"
+    };
+  }
+  const pathMap = collectFieldPaths(allItems, maxDepth);
+  const scored = scoreFields(pathMap, allItems.length);
+  const fields = scored.map(({ path, pct }) => ({
+    path,
+    pct,
+    inProfile: currentFields.has(path)
+  }));
+  const newFields = fields.filter((f) => !f.inProfile).map((f) => f.path);
+  return {
+    ...base,
+    detectedItemsPath: detectedPathCount >= Math.ceil(samples.length / 2) ? detectedPath : null,
+    itemCount: allItems.length,
+    fields,
+    newFields
+  };
+}
+function printResult(result, apply) {
+  const header = `${result.toolName} (${result.sampleCount} sample${result.sampleCount === 1 ? "" : "s"} \xB7 ${result.itemCount} item${result.itemCount === 1 ? "" : "s"}):`;
+  console.log(`
+${header}`);
+  if (result.error) {
+    console.log(`  \u26A0 ${result.error}`);
+    return;
+  }
+  if (result.strategyType !== "json_extract") {
+    console.log(`  Strategy is ${result.strategyType} \u2014 field extraction not applicable.`);
+    console.log(`  Tip: if this tool returns structured lists, consider switching to json_extract.`);
+    return;
+  }
+  if (result.detectedItemsPath !== null) {
+    const inProfile = result.currentItemsPath.includes(result.detectedItemsPath);
+    const status = inProfile ? "\u2713 matches profile" : "\u26A0 not in current profile items_path";
+    console.log(`  items_path: "${result.detectedItemsPath}"  ${status}`);
+  }
+  if (result.fields.length === 0) {
+    console.log(`  No fields found at \u226550% frequency.`);
+    return;
+  }
+  console.log(`  Fields (\u226550% frequency):`);
+  const colW = Math.min(45, Math.max(...result.fields.map((f) => f.path.length)) + 2);
+  for (const f of result.fields) {
+    const pctStr = `${(f.pct * 100).toFixed(0)}%`.padStart(4);
+    const tag = f.inProfile ? "in profile" : "NEW";
+    console.log(`    ${`"${f.path}"`.padEnd(colW)}  ${pctStr}  ${tag}`);
+  }
+  if (result.newFields.length === 0) {
+    console.log(`  \u2713 Profile is up to date.`);
+  } else if (!apply) {
+    console.log(`  ${result.newFields.length} new field(s) found. Run with --apply to update.`);
+  }
+}
+function applyResult(result, date) {
+  if (result.newFields.length === 0)
+    return;
+  let toml;
+  try {
+    toml = readFileSync3(result.profileFilePath, "utf8");
+  } catch (e) {
+    console.log(`  \u2717 Could not read ${result.profileFilePath}: ${e instanceof Error ? e.message : String(e)}`);
+    return;
+  }
+  const oldVersion = toml.match(/version\s*=\s*"([^"]+)"/)?.[1] ?? "?";
+  const updated = applyRetrainToToml(toml, result.newFields, date);
+  const newVersion = updated.match(/version\s*=\s*"([^"]+)"/)?.[1] ?? "?";
+  writeFileSync(result.profileFilePath, updated);
+  console.log(`  \u2713 Updated: ${result.profileFilePath} (${oldVersion} \u2192 ${newVersion})`);
+}
+async function handleRetrainCommand(args) {
+  const apply = args.includes("--apply");
+  let cliDepth = null;
+  for (let i = 0;i < args.length; i++) {
+    if (args[i] === "--depth" && args[i + 1]) {
+      cliDepth = parseInt(args[i + 1]);
+      break;
+    }
+    if (args[i]?.startsWith("--depth=")) {
+      cliDepth = parseInt(args[i].slice("--depth=".length));
+      break;
+    }
+  }
+  const targets = args.filter((a) => !a.startsWith("--") && !/^\d+$/.test(a));
+  const cwd = process.cwd();
+  const projectKey = getProjectKey(cwd);
+  const db = getDb(defaultDbPath(projectKey));
+  const breakdown = getToolBreakdown(db, projectKey).filter((r) => r.items >= MIN_SAMPLES);
+  if (breakdown.length === 0) {
+    console.log(`No tools with \u2265${MIN_SAMPLES} stored samples. Run some MCP tools first.`);
+    return;
+  }
+  const profiles = loadProfiles();
+  const qualifying = breakdown.filter((r) => {
+    if (targets.length > 0 && !targets.some((t) => r.tool_name.includes(t)))
+      return false;
+    return resolveProfile(r.tool_name, profiles, ALL_TIERS) !== null;
+  });
+  if (qualifying.length === 0) {
+    console.log("No profiled tools with enough data found.");
+    if (targets.length > 0)
+      console.log(`(filter: ${targets.join(", ")})`);
+    return;
+  }
+  console.log(`
+Retraining from stored corpus\u2026`);
+  const date = new Date().toISOString().slice(0, 10);
+  let analyzed = 0;
+  let totalNew = 0;
+  let applied = 0;
+  for (const row of qualifying) {
+    const profile = resolveProfile(row.tool_name, profiles, ALL_TIERS);
+    const maxDepth = cliDepth ?? profile.spec.retrain?.max_depth ?? DEFAULT_DEPTH;
+    const samples = sampleOutputs(db, projectKey, row.tool_name, MAX_SAMPLES);
+    const result = retrainProfile(samples, profile, maxDepth);
+    printResult(result, apply);
+    if (apply && result.newFields.length > 0 && !result.error) {
+      applyResult(result, date);
+      applied++;
+    }
+    analyzed++;
+    totalNew += result.newFields.length;
+  }
+  console.log(`
+${"\u2500".repeat(54)}`);
+  if (apply) {
+    console.log(`${analyzed} profile(s) analyzed \xB7 ${totalNew} new field(s) \xB7 ${applied} profile(s) updated.`);
+    if (applied > 0)
+      clearProfileCache();
+  } else {
+    console.log(`${analyzed} profile(s) analyzed \xB7 ${totalNew} new field(s) found.`);
+    if (totalNew > 0)
+      console.log(`Run with --apply to update profiles.`);
+  }
+}
+
+// src/profiles/commands.ts
 var MANIFEST_URL = "https://raw.githubusercontent.com/sakebomb/mcp-recall-profiles/main/manifest.json";
 var PROFILE_BASE_URL = "https://raw.githubusercontent.com/sakebomb/mcp-recall-profiles/main/";
 var COMMUNITY_REPO = "sakebomb/mcp-recall-profiles";
@@ -6743,7 +7037,7 @@ function saveToCommunitDir(profileId, content) {
   const dir = join4(communityDir(), profileId);
   mkdirSync2(dir, { recursive: true });
   const filePath = join4(dir, "default.toml");
-  writeFileSync(filePath, content);
+  writeFileSync2(filePath, content);
   return filePath;
 }
 function installedCommunityMap() {
@@ -6757,7 +7051,7 @@ function installedCommunityMap() {
   for (const entry of entries) {
     const toml = join4(communityDir(), entry, "default.toml");
     try {
-      const p = parse(readFileSync3(toml, "utf8"));
+      const p = parse(readFileSync4(toml, "utf8"));
       const version = p["profile"]["version"];
       map.set(entry, version ?? "0.0.0");
     } catch {}
@@ -6879,7 +7173,7 @@ function cmdRemove(args) {
 async function cmdSeed() {
   let serverKeys = [];
   try {
-    const raw = JSON.parse(readFileSync3(join4(homedir4(), ".claude.json"), "utf8"));
+    const raw = JSON.parse(readFileSync4(join4(homedir4(), ".claude.json"), "utf8"));
     const mcpServers = raw["mcpServers"];
     serverKeys = Object.keys(mcpServers ?? {}).filter((k) => k !== "recall");
   } catch {
@@ -6947,7 +7241,7 @@ Your local profiles:`);
   }
   let content;
   try {
-    content = readFileSync3(profilePath, "utf8");
+    content = readFileSync4(profilePath, "utf8");
   } catch {
     console.error(`Cannot read: ${profilePath}`);
     process.exit(1);
@@ -7058,6 +7352,9 @@ async function handleProfilesCommand(args) {
     case "check":
       cmdCheck();
       break;
+    case "retrain":
+      await handleRetrainCommand(rest);
+      break;
     default:
       console.error(`Unknown subcommand: ${cmd ?? "(none)"}
 `);
@@ -7071,12 +7368,13 @@ async function handleProfilesCommand(args) {
       console.error("  seed              Install profiles for all detected MCPs");
       console.error("  feed [path]       Contribute a local profile to the community");
       console.error("  check             Detect pattern conflicts");
+      console.error("  retrain [--apply] [--depth N] [filter]  Suggest profile improvements from stored corpus");
       process.exit(1);
   }
 }
 
 // src/learn/index.ts
-import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, mkdirSync as mkdirSync3 } from "fs";
+import { readFileSync as readFileSync5, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3 } from "fs";
 import { join as join5 } from "path";
 import { homedir as homedir5 } from "os";
 
@@ -7292,7 +7590,7 @@ function userProfilesDir() {
 }
 function readClaudeJson() {
   const path = join5(homedir5(), ".claude.json");
-  const raw = JSON.parse(readFileSync4(path, "utf8"));
+  const raw = JSON.parse(readFileSync5(path, "utf8"));
   return raw["mcpServers"] ?? {};
 }
 async function handleLearnCommand(args) {
@@ -7347,7 +7645,7 @@ Learning from ${candidates.length} MCP server(s)\u2026
     const profileDir = join5(outputDir, `mcp__${key.replace(/-/g, "_")}`);
     mkdirSync3(profileDir, { recursive: true });
     const filePath = join5(profileDir, "default.toml");
-    writeFileSync2(filePath, toml);
+    writeFileSync3(filePath, toml);
     console.log(`     \u2192 ${filePath}`);
     written++;
   }
