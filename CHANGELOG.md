@@ -4,6 +4,28 @@ All notable changes to mcp-recall are documented here.
 
 ---
 
+## v1.5.0 — 2026-03-03
+
+### `mcp-recall install` / `uninstall` / `status`
+
+Removes the biggest install friction — no more manually editing `~/.claude.json` and `~/.claude/settings.json`.
+
+```bash
+mcp-recall install [--dry-run]   # write MCP server + hooks, idempotent
+mcp-recall uninstall             # remove all entries, leave other hooks intact
+mcp-recall status                # verify config entries + build artifacts exist
+```
+
+Writes are atomic (temp file → rename). Existing hooks from other tools are never touched. Re-running after a `bun run build` updates stale paths in place.
+
+### Stripe compression handler
+
+New TypeScript handler for all `mcp__stripe__*` tools. Formats amounts correctly — Stripe stores values in the smallest currency unit (`250000` = **$2,500.00**, not `250000`). Zero-decimal currencies (JPY, KRW, etc.) handled separately.
+
+Per-tool routing: customers, invoices, payment intents, subscriptions, products, prices, disputes, payment links, balance, account info. Mixed `search_stripe_resources` results routed per item by `object` field. Handles both Stripe list responses (`{ object: "list", data: [...] }`) and single-object responses from create/update/cancel tools.
+
+---
+
 ## v1.4.0 — 2026-03-03
 
 ### Three new TypeScript compression handlers

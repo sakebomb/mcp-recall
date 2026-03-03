@@ -116,6 +116,25 @@ claude plugin update mcp-recall@mcp-recall
 claude plugin uninstall mcp-recall@mcp-recall
 ```
 
+### Manual install / from source
+
+If you prefer to run from a local clone, or if the plugin system isn't available:
+
+```bash
+git clone https://github.com/sakebomb/mcp-recall
+cd mcp-recall
+bun install
+bun run build
+mcp-recall install
+```
+
+`mcp-recall install` writes the MCP server entry and both hooks directly to `~/.claude.json` and `~/.claude/settings.json`. It's idempotent — safe to re-run after pulling updates.
+
+```bash
+mcp-recall status      # verify installation
+mcp-recall uninstall   # remove all entries
+```
+
 ---
 
 ## Configuration
