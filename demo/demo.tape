@@ -11,46 +11,46 @@ Set FontSize 14
 Set Width 900
 Set Height 550
 Set Theme "Catppuccin Mocha"
-Set TypingSpeed 40ms
+Set TypingSpeed 70ms
 Set Padding 20
 
 # --- Scene 1: tests passing ---
 Type "bun test"
 Enter
-Sleep 3s
+Sleep 5s
 
 # --- Scene 2: compression ---
 Type "clear"
 Enter
-Sleep 300ms
+Sleep 500ms
 Type "# A 56KB Playwright snapshot arrives..."
 Enter
-Sleep 800ms
+Sleep 1.5s
 Type "# mcp-recall delivers this to Claude instead:"
 Enter
-Sleep 600ms
+Sleep 1s
 Type "cat demo/sample-compression.txt"
 Enter
-Sleep 2s
+Sleep 4s
 
 # --- Scene 3: stats ---
 Type "clear"
 Enter
-Sleep 300ms
+Sleep 500ms
 Type "# After a full session:"
 Enter
-Sleep 500ms
+Sleep 1s
 Type "cat demo/sample-stats.txt"
 Enter
-Sleep 2s
+Sleep 4s
 
 # --- Scene 4: search ---
 Type "clear"
 Enter
-Sleep 300ms
+Sleep 500ms
 Type "# Find anything stored, no ID needed:"
 Enter
-Sleep 500ms
+Sleep 1s
 Type "cat demo/sample-search.txt"
 Enter
-Sleep 2.5s
+Sleep 4s
