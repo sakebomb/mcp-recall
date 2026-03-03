@@ -17,72 +17,24 @@ Sessions that used to hit context limits in 30 minutes routinely run for 3+ hour
 
 ## How it works
 
-```
-                    MCP tool response
-                    (e.g. 56 KB snapshot)
-                           │
-                    PostToolUse hook
-                           │
-               ┌───────────┴────────────┐
-               │     Security checks    │
-               │  ┌──────────────────┐  │
-               │  │ denylist match?  ├──┼──► skip: original passes through
-               │  │ secret detected? ├──┼──► skip + warn: original passes through
-               │  └──────────────────┘  │
-               └───────────┬────────────┘
-                           │
-               ┌───────────┴────────────┐
-               │      Dedup check       │
-               │                        │
-               │  sha256(name+input) ───┼──► [cached] header on hit
-               └───────────┬────────────┘
-                           │ (miss)
-               ┌───────────┴────────────┐
-               │   Compression handler  │
-               │   (TOML profile first) │
-               │                        │
-               │  Playwright → elements │
-               │  GitHub     → fields   │
-               │  GitLab     → fields   │
-               │  Shell      → 50 lines │
-               │  Linear     → issues   │
-               │  Slack      → messages │
-               │  Tavily     → answer   │
-               │  Database   → rows     │
-               │  Sentry     → exception│
-               │  Filesystem → 50 lines │
-               │  CSV        → row/col  │
-               │  JSON       → depth 3  │
-               │  Text       → 500 chars│
-               └──────┬─────────────────┘
-                      │
-            ┌─────────┴──────────┐
-            │                    │
-            ▼                    ▼
-   ┌─────────────────┐  ┌────────────────────────┐
-   │     Context     │  │      SQLite store       │
-   │                 │  │                         │
-   │  299 B summary  │  │  full_content  (56 KB)  │
-   │  + recall header│  │  summary       (299 B)  │
-   │                 │  │  FTS index              │
-   └─────────────────┘  │  access tracking        │
-                        │  session_days           │
-                        └────────────┬────────────┘
-                                     │
-                        ┌────────────┴────────────┐
-                        │     recall__* tools     │
-                        │                         │
-                        │  retrieve(id, query?)   │
-                        │  search(query)          │
-                        │  pin(id)                │
-                        │  note(text)             │
-                        │  export()               │
-                        │  list_stored()          │
-                        │  forget(...)            │
-                        │  stats()                │
-                        │  session_summary()      │
-                        │  context()              │
-                        └─────────────────────────┘
+```mermaid
+flowchart TD
+    A["MCP tool response<br/>(e.g. 56 KB snapshot)"] --> B[PostToolUse hook]
+
+    B --> SEC{Security check}
+    SEC -- "denylist match" --> P1([skip: passes through unchanged])
+    SEC -- "secret detected" --> P2([skip + warn: passes through unchanged])
+    SEC -- clean --> DEDUP{Dedup check}
+
+    DEDUP -- "sha256 cache hit" --> CACHED(["[cached] header"])
+    DEDUP -- miss --> HANDLER["Compression handler<br/>(TOML profile first)"]
+
+    HANDLER --> TYPES["Playwright · GitHub · GitLab<br/>Shell · Linear · Slack · Tavily<br/>Database · Sentry · Filesystem<br/>CSV · JSON · Text"]
+
+    TYPES --> CTX["Context<br/>299 B summary + recall header"]
+    TYPES --> DB["SQLite store<br/>full content (56 KB) · summary (299 B)<br/>FTS index · access tracking · session days"]
+
+    DB --> TOOLS["recall__* tools<br/>retrieve · search · pin · note<br/>stats · session_summary · list<br/>forget · export · context"]
 ```
 
 **Two hooks, one MCP server.**
