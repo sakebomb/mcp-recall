@@ -39,6 +39,7 @@ Sessions that used to hit context limits in 30 minutes routinely run for 3+ hour
                            │ (miss)
                ┌───────────┴────────────┐
                │   Compression handler  │
+               │   (TOML profile first) │
                │                        │
                │  Playwright → elements │
                │  GitHub     → key fields│
@@ -302,25 +303,16 @@ mcp-recall never breaks a tool call. Every failure mode — hook crash, SQLite e
 
 ## Profile system
 
-mcp-recall compresses tool outputs using declarative TOML profiles — no TypeScript required.
-
-**Auto-generate profiles for all your installed MCPs:**
+Declarative TOML profiles extend compression to any MCP — no TypeScript required. Community profiles are shared at **[sakebomb/mcp-recall-profiles](https://github.com/sakebomb/mcp-recall-profiles)** (9 profiles: Jira, Confluence, Gmail, AWS, GCP, Figma, Vercel, HubSpot, Google Calendar).
 
 ```bash
-mcp-recall learn
+mcp-recall learn                    # auto-generate profiles from your installed MCPs
+mcp-recall profiles seed            # install community profiles for detected MCPs
+mcp-recall profiles retrain         # suggest field additions using your stored data
+mcp-recall profiles list            # show all installed profiles
 ```
 
-**Browse and manage profiles:**
-
-```bash
-mcp-recall profiles list              # show all installed profiles
-mcp-recall profiles seed              # install community profiles for detected MCPs
-mcp-recall profiles install mcp__jira # install a specific community profile
-mcp-recall profiles feed profile.toml # contribute a profile back to the community
-mcp-recall profiles check             # detect pattern conflicts
-```
-
-Community profiles live at [sakebomb/mcp-recall-profiles](https://github.com/sakebomb/mcp-recall-profiles). Anyone can contribute a TOML profile without writing TypeScript — see [docs/profile-schema.md](docs/profile-schema.md) for the schema.
+→ [Profile schema](docs/profile-schema.md) · [retrain guide](docs/retrain.md) · [Contributing a profile](CONTRIBUTING.md#contributing-a-profile)
 
 ---
 
@@ -339,13 +331,16 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for project structure, workflow, and how 
 
 ## What's next
 
-Community contributions welcome — see the [open issues](https://github.com/sakebomb/mcp-recall/issues) for planned handlers:
+The easiest way to contribute is a TOML profile — no TypeScript, no clone of this repo needed. If you use an MCP that isn't covered, check the [community profiles repo](https://github.com/sakebomb/mcp-recall-profiles) or open a [profile request](https://github.com/sakebomb/mcp-recall/issues/new?template=profile-request.md).
 
-- [Jira](https://github.com/sakebomb/mcp-recall/issues/49) — issue fields, description excerpt, comment count
+Open requests (profiles preferred):
+
 - [Notion](https://github.com/sakebomb/mcp-recall/issues/50) — extract readable text from block metadata
 - [Database results](https://github.com/sakebomb/mcp-recall/issues/51) — column names + first N rows
 - [Sentry](https://github.com/sakebomb/mcp-recall/issues/52) — exception type, message, top stack frames
 - [GitLab](https://github.com/sakebomb/mcp-recall/issues/53) — mirrors the GitHub handler
+
+TypeScript handlers are welcome for tools with complex, non-JSON output (HTML, DOM trees, binary formats) — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
