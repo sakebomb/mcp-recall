@@ -21,20 +21,36 @@ Sessions that used to hit context limits in 30 minutes routinely run for 3+ hour
 flowchart TD
     A["MCP tool response<br/>(e.g. 56 KB snapshot)"] --> B[PostToolUse hook]
 
-    B --> SEC{Security check}
-    SEC -- "denylist match" --> P1([skip: passes through unchanged])
-    SEC -- "secret detected" --> P2([skip + warn: passes through unchanged])
-    SEC -- clean --> DEDUP{Dedup check}
+    subgraph SEC["Security checks"]
+        DENY[denylist match?]
+        SCRT[secret detected?]
+    end
 
-    DEDUP -- "sha256 cache hit" --> CACHED(["[cached] header"])
-    DEDUP -- miss --> HANDLER["Compression handler<br/>(TOML profile first)"]
+    B --> DENY
+    DENY -- yes --> P1([skip: passes through unchanged])
+    DENY -- no --> SCRT
+    SCRT -- yes --> P2([skip + warn: passes through unchanged])
+    SCRT -- no --> DEDUP_N
 
-    HANDLER --> TYPES["Playwright · GitHub · GitLab<br/>Shell · Linear · Slack · Tavily<br/>Database · Sentry · Filesystem<br/>CSV · JSON · Text"]
+    subgraph DEDUP["Dedup check"]
+        DEDUP_N["sha256(name+input)"]
+    end
 
-    TYPES --> CTX["Context<br/>299 B summary + recall header"]
-    TYPES --> DB["SQLite store<br/>full content (56 KB) · summary (299 B)<br/>FTS index · access tracking · session days"]
+    DEDUP_N -- "cache hit" --> CACHED(["[cached] header"])
+    DEDUP_N -- miss --> HAND_N
 
-    DB --> TOOLS["recall__* tools<br/>retrieve · search · pin · note<br/>stats · session_summary · list<br/>forget · export · context"]
+    subgraph HANDLER["Compression handler (TOML profile first)"]
+        HAND_N["Playwright · GitHub · GitLab · Shell<br/>Linear · Slack · Tavily · Database<br/>Sentry · Filesystem · CSV · JSON · Text"]
+    end
+
+    HAND_N --> CTX["Context<br/>299 B summary + recall header"]
+    HAND_N --> DB_N
+
+    subgraph DB["SQLite store"]
+        DB_N["full content (56 KB) · summary (299 B)<br/>FTS index · access tracking · session days"]
+    end
+
+    DB_N --> TOOLS["recall__* tools<br/>retrieve · search · pin · note<br/>stats · session_summary · list · forget · export · context"]
 ```
 
 **Two hooks, one MCP server.**
