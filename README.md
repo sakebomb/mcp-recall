@@ -309,6 +309,7 @@ Declarative TOML profiles extend compression to any MCP — no TypeScript requir
 mcp-recall learn                    # auto-generate profiles from your installed MCPs
 mcp-recall profiles seed            # install community profiles for detected MCPs
 mcp-recall profiles retrain         # suggest field additions using your stored data
+mcp-recall profiles test <tool>     # apply a profile and show compression result
 mcp-recall profiles list            # show all installed profiles
 ```
 

@@ -65,6 +65,64 @@ describe("BUILTIN_PATTERNS", () => {
   it("includes mcp__1password__* to protect secrets manager", () => {
     expect(BUILTIN_PATTERNS).toContain("mcp__1password__*");
   });
+
+  it("includes all password manager explicit entries", () => {
+    const expected = [
+      "mcp__bitwarden__*",
+      "mcp__lastpass__*",
+      "mcp__dashlane__*",
+      "mcp__keeper__*",
+      "mcp__hashicorp_vault__*",
+      "mcp__vault__*",
+      "mcp__doppler__*",
+      "mcp__infisical__*",
+    ];
+    for (const pattern of expected) {
+      expect(BUILTIN_PATTERNS).toContain(pattern);
+    }
+  });
+});
+
+describe("isDenied password managers", () => {
+  it("denies bitwarden tools whose names contain no keyword", () => {
+    // get_item and list_logins have no *secret*/*auth*/*password* substring
+    expect(isDenied("mcp__bitwarden__get_item", baseConfig)).toBe(true);
+    expect(isDenied("mcp__bitwarden__list_logins", baseConfig)).toBe(true);
+  });
+
+  it("denies lastpass tools", () => {
+    expect(isDenied("mcp__lastpass__get_account", baseConfig)).toBe(true);
+  });
+
+  it("denies dashlane tools", () => {
+    expect(isDenied("mcp__dashlane__get_login", baseConfig)).toBe(true);
+  });
+
+  it("denies keeper tools", () => {
+    expect(isDenied("mcp__keeper__get_record", baseConfig)).toBe(true);
+  });
+
+  it("denies hashicorp vault tools whose names contain no keyword", () => {
+    expect(isDenied("mcp__hashicorp_vault__read", baseConfig)).toBe(true);
+    expect(isDenied("mcp__hashicorp_vault__list", baseConfig)).toBe(true);
+  });
+
+  it("denies vault tools", () => {
+    expect(isDenied("mcp__vault__get", baseConfig)).toBe(true);
+  });
+
+  it("denies doppler tools", () => {
+    expect(isDenied("mcp__doppler__get_config", baseConfig)).toBe(true);
+  });
+
+  it("denies infisical tools", () => {
+    expect(isDenied("mcp__infisical__list_items", baseConfig)).toBe(true);
+  });
+
+  it("still allows unrelated tools after adding PM entries", () => {
+    expect(isDenied("mcp__github__list_issues", baseConfig)).toBe(false);
+    expect(isDenied("mcp__playwright__snapshot", baseConfig)).toBe(false);
+  });
 });
 
 describe("isDenied", () => {

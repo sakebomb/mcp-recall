@@ -4,6 +4,25 @@ All notable changes to mcp-recall are documented here.
 
 ---
 
+## v1.3.0 — 2026-03-03
+
+### `mcp-recall profiles test`
+
+New subcommand to apply a profile to real input and inspect the result — completes the contributor loop.
+
+```bash
+mcp-recall profiles test mcp__jira__search_issues --stored recall_abc123
+mcp-recall profiles test mcp__stripe__list_customers --input fixture.json
+```
+
+Shows which profile matched (ID, tier, pattern, file, strategy), input and output sizes, compression percentage, and the full summary as Claude would receive it. Accepts input from a stored item (`--stored <id>`) or a local file (`--input <file>`).
+
+### Password manager denylist hardening
+
+Eight additional password managers added to the built-in denylist: `mcp__bitwarden__*`, `mcp__lastpass__*`, `mcp__dashlane__*`, `mcp__keeper__*`, `mcp__hashicorp_vault__*`, `mcp__vault__*`, `mcp__doppler__*`, `mcp__infisical__*`. These use tool names like `get_item`, `list_logins`, and `vault read` that don't contain `*secret*`/`*credential*` keywords — explicit entries ensure they're always blocked.
+
+---
+
 ## v1.2.0 — 2026-03-03
 
 ### Hot cache in `recall__context`
