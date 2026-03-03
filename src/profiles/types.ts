@@ -1,0 +1,40 @@
+export type StrategyType = "json_extract" | "json_truncate" | "text_truncate";
+
+export interface ProfileStrategy {
+  type: StrategyType;
+  // json_extract
+  items_path?: string[];
+  fields?: string[];
+  labels?: Record<string, string>;
+  max_items?: number;
+  max_chars_per_field?: number;
+  // json_truncate
+  max_depth?: number;
+  max_array_items?: number;
+  // shared
+  max_chars?: number;
+  fallback_chars?: number;
+}
+
+export interface ProfileMeta {
+  id: string;
+  version: string;
+  description: string;
+  mcp_pattern: string | string[];
+  author?: string;
+  sample_tool?: string;
+}
+
+export interface ProfileSpec {
+  profile: ProfileMeta;
+  strategy: ProfileStrategy;
+}
+
+export type ProfileTier = "user" | "community" | "bundled";
+
+export interface LoadedProfile {
+  spec: ProfileSpec;
+  tier: ProfileTier;
+  patterns: string[];
+  filePath: string;
+}

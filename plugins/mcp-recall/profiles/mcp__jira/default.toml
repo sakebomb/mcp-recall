@@ -1,0 +1,28 @@
+[profile]
+id          = "mcp__jira"
+version     = "1.0.0"
+description = "Jira issue and search results — extracts key, summary, status, assignee, priority"
+mcp_pattern = "mcp__jira__*"
+author      = "sakebomb"
+sample_tool = "mcp__jira__search_issues"
+
+[strategy]
+type       = "json_extract"
+items_path = ["issues", "nodes"]
+fields     = [
+  "key",
+  "fields.summary",
+  "fields.status.name",
+  "fields.assignee.displayName",
+  "fields.priority.name",
+]
+max_items           = 10
+max_chars_per_field = 200
+fallback_chars      = 500
+
+[strategy.labels]
+"key"                         = "Key"
+"fields.summary"              = "Summary"
+"fields.status.name"          = "Status"
+"fields.assignee.displayName" = "Assignee"
+"fields.priority.name"        = "Priority"

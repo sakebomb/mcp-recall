@@ -8,10 +8,23 @@
 
 import { handleSessionStart } from "./hooks/session-start";
 import { handlePostToolUse } from "./hooks/post-tool-use";
+import { handleProfilesCommand } from "./profiles/commands";
+import { handleLearnCommand } from "./learn/index";
 
 const subcommand = process.argv[2];
 
 async function main(): Promise<void> {
+  // User-facing commands — do not read stdin (not hook handlers)
+  if (subcommand === "profiles") {
+    await handleProfilesCommand(process.argv.slice(3));
+    process.exit(0);
+  }
+
+  if (subcommand === "learn") {
+    await handleLearnCommand(process.argv.slice(3));
+    process.exit(0);
+  }
+
   const raw = await Bun.stdin.text();
 
   try {

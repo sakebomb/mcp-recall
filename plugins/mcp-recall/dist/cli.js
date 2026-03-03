@@ -6272,11 +6272,311 @@ var genericHandler = (_toolName, output) => {
   return { summary, originalSize };
 };
 
+// src/profiles/loader.ts
+import { readdirSync, readFileSync as readFileSync2, statSync } from "fs";
+import { join as join3 } from "path";
+import { homedir as homedir3 } from "os";
+function getUserProfilesDir() {
+  return process.env.RECALL_USER_PROFILES_PATH ?? join3(homedir3(), ".config", "mcp-recall", "profiles");
+}
+function getCommunityProfilesDir() {
+  return process.env.RECALL_COMMUNITY_PROFILES_PATH ?? join3(homedir3(), ".local", "share", "mcp-recall", "profiles", "community");
+}
+function getBundledProfilesDir() {
+  if (process.env.RECALL_BUNDLED_PROFILES_PATH) {
+    return process.env.RECALL_BUNDLED_PROFILES_PATH;
+  }
+  const devPath = join3(import.meta.dir, "../../profiles");
+  const distPath = join3(import.meta.dir, "../profiles");
+  try {
+    statSync(devPath);
+    return devPath;
+  } catch {
+    return distPath;
+  }
+}
+var fileCache = new Map;
+function loadSpec(filePath) {
+  let mtime;
+  try {
+    mtime = statSync(filePath).mtimeMs;
+  } catch {
+    fileCache.delete(filePath);
+    return null;
+  }
+  const cached2 = fileCache.get(filePath);
+  if (cached2 && cached2.mtime === mtime)
+    return cached2.spec;
+  let raw;
+  try {
+    raw = readFileSync2(filePath, "utf8");
+  } catch {
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = parse(raw);
+  } catch (e) {
+    dbg(`profile parse error \xB7 ${filePath}: ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
+  const spec = validateSpec(parsed, filePath);
+  if (!spec)
+    return null;
+  fileCache.set(filePath, { mtime, spec });
+  return spec;
+}
+var VALID_TYPES = new Set(["json_extract", "json_truncate", "text_truncate"]);
+function validateSpec(raw, filePath) {
+  if (typeof raw !== "object" || raw === null)
+    return null;
+  const obj = raw;
+  const profile = obj["profile"];
+  const strategy = obj["strategy"];
+  if (!profile || !strategy) {
+    dbg(`profile skip \xB7 missing [profile] or [strategy] \xB7 ${filePath}`);
+    return null;
+  }
+  if (typeof profile["id"] !== "string" || typeof profile["version"] !== "string" || typeof profile["description"] !== "string" || typeof profile["mcp_pattern"] !== "string" && !Array.isArray(profile["mcp_pattern"])) {
+    dbg(`profile skip \xB7 missing required fields \xB7 ${filePath}`);
+    return null;
+  }
+  const type = strategy["type"];
+  if (!VALID_TYPES.has(type)) {
+    dbg(`profile skip \xB7 unknown strategy.type "${type}" \xB7 ${filePath}`);
+    return null;
+  }
+  if (type === "json_extract") {
+    const fields = strategy["fields"];
+    if (!Array.isArray(fields) || fields.length === 0) {
+      dbg(`profile skip \xB7 json_extract missing fields \xB7 ${filePath}`);
+      return null;
+    }
+  }
+  return raw;
+}
+function scanDir(dir, tier) {
+  let entries;
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const results = [];
+  for (const entry of entries) {
+    const full = join3(dir, entry);
+    let stat;
+    try {
+      stat = statSync(full);
+    } catch {
+      continue;
+    }
+    if (stat.isDirectory()) {
+      results.push(...scanDir(full, tier));
+    } else if (entry.endsWith(".toml")) {
+      const spec = loadSpec(full);
+      if (!spec)
+        continue;
+      const raw = spec.profile.mcp_pattern;
+      const patterns = Array.isArray(raw) ? raw : [raw];
+      results.push({ spec, tier, patterns, filePath: full });
+    }
+  }
+  return results;
+}
+function loadProfiles() {
+  return [
+    ...scanDir(getUserProfilesDir(), "user"),
+    ...scanDir(getCommunityProfilesDir(), "community"),
+    ...scanDir(getBundledProfilesDir(), "bundled")
+  ];
+}
+function clearProfileCache() {
+  fileCache.clear();
+}
+
+// src/profiles/strategies.ts
+function resolvePath(obj, path) {
+  if (path === "" || path === ".")
+    return obj;
+  return path.split(".").reduce((cur, key) => {
+    if (cur === null || cur === undefined || typeof cur !== "object")
+      return;
+    return cur[key];
+  }, obj);
+}
+function getLabel(fieldPath, labels) {
+  if (labels?.[fieldPath])
+    return labels[fieldPath];
+  const parts = fieldPath.split(".");
+  return parts[parts.length - 1] ?? fieldPath;
+}
+function fieldValue(obj, fieldPath, maxChars) {
+  const val = resolvePath(obj, fieldPath);
+  if (val === undefined || val === null)
+    return "";
+  const str = typeof val === "object" ? JSON.stringify(val) : String(val);
+  return str.length > maxChars ? str.slice(0, maxChars) + "\u2026" : str;
+}
+function resolveItems(parsed, itemsPaths) {
+  const pathsToTry = itemsPaths.length > 0 ? itemsPaths : [""];
+  for (const path of pathsToTry) {
+    const val = resolvePath(parsed, path);
+    if (Array.isArray(val))
+      return val;
+    if (val !== null && val !== undefined && typeof val === "object")
+      return [val];
+  }
+  if (Array.isArray(parsed))
+    return parsed;
+  if (parsed !== null && typeof parsed === "object")
+    return [parsed];
+  return null;
+}
+function applyJsonExtract(strategy, _toolName, output) {
+  const raw = extractText(output);
+  const originalSize = Buffer.byteLength(raw, "utf8");
+  const fallbackChars = strategy.fallback_chars ?? 500;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { summary: raw.slice(0, fallbackChars), originalSize };
+  }
+  const items = resolveItems(parsed, strategy.items_path ?? []);
+  if (!items || items.length === 0) {
+    return { summary: raw.slice(0, fallbackChars), originalSize };
+  }
+  const fields = strategy.fields ?? [];
+  const maxItems = strategy.max_items ?? 10;
+  const maxCharsPerField = strategy.max_chars_per_field ?? 200;
+  const labels = strategy.labels;
+  const count = items.length;
+  const lines = items.slice(0, maxItems).map((item, i) => {
+    const parts = fields.map((f) => {
+      const val = fieldValue(item, f, maxCharsPerField);
+      return val ? `${getLabel(f, labels)}: ${val}` : null;
+    }).filter(Boolean);
+    return `${i + 1}. ${parts.join(" \xB7 ")}`;
+  });
+  const more = count > maxItems ? `
+\u2026and ${count - maxItems} more` : "";
+  const summary = `${count} item${count === 1 ? "" : "s"}:
+${lines.join(`
+`)}${more}`;
+  return { summary, originalSize };
+}
+function truncateJson(value, depth, maxDepth, maxArrayItems) {
+  if (depth > maxDepth)
+    return "\u2026";
+  if (Array.isArray(value)) {
+    const items = value.slice(0, maxArrayItems).map((v) => truncateJson(v, depth + 1, maxDepth, maxArrayItems));
+    if (value.length > maxArrayItems)
+      items.push(`\u2026${value.length - maxArrayItems} more`);
+    return items;
+  }
+  if (value !== null && typeof value === "object") {
+    const result = {};
+    for (const [k, v] of Object.entries(value)) {
+      result[k] = truncateJson(v, depth + 1, maxDepth, maxArrayItems);
+    }
+    return result;
+  }
+  return value;
+}
+function applyJsonTruncate(strategy, _toolName, output) {
+  const raw = extractText(output);
+  const originalSize = Buffer.byteLength(raw, "utf8");
+  const fallbackChars = strategy.fallback_chars ?? 500;
+  const maxDepth = strategy.max_depth ?? 3;
+  const maxArrayItems = strategy.max_array_items ?? 3;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    const excerpt = raw.slice(0, fallbackChars).trimEnd();
+    return {
+      summary: excerpt.length < raw.length ? `${excerpt}
+\u2026` : excerpt,
+      originalSize
+    };
+  }
+  const truncated = truncateJson(parsed, 0, maxDepth, maxArrayItems);
+  return { summary: JSON.stringify(truncated, null, 2), originalSize };
+}
+function applyTextTruncate(strategy, _toolName, output) {
+  const raw = extractText(output);
+  const originalSize = Buffer.byteLength(raw, "utf8");
+  const maxChars = strategy.max_chars ?? 500;
+  const excerpt = raw.slice(0, maxChars).trimEnd();
+  return {
+    summary: raw.length > maxChars ? `${excerpt}
+\u2026` : excerpt,
+    originalSize
+  };
+}
+
+// src/profiles/index.ts
+function matchesPattern2(toolName, pattern) {
+  if (pattern.endsWith("*"))
+    return toolName.startsWith(pattern.slice(0, -1));
+  return toolName === pattern;
+}
+function patternSpecificity(pattern) {
+  return pattern.endsWith("*") ? pattern.length - 1 : Infinity;
+}
+function profileSpecificity(profile, toolName) {
+  return Math.max(...profile.patterns.filter((p) => matchesPattern2(toolName, p)).map(patternSpecificity));
+}
+var TIER_ORDER = ["user", "community", "bundled"];
+function resolveProfile(toolName, profiles, tiers = TIER_ORDER) {
+  const candidates = profiles.filter((p) => tiers.includes(p.tier) && p.patterns.some((pat) => matchesPattern2(toolName, pat)));
+  if (candidates.length === 0)
+    return null;
+  return candidates.reduce((best, cur) => {
+    const bestTierIdx = TIER_ORDER.indexOf(best.tier);
+    const curTierIdx = TIER_ORDER.indexOf(cur.tier);
+    if (curTierIdx !== bestTierIdx)
+      return curTierIdx < bestTierIdx ? cur : best;
+    const bestScore = profileSpecificity(best, toolName);
+    const curScore = profileSpecificity(cur, toolName);
+    return curScore > bestScore ? cur : best;
+  });
+}
+function makeHandler(profile) {
+  const { spec } = profile;
+  const handlerName = `profile:${spec.profile.id}`;
+  const handler = function profileHandler(toolName, output) {
+    const { strategy } = spec;
+    switch (strategy.type) {
+      case "json_extract":
+        return applyJsonExtract(strategy, toolName, output);
+      case "json_truncate":
+        return applyJsonTruncate(strategy, toolName, output);
+      case "text_truncate":
+        return applyTextTruncate(strategy, toolName, output);
+    }
+  };
+  Object.defineProperty(handler, "name", { value: handlerName });
+  return handler;
+}
+function getProfileHandler(toolName, tiers = TIER_ORDER) {
+  const profiles = loadProfiles();
+  const match = resolveProfile(toolName, profiles, tiers);
+  if (!match)
+    return null;
+  dbg(`profile match \xB7 ${match.spec.profile.id} (${match.tier}) \xB7 ${toolName}`);
+  return makeHandler(match);
+}
+
 // src/handlers/index.ts
 function getHandler(toolName, output, input) {
   if (toolName === "Bash") {
     return getBashHandler(input);
   }
+  const highPriorityProfile = getProfileHandler(toolName, ["user", "community"]);
+  if (highPriorityProfile)
+    return highPriorityProfile;
   if (toolName.includes("playwright") && toolName.includes("snapshot")) {
     return playwrightHandler;
   }
@@ -6301,6 +6601,9 @@ function getHandler(toolName, output, input) {
   if (toolName.includes("csv")) {
     return csvHandler;
   }
+  const bundledProfile = getProfileHandler(toolName, ["bundled"]);
+  if (bundledProfile)
+    return bundledProfile;
   const text = extractText(output);
   const trimmed = text.trimStart();
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
@@ -6380,9 +6683,670 @@ ${summary}`,
   };
 }
 
+// src/profiles/commands.ts
+import { readFileSync as readFileSync3, writeFileSync, mkdirSync as mkdirSync2, readdirSync as readdirSync2, statSync as statSync2, rmSync } from "fs";
+import { join as join4 } from "path";
+import { homedir as homedir4 } from "os";
+var MANIFEST_URL = "https://raw.githubusercontent.com/sakebomb/mcp-recall-profiles/main/manifest.json";
+var PROFILE_BASE_URL = "https://raw.githubusercontent.com/sakebomb/mcp-recall-profiles/main/";
+var COMMUNITY_REPO = "sakebomb/mcp-recall-profiles";
+function communityDir() {
+  return process.env.RECALL_COMMUNITY_PROFILES_PATH ?? join4(homedir4(), ".local", "share", "mcp-recall", "profiles", "community");
+}
+function userDir() {
+  return process.env.RECALL_USER_PROFILES_PATH ?? join4(homedir4(), ".config", "mcp-recall", "profiles");
+}
+async function fetchManifest() {
+  const res = await fetch(MANIFEST_URL);
+  if (!res.ok)
+    throw new Error(`manifest fetch failed: ${res.status} ${res.statusText}`);
+  const data = await res.json();
+  return data.profiles;
+}
+async function fetchProfileContent(filePath) {
+  const res = await fetch(`${PROFILE_BASE_URL}${filePath}`);
+  if (!res.ok)
+    throw new Error(`profile fetch failed (${filePath}): ${res.status}`);
+  return res.text();
+}
+function saveToCommunitDir(profileId, content) {
+  const dir = join4(communityDir(), profileId);
+  mkdirSync2(dir, { recursive: true });
+  const filePath = join4(dir, "default.toml");
+  writeFileSync(filePath, content);
+  return filePath;
+}
+function installedCommunityMap() {
+  const map = new Map;
+  let entries;
+  try {
+    entries = readdirSync2(communityDir());
+  } catch {
+    return map;
+  }
+  for (const entry of entries) {
+    const toml = join4(communityDir(), entry, "default.toml");
+    try {
+      const p = parse(readFileSync3(toml, "utf8"));
+      const version = p["profile"]["version"];
+      map.set(entry, version ?? "0.0.0");
+    } catch {}
+  }
+  return map;
+}
+function patternsOverlap(a, b) {
+  const aExact = !a.endsWith("*");
+  const bExact = !b.endsWith("*");
+  if (aExact && bExact)
+    return a === b;
+  if (aExact)
+    return a.startsWith(b.slice(0, -1));
+  if (bExact)
+    return b.startsWith(a.slice(0, -1));
+  const aPrefix = a.slice(0, -1);
+  const bPrefix = b.slice(0, -1);
+  return aPrefix.startsWith(bPrefix) || bPrefix.startsWith(aPrefix);
+}
+function cmdList() {
+  const profiles = loadProfiles();
+  if (profiles.length === 0) {
+    console.log("No profiles installed.");
+    console.log("Run: mcp-recall profiles seed");
+    return;
+  }
+  const COL = { id: 28, tier: 10, pattern: 22 };
+  const header = "ID".padEnd(COL.id) + "  " + "Tier".padEnd(COL.tier) + "  " + "Pattern".padEnd(COL.pattern) + "  Description";
+  console.log(`
+${header}`);
+  console.log("\u2500".repeat(Math.min(header.length, 100)));
+  for (const p of profiles) {
+    const id = p.spec.profile.id.slice(0, COL.id - 1).padEnd(COL.id);
+    const tier = p.tier.padEnd(COL.tier);
+    const pattern = (p.patterns[0] ?? "").slice(0, COL.pattern - 1).padEnd(COL.pattern);
+    const desc = p.spec.profile.description.slice(0, 55);
+    console.log(`${id}  ${tier}  ${pattern}  ${desc}`);
+  }
+  const counts = profiles.reduce((acc, p) => {
+    acc[p.tier] = (acc[p.tier] ?? 0) + 1;
+    return acc;
+  }, {});
+  const summary = Object.entries(counts).map(([t, n]) => `${n} ${t}`).join(", ");
+  console.log(`
+${profiles.length} total (${summary})
+`);
+}
+async function cmdInstall(args) {
+  const id = args[0];
+  if (!id) {
+    console.error("Usage: mcp-recall profiles install <id>");
+    process.exit(1);
+  }
+  process.stdout.write("Fetching manifest\u2026 ");
+  const entries = await fetchManifest();
+  const entry = entries.find((e) => e.id === id);
+  console.log("done");
+  if (!entry) {
+    console.error(`Profile "${id}" not found.`);
+    console.log(`Available:
+${entries.map((e) => `  ${e.id}`).join(`
+`)}`);
+    process.exit(1);
+  }
+  process.stdout.write(`Installing ${entry.id} v${entry.version}\u2026 `);
+  const content = await fetchProfileContent(entry.file);
+  const filePath = saveToCommunitDir(entry.id, content);
+  clearProfileCache();
+  console.log(`done
+\u2713 ${filePath}`);
+}
+async function cmdUpdate() {
+  const installed = installedCommunityMap();
+  if (installed.size === 0) {
+    console.log("No community profiles installed.");
+    return;
+  }
+  process.stdout.write("Fetching manifest\u2026 ");
+  const entries = await fetchManifest();
+  console.log(`done
+`);
+  let updated = 0;
+  for (const [id, currentVersion] of installed) {
+    const entry = entries.find((e) => e.id === id);
+    if (!entry) {
+      console.log(`  ${id}: not in registry (skipped)`);
+      continue;
+    }
+    if (entry.version === currentVersion) {
+      console.log(`  ${id}: up to date (${currentVersion})`);
+      continue;
+    }
+    const content = await fetchProfileContent(entry.file);
+    saveToCommunitDir(id, content);
+    console.log(`  \u2713 ${id}: ${currentVersion} \u2192 ${entry.version}`);
+    updated++;
+  }
+  clearProfileCache();
+  console.log(`
+${updated} profile(s) updated.`);
+}
+function cmdRemove(args) {
+  const id = args[0];
+  if (!id) {
+    console.error("Usage: mcp-recall profiles remove <id>");
+    process.exit(1);
+  }
+  const dir = join4(communityDir(), id);
+  try {
+    statSync2(dir);
+  } catch {
+    console.error(`"${id}" is not installed.`);
+    process.exit(1);
+  }
+  rmSync(dir, { recursive: true });
+  clearProfileCache();
+  console.log(`\u2713 Removed ${id}`);
+}
+async function cmdSeed() {
+  let serverKeys = [];
+  try {
+    const raw = JSON.parse(readFileSync3(join4(homedir4(), ".claude.json"), "utf8"));
+    const mcpServers = raw["mcpServers"];
+    serverKeys = Object.keys(mcpServers ?? {}).filter((k) => k !== "recall");
+  } catch {
+    console.log("Could not read ~/.claude.json \u2014 no MCPs detected.");
+    return;
+  }
+  if (serverKeys.length === 0) {
+    console.log("No MCP servers found in ~/.claude.json (other than recall).");
+    return;
+  }
+  console.log(`Detected MCPs: ${serverKeys.join(", ")}`);
+  process.stdout.write("Fetching manifest\u2026 ");
+  const entries = await fetchManifest();
+  console.log(`done
+`);
+  const installed = installedCommunityMap();
+  let count = 0;
+  for (const key of serverKeys) {
+    const prefix = `mcp__${key.replace(/-/g, "_")}__`;
+    const matches = entries.filter((e) => {
+      const patterns = Array.isArray(e.mcp_pattern) ? e.mcp_pattern : [e.mcp_pattern];
+      return patterns.some((pat) => {
+        const stripped = pat.endsWith("*") ? pat.slice(0, -1) : pat;
+        return stripped === prefix || prefix.startsWith(stripped);
+      });
+    });
+    if (matches.length === 0) {
+      console.log(`  ${key}: no community profile available`);
+      continue;
+    }
+    for (const entry of matches) {
+      if (installed.has(entry.id)) {
+        console.log(`  ${entry.id}: already installed`);
+        continue;
+      }
+      const content = await fetchProfileContent(entry.file);
+      saveToCommunitDir(entry.id, content);
+      console.log(`  \u2713 ${entry.id} installed (matched ${key})`);
+      count++;
+    }
+  }
+  clearProfileCache();
+  console.log(`
+${count} profile(s) installed.`);
+}
+function cmdFeed(args) {
+  const profilePath = args[0];
+  if (!profilePath) {
+    const dir = userDir();
+    const files = [];
+    try {
+      for (const entry of readdirSync2(dir)) {
+        if (entry.endsWith(".toml"))
+          files.push(join4(dir, entry));
+      }
+    } catch {}
+    console.log("Usage: mcp-recall profiles feed <path-to-profile.toml>");
+    if (files.length > 0) {
+      console.log(`
+Your local profiles:`);
+      for (const f of files)
+        console.log(`  ${f}`);
+    }
+    return;
+  }
+  let content;
+  try {
+    content = readFileSync3(profilePath, "utf8");
+  } catch {
+    console.error(`Cannot read: ${profilePath}`);
+    process.exit(1);
+  }
+  let parsed;
+  try {
+    parsed = parse(content);
+  } catch (e) {
+    console.error(`Invalid TOML: ${e instanceof Error ? e.message : String(e)}`);
+    process.exit(1);
+  }
+  const meta = parsed["profile"];
+  if (!meta?.["id"] || !meta?.["version"] || !meta?.["mcp_pattern"]) {
+    console.error("Profile missing required fields (id, version, mcp_pattern).");
+    process.exit(1);
+  }
+  const id = meta["id"];
+  const patterns = Array.isArray(meta["mcp_pattern"]) ? meta["mcp_pattern"].join(", ") : meta["mcp_pattern"];
+  console.log(`
+Profile: ${id} (v${meta["version"]})`);
+  console.log(`Pattern: ${patterns}`);
+  console.log(`
+To submit to the community repo:`);
+  console.log(`  1. Fork https://github.com/${COMMUNITY_REPO}`);
+  console.log(`  2. Add your file as: profiles/${id}/default.toml`);
+  console.log(`  3. gh pr create --repo ${COMMUNITY_REPO} --title "feat: ${id} profile" --body "..."`);
+  const cmds = [
+    ["wl-copy", []],
+    ["xclip", ["-selection", "clipboard"]],
+    ["xsel", ["--clipboard", "--input"]],
+    ["pbcopy", []]
+  ];
+  for (const [bin, cargs] of cmds) {
+    try {
+      const proc = Bun.spawnSync([bin, ...cargs], {
+        stdin: new TextEncoder().encode(content)
+      });
+      if (proc.exitCode === 0) {
+        console.log(`
+\u2713 Profile content copied to clipboard.`);
+        return;
+      }
+    } catch {}
+  }
+  console.log(`
+Profile content (copy manually):
+
+${content}`);
+}
+function cmdCheck() {
+  const profiles = loadProfiles();
+  if (profiles.length === 0) {
+    console.log("No profiles installed.");
+    return;
+  }
+  const conflicts = [];
+  for (let i = 0;i < profiles.length; i++) {
+    for (let j = i + 1;j < profiles.length; j++) {
+      const a = profiles[i];
+      const b = profiles[j];
+      if (a.tier !== b.tier)
+        continue;
+      for (const patA of a.patterns) {
+        for (const patB of b.patterns) {
+          if (patternsOverlap(patA, patB)) {
+            conflicts.push({ a, b, patA, patB });
+          }
+        }
+      }
+    }
+  }
+  if (conflicts.length === 0) {
+    console.log(`\u2713 No conflicts across ${profiles.length} profile(s).`);
+    return;
+  }
+  console.log(`
+${conflicts.length} conflict(s):
+`);
+  for (const { a, b, patA, patB } of conflicts) {
+    console.log(`  [${a.tier}] ${a.spec.profile.id} (${patA})`);
+    console.log(`  [${b.tier}] ${b.spec.profile.id} (${patB})`);
+    console.log(`  \u2192 resolved by specificity (exact > wildcard, longer prefix > shorter)
+`);
+  }
+}
+async function handleProfilesCommand(args) {
+  const cmd = args[0];
+  const rest = args.slice(1);
+  switch (cmd) {
+    case "list":
+      cmdList();
+      break;
+    case "install":
+      await cmdInstall(rest);
+      break;
+    case "update":
+      await cmdUpdate();
+      break;
+    case "remove":
+      cmdRemove(rest);
+      break;
+    case "seed":
+      await cmdSeed();
+      break;
+    case "feed":
+      cmdFeed(rest);
+      break;
+    case "check":
+      cmdCheck();
+      break;
+    default:
+      console.error(`Unknown subcommand: ${cmd ?? "(none)"}
+`);
+      console.error(`Usage: mcp-recall profiles <command>
+`);
+      console.error("Commands:");
+      console.error("  list              Show all installed profiles");
+      console.error("  install <id>      Install a community profile by ID");
+      console.error("  update            Update all installed community profiles");
+      console.error("  remove <id>       Remove a community profile");
+      console.error("  seed              Install profiles for all detected MCPs");
+      console.error("  feed [path]       Contribute a local profile to the community");
+      console.error("  check             Detect pattern conflicts");
+      process.exit(1);
+  }
+}
+
+// src/learn/index.ts
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, mkdirSync as mkdirSync3 } from "fs";
+import { join as join5 } from "path";
+import { homedir as homedir5 } from "os";
+
+// src/learn/client.ts
+class LineReader {
+  buf = "";
+  reader;
+  dec = new TextDecoder;
+  constructor(stream) {
+    this.reader = stream.getReader();
+  }
+  async readLine(timeoutMs) {
+    const timer = new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs));
+    const read = this._nextLine();
+    return Promise.race([read, timer]);
+  }
+  async _nextLine() {
+    while (true) {
+      const nl = this.buf.indexOf(`
+`);
+      if (nl !== -1) {
+        const line = this.buf.slice(0, nl).trimEnd();
+        this.buf = this.buf.slice(nl + 1);
+        return line;
+      }
+      const { done, value } = await this.reader.read();
+      if (done) {
+        const line = this.buf.trim();
+        this.buf = "";
+        return line.length > 0 ? line : null;
+      }
+      this.buf += this.dec.decode(value, { stream: true });
+    }
+  }
+  release() {
+    this.reader.releaseLock();
+  }
+}
+async function awaitResponse(reader, id, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const remaining = deadline - Date.now();
+    const line = await reader.readLine(remaining);
+    if (line === null)
+      throw new Error("server closed stdout");
+    if (!line.startsWith("{"))
+      continue;
+    let msg;
+    try {
+      msg = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (msg.id !== id)
+      continue;
+    if (msg.error)
+      throw new Error(`MCP error: ${msg.error.message}`);
+    return msg.result;
+  }
+  throw new Error("timeout waiting for MCP response");
+}
+async function listMcpTools(command, args, env, timeoutMs = 1e4) {
+  const proc = Bun.spawn([command, ...args], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "ignore",
+    env: { ...process.env, ...env }
+  });
+  const reader = new LineReader(proc.stdout);
+  function send(msg) {
+    proc.stdin.write(JSON.stringify(msg) + `
+`);
+  }
+  try {
+    send({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: { name: "mcp-recall-learn", version: "1.0.0" }
+      }
+    });
+    await awaitResponse(reader, 1, timeoutMs);
+    send({ jsonrpc: "2.0", method: "notifications/initialized" });
+    send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+    const result = await awaitResponse(reader, 2, timeoutMs);
+    return result?.tools ?? [];
+  } finally {
+    reader.release();
+    proc.stdin.end();
+    proc.kill();
+  }
+}
+
+// src/learn/generate.ts
+var LIST_VERBS = /^(list|search|find|query|get_all|fetch_all)/i;
+var SINGLE_VERBS = /^(get|fetch|read|describe|show|retrieve)/i;
+var WRITE_VERBS = /^(create|update|delete|remove|set|add|post|put|patch)/i;
+var COMMON_FIELDS = ["id", "title", "name", "status", "description"];
+function impliesList(toolName, description) {
+  const base = toolName.split("__").pop() ?? toolName;
+  if (LIST_VERBS.test(base))
+    return true;
+  if (WRITE_VERBS.test(base))
+    return false;
+  if (SINGLE_VERBS.test(base))
+    return false;
+  if (description) {
+    const d = description.toLowerCase();
+    return d.includes("list") || d.includes("search") || d.includes("results");
+  }
+  return false;
+}
+function schemaFields(inputSchema) {
+  if (!inputSchema)
+    return [];
+  const props = inputSchema["properties"];
+  if (!props)
+    return [];
+  return Object.keys(props).filter((k) => !["limit", "cursor", "offset", "page", "query", "filter"].includes(k));
+}
+function suggestItemsPaths(serverKey, tools) {
+  const allNames = tools.map((t) => t.name.toLowerCase()).join(" ");
+  const paths = [];
+  const keywords = [
+    ["issue", "issues"],
+    ["ticket", "tickets"],
+    ["page", "pages"],
+    ["item", "items"],
+    ["result", "results"],
+    ["task", "tasks"],
+    ["record", "records"],
+    ["node", "nodes"],
+    ["message", "messages"]
+  ];
+  for (const [keyword, path] of keywords) {
+    if (allNames.includes(keyword) || serverKey.includes(keyword))
+      paths.push(path);
+  }
+  for (const fb of ["items", "results", "data", "nodes"]) {
+    if (!paths.includes(fb))
+      paths.push(fb);
+  }
+  return paths.slice(0, 6);
+}
+function generateProfile(serverKey, tools) {
+  const id = `mcp__${serverKey.replace(/-/g, "_")}`;
+  const pattern = `mcp__${serverKey.replace(/-/g, "_")}__*`;
+  const toolCount = tools.length;
+  const listTools = tools.filter((t) => impliesList(t.name, t.description));
+  const useExtract = listTools.length > 0;
+  const description = `Auto-generated profile for ${serverKey} (${toolCount} tool${toolCount === 1 ? "" : "s"} \u2014 run mcp-recall learn to regenerate)`;
+  if (!useExtract) {
+    return [
+      `# Generated by: mcp-recall learn`,
+      `# Tools: ${tools.map((t) => t.name.split("__").pop()).join(", ")}`,
+      `# Refine strategy.fields after observing real tool output.`,
+      ``,
+      `[profile]`,
+      `id          = "${id}"`,
+      `version     = "1.0.0"`,
+      `description = "${description}"`,
+      `mcp_pattern = "${pattern}"`,
+      ``,
+      `[strategy]`,
+      `type            = "json_truncate"`,
+      `max_depth       = 3`,
+      `max_array_items = 5`,
+      `fallback_chars  = 500`
+    ].join(`
+`) + `
+`;
+  }
+  const schemaHints = listTools.flatMap((t) => schemaFields(t.inputSchema));
+  const candidateFields = [...new Set([...COMMON_FIELDS, ...schemaHints])].slice(0, 8);
+  const itemsPaths = suggestItemsPaths(serverKey, tools);
+  const fieldsToml = candidateFields.map((f) => `  "${f}",`).join(`
+`);
+  const pathsToml = itemsPaths.map((p) => `  "${p}",`).join(`
+`);
+  return [
+    `# Generated by: mcp-recall learn`,
+    `# List tools detected: ${listTools.map((t) => t.name.split("__").pop()).join(", ")}`,
+    `# Refine items_path and fields after observing real tool output.`,
+    ``,
+    `[profile]`,
+    `id          = "${id}"`,
+    `version     = "1.0.0"`,
+    `description = "${description}"`,
+    `mcp_pattern = "${pattern}"`,
+    ``,
+    `[strategy]`,
+    `type = "json_extract"`,
+    `items_path = [`,
+    pathsToml,
+    `]`,
+    `fields = [`,
+    fieldsToml,
+    `]`,
+    `max_items           = 10`,
+    `max_chars_per_field = 200`,
+    `fallback_chars      = 500`
+  ].join(`
+`) + `
+`;
+}
+
+// src/learn/index.ts
+function userProfilesDir() {
+  return process.env.RECALL_USER_PROFILES_PATH ?? join5(homedir5(), ".config", "mcp-recall", "profiles");
+}
+function readClaudeJson() {
+  const path = join5(homedir5(), ".claude.json");
+  const raw = JSON.parse(readFileSync4(path, "utf8"));
+  return raw["mcpServers"] ?? {};
+}
+async function handleLearnCommand(args) {
+  const dryRun = args.includes("--dry-run");
+  const targets = args.filter((a) => !a.startsWith("--"));
+  let servers;
+  try {
+    servers = readClaudeJson();
+  } catch {
+    console.error("Could not read ~/.claude.json");
+    process.exit(1);
+  }
+  const candidates = Object.entries(servers).filter(([key, cfg]) => {
+    if (key === "recall")
+      return false;
+    if (targets.length > 0 && !targets.includes(key))
+      return false;
+    if (!cfg.command) {
+      console.log(`  ${key}: skipped (HTTP/SSE server \u2014 only stdio supported)`);
+      return false;
+    }
+    return true;
+  });
+  if (candidates.length === 0) {
+    console.log("No stdio MCP servers found to learn from.");
+    return;
+  }
+  console.log(`
+Learning from ${candidates.length} MCP server(s)\u2026
+`);
+  const outputDir = userProfilesDir();
+  let written = 0;
+  let skipped = 0;
+  for (const [key, cfg] of candidates) {
+    process.stdout.write(`  ${key}: connecting\u2026 `);
+    let tools;
+    try {
+      tools = await listMcpTools(cfg.command, cfg.args ?? [], cfg.env ?? {}, 1e4);
+    } catch (e) {
+      console.log(`failed \u2014 ${e instanceof Error ? e.message : String(e)}`);
+      skipped++;
+      continue;
+    }
+    console.log(`${tools.length} tool(s) found`);
+    const toml = generateProfile(key, tools);
+    if (dryRun) {
+      console.log(`
+\u2500\u2500\u2500 ${key} \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
+      console.log(toml);
+      continue;
+    }
+    const profileDir = join5(outputDir, `mcp__${key.replace(/-/g, "_")}`);
+    mkdirSync3(profileDir, { recursive: true });
+    const filePath = join5(profileDir, "default.toml");
+    writeFileSync2(filePath, toml);
+    console.log(`     \u2192 ${filePath}`);
+    written++;
+  }
+  if (!dryRun) {
+    clearProfileCache();
+    console.log(`
+${written} profile(s) written, ${skipped} skipped.`);
+    if (written > 0) {
+      console.log(`
+Next steps:`);
+      console.log(`  1. Run a tool from each MCP to see real output`);
+      console.log(`  2. Refine items_path and fields in the generated profiles`);
+      console.log(`  3. Run: mcp-recall profiles check`);
+      console.log(`  4. Share good profiles: mcp-recall profiles feed <path>`);
+    }
+  }
+}
+
 // src/cli.ts
 var subcommand = process.argv[2];
 async function main() {
+  if (subcommand === "profiles") {
+    await handleProfilesCommand(process.argv.slice(3));
+    process.exit(0);
+  }
+  if (subcommand === "learn") {
+    await handleLearnCommand(process.argv.slice(3));
+    process.exit(0);
+  }
   const raw = await Bun.stdin.text();
   try {
     switch (subcommand) {

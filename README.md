@@ -300,6 +300,30 @@ mcp-recall never breaks a tool call. Every failure mode — hook crash, SQLite e
 
 ---
 
+## Profile system
+
+mcp-recall compresses tool outputs using declarative TOML profiles — no TypeScript required.
+
+**Auto-generate profiles for all your installed MCPs:**
+
+```bash
+mcp-recall learn
+```
+
+**Browse and manage profiles:**
+
+```bash
+mcp-recall profiles list              # show all installed profiles
+mcp-recall profiles seed              # install community profiles for detected MCPs
+mcp-recall profiles install mcp__jira # install a specific community profile
+mcp-recall profiles feed profile.toml # contribute a profile back to the community
+mcp-recall profiles check             # detect pattern conflicts
+```
+
+Community profiles live at [sakebomb/mcp-recall-profiles](https://github.com/sakebomb/mcp-recall-profiles). Anyone can contribute a TOML profile without writing TypeScript — see [docs/profile-schema.md](docs/profile-schema.md) for the schema.
+
+---
+
 ## Development
 
 ```bash

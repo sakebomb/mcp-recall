@@ -2,6 +2,50 @@
 
 Completed work.
 
+## 2026-03-03
+
+### v1.1.0 — MCP-Agnostic Profile System (PR #71)
+
+**Design**: Declarative TOML profiles let anyone add compression support for any MCP without TypeScript. Three strategies: `json_extract`, `json_truncate`, `text_truncate`. Priority chain: user > community > bundled > TypeScript handlers > generic.
+
+**`src/profiles/`**
+- `types.ts` — ProfileSpec, LoadedProfile, ProfileTier interfaces
+- `loader.ts` — scans three tier dirs, per-file mtime cache, skips invalid profiles silently
+- `strategies.ts` — json_extract (items_path ordered fallback, dot-notation field extraction, labels), json_truncate, text_truncate
+- `index.ts` — getProfileHandler(toolName, tiers), two-pass integration: user/community before TypeScript handlers, bundled before json/generic fallback
+- `commands.ts` — 7 CLI subcommands: list, install, update, remove, seed, feed, check
+
+**`src/learn/`**
+- `client.ts` — LineReader (buffered newline splitting), stdio MCP initialize→tools/list→kill lifecycle, 10s timeout
+- `generate.ts` — impliesList() verb heuristic, suggestItemsPaths() keyword scan, generateProfile() TOML template
+- `index.ts` — reads ~/.claude.json, skips HTTP/SSE servers, --dry-run flag, named server targeting
+
+**`src/cli.ts`** — profiles + learn intercepted before stdin read (not hook handlers)
+
+**`profiles/mcp__jira/default.toml`** — first bundled profile; build script copies to `plugins/mcp-recall/profiles/` via `rm -rf && cp -r`
+
+**Community repo** (`sakebomb/mcp-recall-profiles`): 6 profiles (Jira, Confluence, Gmail, AWS, GCP, Figma), validate+manifest CI, auto-manifest-regen on profile changes
+
+**Tests**: 51 new tests across profiles.test.ts, profiles-commands.test.ts, learn.test.ts. Total: 396 passing.
+
+**Docs**: `docs/profile-schema.md` (full schema reference), README `## Profile system` section, version bumped to 1.1.0.
+
+---
+
+## 2026-03-02
+
+### #55 — Debug mode (PR #68)
+- `src/debug.ts` — `dbg()` checks `RECALL_DEBUG` env var OR `config.debug.enabled`
+- 6 debug calls in post-tool-use.ts, 2 in session-start.ts, stack trace in cli.ts catch block
+- 14 new tests across debug.test.ts, hooks.test.ts, config.test.ts, denylist.test.ts
+
+### #56 — Contributing guide (PR #69)
+- `CONTRIBUTING.md` expanded with full handler authoring guide: contract, annotated template, dispatcher registration, RECALL_DEBUG fixture capture, 6-test template, PR checklist
+
+### #57 — VACUUM + PRAGMA optimize (PR #70)
+- `src/db/index.ts`: `PRAGMA optimize` on startup; `VACUUM` after ≥50 row deletes in `forgetOutputs()`
+- 2 new db tests
+
 ## 2026-03-01
 
 ### Project Initialization
