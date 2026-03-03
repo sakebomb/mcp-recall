@@ -43,10 +43,13 @@ Sessions that used to hit context limits in 30 minutes routinely run for 3+ hour
                │                        │
                │  Playwright → elements │
                │  GitHub     → fields   │
+               │  GitLab     → fields   │
                │  Shell      → 50 lines │
                │  Linear     → issues   │
                │  Slack      → messages │
                │  Tavily     → answer   │
+               │  Database   → rows     │
+               │  Sentry     → exception│
                │  Filesystem → 50 lines │
                │  CSV        → row/col  │
                │  JSON       → depth 3  │
@@ -244,10 +247,13 @@ Repeated identical tool calls return a cached header instead of re-compressing:
 | Bash | native `Bash` tool | CLI-aware routing on `tool_input.command`: `git diff`/`git show` → changed-files summary with per-file +/- stats; `git log` → 20-commit cap; `terraform plan` → resource action symbols + Plan: summary; everything else → shell handler. |
 | Playwright | tool name contains `playwright` and `snapshot` | Interactive elements (buttons, inputs, links), visible text, headings. Drops aria noise. |
 | GitHub | `mcp__github__*` | Number, title, state, body (200 chars), labels, URL. Lists: first 10 + overflow count. |
+| GitLab | `mcp__gitlab__*` | IID, title, state, description excerpt (200 chars), labels, web URL. Lists: first 10 + overflow count. |
 | Shell | tool name contains `bash`, `shell`, `terminal`, `run_command`, `ssh_exec`, `exec_command`, `remote_exec`, or `container_exec` | Strips ANSI escape codes and SSH post-quantum advisory noise. Parses structured `{stdout, stderr, returncode}` JSON; falls back to plain text. Stdout: first 50 lines + overflow count. Stderr: first 20 lines, shown in a separate section. Exit code in header. |
 | Linear | tool name contains `linear` | Identifier, title, state, priority (numeric → label), description excerpt (200 chars), URL. Handles single, array, GraphQL, and Relay shapes. |
 | Slack | tool name contains `slack` | Channel, formatted timestamp, user/display name, message text (200 chars). Handles `{ok, messages}` wrappers and bare arrays. Lists: first 10 + overflow count. |
 | Tavily | tool name contains `tavily` | Query header, synthesized answer in full, per-result title + URL + 150-char content snippet. Drops `raw_content`, `score`, `response_time`. Lists: first 10 + overflow count. |
+| Database | tool name contains `postgres`, `mysql`, `sqlite`, or `database` | Row/column count header, column names, first 10 rows as col=value pairs. Handles node-postgres `{rows, fields}`, bare array, and `{results}` wrapper shapes. |
+| Sentry | tool name contains `sentry` | Exception type + message, level, environment, release, event ID. Last 8 stack frames (innermost/most relevant). Drops breadcrumbs, SDK info, request headers. |
 | Filesystem | `mcp__filesystem__*` or tool name contains `read_file` / `get_file` | Line count header + first 50 lines + truncation notice. |
 | CSV | tool name contains `csv`, or content-based detection | Column headers + first 5 data rows as key=value pairs + row/col count. Handles quoted fields. |
 | Generic JSON | Any unmatched tool with JSON output | 3-level depth limit, arrays capped at 3 items with overflow count. |
@@ -265,7 +271,7 @@ Credential tools are never stored. Password managers are blocked by explicit nam
 
 Claude Code's `PostToolUse` hook supports output replacement for MCP tools and the `Bash` tool. mcp-recall intercepts both:
 
-- **MCP tools** (`mcp__*`) — all compression handlers apply (Playwright, GitHub, filesystem, shell/remote-exec, Linear, Slack, Tavily, CSV, JSON, generic text)
+- **MCP tools** (`mcp__*`) — all compression handlers apply (Playwright, GitHub, GitLab, filesystem, shell/remote-exec, Linear, Slack, Tavily, database query results, Sentry events, CSV, JSON, generic text)
 - **Bash** — CLI-aware handlers: `git diff` → file-level changed-files summary; `git log` → 20-commit cap; `terraform plan` → resource action summary; everything else → 50-line shell cap with ANSI stripping
 
 The remaining built-in tools — `Read`, `Grep`, `Glob` — do not support output replacement. Their full output enters context directly. If large file reads are your biggest context consumer, consider the [filesystem MCP server](https://github.com/modelcontextprotocol/servers) instead of the built-in Read tool.
@@ -334,12 +340,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for project structure, workflow, and how 
 ## What's next
 
 The easiest way to contribute is a TOML profile — no TypeScript, no clone of this repo needed. If you use an MCP that isn't covered, check the [community profiles repo](https://github.com/sakebomb/mcp-recall-profiles) or open a [profile request](https://github.com/sakebomb/mcp-recall/issues/new?template=profile-request.md).
-
-Open requests (profiles preferred):
-
-- [Database results](https://github.com/sakebomb/mcp-recall/issues/51) — column names + first N rows
-- [Sentry](https://github.com/sakebomb/mcp-recall/issues/52) — exception type, message, top stack frames
-- [GitLab](https://github.com/sakebomb/mcp-recall/issues/53) — mirrors the GitHub handler
 
 TypeScript handlers are welcome for tools with complex, non-JSON output (HTML, DOM trees, binary formats) — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
