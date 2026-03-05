@@ -6539,6 +6539,25 @@ var require_package = __commonJS((exports, module) => {
     engines: {
       bun: ">=1.1.0"
     },
+    bin: {
+      "mcp-recall": "./bin/recall"
+    },
+    files: [
+      "bin/",
+      "src/",
+      "plugins/mcp-recall/dist/",
+      "plugins/mcp-recall/hooks/",
+      "plugins/mcp-recall/profiles/",
+      "profiles/",
+      "hooks/",
+      ".claude-plugin/",
+      "LICENSE",
+      "README.md",
+      "CHANGELOG.md",
+      "CONTRIBUTING.md",
+      "SECURITY.md",
+      "tsconfig.json"
+    ],
     module: "src/server.ts",
     type: "module",
     scripts: {
