@@ -95,7 +95,12 @@ Password managers (explicit — tool names like `get_item`, `list_logins`, `vaul
 - `mcp__hashicorp_vault__*`, `mcp__vault__*`, `mcp__doppler__*`, `mcp__infisical__*`
 
 Keyword patterns (catch remaining credential-adjacent tool names):
-- `*secret*`, `*token*`, `*password*`, `*credential*`, `*key*`, `*auth*`, `*env*`
+- Broad: `*secret*`, `*password*`, `*credential*`, `*token*`
+- Key-specific: `*api_key*`, `*access_key*`, `*private_key*`, `*signing_key*`, `*encrypt*key*`
+- Auth-specific: `*oauth*`, `*auth_token*`, `*authenticate*`
+- Env-specific: `*env_var*`, `*dotenv*`
+
+Allowlist (`denylist.allowlist` in config) overrides deny patterns for specific tools.
 
 Own tools:
 - `mcp__recall__*` (never intercept own tools)
