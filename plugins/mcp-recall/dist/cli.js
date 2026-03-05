@@ -4947,7 +4947,8 @@ var RecallConfigSchema = exports_external.object({
   }),
   denylist: exports_external.object({
     additional: exports_external.array(exports_external.string()),
-    override_defaults: exports_external.array(exports_external.string())
+    override_defaults: exports_external.array(exports_external.string()),
+    allowlist: exports_external.array(exports_external.string())
   }),
   debug: exports_external.object({
     enabled: exports_external.boolean()
@@ -4967,7 +4968,8 @@ var DEFAULTS = {
   },
   denylist: {
     additional: [],
-    override_defaults: []
+    override_defaults: [],
+    allowlist: []
   },
   debug: {
     enabled: false
@@ -5486,14 +5488,24 @@ var BUILTIN_PATTERNS = [
   "mcp__doppler__*",
   "mcp__infisical__*",
   "*secret*",
-  "*token*",
   "*password*",
   "*credential*",
-  "*key*",
-  "*auth*",
-  "*env*"
+  "*token*",
+  "*api_key*",
+  "*access_key*",
+  "*private_key*",
+  "*signing_key*",
+  "*encrypt*key*",
+  "*oauth*",
+  "*auth_token*",
+  "*authenticate*",
+  "*env_var*",
+  "*dotenv*"
 ];
 function isDenied(toolName, config) {
+  if (config.denylist.allowlist.some((p) => matchesPattern(toolName, p))) {
+    return false;
+  }
   const base = config.denylist.override_defaults.length > 0 ? config.denylist.override_defaults : BUILTIN_PATTERNS;
   const patterns = [...base, ...config.denylist.additional];
   return patterns.some((p) => matchesPattern(toolName, p));
