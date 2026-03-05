@@ -1,10 +1,28 @@
 # Changelog
 
-All notable changes to mcp-recall are documented here.
+All notable changes to mcp-recall are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
-## v1.5.0 — 2026-03-03
+## [Unreleased]
+
+### Fixed
+- AWS secret regex used PCRE `(?i:...)` syntax that silently never matched in JavaScript — now uses `/i` flag (#103)
+- MCP server tool handlers now catch errors and return text instead of crashing (#103)
+- FTS5 queries sanitized to prevent syntax errors from user input (#103)
+- `PRAGMA optimize` moved from DB open (no-op) to close (#103)
+- MCP server version synced with package.json (was hardcoded 1.0.0) (#103)
+
+### Changed
+- Denylist regex patterns cached — eliminated ~17 compilations per hook call (#103)
+- `getProjectKey` result cached — eliminated `spawnSync` per hook call (#103)
+- Store + chunk inserts wrapped in a transaction for atomicity and write perf (#103)
+- Deduplicated `formatBytes` into shared `src/format.ts` (#103)
+- Secret scan consolidated from two passes to one (#103)
+
+---
+
+## [1.5.0] — 2026-03-03
 
 ### `mcp-recall install` / `uninstall` / `status`
 
@@ -26,7 +44,7 @@ Per-tool routing: customers, invoices, payment intents, subscriptions, products,
 
 ---
 
-## v1.4.0 — 2026-03-03
+## [1.4.0] — 2026-03-03
 
 ### Three new TypeScript compression handlers
 
@@ -38,7 +56,7 @@ Per-tool routing: customers, invoices, payment intents, subscriptions, products,
 
 ---
 
-## v1.3.0 — 2026-03-03
+## [1.3.0] — 2026-03-03
 
 ### `mcp-recall profiles test`
 
@@ -57,7 +75,7 @@ Eight additional password managers added to the built-in denylist: `mcp__bitward
 
 ---
 
-## v1.2.0 — 2026-03-03
+## [1.2.0] — 2026-03-03
 
 ### Hot cache in `recall__context`
 
@@ -94,7 +112,7 @@ Three new profiles added to [sakebomb/mcp-recall-profiles](https://github.com/sa
 
 ---
 
-## v1.1.0 — 2026-03-03
+## [1.1.0] — 2026-03-03
 
 ### TOML profile system
 
@@ -140,7 +158,7 @@ Shared profiles at [sakebomb/mcp-recall-profiles](https://github.com/sakebomb/mc
 
 ---
 
-## v1.0.0 — 2026-03-02
+## [1.0.0] — 2026-03-02
 
 Initial public release.
 
@@ -190,3 +208,13 @@ Ten `recall__*` tools available in every Claude session:
 - FTS chunking — content split into overlapping 512-char chunks for precise snippet retrieval on long documents
 - Access tracking — `access_count` and `last_accessed` per item; LFU eviction when store exceeds `max_size_mb`
 - Session-day expiry — counts active Claude Code days, not calendar days; vacations don't drain your stored context
+
+---
+
+[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/sakebomb/mcp-recall/compare/v1.4.0...v1.5.0
+[1.4.0]: https://github.com/sakebomb/mcp-recall/compare/v1.3.0...v1.4.0
+[1.3.0]: https://github.com/sakebomb/mcp-recall/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/sakebomb/mcp-recall/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/sakebomb/mcp-recall/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/sakebomb/mcp-recall/releases/tag/v1.0.0
