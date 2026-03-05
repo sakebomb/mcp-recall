@@ -2,9 +2,10 @@ import { createHash } from "crypto";
 import { loadConfig } from "../config";
 import { getProjectKey } from "../project-key";
 import { isDenied } from "../denylist";
-import { containsSecret, findSecrets } from "../secrets";
+import { findSecrets } from "../secrets";
 import { getHandler, extractText } from "../handlers/index";
 import { getDb, defaultDbPath, storeOutput, checkDedup, evictIfNeeded } from "../db/index";
+import { formatBytes } from "../format";
 import { dbg } from "../debug";
 
 interface PostToolUseInput {
@@ -21,12 +22,6 @@ export interface HookOutput {
   suppressOutput?: boolean;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
-
 export function handlePostToolUse(raw: string): HookOutput {
   const input = JSON.parse(raw) as PostToolUseInput;
   const { tool_name, tool_input, tool_response, cwd, session_id } = input;
@@ -41,9 +36,9 @@ export function handlePostToolUse(raw: string): HookOutput {
   // 2. Extract text and check for secrets
   const fullContent = extractText(tool_response);
   dbg(`intercepted ${tool_name} · ${formatBytes(Buffer.byteLength(fullContent, "utf8"))}`);
-  if (containsSecret(fullContent)) {
-    const names = findSecrets(fullContent);
-    process.stderr.write(`[recall] skipped ${tool_name}: detected ${names.join(", ")}\n`);
+  const secretNames = findSecrets(fullContent);
+  if (secretNames.length > 0) {
+    process.stderr.write(`[recall] skipped ${tool_name}: detected ${secretNames.join(", ")}\n`);
     return {};
   }
 

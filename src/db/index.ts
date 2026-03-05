@@ -216,7 +216,6 @@ export function getDb(path: string): Database {
   instance = new Database(path);
   instance.run("PRAGMA journal_mode=WAL");
   instance.run("PRAGMA foreign_keys=ON");
-  instance.run("PRAGMA optimize");
   instance.run(SCHEMA);
   applyMigrations(instance);
   return instance;
@@ -224,7 +223,10 @@ export function getDb(path: string): Database {
 
 /** Closes the singleton database connection and resets the instance. Call in tests after each case. */
 export function closeDb(): void {
-  instance?.close();
+  if (instance) {
+    instance.run("PRAGMA optimize");
+    instance.close();
+  }
   instance = null;
 }
 
@@ -261,6 +263,24 @@ function storeChunks(db: Database, id: string, full_content: string): void {
 }
 
 // ---------------------------------------------------------------------------
+// FTS helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Escapes an FTS5 query to prevent syntax errors from user input.
+ * Wraps each whitespace-separated term in double-quotes so FTS5
+ * treats special characters (AND, OR, NOT, NEAR, brackets) as literals.
+ */
+export function sanitizeFtsQuery(query: string): string {
+  const trimmed = query.trim();
+  if (trimmed.length === 0) return '""';
+  return trimmed
+    .split(/\s+/)
+    .map((term) => `"${term.replace(/"/g, '""')}"`)
+    .join(" ");
+}
+
+// ---------------------------------------------------------------------------
 // Operations
 // ---------------------------------------------------------------------------
 
@@ -278,18 +298,22 @@ export function storeOutput(db: Database, input: StoreInput): StoredOutput {
   const created_at = Math.floor(Date.now() / 1000);
   const input_hash = input.input_hash ?? null;
 
-  db.prepare(`
-    INSERT INTO stored_outputs
-      (id, project_key, session_id, tool_name, summary, full_content,
-       original_size, summary_size, created_at, input_hash)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    id, input.project_key, input.session_id, input.tool_name,
-    input.summary, input.full_content, input.original_size,
-    summary_size, created_at, input_hash
-  );
+  const insertAndChunk = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO stored_outputs
+        (id, project_key, session_id, tool_name, summary, full_content,
+         original_size, summary_size, created_at, input_hash)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id, input.project_key, input.session_id, input.tool_name,
+      input.summary, input.full_content, input.original_size,
+      summary_size, created_at, input_hash
+    );
 
-  storeChunks(db, id, input.full_content);
+    storeChunks(db, id, input.full_content);
+  });
+
+  insertAndChunk();
 
   return {
     id, ...input, summary_size, created_at,
@@ -402,25 +426,37 @@ export function retrieveSnippet(
 
   if (!row) return null;
 
-  // 1. Chunk-based retrieval: returns the best matching chunk verbatim
-  const chunkRow = db.prepare(`
-    SELECT content FROM content_chunks
-    WHERE content_chunks MATCH ? AND output_id = ?
-    ORDER BY rank
-    LIMIT 1
-  `).get(query, id) as { content: string } | null;
+  // FTS5 MATCH has its own query syntax — malformed queries throw.
+  // Wrap in double-quotes to treat as a phrase, falling back on error.
+  const safeQuery = sanitizeFtsQuery(query);
 
-  if (chunkRow) return chunkRow.content;
+  // 1. Chunk-based retrieval: returns the best matching chunk verbatim
+  try {
+    const chunkRow = db.prepare(`
+      SELECT content FROM content_chunks
+      WHERE content_chunks MATCH ? AND output_id = ?
+      ORDER BY rank
+      LIMIT 1
+    `).get(safeQuery, id) as { content: string } | null;
+
+    if (chunkRow) return chunkRow.content;
+  } catch {
+    // FTS parse error — fall through to legacy
+  }
 
   // 2. Legacy fallback: FTS snippet on full document (items stored pre-chunking)
-  const snippetRow = db.prepare(`
-    SELECT snippet(outputs_fts, 3, '', '', ' [...] ', 64) as excerpt
-    FROM outputs_fts
-    WHERE outputs_fts MATCH ?
-    AND rowid = ?
-  `).get(query, row.rowid) as { excerpt: string } | null;
+  try {
+    const snippetRow = db.prepare(`
+      SELECT snippet(outputs_fts, 3, '', '', ' [...] ', 64) as excerpt
+      FROM outputs_fts
+      WHERE outputs_fts MATCH ?
+      AND rowid = ?
+    `).get(safeQuery, row.rowid) as { excerpt: string } | null;
 
-  return snippetRow?.excerpt ?? null;
+    return snippetRow?.excerpt ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -433,6 +469,7 @@ export function searchOutputs(
   options: SearchOptions
 ): StoredOutput[] {
   const limit = options.limit ?? 10;
+  const safeQuery = sanitizeFtsQuery(query);
   const sql = `
     SELECT s.* FROM outputs_fts f
     JOIN stored_outputs s ON s.rowid = f.rowid
@@ -442,10 +479,14 @@ export function searchOutputs(
     ORDER BY rank
     LIMIT ?
   `;
-  const params: SQLQueryBindings[] = [query, options.project_key];
+  const params: SQLQueryBindings[] = [safeQuery, options.project_key];
   if (options.tool) params.push(options.tool);
   params.push(limit);
-  return db.prepare(sql).all(...params) as StoredOutput[];
+  try {
+    return db.prepare(sql).all(...params) as StoredOutput[];
+  } catch {
+    return [];
+  }
 }
 
 /** Returns a paginated list of stored outputs, optionally filtered by tool name. */
