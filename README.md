@@ -85,40 +85,30 @@ Across a full session: 315 KB of tool output → 5.4 KB delivered to context.
 - [Claude Code](https://claude.ai/claude-code) installed
 - [Bun](https://bun.sh) installed — `curl -fsSL https://bun.sh/install | bash`
 
-### Quick start
+### Option A — npm (recommended)
 
 ```bash
-# Register mcp-recall as a plugin marketplace (one-time)
-claude plugin marketplace add mcp-recall https://github.com/sakebomb/mcp-recall
+bun add -g mcp-recall    # or: npm i -g mcp-recall
+mcp-recall install       # register hooks + MCP server in Claude Code
+mcp-recall status        # verify
+```
 
-# Install the plugin
+`mcp-recall install` writes the MCP server entry and both hooks directly to `~/.claude.json` and `~/.claude/settings.json`. It's idempotent — safe to re-run after updates.
+
+Update: `bun update -g mcp-recall && mcp-recall install`
+
+Uninstall: `mcp-recall uninstall && bun remove -g mcp-recall`
+
+### Option B — Claude Code plugin marketplace
+
+```bash
+claude plugin marketplace add mcp-recall https://github.com/sakebomb/mcp-recall
 claude plugin install mcp-recall@mcp-recall
 ```
 
-Both hooks and the MCP server register automatically. No manual config needed.
+Both hooks and the MCP server register automatically. Verify with `claude --debug`.
 
-Verify it loaded:
-
-```bash
-claude --debug
-# Look for: "loading plugin mcp-recall" with no errors
-```
-
-### Update
-
-```bash
-claude plugin update mcp-recall@mcp-recall
-```
-
-### Uninstall
-
-```bash
-claude plugin uninstall mcp-recall@mcp-recall
-```
-
-### Manual install / from source
-
-If you prefer to run from a local clone, or if the plugin system isn't available:
+### Option C — from source
 
 ```bash
 git clone https://github.com/sakebomb/mcp-recall
@@ -126,13 +116,6 @@ cd mcp-recall
 bun install
 bun run build
 mcp-recall install
-```
-
-`mcp-recall install` writes the MCP server entry and both hooks directly to `~/.claude.json` and `~/.claude/settings.json`. It's idempotent — safe to re-run after pulling updates.
-
-```bash
-mcp-recall status      # verify installation
-mcp-recall uninstall   # remove all entries
 ```
 
 ---
