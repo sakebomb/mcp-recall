@@ -34,7 +34,7 @@ export const SECRET_PATTERNS: SecretPattern[] = [
   },
   {
     name: "AWS secret access key",
-    pattern: /(?i:aws.{0,20}secret.{0,20})[A-Za-z0-9/+=]{40}/,
+    pattern: /aws.{0,20}secret.{0,20}[A-Za-z0-9/+=]{40}/i,
   },
   {
     name: "Anthropic API key",

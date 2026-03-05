@@ -5018,20 +5018,23 @@ function loadConfig() {
 // src/project-key.ts
 import { createHash } from "crypto";
 import { spawnSync } from "child_process";
+var pathCache = new Map;
 function getProjectKey(cwd) {
   const resolved = resolveProjectPath(cwd);
   return hashPath(resolved);
 }
 function resolveProjectPath(cwd) {
+  const cached2 = pathCache.get(cwd);
+  if (cached2 !== undefined)
+    return cached2;
   const result = spawnSync("git", ["rev-parse", "--show-toplevel"], {
     cwd,
     encoding: "utf8",
     stdio: ["pipe", "pipe", "pipe"]
   });
-  if (result.status === 0 && result.stdout) {
-    return result.stdout.trim();
-  }
-  return cwd;
+  const resolved = result.status === 0 && result.stdout ? result.stdout.trim() : cwd;
+  pathCache.set(cwd, resolved);
+  return resolved;
 }
 function hashPath(path) {
   return createHash("sha256").update(path).digest("hex").slice(0, 16);
@@ -5121,7 +5124,6 @@ function getDb(path) {
   instance = new Database(path);
   instance.run("PRAGMA journal_mode=WAL");
   instance.run("PRAGMA foreign_keys=ON");
-  instance.run("PRAGMA optimize");
   instance.run(SCHEMA);
   applyMigrations(instance);
   return instance;
@@ -5155,13 +5157,16 @@ function storeOutput(db, input) {
   const summary_size = Buffer.byteLength(input.summary, "utf8");
   const created_at = Math.floor(Date.now() / 1000);
   const input_hash = input.input_hash ?? null;
-  db.prepare(`
-    INSERT INTO stored_outputs
-      (id, project_key, session_id, tool_name, summary, full_content,
-       original_size, summary_size, created_at, input_hash)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, input.project_key, input.session_id, input.tool_name, input.summary, input.full_content, input.original_size, summary_size, created_at, input_hash);
-  storeChunks(db, id, input.full_content);
+  const insertAndChunk = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO stored_outputs
+        (id, project_key, session_id, tool_name, summary, full_content,
+         original_size, summary_size, created_at, input_hash)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, input.project_key, input.session_id, input.tool_name, input.summary, input.full_content, input.original_size, summary_size, created_at, input_hash);
+    storeChunks(db, id, input.full_content);
+  });
+  insertAndChunk();
   return {
     id,
     ...input,
@@ -5354,7 +5359,7 @@ function getSessionDays(db) {
   return db.prepare(`SELECT date FROM sessions ORDER BY date DESC`).all().map((r) => r.date);
 }
 
-// src/tools.ts
+// src/format.ts
 function formatBytes(bytes) {
   if (bytes < 1024)
     return `${bytes}B`;
@@ -5362,6 +5367,8 @@ function formatBytes(bytes) {
     return `${(bytes / 1024).toFixed(1)}KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
+
+// src/tools.ts
 function formatDate(unixSecs) {
   return new Date(unixSecs * 1000).toISOString().slice(0, 10);
 }
@@ -5491,9 +5498,15 @@ function isDenied(toolName, config) {
   const patterns = [...base, ...config.denylist.additional];
   return patterns.some((p) => matchesPattern(toolName, p));
 }
+var regexCache = new Map;
 function matchesPattern(toolName, pattern) {
-  const escaped = pattern.split("*").map((s) => s.replace(/[.+^${}()|[\]\\]/g, "\\$&")).join(".*");
-  return new RegExp(`^${escaped}$`).test(toolName);
+  let re = regexCache.get(pattern);
+  if (!re) {
+    const escaped = pattern.split("*").map((s) => s.replace(/[.+^${}()|[\]\\]/g, "\\$&")).join(".*");
+    re = new RegExp(`^${escaped}$`);
+    regexCache.set(pattern, re);
+  }
+  return re.test(toolName);
 }
 
 // src/secrets.ts
@@ -5524,7 +5537,7 @@ var SECRET_PATTERNS = [
   },
   {
     name: "AWS secret access key",
-    pattern: /(?i:aws.{0,20}secret.{0,20})[A-Za-z0-9/+=]{40}/
+    pattern: /aws.{0,20}secret.{0,20}[A-Za-z0-9/+=]{40}/i
   },
   {
     name: "Anthropic API key",
@@ -5539,9 +5552,6 @@ var SECRET_PATTERNS = [
     pattern: /-----BEGIN OPENSSH PRIVATE KEY-----/
   }
 ];
-function containsSecret(content) {
-  return SECRET_PATTERNS.some(({ pattern }) => pattern.test(content));
-}
 function findSecrets(content) {
   return SECRET_PATTERNS.filter(({ pattern }) => pattern.test(content)).map(({ name }) => name);
 }
@@ -7176,13 +7186,6 @@ function getHandler(toolName, output, input) {
 }
 
 // src/hooks/post-tool-use.ts
-function formatBytes2(bytes) {
-  if (bytes < 1024)
-    return `${bytes}B`;
-  if (bytes < 1024 * 1024)
-    return `${(bytes / 1024).toFixed(1)}KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
 function handlePostToolUse(raw) {
   const input = JSON.parse(raw);
   const { tool_name, tool_input, tool_response, cwd, session_id } = input;
@@ -7192,10 +7195,10 @@ function handlePostToolUse(raw) {
     return {};
   }
   const fullContent = extractText(tool_response);
-  dbg(`intercepted ${tool_name} \xB7 ${formatBytes2(Buffer.byteLength(fullContent, "utf8"))}`);
-  if (containsSecret(fullContent)) {
-    const names = findSecrets(fullContent);
-    process.stderr.write(`[recall] skipped ${tool_name}: detected ${names.join(", ")}
+  dbg(`intercepted ${tool_name} \xB7 ${formatBytes(Buffer.byteLength(fullContent, "utf8"))}`);
+  const secretNames = findSecrets(fullContent);
+  if (secretNames.length > 0) {
+    process.stderr.write(`[recall] skipped ${tool_name}: detected ${secretNames.join(", ")}
 `);
     return {};
   }
@@ -7220,7 +7223,7 @@ ${cached2.summary}`,
   const { summary, originalSize } = handler(tool_name, tool_response);
   const summarySize = Buffer.byteLength(summary, "utf8");
   if (summarySize >= originalSize) {
-    dbg(`SKIP no-compression \xB7 ${tool_name} \xB7 ${formatBytes2(summarySize)} \u2265 ${formatBytes2(originalSize)}`);
+    dbg(`SKIP no-compression \xB7 ${tool_name} \xB7 ${formatBytes(summarySize)} \u2265 ${formatBytes(originalSize)}`);
     return {};
   }
   const stored = storeOutput(db, {
@@ -7234,8 +7237,8 @@ ${cached2.summary}`,
   });
   evictIfNeeded(db, projectKey, config.store.max_size_mb);
   const reduction = ((1 - summarySize / originalSize) * 100).toFixed(0);
-  dbg(`STORED \xB7 ${tool_name} \xB7 id=${stored.id} \xB7 ${formatBytes2(originalSize)}\u2192${formatBytes2(summarySize)} (${reduction}% reduction)`);
-  const header = `[recall:${stored.id} \xB7 ${formatBytes2(originalSize)}\u2192${formatBytes2(summarySize)} (${reduction}% reduction)]`;
+  dbg(`STORED \xB7 ${tool_name} \xB7 id=${stored.id} \xB7 ${formatBytes(originalSize)}\u2192${formatBytes(summarySize)} (${reduction}% reduction)`);
+  const header = `[recall:${stored.id} \xB7 ${formatBytes(originalSize)}\u2192${formatBytes(summarySize)} (${reduction}% reduction)]`;
   return {
     updatedMCPToolOutput: `${header}
 ${summary}`,
@@ -7836,7 +7839,7 @@ ${conflicts.length} conflict(s):
 `);
   }
 }
-function formatBytes3(bytes) {
+function formatBytes2(bytes) {
   if (bytes < 1024)
     return `${bytes} B`;
   if (bytes < 1024 * 1024)
@@ -7917,11 +7920,11 @@ To add a profile:`);
     console.log(`  https://github.com/sakebomb/mcp-recall/blob/main/docs/profile-schema.md`);
   }
   console.log(`
-Input:  ${formatBytes3(result.inputBytes)}  (${contentSource})`);
+Input:  ${formatBytes2(result.inputBytes)}  (${contentSource})`);
   console.log("\u2500".repeat(60));
   console.log(result.summary);
   console.log("\u2500".repeat(60));
-  console.log(`Output: ${formatBytes3(result.outputBytes)}  (${result.reductionPct}% reduction)
+  console.log(`Output: ${formatBytes2(result.outputBytes)}  (${result.reductionPct}% reduction)
 `);
 }
 async function handleProfilesCommand(args) {

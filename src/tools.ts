@@ -24,16 +24,11 @@ import {
   type ForgetOptions,
 } from "./db/index";
 import { loadConfig } from "./config";
+import { formatBytes } from "./format";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
 
 function formatDate(unixSecs: number): string {
   return new Date(unixSecs * 1000).toISOString().slice(0, 10);
