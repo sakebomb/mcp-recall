@@ -18,6 +18,7 @@ const RecallConfigSchema = z.object({
   denylist: z.object({
     additional: z.array(z.string()),
     override_defaults: z.array(z.string()),
+    allowlist: z.array(z.string()),
   }),
   debug: z.object({
     enabled: z.boolean(),
@@ -42,6 +43,7 @@ const DEFAULTS: RecallConfig = {
   denylist: {
     additional: [],
     override_defaults: [],
+    allowlist: [],
   },
   debug: {
     enabled: false,

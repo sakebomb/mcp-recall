@@ -161,6 +161,14 @@ additional = [
   # "*myserver*secret*",
 ]
 
+# Allowlist — tools matching these patterns are always stored,
+# even if they match a deny pattern. Use when a legitimate tool
+# is blocked by a keyword pattern (e.g. *token* blocking your
+# analytics tool).
+allowlist = [
+  # "mcp__myservice__list_authors",
+]
+
 # Replace built-in defaults entirely (use sparingly).
 # Must re-specify any defaults you still want.
 override_defaults = [
@@ -231,7 +239,7 @@ Repeated identical tool calls return a cached header instead of re-compressing:
 
 The generic JSON handler is intentionally conservative — it keeps structure and marks what was dropped. Correctness matters more than compression ratio.
 
-Credential tools are never stored. Password managers are blocked by explicit name (`mcp__1password__*`, `mcp__bitwarden__*`, `mcp__lastpass__*`, `mcp__dashlane__*`, `mcp__keeper__*`, `mcp__hashicorp_vault__*`, `mcp__vault__*`, `mcp__doppler__*`, `mcp__infisical__*`) because their tool names — `get_item`, `list_logins`, `vault read` — don't contain obvious credential keywords. Keyword patterns `*secret*`, `*token*`, `*password*`, `*credential*`, `*key*`, `*auth*`, `*env*` catch everything else. Output is also scanned for secret patterns (PEM headers, GitHub PATs, AWS keys, etc.) before any write. See [SECURITY.md](SECURITY.md) for details.
+Credential tools are never stored. Password managers are blocked by explicit name (`mcp__1password__*`, `mcp__bitwarden__*`, `mcp__lastpass__*`, `mcp__dashlane__*`, `mcp__keeper__*`, `mcp__hashicorp_vault__*`, `mcp__vault__*`, `mcp__doppler__*`, `mcp__infisical__*`) because their tool names — `get_item`, `list_logins`, `vault read` — don't contain obvious credential keywords. Keyword patterns catch remaining credential-adjacent names: `*secret*`, `*token*`, `*password*`, `*credential*`, `*api_key*`, `*access_key*`, `*private_key*`, `*signing_key*`, `*oauth*`, `*auth_token*`, `*authenticate*`, `*env_var*`, `*dotenv*`. Output is also scanned for secret patterns (PEM headers, GitHub PATs, AWS keys, etc.) before any write. If a legitimate tool is blocked by a keyword pattern, add it to `denylist.allowlist` in your config. See [SECURITY.md](SECURITY.md) for details.
 
 ---
 

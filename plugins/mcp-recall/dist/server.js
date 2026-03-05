@@ -20918,7 +20918,8 @@ var RecallConfigSchema = exports_external.object({
   }),
   denylist: exports_external.object({
     additional: exports_external.array(exports_external.string()),
-    override_defaults: exports_external.array(exports_external.string())
+    override_defaults: exports_external.array(exports_external.string()),
+    allowlist: exports_external.array(exports_external.string())
   }),
   debug: exports_external.object({
     enabled: exports_external.boolean()
@@ -20938,7 +20939,8 @@ var DEFAULTS = {
   },
   denylist: {
     additional: [],
-    override_defaults: []
+    override_defaults: [],
+    allowlist: []
   },
   debug: {
     enabled: false

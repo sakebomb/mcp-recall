@@ -18,24 +18,41 @@ export const BUILTIN_PATTERNS: string[] = [
   "mcp__vault__*",
   "mcp__doppler__*",
   "mcp__infisical__*",
-  // keyword patterns — catch remaining credential-adjacent tool names
+  // keyword patterns — catch credential-adjacent tool names
+  // Broad patterns that rarely false-positive:
   "*secret*",
-  "*token*",
   "*password*",
   "*credential*",
-  "*key*",
-  "*auth*",
-  "*env*",
+  "*token*",
+  // Narrowed from *key* — avoids "project_keys", "keyboard", "hotkey", "primary_key":
+  "*api_key*",
+  "*access_key*",
+  "*private_key*",
+  "*signing_key*",
+  "*encrypt*key*",
+  // Narrowed from *auth* — avoids "author", "get_authors":
+  "*oauth*",
+  "*auth_token*",
+  "*authenticate*",
+  // Narrowed from *env* — avoids "environments", "list_envs", "deploy_env":
+  "*env_var*",
+  "*dotenv*",
 ];
 
 /**
  * Returns true if the tool output should not be stored.
  *
  * Pattern resolution:
- *   - If config.denylist.override_defaults is non-empty, it replaces BUILTIN_PATTERNS.
- *   - config.denylist.additional is always appended regardless.
+ *   1. If config.denylist.allowlist matches, the tool is always allowed (not denied).
+ *   2. If config.denylist.override_defaults is non-empty, it replaces BUILTIN_PATTERNS.
+ *   3. config.denylist.additional is always appended regardless.
  */
 export function isDenied(toolName: string, config: RecallConfig): boolean {
+  // Allowlist takes priority — lets users un-block tools matched by keyword patterns
+  if (config.denylist.allowlist.some((p) => matchesPattern(toolName, p))) {
+    return false;
+  }
+
   const base =
     config.denylist.override_defaults.length > 0
       ? config.denylist.override_defaults
