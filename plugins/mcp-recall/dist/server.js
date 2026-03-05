@@ -6516,6 +6516,51 @@ var require_dist = __commonJS((exports, module) => {
   exports.default = formatsPlugin;
 });
 
+// package.json
+var require_package = __commonJS((exports, module) => {
+  module.exports = {
+    name: "mcp-recall",
+    version: "1.5.0",
+    description: "Context compression and persistent retrieval for Claude Code",
+    author: {
+      name: "sakebomb",
+      url: "https://github.com/sakebomb"
+    },
+    license: "MIT",
+    homepage: "https://github.com/sakebomb/mcp-recall#readme",
+    repository: {
+      type: "git",
+      url: "https://github.com/sakebomb/mcp-recall"
+    },
+    bugs: {
+      url: "https://github.com/sakebomb/mcp-recall/issues"
+    },
+    keywords: ["mcp", "claude", "claude-code", "context", "compression", "memory", "sqlite", "plugin"],
+    engines: {
+      bun: ">=1.1.0"
+    },
+    module: "src/server.ts",
+    type: "module",
+    scripts: {
+      start: "bun run src/server.ts",
+      test: "bun test",
+      dev: "bun --watch src/server.ts",
+      typecheck: "tsc --noEmit",
+      build: "bun build src/server.ts --target bun --outfile plugins/mcp-recall/dist/server.js && bun build src/cli.ts --target bun --outfile plugins/mcp-recall/dist/cli.js && cp hooks/hooks.json plugins/mcp-recall/hooks/hooks.json && rm -rf plugins/mcp-recall/profiles && cp -r profiles plugins/mcp-recall/profiles",
+      prepare: "git config core.hooksPath .githooks"
+    },
+    dependencies: {
+      "@modelcontextprotocol/sdk": "^1.27.1",
+      "smol-toml": "^1.6.0",
+      zod: "^3.24.0"
+    },
+    devDependencies: {
+      "@types/bun": "latest",
+      typescript: "^5.7.0"
+    }
+  };
+});
+
 // node_modules/zod/v3/external.js
 var exports_external = {};
 __export(exports_external, {
@@ -19475,20 +19520,23 @@ class StdioServerTransport {
 // src/project-key.ts
 import { createHash } from "crypto";
 import { spawnSync } from "child_process";
+var pathCache = new Map;
 function getProjectKey(cwd) {
   const resolved = resolveProjectPath(cwd);
   return hashPath(resolved);
 }
 function resolveProjectPath(cwd) {
+  const cached2 = pathCache.get(cwd);
+  if (cached2 !== undefined)
+    return cached2;
   const result = spawnSync("git", ["rev-parse", "--show-toplevel"], {
     cwd,
     encoding: "utf8",
     stdio: ["pipe", "pipe", "pipe"]
   });
-  if (result.status === 0 && result.stdout) {
-    return result.stdout.trim();
-  }
-  return cwd;
+  const resolved = result.status === 0 && result.stdout ? result.stdout.trim() : cwd;
+  pathCache.set(cwd, resolved);
+  return resolved;
 }
 function hashPath(path) {
   return createHash("sha256").update(path).digest("hex").slice(0, 16);
@@ -19578,7 +19626,6 @@ function getDb(path) {
   instance = new Database(path);
   instance.run("PRAGMA journal_mode=WAL");
   instance.run("PRAGMA foreign_keys=ON");
-  instance.run("PRAGMA optimize");
   instance.run(SCHEMA);
   applyMigrations(instance);
   return instance;
@@ -19604,6 +19651,12 @@ function storeChunks(db, id, full_content) {
     stmt.run(id, i, chunks[i]);
   }
 }
+function sanitizeFtsQuery(query) {
+  const trimmed = query.trim();
+  if (trimmed.length === 0)
+    return '""';
+  return trimmed.split(/\s+/).map((term) => `"${term.replace(/"/g, '""')}"`).join(" ");
+}
 function generateId() {
   return `recall_${randomBytes(4).toString("hex")}`;
 }
@@ -19612,13 +19665,16 @@ function storeOutput(db, input) {
   const summary_size = Buffer.byteLength(input.summary, "utf8");
   const created_at = Math.floor(Date.now() / 1000);
   const input_hash = input.input_hash ?? null;
-  db.prepare(`
-    INSERT INTO stored_outputs
-      (id, project_key, session_id, tool_name, summary, full_content,
-       original_size, summary_size, created_at, input_hash)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, input.project_key, input.session_id, input.tool_name, input.summary, input.full_content, input.original_size, summary_size, created_at, input_hash);
-  storeChunks(db, id, input.full_content);
+  const insertAndChunk = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO stored_outputs
+        (id, project_key, session_id, tool_name, summary, full_content,
+         original_size, summary_size, created_at, input_hash)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, input.project_key, input.session_id, input.tool_name, input.summary, input.full_content, input.original_size, summary_size, created_at, input_hash);
+    storeChunks(db, id, input.full_content);
+  });
+  insertAndChunk();
   return {
     id,
     ...input,
@@ -19651,24 +19707,32 @@ function retrieveSnippet(db, id, query) {
   const row = db.prepare(`SELECT rowid FROM stored_outputs WHERE id = ?`).get(id);
   if (!row)
     return null;
-  const chunkRow = db.prepare(`
-    SELECT content FROM content_chunks
-    WHERE content_chunks MATCH ? AND output_id = ?
-    ORDER BY rank
-    LIMIT 1
-  `).get(query, id);
-  if (chunkRow)
-    return chunkRow.content;
-  const snippetRow = db.prepare(`
-    SELECT snippet(outputs_fts, 3, '', '', ' [...] ', 64) as excerpt
-    FROM outputs_fts
-    WHERE outputs_fts MATCH ?
-    AND rowid = ?
-  `).get(query, row.rowid);
-  return snippetRow?.excerpt ?? null;
+  const safeQuery = sanitizeFtsQuery(query);
+  try {
+    const chunkRow = db.prepare(`
+      SELECT content FROM content_chunks
+      WHERE content_chunks MATCH ? AND output_id = ?
+      ORDER BY rank
+      LIMIT 1
+    `).get(safeQuery, id);
+    if (chunkRow)
+      return chunkRow.content;
+  } catch {}
+  try {
+    const snippetRow = db.prepare(`
+      SELECT snippet(outputs_fts, 3, '', '', ' [...] ', 64) as excerpt
+      FROM outputs_fts
+      WHERE outputs_fts MATCH ?
+      AND rowid = ?
+    `).get(safeQuery, row.rowid);
+    return snippetRow?.excerpt ?? null;
+  } catch {
+    return null;
+  }
 }
 function searchOutputs(db, query, options) {
   const limit = options.limit ?? 10;
+  const safeQuery = sanitizeFtsQuery(query);
   const sql = `
     SELECT s.* FROM outputs_fts f
     JOIN stored_outputs s ON s.rowid = f.rowid
@@ -19678,11 +19742,15 @@ function searchOutputs(db, query, options) {
     ORDER BY rank
     LIMIT ?
   `;
-  const params = [query, options.project_key];
+  const params = [safeQuery, options.project_key];
   if (options.tool)
     params.push(options.tool);
   params.push(limit);
-  return db.prepare(sql).all(...params);
+  try {
+    return db.prepare(sql).all(...params);
+  } catch {
+    return [];
+  }
 }
 function countAndDelete(db, where, params) {
   const count = db.prepare(`SELECT COUNT(*) as n FROM stored_outputs WHERE ${where}`).get(...params).n;
@@ -20899,7 +20967,7 @@ function loadConfig() {
   return cached2;
 }
 
-// src/tools.ts
+// src/format.ts
 function formatBytes(bytes) {
   if (bytes < 1024)
     return `${bytes}B`;
@@ -20907,6 +20975,8 @@ function formatBytes(bytes) {
     return `${(bytes / 1024).toFixed(1)}KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
+
+// src/tools.ts
 function formatDate(unixSecs) {
   return new Date(unixSecs * 1000).toISOString().slice(0, 10);
 }
@@ -21219,39 +21289,50 @@ function toolStats(db, projectKey, args = {}) {
 // src/server.ts
 var projectKey = getProjectKey(process.cwd());
 var db = getDb(defaultDbPath(projectKey));
+function safeTool(fn) {
+  return async (args) => {
+    try {
+      return fn(args);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { content: [{ type: "text", text: `[recall: error] ${msg}` }] };
+    }
+  };
+}
+var { version: version2 } = await Promise.resolve().then(() => __toESM(require_package(), 1));
 var server = new McpServer({
   name: "recall",
-  version: "1.0.0"
+  version: version2
 });
 server.tool("recall__retrieve", "Fetch stored content from a previous tool call. Pass a query to return the most relevant excerpt via FTS. Use when you need more detail from a compressed result.", {
   id: exports_external.string().describe("8-char or full item ID"),
   query: exports_external.string().optional().describe("FTS query to return a focused excerpt"),
   max_bytes: exports_external.number().optional().describe("Override default 8KB cap on returned bytes (used when FTS returns no match)")
-}, async (args) => ({
+}, safeTool((args) => ({
   content: [{ type: "text", text: toolRetrieve(db, args) }]
-}));
+})));
 server.tool("recall__search", "Search across all stored tool outputs by content. Use when you don't have an ID but know what you're looking for. Returns matching items with IDs for retrieval.", {
   query: exports_external.string().describe("FTS search query"),
   tool: exports_external.string().optional().describe("Filter by tool name (substring match)"),
   limit: exports_external.number().optional().describe("Max results to return (default 5)")
-}, async (args) => ({
+}, safeTool((args) => ({
   content: [{ type: "text", text: toolSearch(db, projectKey, args) }]
-}));
+})));
 server.tool("recall__pin", "Pin an item to protect it from expiry and eviction. Use for important results you want to keep indefinitely. Pass pinned: false to unpin.", {
   id: exports_external.string().describe("Item ID to pin or unpin"),
   pinned: exports_external.boolean().optional().describe("true to pin (default), false to unpin")
-}, async (args) => ({
+}, safeTool((args) => ({
   content: [{ type: "text", text: toolPin(db, projectKey, args) }]
-}));
+})));
 server.tool("recall__note", "Store arbitrary text as a recall note \u2014 conclusions, findings, context that should survive context resets. Use for project memory.", {
   text: exports_external.string().describe("Note content to store"),
   title: exports_external.string().optional().describe("Short title for the note (shown in list/search)")
-}, async (args) => ({
+}, safeTool((args) => ({
   content: [{ type: "text", text: toolNote(db, projectKey, args) }]
-}));
-server.tool("recall__export", "Export all stored items for this project as JSON. Use before a full clear to preserve data.", {}, async () => ({
+})));
+server.tool("recall__export", "Export all stored items for this project as JSON. Use before a full clear to preserve data.", {}, safeTool(() => ({
   content: [{ type: "text", text: toolExport(db, projectKey) }]
-}));
+})));
 server.tool("recall__forget", "Delete stored items by ID, tool pattern, session, age, or clear all. Pinned items are skipped unless force: true.", {
   id: exports_external.string().optional().describe("Delete a single item by ID"),
   tool: exports_external.string().optional().describe("Delete all items matching tool name substring"),
@@ -21260,18 +21341,18 @@ server.tool("recall__forget", "Delete stored items by ID, tool pattern, session,
   all: exports_external.boolean().optional().describe("Clear entire store (requires confirmed: true)"),
   confirmed: exports_external.boolean().optional().describe("Required to execute all: true"),
   force: exports_external.boolean().optional().describe("Override pin protection and delete pinned items too")
-}, async (args) => ({
+}, safeTool((args) => ({
   content: [{ type: "text", text: toolForget(db, projectKey, args) }]
-}));
+})));
 server.tool("recall__list_stored", "Browse stored items by recency, access frequency, or size. Use to find a specific item to retrieve or forget.", {
   limit: exports_external.number().optional().describe("Items per page (default 10)"),
   offset: exports_external.number().optional().describe("Pagination offset"),
   tool: exports_external.string().optional().describe("Filter by tool name substring"),
   sort: exports_external.enum(["recent", "accessed", "size"]).optional().describe("Sort order: recent (default), accessed (most-used first), size (largest first)")
-}, async (args) => ({
+}, safeTool((args) => ({
   content: [{ type: "text", text: toolListStored(db, projectKey, args) }]
-}));
-server.tool("recall__stats", "Aggregate session efficiency stats \u2014 total savings, compression ratio, token savings, session days. Use to understand the big picture.", {}, async () => {
+})));
+server.tool("recall__stats", "Aggregate session efficiency stats \u2014 total savings, compression ratio, token savings, session days. Use to understand the big picture.", {}, safeTool(() => {
   const config2 = loadConfig();
   return {
     content: [{ type: "text", text: toolStats(db, projectKey, {
@@ -21279,18 +21360,18 @@ server.tool("recall__stats", "Aggregate session efficiency stats \u2014 total sa
       stale_days: config2.store.stale_item_days
     }) }]
   };
-});
+}));
 server.tool("recall__session_summary", "Digest of a single session's activity \u2014 tools called, compression savings, most-accessed items, pinned items, notes. Defaults to today. Use at session start for orientation or handoff.", {
   session_id: exports_external.string().optional().describe("Filter by specific Claude session ID (exact match)"),
   date: exports_external.string().optional().describe("Filter by date in YYYY-MM-DD format (defaults to today)")
-}, async (args) => ({
+}, safeTool((args) => ({
   content: [{ type: "text", text: toolSessionSummary(db, projectKey, args) }]
-}));
+})));
 server.tool("recall__context", "Session orientation: pinned items, recent notes, recently accessed items, and last session headline. Call at the start of a session to quickly re-orient to prior work.", {
   days: exports_external.number().optional().describe("Lookback window for recently accessed items in days (default 7)"),
   limit: exports_external.number().optional().describe("Max recently accessed items to show (default 5)")
-}, async (args) => ({
+}, safeTool((args) => ({
   content: [{ type: "text", text: toolContext(db, projectKey, args) }]
-}));
+})));
 var transport = new StdioServerTransport;
 await server.connect(transport);

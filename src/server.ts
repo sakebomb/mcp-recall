@@ -35,9 +35,23 @@ import {
 const projectKey = getProjectKey(process.cwd());
 const db = getDb(defaultDbPath(projectKey));
 
+/** Wraps a tool callback so errors return a text error instead of crashing. */
+function safeTool<T>(fn: (args: T) => { content: Array<{ type: "text"; text: string }> }) {
+  return async (args: T) => {
+    try {
+      return fn(args);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { content: [{ type: "text" as const, text: `[recall: error] ${msg}` }] };
+    }
+  };
+}
+
+const { version } = await import("../package.json");
+
 const server = new McpServer({
   name: "recall",
-  version: "1.0.0",
+  version,
 });
 
 server.tool(
@@ -51,9 +65,9 @@ server.tool(
       .optional()
       .describe("Override default 8KB cap on returned bytes (used when FTS returns no match)"),
   },
-  async (args) => ({
+  safeTool((args) => ({
     content: [{ type: "text", text: toolRetrieve(db, args) }],
-  })
+  }))
 );
 
 server.tool(
@@ -64,9 +78,9 @@ server.tool(
     tool: z.string().optional().describe("Filter by tool name (substring match)"),
     limit: z.number().optional().describe("Max results to return (default 5)"),
   },
-  async (args) => ({
+  safeTool((args) => ({
     content: [{ type: "text", text: toolSearch(db, projectKey, args) }],
-  })
+  }))
 );
 
 server.tool(
@@ -76,9 +90,9 @@ server.tool(
     id: z.string().describe("Item ID to pin or unpin"),
     pinned: z.boolean().optional().describe("true to pin (default), false to unpin"),
   },
-  async (args) => ({
+  safeTool((args) => ({
     content: [{ type: "text", text: toolPin(db, projectKey, args) }],
-  })
+  }))
 );
 
 server.tool(
@@ -88,18 +102,18 @@ server.tool(
     text: z.string().describe("Note content to store"),
     title: z.string().optional().describe("Short title for the note (shown in list/search)"),
   },
-  async (args) => ({
+  safeTool((args) => ({
     content: [{ type: "text", text: toolNote(db, projectKey, args) }],
-  })
+  }))
 );
 
 server.tool(
   "recall__export",
   "Export all stored items for this project as JSON. Use before a full clear to preserve data.",
   {},
-  async () => ({
+  safeTool(() => ({
     content: [{ type: "text", text: toolExport(db, projectKey) }],
-  })
+  }))
 );
 
 server.tool(
@@ -117,9 +131,9 @@ server.tool(
     confirmed: z.boolean().optional().describe("Required to execute all: true"),
     force: z.boolean().optional().describe("Override pin protection and delete pinned items too"),
   },
-  async (args) => ({
+  safeTool((args) => ({
     content: [{ type: "text", text: toolForget(db, projectKey, args) }],
-  })
+  }))
 );
 
 server.tool(
@@ -134,16 +148,16 @@ server.tool(
       .optional()
       .describe("Sort order: recent (default), accessed (most-used first), size (largest first)"),
   },
-  async (args) => ({
+  safeTool((args) => ({
     content: [{ type: "text", text: toolListStored(db, projectKey, args) }],
-  })
+  }))
 );
 
 server.tool(
   "recall__stats",
   "Aggregate session efficiency stats — total savings, compression ratio, token savings, session days. Use to understand the big picture.",
   {},
-  async () => {
+  safeTool(() => {
     const config = loadConfig();
     return {
       content: [{ type: "text", text: toolStats(db, projectKey, {
@@ -151,7 +165,7 @@ server.tool(
         stale_days: config.store.stale_item_days,
       }) }],
     };
-  }
+  })
 );
 
 server.tool(
@@ -167,9 +181,9 @@ server.tool(
       .optional()
       .describe("Filter by date in YYYY-MM-DD format (defaults to today)"),
   },
-  async (args) => ({
+  safeTool((args) => ({
     content: [{ type: "text", text: toolSessionSummary(db, projectKey, args) }],
-  })
+  }))
 );
 
 server.tool(
@@ -185,9 +199,9 @@ server.tool(
       .optional()
       .describe("Max recently accessed items to show (default 5)"),
   },
-  async (args) => ({
+  safeTool((args) => ({
     content: [{ type: "text", text: toolContext(db, projectKey, args) }],
-  })
+  }))
 );
 
 const transport = new StdioServerTransport();

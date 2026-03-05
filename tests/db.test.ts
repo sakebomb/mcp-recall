@@ -20,6 +20,7 @@ import {
   chunkText,
   CHUNK_SIZE,
   CHUNK_OVERLAP,
+  sanitizeFtsQuery,
   type StoreInput,
 } from "../src/db/index";
 import type { Database } from "bun:sqlite";
@@ -147,6 +148,36 @@ describe("db", () => {
       storeOutput(db, makeInput({ project_key: "otherproject567", summary: "secret stuff" }));
       const results = searchOutputs(db, "secret", { project_key: PROJECT_KEY });
       expect(results.length).toBe(0);
+    });
+
+    it("returns empty array for malformed FTS query instead of throwing", () => {
+      storeOutput(db, makeInput());
+      const results = searchOutputs(db, "NOT *", { project_key: PROJECT_KEY });
+      expect(Array.isArray(results)).toBe(true);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // sanitizeFtsQuery
+  // -------------------------------------------------------------------------
+
+  describe("sanitizeFtsQuery", () => {
+    it("wraps simple terms in double-quotes", () => {
+      expect(sanitizeFtsQuery("hello world")).toBe('"hello" "world"');
+    });
+
+    it("escapes embedded double-quotes", () => {
+      expect(sanitizeFtsQuery('say "hi"')).toBe('"say" """hi"""');
+    });
+
+    it("handles empty and whitespace-only input", () => {
+      expect(sanitizeFtsQuery("")).toBe('""');
+      expect(sanitizeFtsQuery("   ")).toBe('""');
+    });
+
+    it("neutralises FTS operators", () => {
+      expect(sanitizeFtsQuery("NOT something")).toBe('"NOT" "something"');
+      expect(sanitizeFtsQuery("a OR b")).toBe('"a" "OR" "b"');
     });
   });
 

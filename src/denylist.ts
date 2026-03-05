@@ -48,12 +48,19 @@ export function isDenied(toolName: string, config: RecallConfig): boolean {
 /**
  * Matches a tool name against a glob pattern.
  * Supports * as a wildcard matching any sequence of characters.
- * Matching is case-sensitive.
+ * Matching is case-sensitive. Compiled regexes are cached.
  */
+const regexCache = new Map<string, RegExp>();
+
 export function matchesPattern(toolName: string, pattern: string): boolean {
-  const escaped = pattern
-    .split("*")
-    .map((s) => s.replace(/[.+^${}()|[\]\\]/g, "\\$&"))
-    .join(".*");
-  return new RegExp(`^${escaped}$`).test(toolName);
+  let re = regexCache.get(pattern);
+  if (!re) {
+    const escaped = pattern
+      .split("*")
+      .map((s) => s.replace(/[.+^${}()|[\]\\]/g, "\\$&"))
+      .join(".*");
+    re = new RegExp(`^${escaped}$`);
+    regexCache.set(pattern, re);
+  }
+  return re.test(toolName);
 }
