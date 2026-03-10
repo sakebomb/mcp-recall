@@ -6,7 +6,20 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+---
+
+## [1.6.0] — 2026-03-10
+
+### Security
+
+- Profile install now validates `id` and `file` fields from manifest against strict patterns — prevents path traversal and URL injection (#111)
+- `profiles test` now checks denylist before processing — denylist-protected tools can no longer be passed to `getHandler` (#111)
+- TOML strategy numeric fields (`max_depth`, `max_items`, `max_array_items`, `max_chars`, `max_chars_per_field`, `fallback_chars`) now enforce upper bounds at load time — prevents stack overflow or heap exhaustion via crafted profiles (#111)
+- Terminal output in `profiles list` now strips ANSI escape sequences and control characters — prevents escape injection via malicious profile metadata (#111)
+- Downloaded profile content verified against SHA256 hashes in manifest before writing to disk (#111)
+
 ### Fixed
+
 - AWS secret regex used PCRE `(?i:...)` syntax that silently never matched in JavaScript — now uses `/i` flag (#103)
 - MCP server tool handlers now catch errors and return text instead of crashing (#103)
 - FTS5 queries sanitized to prevent syntax errors from user input (#103)
@@ -14,6 +27,10 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 - MCP server version synced with package.json (was hardcoded 1.0.0) (#103)
 
 ### Changed
+
+- README: new tagline — "Your context window is finite. MCP tool outputs aren't. mcp-recall bridges the gap." (#110)
+- README: new "The full context stack" section positions mcp-recall in the broader MCP ecosystem (#110)
+- README: simplified *How it works* diagram — 4-node overview with detailed pipeline in collapsible section (#110)
 - Denylist regex patterns cached — eliminated ~17 compilations per hook call (#103)
 - `getProjectKey` result cached — eliminated `spawnSync` per hook call (#103)
 - Store + chunk inserts wrapped in a transaction for atomicity and write perf (#103)
@@ -211,7 +228,8 @@ Ten `recall__*` tools available in every Claude session:
 
 ---
 
-[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/sakebomb/mcp-recall/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/sakebomb/mcp-recall/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/sakebomb/mcp-recall/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/sakebomb/mcp-recall/compare/v1.2.0...v1.3.0
