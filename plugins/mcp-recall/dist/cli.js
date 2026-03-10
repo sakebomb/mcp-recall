@@ -7277,6 +7277,7 @@ ${summary}`,
 import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync2, statSync as statSync2, rmSync } from "fs";
 import { join as join4 } from "path";
 import { homedir as homedir4 } from "os";
+import { createHash as createHash3 } from "crypto";
 
 // src/learn/retrain.ts
 import { readFileSync as readFileSync3, writeFileSync } from "fs";
@@ -7587,6 +7588,15 @@ async function fetchProfileContent(filePath) {
     throw new Error(`profile fetch failed (${filePath}): ${res.status}`);
   return res.text();
 }
+function verifyHash(content, expected, id) {
+  if (!expected) {
+    return;
+  }
+  const actual = createHash3("sha256").update(content).digest("hex");
+  if (actual !== expected) {
+    throw new Error(`Profile ${id}: hash mismatch (expected ${expected.slice(0, 8)}\u2026, got ${actual.slice(0, 8)}\u2026)`);
+  }
+}
 function saveToCommunitDir(profileId, content) {
   const dir = join4(communityDir(), profileId);
   mkdirSync2(dir, { recursive: true });
@@ -7674,6 +7684,7 @@ ${entries.map((e) => `  ${e.id}`).join(`
   assertSafeFile(entry.file);
   process.stdout.write(`Installing ${sanitize(entry.id)} v${sanitize(entry.version)}\u2026 `);
   const content = await fetchProfileContent(entry.file);
+  verifyHash(content, entry.sha256, entry.id);
   const filePath = saveToCommunitDir(entry.id, content);
   clearProfileCache();
   console.log(`done
@@ -7703,6 +7714,7 @@ async function cmdUpdate() {
     assertSafeId(entry.id);
     assertSafeFile(entry.file);
     const content = await fetchProfileContent(entry.file);
+    verifyHash(content, entry.sha256, entry.id);
     saveToCommunitDir(id, content);
     console.log(`  \u2713 ${id}: ${currentVersion} \u2192 ${entry.version}`);
     updated++;
@@ -7771,6 +7783,7 @@ async function cmdSeed() {
       assertSafeId(entry.id);
       assertSafeFile(entry.file);
       const content = await fetchProfileContent(entry.file);
+      verifyHash(content, entry.sha256, entry.id);
       saveToCommunitDir(entry.id, content);
       console.log(`  \u2713 ${entry.id} installed (matched ${key})`);
       count++;

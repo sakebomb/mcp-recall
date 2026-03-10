@@ -14,6 +14,7 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, rmSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { createHash } from "crypto";
 import { parse } from "smol-toml";
 import { loadProfiles, clearProfileCache } from "./loader";
 import { resolveProfile } from "./index";
@@ -81,6 +82,7 @@ interface ManifestEntry {
   description: string;
   mcp_pattern: string | string[];
   file: string;
+  sha256?: string;
   author?: string;
 }
 
@@ -95,6 +97,19 @@ async function fetchProfileContent(filePath: string): Promise<string> {
   const res = await fetch(`${PROFILE_BASE_URL}${filePath}`);
   if (!res.ok) throw new Error(`profile fetch failed (${filePath}): ${res.status}`);
   return res.text();
+}
+
+function verifyHash(content: string, expected: string | undefined, id: string): void {
+  if (!expected) {
+    // Older manifest without sha256 — skip verification
+    return;
+  }
+  const actual = createHash("sha256").update(content).digest("hex");
+  if (actual !== expected) {
+    throw new Error(
+      `Profile ${id}: hash mismatch (expected ${expected.slice(0, 8)}…, got ${actual.slice(0, 8)}…)`
+    );
+  }
 }
 
 function saveToCommunitDir(profileId: string, content: string): string {
@@ -205,6 +220,7 @@ async function cmdInstall(args: string[]): Promise<void> {
   assertSafeFile(entry.file);
   process.stdout.write(`Installing ${sanitize(entry.id)} v${sanitize(entry.version)}… `);
   const content = await fetchProfileContent(entry.file);
+  verifyHash(content, entry.sha256, entry.id);
   const filePath = saveToCommunitDir(entry.id, content);
   clearProfileCache();
   console.log(`done\n✓ ${filePath}`);
@@ -237,6 +253,7 @@ async function cmdUpdate(): Promise<void> {
     assertSafeId(entry.id);
     assertSafeFile(entry.file);
     const content = await fetchProfileContent(entry.file);
+    verifyHash(content, entry.sha256, entry.id);
     saveToCommunitDir(id, content);
     console.log(`  ✓ ${id}: ${currentVersion} → ${entry.version}`);
     updated++;
@@ -321,6 +338,7 @@ async function cmdSeed(): Promise<void> {
       assertSafeId(entry.id);
       assertSafeFile(entry.file);
       const content = await fetchProfileContent(entry.file);
+      verifyHash(content, entry.sha256, entry.id);
       saveToCommunitDir(entry.id, content);
       console.log(`  ✓ ${entry.id} installed (matched ${key})`);
       count++;
