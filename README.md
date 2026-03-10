@@ -5,7 +5,7 @@
 ![Runtime: Bun](https://img.shields.io/badge/runtime-Bun-f472b6.svg)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)
 
-**Context compression and persistent retrieval for Claude Code.**
+**Your context window is finite. MCP tool outputs aren't. mcp-recall bridges the gap.**
 
 MCP tool outputs — Playwright snapshots, GitHub issues, file reads — can consume tens of kilobytes of context per call. A 200K token context window fills up in ~30 minutes of active MCP use. mcp-recall intercepts those outputs, stores them in full locally, and delivers compressed summaries to Claude instead. When Claude needs more detail, it retrieves exactly what it needs via FTS search — without re-running the tool.
 
