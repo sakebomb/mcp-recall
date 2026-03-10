@@ -22,12 +22,40 @@ import { getDb, defaultDbPath } from "../db/index";
 import { getProjectKey } from "../project-key";
 import type { LoadedProfile } from "./types";
 import { handleRetrainCommand } from "../learn/retrain";
+import { isDenied } from "../denylist";
+import { loadConfig } from "../config";
 
 const MANIFEST_URL =
   "https://raw.githubusercontent.com/sakebomb/mcp-recall-profiles/main/manifest.json";
 const PROFILE_BASE_URL =
   "https://raw.githubusercontent.com/sakebomb/mcp-recall-profiles/main/";
 const COMMUNITY_REPO = "sakebomb/mcp-recall-profiles";
+
+// ── input validation helpers ──────────────────────────────────────────────────
+
+const SAFE_ID_RE = /^[a-z0-9_-]+$/;
+const SAFE_FILE_RE = /^profiles\/[a-z0-9_-]+\/[a-z0-9_.-]+\.toml$/;
+
+function assertSafeId(id: string): void {
+  if (!SAFE_ID_RE.test(id)) {
+    throw new Error(
+      `Invalid profile id "${id}": must match /^[a-z0-9_-]+$/ (no path separators or special characters).`
+    );
+  }
+}
+
+function assertSafeFile(file: string): void {
+  if (!SAFE_FILE_RE.test(file)) {
+    throw new Error(
+      `Invalid profile file path "${file}": must match profiles/<id>/<name>.toml and contain no path traversal.`
+    );
+  }
+}
+
+/** Strip ANSI escape sequences and non-printable control characters. */
+function sanitize(value: string): string {
+  return value.replace(/[\x00-\x1F\x7F]|\x9B|\x1B\[[0-9;]*[a-zA-Z]/g, "");
+}
 
 // ── directory helpers ─────────────────────────────────────────────────────────
 
@@ -136,10 +164,10 @@ function cmdList(): void {
   console.log("─".repeat(Math.min(header.length, 100)));
 
   for (const p of profiles) {
-    const id = p.spec.profile.id.slice(0, COL.id - 1).padEnd(COL.id);
+    const id = sanitize(p.spec.profile.id).slice(0, COL.id - 1).padEnd(COL.id);
     const tier = p.tier.padEnd(COL.tier);
     const pattern = (p.patterns[0] ?? "").slice(0, COL.pattern - 1).padEnd(COL.pattern);
-    const desc = p.spec.profile.description.slice(0, 55);
+    const desc = sanitize(p.spec.profile.description).slice(0, 55);
     console.log(`${id}  ${tier}  ${pattern}  ${desc}`);
   }
 
@@ -173,7 +201,9 @@ async function cmdInstall(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  process.stdout.write(`Installing ${entry.id} v${entry.version}… `);
+  assertSafeId(entry.id);
+  assertSafeFile(entry.file);
+  process.stdout.write(`Installing ${sanitize(entry.id)} v${sanitize(entry.version)}… `);
   const content = await fetchProfileContent(entry.file);
   const filePath = saveToCommunitDir(entry.id, content);
   clearProfileCache();
@@ -204,6 +234,8 @@ async function cmdUpdate(): Promise<void> {
       console.log(`  ${id}: up to date (${currentVersion})`);
       continue;
     }
+    assertSafeId(entry.id);
+    assertSafeFile(entry.file);
     const content = await fetchProfileContent(entry.file);
     saveToCommunitDir(id, content);
     console.log(`  ✓ ${id}: ${currentVersion} → ${entry.version}`);
@@ -222,6 +254,8 @@ function cmdRemove(args: string[]): void {
     console.error("Usage: mcp-recall profiles remove <id>");
     process.exit(1);
   }
+
+  assertSafeId(id);
 
   const dir = join(communityDir(), id);
   try {
@@ -284,6 +318,8 @@ async function cmdSeed(): Promise<void> {
         console.log(`  ${entry.id}: already installed`);
         continue;
       }
+      assertSafeId(entry.id);
+      assertSafeFile(entry.file);
       const content = await fetchProfileContent(entry.file);
       saveToCommunitDir(entry.id, content);
       console.log(`  ✓ ${entry.id} installed (matched ${key})`);
@@ -508,6 +544,12 @@ function cmdTest(args: string[]): void {
       process.exit(1);
     }
     contentSource = inputFile!;
+  }
+
+  const config = loadConfig();
+  if (isDenied(toolName, config)) {
+    console.log(`Tool "${toolName}" is on the denylist — output will not be processed or stored.`);
+    return;
   }
 
   const result = testProfile(toolName, content);

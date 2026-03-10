@@ -129,6 +129,22 @@ function validateSpec(raw: unknown, filePath: string): ProfileSpec | null {
     }
   }
 
+  const numericCeilings: Array<[string, number]> = [
+    ["max_depth", 20],
+    ["max_items", 1000],
+    ["max_array_items", 1000],
+    ["max_chars", 1_000_000],
+    ["max_chars_per_field", 100_000],
+    ["fallback_chars", 100_000],
+  ];
+  for (const [field, ceiling] of numericCeilings) {
+    const val = strategy[field];
+    if (val !== undefined && typeof val === "number" && val > ceiling) {
+      dbg(`profile skip · ${field} exceeds maximum allowed value of ${ceiling} · ${filePath}`);
+      return null;
+    }
+  }
+
   return raw as ProfileSpec;
 }
 
