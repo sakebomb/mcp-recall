@@ -50,6 +50,17 @@ Layers ① and ② have solid first-party and community solutions. mcp-recall fo
 ## How it works
 
 ```mermaid
+flowchart LR
+    A["MCP tool output\n(e.g. 56 KB snapshot)"] -->|"PostToolUse hook"| B(["mcp-recall"])
+    B -->|"~300 B summary"| C["Claude's context"]
+    B -->|"full content + FTS index"| D[("SQLite")]
+    D <-->|"recall__retrieve · recall__search"| C
+```
+
+<details>
+<summary>Detailed pipeline</summary>
+
+```mermaid
 flowchart TD
     A["MCP tool response<br/>(e.g. 56 KB snapshot)"] --> B[PostToolUse hook]
 
@@ -84,6 +95,8 @@ flowchart TD
 
     DB_N --> TOOLS["recall__* tools<br/>retrieve · search · pin · note<br/>stats · session_summary · list · forget · export · context"]
 ```
+
+</details>
 
 **Two hooks, one MCP server.**
 
