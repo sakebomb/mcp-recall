@@ -15,6 +15,38 @@ Sessions that used to hit context limits in 30 minutes routinely run for 3+ hour
 
 ---
 
+## The full context stack
+
+Context pressure builds at four distinct layers. mcp-recall targets the two that nothing else handles.
+
+```mermaid
+flowchart TD
+    A(["Claude session begins"]) --> B
+
+    B["① Tool definitions loaded into context\n~500 tokens × every connected tool"]
+    B -->|"Claude Code Tool Search · Switchboard\ndefer unused schemas"| C
+
+    C["② Claude calls tools in sequence"]
+    C -->|"Code Mode · FastMCP 3.1\nrun script in sandbox, no intermediate results"| D
+
+    D["③ Tool returns large output\n50–85 KB per call"]
+    D -->|"mcp-recall\ncompresses to ~300 B, stores in SQLite"| E
+
+    E["④ Session ends"]
+    E -->|"mcp-recall\npersists across sessions via FTS index"| F(["Next session: clean context"])
+```
+
+| Layer | Problem | Solution |
+|---|---|---|
+| **① Tool definitions** | Every connected MCP loads its full schema upfront (~500 tokens/tool) | [Claude Code Tool Search](https://code.claude.com/docs/en/mcp#scale-with-mcp-tool-search) (built-in) · Switchboard |
+| **② Intermediate results** | Multi-step workflows pass each result back through context | [Code Mode](https://blog.cloudflare.com/code-mode/) · [FastMCP 3.1](https://www.jlowin.dev/blog/fastmcp-3-1-code-mode) |
+| **③ Single-tool outputs** | One snapshot or API response dumps 50–85 KB | **mcp-recall** |
+| **④ Cross-session memory** | Useful context disappears when the session ends | **mcp-recall** |
+
+Layers ① and ② have solid first-party and community solutions. mcp-recall focuses on ③ and ④ — the outputs that do land in context, and the knowledge that shouldn't vanish when the session ends. All four layers stack: run them together for maximum efficiency.
+
+---
+
 ## How it works
 
 ```mermaid
