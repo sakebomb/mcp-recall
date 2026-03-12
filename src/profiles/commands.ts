@@ -535,7 +535,7 @@ function cmdFeed(args: string[]): void {
     }
   }
 
-  console.log(`\nProfile content (copy manually):\n\n${content}`);
+  console.log(`\nProfile content (copy manually):\n\n${sanitize(content)}`);
 }
 
 // ── check ─────────────────────────────────────────────────────────────────────

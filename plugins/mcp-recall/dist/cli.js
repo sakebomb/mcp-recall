@@ -8051,7 +8051,7 @@ To submit to the community repo:`);
   console.log(`
 Profile content (copy manually):
 
-${content}`);
+${sanitize(content)}`);
 }
 function cmdCheck() {
   const profiles = loadProfiles();
