@@ -31,7 +31,7 @@ export type RecallConfig = z.infer<typeof RecallConfigSchema>;
 
 const DEFAULTS: RecallConfig = {
   store: {
-    expire_after_session_days: 7,
+    expire_after_session_days: 30,
     key: "git_root",
     max_size_mb: 500,
     pin_recommendation_threshold: 5,

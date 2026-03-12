@@ -188,6 +188,53 @@ describe("MCP tool handlers", () => {
       const result = toolForget(db, PROJECT_KEY, { id: "recall_00000000" });
       expect(result).toContain("nothing deleted");
     });
+
+    it("rejects older_than_days: 0 with a guard error", () => {
+      const result = toolForget(db, PROJECT_KEY, { older_than_days: 0 });
+      expect(result).toContain("older_than_days must be at least 1");
+    });
+
+    it("rejects negative older_than_days", () => {
+      const result = toolForget(db, PROJECT_KEY, { older_than_days: -5 });
+      expect(result).toContain("older_than_days must be at least 1");
+    });
+
+    it("deletes items older than the cutoff, retains newer ones", () => {
+      const old = storeOutput(db, makeInput({ summary: "old item" }));
+      const fresh = storeOutput(db, makeInput({ summary: "fresh item" }));
+
+      // Back-date the old item to 10 days ago
+      const tenDaysAgo = Math.floor(Date.now() / 1000) - 10 * 86400;
+      db.prepare("UPDATE stored_outputs SET created_at = ? WHERE id = ?").run(tenDaysAgo, old.id);
+
+      const result = toolForget(db, PROJECT_KEY, { older_than_days: 7 });
+      expect(result).toContain("deleted 1 item");
+      expect(db.prepare("SELECT id FROM stored_outputs WHERE id = ?").get(old.id)).toBeNull();
+      expect(db.prepare("SELECT id FROM stored_outputs WHERE id = ?").get(fresh.id)).not.toBeNull();
+    });
+
+    it("returns nothing-deleted when no items are old enough", () => {
+      storeOutput(db, makeInput({ summary: "fresh item" }));
+      const result = toolForget(db, PROJECT_KEY, { older_than_days: 30 });
+      expect(result).toContain("nothing deleted");
+    });
+
+    it("does not delete pinned items when using older_than_days", () => {
+      const pinned = storeOutput(db, makeInput({ summary: "pinned old item" }));
+      const unpinned = storeOutput(db, makeInput({ summary: "unpinned old item" }));
+
+      // Back-date both to 10 days ago
+      const tenDaysAgo = Math.floor(Date.now() / 1000) - 10 * 86400;
+      db.prepare("UPDATE stored_outputs SET created_at = ? WHERE id = ?").run(tenDaysAgo, pinned.id);
+      db.prepare("UPDATE stored_outputs SET created_at = ? WHERE id = ?").run(tenDaysAgo, unpinned.id);
+
+      pinOutput(db, pinned.id, PROJECT_KEY, true);
+
+      const result = toolForget(db, PROJECT_KEY, { older_than_days: 7 });
+      expect(result).toContain("deleted 1 item");
+      expect(db.prepare("SELECT id FROM stored_outputs WHERE id = ?").get(pinned.id)).not.toBeNull();
+      expect(db.prepare("SELECT id FROM stored_outputs WHERE id = ?").get(unpinned.id)).toBeNull();
+    });
   });
 
   // -------------------------------------------------------------------------

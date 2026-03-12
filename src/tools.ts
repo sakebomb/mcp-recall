@@ -233,6 +233,10 @@ export function toolForget(
     return `[recall: clearing all stored items requires confirmed: true]`;
   }
 
+  if (args.older_than_days !== undefined && args.older_than_days < 1) {
+    return `[recall: older_than_days must be at least 1 — use all: true with confirmed: true to delete everything]`;
+  }
+
   const options: ForgetOptions = {
     id: args.id,
     tool: args.tool,
