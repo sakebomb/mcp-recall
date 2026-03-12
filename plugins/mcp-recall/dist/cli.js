@@ -1,5 +1,35 @@
 // @bun
+var __create = Object.create;
+var __getProtoOf = Object.getPrototypeOf;
 var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+function __accessProp(key) {
+  return this[key];
+}
+var __toESMCache_node;
+var __toESMCache_esm;
+var __toESM = (mod, isNodeMode, target) => {
+  var canCache = mod != null && typeof mod === "object";
+  if (canCache) {
+    var cache = isNodeMode ? __toESMCache_node ??= new WeakMap : __toESMCache_esm ??= new WeakMap;
+    var cached = cache.get(mod);
+    if (cached)
+      return cached;
+  }
+  target = mod != null ? __create(__getProtoOf(mod)) : {};
+  const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
+  for (let key of __getOwnPropNames(mod))
+    if (!__hasOwnProp.call(to, key))
+      __defProp(to, key, {
+        get: __accessProp.bind(mod, key),
+        enumerable: true
+      });
+  if (canCache)
+    cache.set(mod, to);
+  return to;
+};
+var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
 var __returnValue = (v) => v;
 function __exportSetter(name, newValue) {
   this[name] = __returnValue.bind(null, newValue);
@@ -13,6 +43,70 @@ var __export = (target, all) => {
       set: __exportSetter.bind(all, name)
     });
 };
+
+// package.json
+var require_package = __commonJS((exports, module) => {
+  module.exports = {
+    name: "mcp-recall",
+    version: "1.5.1",
+    description: "Context compression and persistent retrieval for Claude Code",
+    author: {
+      name: "sakebomb",
+      url: "https://github.com/sakebomb"
+    },
+    license: "MIT",
+    homepage: "https://github.com/sakebomb/mcp-recall#readme",
+    repository: {
+      type: "git",
+      url: "https://github.com/sakebomb/mcp-recall"
+    },
+    bugs: {
+      url: "https://github.com/sakebomb/mcp-recall/issues"
+    },
+    keywords: ["mcp", "claude", "claude-code", "context", "compression", "memory", "sqlite", "plugin"],
+    engines: {
+      bun: ">=1.1.0"
+    },
+    bin: {
+      "mcp-recall": "./bin/recall"
+    },
+    files: [
+      "bin/",
+      "src/",
+      "plugins/mcp-recall/dist/",
+      "plugins/mcp-recall/hooks/",
+      "plugins/mcp-recall/profiles/",
+      "profiles/",
+      "hooks/",
+      ".claude-plugin/",
+      "LICENSE",
+      "README.md",
+      "CHANGELOG.md",
+      "CONTRIBUTING.md",
+      "SECURITY.md",
+      "tsconfig.json"
+    ],
+    module: "src/server.ts",
+    type: "module",
+    scripts: {
+      start: "bun run src/server.ts",
+      test: "bun test",
+      dev: "bun --watch src/server.ts",
+      typecheck: "tsc --noEmit",
+      build: "bun build src/server.ts --target bun --outfile plugins/mcp-recall/dist/server.js && bun build src/cli.ts --target bun --outfile plugins/mcp-recall/dist/cli.js && cp hooks/hooks.json plugins/mcp-recall/hooks/hooks.json && rm -rf plugins/mcp-recall/profiles && cp -r profiles plugins/mcp-recall/profiles",
+      prepare: "git config core.hooksPath .githooks"
+    },
+    dependencies: {
+      "@modelcontextprotocol/sdk": "^1.27.1",
+      "smol-toml": "^1.6.0",
+      zod: "^3.24.0"
+    },
+    devDependencies: {
+      "@types/bun": "latest",
+      typescript: "^5.7.0"
+    }
+  };
+});
 
 // node_modules/smol-toml/dist/error.js
 /*!
@@ -7635,8 +7729,16 @@ function patternsOverlap(a, b) {
   const bPrefix = b.slice(0, -1);
   return aPrefix.startsWith(bPrefix) || bPrefix.startsWith(aPrefix);
 }
-function cmdList() {
+function cmdList(args) {
+  const machineReadable = args.includes("--machine-readable");
   const profiles = loadProfiles();
+  if (machineReadable) {
+    for (const p of profiles) {
+      process.stdout.write(sanitize(p.spec.profile.id) + `
+`);
+    }
+    return;
+  }
   if (profiles.length === 0) {
     console.log("No profiles installed.");
     console.log("Run: mcp-recall profiles seed");
@@ -7999,7 +8101,7 @@ async function handleProfilesCommand(args) {
   const rest = args.slice(1);
   switch (cmd) {
     case "list":
-      cmdList();
+      cmdList(rest);
       break;
     case "install":
       await cmdInstall(rest);
@@ -8508,6 +8610,15 @@ async function installCommand(opts = {}) {
   if (anyChange && !dryRun) {
     console.log(`
 Restart Claude Code to activate mcp-recall.`);
+    console.log(`
+Next steps:`);
+    console.log(`  Install compression profiles for your MCPs:`);
+    console.log(`    ${BOLD}mcp-recall profiles seed${RESET}`);
+    console.log(`
+  Optional \u2014 enable shell completions:`);
+    console.log(`    ${BOLD}mcp-recall completions zsh >> ~/.zfunc/_mcp-recall${RESET}   ${DIM}# zsh${RESET}`);
+    console.log(`    ${BOLD}mcp-recall completions bash >> ~/.bash_completion${RESET}    ${DIM}# bash${RESET}`);
+    console.log(`    ${BOLD}mcp-recall completions fish > ~/.config/fish/completions/mcp-recall.fish${RESET}  ${DIM}# fish${RESET}`);
   }
 }
 async function uninstallCommand(opts = {}) {
@@ -8603,8 +8714,260 @@ Installation: ${BOLD}${label}${RESET}
 }
 
 // src/cli.ts
+async function getVersion() {
+  const pkg = await Promise.resolve().then(() => __toESM(require_package(), 1));
+  return pkg.version;
+}
+function printHelp() {
+  console.log(`
+mcp-recall \u2014 context compression for Claude Code
+
+Usage: mcp-recall <command> [options]
+
+Commands:
+  install              Register hooks + MCP server in Claude Code
+  uninstall            Remove hooks + MCP server
+  status               Show current configuration and health
+  profiles <cmd>       Manage compression profiles
+    seed [--all]       Install profiles for detected MCPs (--all for entire catalog)
+    list               Show installed profiles
+    install <id>       Install a specific community profile
+    update             Update all community profiles
+    remove <id>        Remove a community profile
+    feed [path]        Contribute a profile to the community
+    check              Detect pattern conflicts
+    retrain            Suggest profile improvements from stored data
+    test <tool>        Test a profile against real input
+  learn                Generate profile suggestions from session data
+  completions <shell>  Print shell completion script (bash, zsh, fish)
+
+Options:
+  --help, -h           Show this help
+  --version, -v        Show version
+
+Examples:
+  mcp-recall install              # first-time setup
+  mcp-recall profiles seed        # install profiles for your MCPs
+  mcp-recall status               # check everything is working
+  mcp-recall completions zsh >> ~/.zfunc/_mcp-recall
+`);
+}
+function completionScript(shell) {
+  switch (shell) {
+    case "bash":
+      return bashCompletion();
+    case "zsh":
+      return zshCompletion();
+    case "fish":
+      return fishCompletion();
+    default:
+      throw new Error(`Unknown shell "${shell}". Supported: bash, zsh, fish`);
+  }
+}
+function bashCompletion() {
+  return `# mcp-recall bash completions
+# Add to your ~/.bashrc or source from /etc/bash_completion.d/mcp-recall
+
+_mcp_recall() {
+  local cur prev
+  COMPREPLY=()
+  cur="\${COMP_WORDS[COMP_CWORD]}"
+
+  local commands="install uninstall status profiles learn completions --help --version"
+  local profiles_cmds="list install update remove seed feed check retrain test"
+
+  if [[ \${COMP_CWORD} -eq 1 ]]; then
+    COMPREPLY=( $(compgen -W "\${commands}" -- "\${cur}") )
+    return 0
+  fi
+
+  if [[ "\${COMP_WORDS[1]}" == "profiles" ]]; then
+    if [[ \${COMP_CWORD} -eq 2 ]]; then
+      COMPREPLY=( $(compgen -W "\${profiles_cmds}" -- "\${cur}") )
+      return 0
+    fi
+    if [[ \${COMP_CWORD} -ge 3 ]]; then
+      local subcmd="\${COMP_WORDS[2]}"
+      if [[ "$subcmd" == "install" || "$subcmd" == "remove" || "$subcmd" == "test" ]]; then
+        local profile_ids
+        profile_ids="$(mcp-recall profiles list --machine-readable 2>/dev/null)"
+        COMPREPLY=( $(compgen -W "\${profile_ids}" -- "\${cur}") )
+        return 0
+      fi
+    fi
+  fi
+}
+
+complete -F _mcp_recall mcp-recall
+`;
+}
+function zshCompletion() {
+  return `#compdef mcp-recall
+# mcp-recall zsh completions
+# Add to your fpath, e.g.: mcp-recall completions zsh >> ~/.zfunc/_mcp-recall
+# Then add to ~/.zshrc: fpath=(~/.zfunc \${fpath}); autoload -Uz compinit && compinit
+
+_mcp_recall_profiles() {
+  local state
+  _arguments \\
+    '1: :->subcommand' \\
+    '*:: :->args'
+
+  case $state in
+    subcommand)
+      local subcommands=(
+        'list:show installed profiles'
+        'install:install a community profile by ID'
+        'update:update all installed community profiles'
+        'remove:remove an installed community profile'
+        'seed:install profiles for all detected MCPs'
+        'feed:contribute a local profile to the community'
+        'check:detect pattern conflicts between installed profiles'
+        'retrain:suggest profile improvements from stored data'
+        'test:test a profile against real input'
+      )
+      _describe 'subcommand' subcommands
+      ;;
+    args)
+      case $words[1] in
+        install|remove|test)
+          local profiles
+          profiles=(\${(f)"$(mcp-recall profiles list --machine-readable 2>/dev/null)"})
+          _describe 'profile' profiles
+          ;;
+        seed)
+          _arguments '--all[install every profile in the community catalog]'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_mcp_recall() {
+  local state
+  _arguments \\
+    '(-h --help)'{-h,--help}'[show help and exit]' \\
+    '(-v --version)'{-v,--version}'[show version and exit]' \\
+    '1: :->command' \\
+    '*:: :->args'
+
+  case $state in
+    command)
+      local commands=(
+        'install:register hooks and MCP server in Claude Code'
+        'uninstall:remove hooks and MCP server'
+        'status:show current configuration and health'
+        'profiles:manage compression profiles'
+        'learn:generate profile suggestions from session data'
+        'completions:print shell completion script (bash, zsh, fish)'
+      )
+      _describe 'command' commands
+      ;;
+    args)
+      case $words[1] in
+        profiles)
+          _mcp_recall_profiles
+          ;;
+        completions)
+          local shells=('bash:generate bash completion script' 'zsh:generate zsh completion script' 'fish:generate fish completion script')
+          _describe 'shell' shells
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_mcp_recall "$@"
+`;
+}
+function fishCompletion() {
+  return `# mcp-recall fish completions
+# Save to: mcp-recall completions fish > ~/.config/fish/completions/mcp-recall.fish
+
+set -l commands install uninstall status profiles learn completions
+
+# Top-level commands
+complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
+  -a install -d "Register hooks and MCP server in Claude Code"
+complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
+  -a uninstall -d "Remove hooks and MCP server"
+complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
+  -a status -d "Show current configuration and health"
+complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
+  -a profiles -d "Manage compression profiles"
+complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
+  -a learn -d "Generate profile suggestions from session data"
+complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
+  -a completions -d "Print shell completion script"
+complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
+  -s h -l help -d "Show help and exit"
+complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
+  -s v -l version -d "Show version and exit"
+
+# completions subcommand \u2014 shell argument
+complete -c mcp-recall -f -n "__fish_seen_subcommand_from completions" \\
+  -a "bash zsh fish"
+
+# profiles subcommands
+set -l profile_cmds list install update remove seed feed check retrain test
+
+complete -c mcp-recall -f -n "__fish_seen_subcommand_from profiles; and not __fish_seen_subcommand_from $profile_cmds" \\
+  -a list -d "Show installed profiles"
+complete -c mcp-recall -f -n "__fish_seen_subcommand_from profiles; and not __fish_seen_subcommand_from $profile_cmds" \\
+  -a install -d "Install a community profile by ID"
+complete -c mcp-recall -f -n "__fish_seen_subcommand_from profiles; and not __fish_seen_subcommand_from $profile_cmds" \\
+  -a update -d "Update all installed community profiles"
+complete -c mcp-recall -f -n "__fish_seen_subcommand_from profiles; and not __fish_seen_subcommand_from $profile_cmds" \\
+  -a remove -d "Remove an installed community profile"
+complete -c mcp-recall -f -n "__fish_seen_subcommand_from profiles; and not __fish_seen_subcommand_from $profile_cmds" \\
+  -a seed -d "Install profiles for all detected MCPs"
+complete -c mcp-recall -f -n "__fish_seen_subcommand_from profiles; and not __fish_seen_subcommand_from $profile_cmds" \\
+  -a feed -d "Contribute a local profile to the community"
+complete -c mcp-recall -f -n "__fish_seen_subcommand_from profiles; and not __fish_seen_subcommand_from $profile_cmds" \\
+  -a check -d "Detect pattern conflicts between installed profiles"
+complete -c mcp-recall -f -n "__fish_seen_subcommand_from profiles; and not __fish_seen_subcommand_from $profile_cmds" \\
+  -a retrain -d "Suggest profile improvements from stored data"
+complete -c mcp-recall -f -n "__fish_seen_subcommand_from profiles; and not __fish_seen_subcommand_from $profile_cmds" \\
+  -a test -d "Test a profile against real input"
+
+# Dynamic profile IDs for install / remove / test
+complete -c mcp-recall -f \\
+  -n "__fish_seen_subcommand_from profiles; and __fish_seen_subcommand_from install remove test" \\
+  -a "(mcp-recall profiles list --machine-readable 2>/dev/null)"
+
+# profiles seed --all flag
+complete -c mcp-recall -n "__fish_seen_subcommand_from profiles; and __fish_seen_subcommand_from seed" \\
+  -l all -d "Install every profile in the community catalog"
+`;
+}
 var subcommand = process.argv[2];
 async function main() {
+  if (process.argv.includes("--help") || process.argv.includes("-h")) {
+    printHelp();
+    process.exit(0);
+  }
+  if (process.argv.includes("--version") || process.argv.includes("-v")) {
+    console.log(await getVersion());
+    process.exit(0);
+  }
+  if (!subcommand) {
+    printHelp();
+    process.exit(0);
+  }
+  if (subcommand === "completions") {
+    const shell = process.argv[3];
+    if (!shell) {
+      console.error("Usage: mcp-recall completions <bash|zsh|fish>");
+      process.exit(1);
+    }
+    try {
+      process.stdout.write(completionScript(shell));
+    } catch (err) {
+      console.error(`${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+    process.exit(0);
+  }
   if (subcommand === "profiles") {
     await handleProfilesCommand(process.argv.slice(3));
     process.exit(0);
@@ -8657,4 +9020,11 @@ async function main() {
     process.exit(0);
   }
 }
-main();
+if (import.meta.main) {
+  main();
+}
+export {
+  printHelp,
+  getVersion,
+  completionScript
+};

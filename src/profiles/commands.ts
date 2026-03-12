@@ -158,8 +158,17 @@ export function patternsOverlap(a: string, b: string): boolean {
 
 // ── list ──────────────────────────────────────────────────────────────────────
 
-function cmdList(): void {
+export function cmdList(args: string[]): void {
+  const machineReadable = args.includes("--machine-readable");
   const profiles = loadProfiles();
+
+  if (machineReadable) {
+    for (const p of profiles) {
+      process.stdout.write(sanitize(p.spec.profile.id) + "\n");
+    }
+    return;
+  }
+
   if (profiles.length === 0) {
     console.log("No profiles installed.");
     console.log("Run: mcp-recall profiles seed");
@@ -600,7 +609,7 @@ export async function handleProfilesCommand(args: string[]): Promise<void> {
 
   switch (cmd) {
     case "list":
-      cmdList();
+      cmdList(rest);
       break;
     case "install":
       await cmdInstall(rest);
