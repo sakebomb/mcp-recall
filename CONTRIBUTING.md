@@ -90,7 +90,9 @@ See [docs/profile-schema.md](docs/profile-schema.md) for the full schema and [sa
 
 ## Adding a compression handler
 
-Handlers are the best way to contribute. Each one targets a specific MCP tool (or family of tools) and reduces its output to an actionable summary. The community issues [#49](https://github.com/sakebomb/mcp-recall/issues/49)–[#53](https://github.com/sakebomb/mcp-recall/issues/53) and [#59](https://github.com/sakebomb/mcp-recall/issues/59)–[#66](https://github.com/sakebomb/mcp-recall/issues/66) are all open for contribution. Comment on one to claim it before starting.
+Handlers are the best way to contribute. Each one targets a specific MCP tool (or family of tools) and reduces its output to an actionable summary. Check the [open issues](https://github.com/sakebomb/mcp-recall/issues?q=is%3Aopen+label%3Afeature) for handler requests, or open one yourself. Comment on an issue to claim it before starting.
+
+> **Profiles first**: before writing a TypeScript handler, check whether a TOML profile would suffice. See [docs/profile-schema.md](docs/profile-schema.md#when-to-write-a-profile-vs-a-typescript-handler) for the decision table. Profiles are easier to write, review, and maintain.
 
 ### The contract
 
@@ -108,7 +110,7 @@ A handler receives the raw MCP `output` (which may be a `{ content: [{ type: "te
 
 **Rules:**
 - Always call `extractText(output)` first and use its result for `originalSize`. Never measure the raw `output` object.
-- Never throw. If parsing fails, return a graceful fallback (e.g. `raw.slice(0, 500)`).
+- **Never throw.** If `JSON.parse()` fails, a field is missing, or the shape is unexpected — return a graceful fallback (e.g. `{ summary: raw.slice(0, 500), originalSize }`). The handler is called inside a live hook; an unhandled exception breaks the tool call for the user.
 - Return a result for every code path — no `undefined`, no `null`.
 - Keep `summary` under ~1 KB for typical inputs. The goal is to give Claude enough to reason with, not a full reproduction.
 - The function must be a named `const` export (e.g. `export const jiraHandler: Handler = ...`). The name shows up in `[recall:debug]` logs.

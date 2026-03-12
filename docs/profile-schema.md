@@ -73,6 +73,7 @@ type = "json_extract"
 # Ordered paths to try for the items array (first match wins, dot notation).
 # Use "" or omit for root-level array.
 # Use "." for a root-level single object (treated as a one-item list).
+# If none of the paths match, the root object is treated as a single item.
 items_path = ["issues", "nodes", "data.issues.nodes", "data.issue"]
 
 # Fields to extract per item (dot notation for nested paths).
@@ -86,8 +87,10 @@ fields = [
 ]
 
 max_items          = 10    # cap on items shown (default: 10)
-max_chars_per_field = 200  # truncate any single field value beyond this (default: 200)
-fallback_chars     = 500   # chars to return when parsing fails (default: 500)
+max_chars_per_field = 200  # truncate any single extracted field value beyond this (default: 200)
+fallback_chars     = 500   # chars to return when JSON parsing fails entirely (default: 500)
+                           # note: max_chars_per_field applies per-field during normal extraction;
+                           #       fallback_chars applies only when the whole response can't be parsed
 ```
 
 **Optional field labels** — displayed as `Label: value`. If omitted, the last segment of the field path is used as the label.

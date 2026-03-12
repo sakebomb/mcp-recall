@@ -72,6 +72,7 @@ recall__search(query, tool?, limit?)
 - Each result includes a `> …excerpt…` snippet from the matching content
 - Filter by tool name with `tool` (substring match — e.g. `"github"` matches all `mcp__github__*` tools)
 - Default `limit`: 5 results
+- When you already know the item ID, use `recall__retrieve(id, query?)` instead — it returns the full content or a focused excerpt without scanning the whole index
 
 ---
 
@@ -144,6 +145,7 @@ recall__session_summary(session_id?, date?)
 ```
 
 - Defaults to today (UTC). Pass `date` (YYYY-MM-DD) for a specific day, or `session_id` for a specific Claude session.
+- Session IDs appear in `recall__context` output and in the `recall__list_stored` table — look for the `session` column.
 - Shows: items stored, compression savings, tool breakdown, most-accessed items, pinned items, notes.
 
 Example output:
@@ -196,14 +198,14 @@ Delete stored items.
 recall__forget(id?, tool?, session_id?, older_than_days?, all?, confirmed?, force?)
 ```
 
-| Usage | Effect |
-|---|---|
-| `forget(id: "recall_abc12345")` | Delete one item |
-| `forget(tool: "mcp__github__list_issues")` | Delete all items from that tool |
-| `forget(session_id: "xyz")` | Delete everything from a specific session |
-| `forget(older_than_days: 3)` | Delete items older than 3 calendar days |
-| `forget(all: true, confirmed: true)` | Wipe the entire store |
-| `forget(all: true, confirmed: true, force: true)` | Wipe including pinned items |
+| Usage | Effect | Response |
+|---|---|---|
+| `forget(id: "recall_abc12345")` | Delete one item | `Deleted 1 item.` |
+| `forget(tool: "mcp__github__list_issues")` | Delete all items from that tool | `Deleted 5 items from mcp__github__list_issues.` |
+| `forget(session_id: "xyz")` | Delete everything from a specific session | `Deleted 8 items from session xyz.` |
+| `forget(older_than_days: 3)` | Delete items older than 3 calendar days | `Deleted 12 items older than 3 days.` |
+| `forget(all: true, confirmed: true)` | Wipe the entire store | `Deleted 42 items. (3 pinned items skipped)` |
+| `forget(all: true, confirmed: true, force: true)` | Wipe including pinned items | `Deleted 45 items.` |
 
 Pinned items are skipped by default. Pass `force: true` to override.
 

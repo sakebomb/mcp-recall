@@ -91,6 +91,59 @@ mcp-recall profiles list
 2. Confirm the tool is being intercepted: `recall__list_stored()` should show items from it
 3. Check the tool isn't on the denylist: `mcp-recall profiles list` — denylist blocks don't produce stored items
 
+## Tool output not being stored
+
+If a tool is running but nothing appears in `recall__list_stored()`:
+
+**1. Check the denylist:**
+
+```bash
+RECALL_DEBUG=1 claude
+# Look for: [recall:debug] denied · mcp__myservice__get_item
+```
+
+Common causes — the tool name matches a built-in keyword pattern (`*token*`, `*secret*`, `*api_key*`, etc.) or an explicit entry (`mcp__1password__*`, etc.). If the tool is legitimate, add it to the allowlist in `~/.config/mcp-recall/config.toml`:
+
+```toml
+[denylist]
+allowlist = ["mcp__myservice__get_item"]
+```
+
+**2. Check for secret detection:**
+
+If a secret pattern (PEM header, AWS key, etc.) is found in the output, the item is skipped with a warning. Enable debug logging to confirm:
+
+```bash
+RECALL_DEBUG=1 claude
+# Look for: [recall:debug] secret detected · skipping
+```
+
+**3. Check the tool is actually going through the hook:**
+
+HTTP transport MCPs are not intercepted — only stdio MCPs and the Bash tool go through `PostToolUse`. Verify the MCP is registered as a stdio server in `~/.claude.json`.
+
+---
+
+## `mcp-recall` command not found (from-source install)
+
+If you installed from source and `mcp-recall` is not on PATH:
+
+```bash
+# Option 1 — alias
+echo 'alias mcp-recall="bun /path/to/mcp-recall/plugins/mcp-recall/dist/cli.js"' >> ~/.zshrc
+source ~/.zshrc
+
+# Option 2 — symlink
+ln -sf /path/to/mcp-recall/plugins/mcp-recall/dist/cli.js ~/.local/bin/mcp-recall
+# Ensure ~/.local/bin is in your PATH
+```
+
+If the dist files don't exist yet, run `bun run build` first.
+
+→ See [profiles quickstart — from source](profiles-quickstart.md#from-source) for the full setup.
+
+---
+
 ## Profile syntax error not reported
 
 Profile load errors are silent by default (bad profiles are skipped, not fatal). Enable debug logging to see them:
