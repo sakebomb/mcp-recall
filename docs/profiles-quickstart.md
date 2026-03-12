@@ -19,11 +19,12 @@ mcp-recall profiles seed --all
 
 # See what's available in the community catalog (with install status)
 mcp-recall profiles available
+mcp-recall profiles available --verbose   # also shows MCP server URLs
 
 # Verify what's installed
 mcp-recall profiles list
 
-# Get full metadata for a profile (works offline)
+# Get full metadata for a profile (manifest-first, falls back to local data offline)
 mcp-recall profiles info grafana
 
 # Keep profiles current
@@ -100,10 +101,12 @@ Local profiles live in `~/.config/mcp-recall/profiles/` and always take preceden
 # See which tier each profile comes from (user / community / bundled)
 mcp-recall profiles list
 
-# Short names work everywhere — "grafana" is the same as "mcp__grafana"
+# Short names work for most commands — "grafana" is the same as "mcp__grafana"
 mcp-recall profiles info grafana
-mcp-recall profiles test grafana
 mcp-recall profiles remove grafana
+
+# profiles test takes a full tool name, not a short name
+mcp-recall profiles test mcp__grafana__search_dashboards
 
 # Test a profile against real stored output
 mcp-recall profiles test mcp__grafana__search_dashboards

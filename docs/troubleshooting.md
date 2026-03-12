@@ -80,7 +80,7 @@ To confirm a profile is loaded and which tier it came from:
 
 ```bash
 mcp-recall profiles list
-# Columns: ID, Tier (user / community / bundled), Pattern, Description
+# Columns: Name (short name), Tier (user / community / bundled), Pattern, Description
 ```
 
 ## `retrain` shows 0 samples
@@ -104,5 +104,5 @@ RECALL_DEBUG=1 claude
 
 Two profiles in the same tier have overlapping patterns. The resolver picks the more specific one (exact beats wildcard, longer prefix beats shorter), but the conflict is worth resolving to avoid ambiguity:
 
-- If both are community profiles, one may be redundant — remove with `mcp-recall profiles remove <id>`
+- If both are community profiles, one may be redundant — remove with `mcp-recall profiles remove <id>` (only community-tier profiles can be removed this way; user profiles must be deleted manually from `~/.config/mcp-recall/profiles/`)
 - If one is yours (user tier), it takes precedence over community by design — no action needed unless you want to suppress the warning

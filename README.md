@@ -197,13 +197,13 @@ mcp-recall profiles seed
 # Or install the full community catalog at once
 mcp-recall profiles seed --all
 
-# See what's available in the community catalog
+# See what's available in the community catalog (add --verbose for MCP URLs)
 mcp-recall profiles available
 
 # See what's installed (accepts short names: "grafana" not "mcp__grafana")
 mcp-recall profiles list
 
-# Get full metadata for a profile
+# Get full metadata for a profile (manifest-first, falls back to local data offline)
 mcp-recall profiles info grafana
 
 # Keep profiles up to date
@@ -316,7 +316,7 @@ Repeated identical tool calls return a cached header instead of re-compressing:
 
 | Handler | Matches | Strategy |
 |---|---|---|
-| Bash | native `Bash` tool | CLI-aware routing on `tool_input.command`: `git diff`/`git show` → changed-files summary with per-file +/- stats; `git log` → 20-commit cap; `terraform plan` → resource action symbols + Plan: summary; `git status` → staged/unstaged counts + branch info; `npm`/`bun`/`yarn`/`pnpm`/`pip install` → success or error summary; `pytest`/`jest`/`bun test`/`vitest`/`go test` → pass/fail counts + failure names; `docker ps` → container name/image/status/ports; `make`/`just` → target + outcome; everything else → shell handler. |
+| Bash | native `Bash` tool | CLI-aware routing on `tool_input.command`: `git diff`/`git show` → changed-files summary with per-file +/- stats; `git log` → 20-commit cap; `terraform plan` → resource action symbols + Plan: summary; `git status` → staged/unstaged counts + branch info; `npm`/`bun`/`yarn`/`pip install` → success or error summary (pnpm → shell compression); `pytest`/`jest`/`bun test`/`vitest`/`go test` → pass/fail counts + failure names; `docker ps` → container name/image/status/ports; `make`/`just` → target + outcome; everything else → shell handler. |
 | Playwright | tool name contains `playwright` and `snapshot` | Interactive elements (buttons, inputs, links), visible text, headings. Drops aria noise. |
 | GitHub | `mcp__github__*` | Number, title, state, body (200 chars), labels, URL. Lists: first 10 + overflow count. |
 | GitLab | `mcp__gitlab__*` | IID, title, state, description excerpt (200 chars), labels, web URL. Lists: first 10 + overflow count. |
@@ -344,7 +344,7 @@ Credential tools are never stored. Password managers are blocked by explicit nam
 Claude Code's `PostToolUse` hook supports output replacement for MCP tools and the `Bash` tool. mcp-recall intercepts both:
 
 - **MCP tools** (`mcp__*`) — all compression handlers apply (Playwright, GitHub, GitLab, filesystem, shell/remote-exec, Linear, Slack, Tavily, database query results, Sentry events, CSV, JSON, generic text)
-- **Bash** — CLI-aware handlers: `git diff` → file-level summary; `git log` → 20-commit cap; `terraform plan` → resource action summary; `git status` → staged/unstaged counts; package install → success/error summary; test runners (pytest/jest/bun test/vitest/go test) → pass/fail counts; `docker ps` → container list; `make`/`just` → target + outcome; everything else → 50-line shell cap with ANSI stripping
+- **Bash** — CLI-aware handlers: `git diff`/`git show` → file-level summary; `git log` → 20-commit cap; `terraform plan` → resource action summary; `git status` → staged/unstaged counts; package install (npm/bun/yarn/pip) → success/error summary; test runners (pytest/jest/bun test/vitest/go test) → pass/fail counts; `docker ps` → container list; `make`/`just` → target + outcome; everything else → 50-line shell cap with ANSI stripping
 
 The remaining built-in tools — `Read`, `Grep`, `Glob` — do not support output replacement. Their full output enters context directly. If large file reads are your biggest context consumer, consider the [filesystem MCP server](https://github.com/modelcontextprotocol/servers) instead of the built-in Read tool.
 
