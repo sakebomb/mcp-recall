@@ -11,10 +11,12 @@ The [community profiles repo](https://github.com/sakebomb/mcp-recall-profiles) h
 The `mcp-recall` CLI is already on PATH. Just seed:
 
 ```bash
-# Install profiles for your currently connected MCPs
+# Install profiles only for your currently connected MCPs (recommended first step)
+# Detects which MCPs are configured in ~/.claude.json and installs matching profiles.
+# Safe to re-run — skips already-installed profiles.
 mcp-recall profiles seed
 
-# Or install the entire community catalog at once
+# Or install the entire community catalog at once (useful on a fresh machine)
 mcp-recall profiles seed --all
 
 # See what's available in the community catalog (with install status)
@@ -108,8 +110,8 @@ mcp-recall profiles remove grafana
 # profiles test takes a full tool name, not a short name
 mcp-recall profiles test mcp__grafana__search_dashboards
 
-# Test a profile against real stored output
-mcp-recall profiles test mcp__grafana__search_dashboards
+# Test against a specific stored item
+mcp-recall profiles test mcp__grafana__search_dashboards --stored <recall_id>
 
 # Suggest field improvements using your stored data
 mcp-recall profiles retrain
