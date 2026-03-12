@@ -209,3 +209,91 @@ type = "text_truncate"`
     expect(overlap).toBe(true);
   });
 });
+
+// ── cmdList --machine-readable ────────────────────────────────────────────────
+
+describe("cmdList --machine-readable", () => {
+  let userDir: string;
+
+  beforeEach(() => {
+    userDir = mkdtempSync(join(tmpdir(), "recall-cmdlist-"));
+    clearProfileCache();
+    process.env.RECALL_USER_PROFILES_PATH = userDir;
+    process.env.RECALL_COMMUNITY_PROFILES_PATH = join(tmpdir(), "nonexistent-c");
+    process.env.RECALL_BUNDLED_PROFILES_PATH = join(tmpdir(), "nonexistent-b");
+  });
+
+  afterEach(() => {
+    rmSync(userDir, { recursive: true, force: true });
+    delete process.env.RECALL_USER_PROFILES_PATH;
+    delete process.env.RECALL_COMMUNITY_PROFILES_PATH;
+    delete process.env.RECALL_BUNDLED_PROFILES_PATH;
+    clearProfileCache();
+  });
+
+  test("prints bare profile IDs one per line", () => {
+    const { cmdList } = require("../src/profiles/commands");
+
+    writeFileSync(
+      join(userDir, "jira.toml"),
+      `[profile]
+id = "mcp__jira"
+version = "1.0.0"
+description = "Jira"
+mcp_pattern = "mcp__jira__*"
+[strategy]
+type = "text_truncate"`
+    );
+    writeFileSync(
+      join(userDir, "grafana.toml"),
+      `[profile]
+id = "mcp__grafana"
+version = "1.0.0"
+description = "Grafana"
+mcp_pattern = "mcp__grafana__*"
+[strategy]
+type = "text_truncate"`
+    );
+
+    const lines: string[] = [];
+    const orig = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: unknown) => {
+      if (typeof chunk === "string") lines.push(chunk);
+      return true;
+    };
+    try {
+      clearProfileCache();
+      cmdList(["--machine-readable"]);
+    } finally {
+      process.stdout.write = orig;
+    }
+
+    const output = lines.join("");
+    const ids = output.trim().split("\n");
+    expect(ids).toContain("mcp__jira");
+    expect(ids).toContain("mcp__grafana");
+    // No extra formatting — each line is just an ID
+    for (const id of ids) {
+      expect(id).toMatch(/^[a-z0-9_-]+$/);
+    }
+  });
+
+  test("outputs nothing when no profiles installed", () => {
+    const { cmdList } = require("../src/profiles/commands");
+
+    const lines: string[] = [];
+    const orig = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: unknown) => {
+      if (typeof chunk === "string") lines.push(chunk);
+      return true;
+    };
+    try {
+      clearProfileCache();
+      cmdList(["--machine-readable"]);
+    } finally {
+      process.stdout.write = orig;
+    }
+
+    expect(lines.join("").trim()).toBe("");
+  });
+});
