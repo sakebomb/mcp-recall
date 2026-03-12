@@ -13,6 +13,7 @@ import {
   toolContext,
 } from "../src/tools";
 import { resetConfig } from "../src/config";
+import { formatRelativeTime } from "../src/format";
 import type { Database } from "bun:sqlite";
 
 const PROJECT_KEY = "tooltest1234567";
@@ -757,5 +758,51 @@ describe("MCP tool handlers", () => {
       expect(result).toContain("Recently accessed");
       expect(result).not.toContain("Hot from last session");
     });
+
+    it("includes Generated line when context is non-empty", () => {
+      const stored = storeOutput(db, makeInput());
+      pinOutput(db, stored.id, PROJECT_KEY, true);
+      const result = toolContext(db, PROJECT_KEY, {});
+      expect(result).toContain("Generated ");
+    });
+
+    it("does not include Generated line in empty context message", () => {
+      const result = toolContext(db, PROJECT_KEY, {});
+      expect(result).not.toContain("Generated ");
+      expect(result).toContain("no context available");
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatRelativeTime
+// ---------------------------------------------------------------------------
+
+describe("formatRelativeTime", () => {
+  it("returns 'just now' for 0ms", () => {
+    expect(formatRelativeTime(0)).toBe("just now");
+  });
+
+  it("returns 'just now' for under 60 seconds", () => {
+    expect(formatRelativeTime(59_000)).toBe("just now");
+  });
+
+  it("returns minutes for 1-59 minutes", () => {
+    expect(formatRelativeTime(60_000)).toBe("1m ago");
+    expect(formatRelativeTime(5 * 60_000)).toBe("5m ago");
+    expect(formatRelativeTime(59 * 60_000)).toBe("59m ago");
+  });
+
+  it("returns hours and minutes for 1-23 hours", () => {
+    expect(formatRelativeTime(60 * 60_000)).toBe("1h ago");
+    expect(formatRelativeTime(90 * 60_000)).toBe("1h 30m ago");
+    expect(formatRelativeTime(3 * 60 * 60_000 + 14 * 60_000)).toBe("3h 14m ago");
+    expect(formatRelativeTime(23 * 60 * 60_000)).toBe("23h ago");
+  });
+
+  it("returns days for 24h+", () => {
+    expect(formatRelativeTime(24 * 60 * 60_000)).toBe("1 day ago");
+    expect(formatRelativeTime(2 * 24 * 60 * 60_000)).toBe("2 days ago");
+    expect(formatRelativeTime(30 * 24 * 60 * 60_000)).toBe("30 days ago");
   });
 });
