@@ -12,6 +12,7 @@ import { existsSync } from "fs";
 import { mkdir, rename, readFile } from "fs/promises";
 import path from "path";
 import os from "os";
+import { loadProfiles } from "../profiles/loader";
 
 // ── ANSI ─────────────────────────────────────────────────────────────────────
 
@@ -365,6 +366,21 @@ export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
     } else {
       console.log(`  Run ${BOLD}mcp-recall install${RESET}`);
     }
+  }
+
+  // Profiles
+  console.log("");
+  const profiles = loadProfiles();
+  if (profiles.length === 0) {
+    console.log(`  ${RED}✗${RESET} Profiles: none installed`);
+    console.log(`    → Run: ${BOLD}mcp-recall profiles seed${RESET}`);
+  } else {
+    const counts = profiles.reduce<Record<string, number>>((acc, p) => {
+      acc[p.tier] = (acc[p.tier] ?? 0) + 1;
+      return acc;
+    }, {});
+    const summary = Object.entries(counts).map(([t, n]) => `${n} ${t}`).join(", ");
+    console.log(`  ${GREEN}✓${RESET} Profiles: ${profiles.length} installed (${summary})`);
   }
 
   console.log("");
