@@ -82,10 +82,12 @@ Use **dot notation** for nested paths:
 ```toml
 [profile]
 id          = "mcp__<server>"           # e.g. "mcp__stripe"
+short_name  = "<server>"               # e.g. "stripe" — used in CLI commands
 version     = "1.0.0"
 description = "<MCP name> <objects> — extracts <fields>"
 mcp_pattern = "mcp__<server>__*"        # or array for alt names
 author      = "<github-username>"
+mcp_url     = "https://github.com/..."  # link to MCP server repo or docs
 sample_tool = "mcp__<server>__<tool>"
 
 [strategy]
@@ -112,6 +114,7 @@ fallback_chars      = 500   # used when JSON parse fails
 ```toml
 [profile]
 id          = "mcp__<server>"
+short_name  = "<server>"
 version     = "1.0.0"
 description = "<MCP name> — depth-limited JSON truncation"
 mcp_pattern = "mcp__<server>__*"
@@ -129,6 +132,7 @@ fallback_chars  = 500
 ```toml
 [profile]
 id          = "mcp__<server>"
+short_name  = "<server>"
 version     = "1.0.0"
 description = "<MCP name> — text truncation"
 mcp_pattern = "mcp__<server>__*"

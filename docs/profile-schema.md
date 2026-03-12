@@ -48,9 +48,10 @@ mcp_pattern = ["mcp__jira__*", "mcp__atlassian__jira__*"]
 Optional metadata (used by community registry):
 
 ```toml
+short_name  = "jira"                        # friendly name for CLI; defaults to id with mcp__ stripped
 author      = "your-github-username"
-mcp_docs_url = "https://github.com/..."
-sample_tool  = "mcp__jira__search_issues"   # example tool this was tested against
+mcp_url     = "https://github.com/..."      # link to the MCP server repo or docs
+sample_tool = "mcp__jira__search_issues"    # example tool this was tested against
 ```
 
 ---
