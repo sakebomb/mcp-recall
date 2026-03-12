@@ -20921,6 +20921,9 @@ var RecallConfigSchema = exports_external.object({
     override_defaults: exports_external.array(exports_external.string()),
     allowlist: exports_external.array(exports_external.string())
   }),
+  profiles: exports_external.object({
+    verify_signature: exports_external.enum(["warn", "error", "skip"])
+  }),
   debug: exports_external.object({
     enabled: exports_external.boolean()
   })
@@ -20941,6 +20944,9 @@ var DEFAULTS = {
     additional: [],
     override_defaults: [],
     allowlist: []
+  },
+  profiles: {
+    verify_signature: "warn"
   },
   debug: {
     enabled: false

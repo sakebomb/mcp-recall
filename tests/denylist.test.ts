@@ -12,6 +12,7 @@ const baseConfig: RecallConfig = {
   },
   retrieve: { default_max_bytes: 8192 },
   denylist: { additional: [], override_defaults: [], allowlist: [] },
+  profiles: { verify_signature: "warn" },
   debug: { enabled: false },
 };
 
