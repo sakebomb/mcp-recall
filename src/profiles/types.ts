@@ -21,6 +21,8 @@ export interface ProfileMeta {
   version: string;
   description: string;
   mcp_pattern: string | string[];
+  short_name?: string;
+  mcp_url?: string;
   author?: string;
   sample_tool?: string;
 }
