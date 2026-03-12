@@ -69,6 +69,8 @@ mcp-recall profiles list
 # Verify your profile appears and the Pattern column matches the tool name
 ```
 
+> **Short names**: `profiles list`, `profiles install`, `profiles remove`, `profiles info`, and `profiles test` all accept short names (e.g. `grafana` instead of `mcp__grafana`). If a short name matches multiple profiles, an interactive picker appears on TTY. On non-TTY (CI, scripts), it prints the full list and exits — use the full `id` to disambiguate.
+
 Common causes:
 - Pattern uses `mcp__myserver__*` but the tool is actually named `mcp__my-server__*` (hyphens vs underscores)
 - Profile file is in the wrong location — user profiles go in `~/.config/mcp-recall/profiles/<id>/default.toml`
@@ -78,7 +80,7 @@ To confirm a profile is loaded and which tier it came from:
 
 ```bash
 mcp-recall profiles list
-# Columns: ID, Tier (user / community / bundled), Pattern, Description
+# Columns: Name (short name), Tier (user / community / bundled), Pattern, Description
 ```
 
 ## `retrain` shows 0 samples
@@ -102,5 +104,5 @@ RECALL_DEBUG=1 claude
 
 Two profiles in the same tier have overlapping patterns. The resolver picks the more specific one (exact beats wildcard, longer prefix beats shorter), but the conflict is worth resolving to avoid ambiguity:
 
-- If both are community profiles, one may be redundant — remove with `mcp-recall profiles remove <id>`
+- If both are community profiles, one may be redundant — remove with `mcp-recall profiles remove <id>` (only community-tier profiles can be removed this way; user profiles must be deleted manually from `~/.config/mcp-recall/profiles/`)
 - If one is yours (user tier), it takes precedence over community by design — no action needed unless you want to suppress the warning

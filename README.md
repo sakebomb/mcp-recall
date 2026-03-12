@@ -132,6 +132,14 @@ Across a full session: 315 KB of tool output → 5.4 KB delivered to context.
 
 ### Option A — npm (recommended)
 
+No global install required — run directly with npx or bunx:
+
+```bash
+npx mcp-recall install   # or: bunx mcp-recall install
+```
+
+Or install globally for faster subsequent runs:
+
 ```bash
 bun add -g mcp-recall    # or: npm i -g mcp-recall
 mcp-recall install       # register hooks + MCP server in Claude Code
@@ -189,8 +197,14 @@ mcp-recall profiles seed
 # Or install the full community catalog at once
 mcp-recall profiles seed --all
 
-# See what's installed
+# See what's available in the community catalog (add --verbose for MCP URLs)
+mcp-recall profiles available
+
+# See what's installed (accepts short names: "grafana" not "mcp__grafana")
 mcp-recall profiles list
+
+# Get full metadata for a profile (manifest-first, falls back to local data offline)
+mcp-recall profiles info grafana
 
 # Keep profiles up to date
 mcp-recall profiles update
@@ -302,7 +316,7 @@ Repeated identical tool calls return a cached header instead of re-compressing:
 
 | Handler | Matches | Strategy |
 |---|---|---|
-| Bash | native `Bash` tool | CLI-aware routing on `tool_input.command`: `git diff`/`git show` → changed-files summary with per-file +/- stats; `git log` → 20-commit cap; `terraform plan` → resource action symbols + Plan: summary; everything else → shell handler. |
+| Bash | native `Bash` tool | CLI-aware routing on `tool_input.command`: `git diff`/`git show` → changed-files summary with per-file +/- stats; `git log` → 20-commit cap; `terraform plan` → resource action symbols + Plan: summary; `git status` → staged/unstaged counts + branch info; `npm`/`bun`/`yarn`/`pip install` → success or error summary (pnpm → shell compression); `pytest`/`jest`/`bun test`/`vitest`/`go test` → pass/fail counts + failure names; `docker ps` → container name/image/status/ports; `make`/`just` → target + outcome; everything else → shell handler. |
 | Playwright | tool name contains `playwright` and `snapshot` | Interactive elements (buttons, inputs, links), visible text, headings. Drops aria noise. |
 | GitHub | `mcp__github__*` | Number, title, state, body (200 chars), labels, URL. Lists: first 10 + overflow count. |
 | GitLab | `mcp__gitlab__*` | IID, title, state, description excerpt (200 chars), labels, web URL. Lists: first 10 + overflow count. |
@@ -330,7 +344,7 @@ Credential tools are never stored. Password managers are blocked by explicit nam
 Claude Code's `PostToolUse` hook supports output replacement for MCP tools and the `Bash` tool. mcp-recall intercepts both:
 
 - **MCP tools** (`mcp__*`) — all compression handlers apply (Playwright, GitHub, GitLab, filesystem, shell/remote-exec, Linear, Slack, Tavily, database query results, Sentry events, CSV, JSON, generic text)
-- **Bash** — CLI-aware handlers: `git diff` → file-level changed-files summary; `git log` → 20-commit cap; `terraform plan` → resource action summary; everything else → 50-line shell cap with ANSI stripping
+- **Bash** — CLI-aware handlers: `git diff`/`git show` → file-level summary; `git log` → 20-commit cap; `terraform plan` → resource action summary; `git status` → staged/unstaged counts; package install (npm/bun/yarn/pip) → success/error summary; test runners (pytest/jest/bun test/vitest/go test) → pass/fail counts; `docker ps` → container list; `make`/`just` → target + outcome; everything else → 50-line shell cap with ANSI stripping
 
 The remaining built-in tools — `Read`, `Grep`, `Glob` — do not support output replacement. Their full output enters context directly. If large file reads are your biggest context consumer, consider the [filesystem MCP server](https://github.com/modelcontextprotocol/servers) instead of the built-in Read tool.
 
@@ -371,11 +385,14 @@ mcp-recall never breaks a tool call. Every failure mode — hook crash, SQLite e
 Declarative TOML profiles extend compression to any MCP — no TypeScript required. **[18 community profiles](https://github.com/sakebomb/mcp-recall-profiles)** cover Jira, Stripe, Shopify, Datadog, Notion, Teams, and more.
 
 ```bash
-mcp-recall learn                    # auto-generate profiles from your installed MCPs
-mcp-recall profiles seed            # install community profiles for detected MCPs
-mcp-recall profiles retrain         # suggest field additions using your stored data
-mcp-recall profiles test <tool>     # apply a profile and show compression result
-mcp-recall profiles list            # show all installed profiles
+mcp-recall learn                         # auto-generate profiles from your installed MCPs
+mcp-recall profiles seed                 # install community profiles for detected MCPs
+mcp-recall profiles available            # browse the community catalog with install status
+mcp-recall profiles info <name>          # full metadata for any profile (works offline)
+mcp-recall profiles install <name>       # install by short name, e.g. "grafana"
+mcp-recall profiles retrain              # suggest field additions using your stored data
+mcp-recall profiles test <tool>          # apply a profile and show compression result
+mcp-recall profiles list                 # show all installed profiles
 ```
 
 → [Profiles quickstart](docs/profiles-quickstart.md) · [Profile schema](docs/profile-schema.md) · [retrain guide](docs/retrain.md) · [AI profile guide](docs/ai-profile-guide.md) · [Contributing a profile](CONTRIBUTING.md#contributing-a-profile)
