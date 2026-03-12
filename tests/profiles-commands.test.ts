@@ -1,8 +1,8 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { patternsOverlap, testProfile, cmdList, cmdInstall, cmdRemove, cmdAvailable } from "../src/profiles/commands";
+import { patternsOverlap, testProfile, cmdList, cmdInstall, cmdRemove, cmdAvailable, verifyManifest } from "../src/profiles/commands";
 import { clearProfileCache, getShortName } from "../src/profiles/loader";
 
 // ── patternsOverlap ───────────────────────────────────────────────────────────
@@ -733,5 +733,145 @@ type = "text_truncate"`;
     const output = lines.join("\n");
     expect(output).toContain("https://github.com/grafana/mcp-grafana");
     expect(output).toContain("MCP URL");
+  });
+});
+
+// ── verifyManifest ────────────────────────────────────────────────────────────
+
+describe("verifyManifest", () => {
+  let tmpFile: string;
+
+  beforeEach(() => {
+    tmpFile = join(tmpdir(), `test-manifest-${process.pid}.json`);
+    writeFileSync(tmpFile, JSON.stringify({ profiles: [] }), "utf8");
+  });
+
+  afterEach(() => {
+    try { rmSync(tmpFile); } catch { /* already gone */ }
+  });
+
+  test("skip mode does nothing regardless of gh availability", () => {
+    const spy = spyOn(Bun, "spawnSync");
+    verifyManifest(tmpFile, "skip");
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  test("warn mode warns to stderr when gh exits non-zero", () => {
+    const spy = spyOn(Bun, "spawnSync").mockImplementation((cmd: unknown, ..._rest: unknown[]) => {
+      const args = cmd as string[];
+      // probe passes, attestation verify fails
+      if (args[1] === "--version") return { exitCode: 0, stderr: new Uint8Array(), stdout: new Uint8Array(), success: true } as ReturnType<typeof Bun.spawnSync>;
+      return { exitCode: 1, stderr: new TextEncoder().encode("error: no attestation found"), stdout: new Uint8Array(), success: false } as ReturnType<typeof Bun.spawnSync>;
+    });
+
+    const stderrLines: string[] = [];
+    const origWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (msg: string | Uint8Array, ..._rest: unknown[]) => {
+      stderrLines.push(typeof msg === "string" ? msg : new TextDecoder().decode(msg));
+      return true;
+    };
+
+    try {
+      verifyManifest(tmpFile, "warn");
+    } finally {
+      process.stderr.write = origWrite;
+      spy.mockRestore();
+    }
+
+    expect(stderrLines.join("")).toContain("[recall] manifest signature verification failed");
+  });
+
+  test("warn mode does not throw when gh exits non-zero", () => {
+    const spy = spyOn(Bun, "spawnSync").mockImplementation((cmd: unknown, ..._rest: unknown[]) => {
+      const args = cmd as string[];
+      if (args[1] === "--version") return { exitCode: 0, stderr: new Uint8Array(), stdout: new Uint8Array(), success: true } as ReturnType<typeof Bun.spawnSync>;
+      return { exitCode: 1, stderr: new Uint8Array(), stdout: new Uint8Array(), success: false } as ReturnType<typeof Bun.spawnSync>;
+    });
+
+    const origWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = () => true;
+
+    try {
+      expect(() => verifyManifest(tmpFile, "warn")).not.toThrow();
+    } finally {
+      process.stderr.write = origWrite;
+      spy.mockRestore();
+    }
+  });
+
+  test("error mode throws when gh exits non-zero", () => {
+    const spy = spyOn(Bun, "spawnSync").mockImplementation((cmd: unknown, ..._rest: unknown[]) => {
+      const args = cmd as string[];
+      if (args[1] === "--version") return { exitCode: 0, stderr: new Uint8Array(), stdout: new Uint8Array(), success: true } as ReturnType<typeof Bun.spawnSync>;
+      return { exitCode: 1, stderr: new TextEncoder().encode("verification failed"), stdout: new Uint8Array(), success: false } as ReturnType<typeof Bun.spawnSync>;
+    });
+
+    try {
+      expect(() => verifyManifest(tmpFile, "error")).toThrow(
+        /manifest signature verification failed/
+      );
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("warn mode warns to stderr when gh is not in PATH", () => {
+    const spy = spyOn(Bun, "spawnSync").mockImplementation((..._args: unknown[]) => {
+      throw new Error("spawn ENOENT");
+    });
+
+    const stderrLines: string[] = [];
+    const origWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (msg: string | Uint8Array, ..._rest: unknown[]) => {
+      stderrLines.push(typeof msg === "string" ? msg : new TextDecoder().decode(msg));
+      return true;
+    };
+
+    try {
+      verifyManifest(tmpFile, "warn");
+    } finally {
+      process.stderr.write = origWrite;
+      spy.mockRestore();
+    }
+
+    expect(stderrLines.join("")).toContain("gh CLI not found");
+  });
+
+  test("error mode does not throw when gh is not in PATH (degrade gracefully)", () => {
+    const spy = spyOn(Bun, "spawnSync").mockImplementation((..._args: unknown[]) => {
+      throw new Error("spawn ENOENT");
+    });
+
+    const origWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = () => true;
+
+    try {
+      expect(() => verifyManifest(tmpFile, "error")).not.toThrow();
+    } finally {
+      process.stderr.write = origWrite;
+      spy.mockRestore();
+    }
+  });
+
+  test("warn mode succeeds silently when gh exits zero", () => {
+    const spy = spyOn(Bun, "spawnSync").mockImplementation((..._args: unknown[]) => ({
+      exitCode: 0, stderr: new Uint8Array(), stdout: new Uint8Array(), success: true,
+    } as ReturnType<typeof Bun.spawnSync>));
+
+    const stderrLines: string[] = [];
+    const origWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (msg: string | Uint8Array, ..._rest: unknown[]) => {
+      stderrLines.push(typeof msg === "string" ? msg : new TextDecoder().decode(msg));
+      return true;
+    };
+
+    try {
+      expect(() => verifyManifest(tmpFile, "warn")).not.toThrow();
+      expect(stderrLines.join("")).toBe("");
+    } finally {
+      process.stderr.write = origWrite;
+      spy.mockRestore();
+    }
   });
 });
