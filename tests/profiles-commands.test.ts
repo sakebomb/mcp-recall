@@ -1,9 +1,9 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { patternsOverlap, testProfile } from "../src/profiles/commands";
-import { clearProfileCache } from "../src/profiles/loader";
+import { patternsOverlap, testProfile, cmdList, cmdInstall, cmdRemove, cmdAvailable } from "../src/profiles/commands";
+import { clearProfileCache, getShortName } from "../src/profiles/loader";
 
 // ── patternsOverlap ───────────────────────────────────────────────────────────
 
@@ -232,7 +232,7 @@ describe("cmdList --machine-readable", () => {
   });
 
   test("prints bare profile IDs one per line", () => {
-    const { cmdList } = require("../src/profiles/commands");
+    // cmdList imported at top
 
     writeFileSync(
       join(userDir, "jira.toml"),
@@ -270,16 +270,17 @@ type = "text_truncate"`
 
     const output = lines.join("");
     const ids = output.trim().split("\n");
-    expect(ids).toContain("mcp__jira");
-    expect(ids).toContain("mcp__grafana");
-    // No extra formatting — each line is just an ID
+    // short names (mcp__ prefix stripped)
+    expect(ids).toContain("jira");
+    expect(ids).toContain("grafana");
+    // No extra formatting — each line is just a short name
     for (const id of ids) {
       expect(id).toMatch(/^[a-z0-9_-]+$/);
     }
   });
 
   test("outputs nothing when no profiles installed", () => {
-    const { cmdList } = require("../src/profiles/commands");
+    // cmdList imported at top
 
     const lines: string[] = [];
     const orig = process.stdout.write.bind(process.stdout);
@@ -421,5 +422,316 @@ type = "text_truncate"`;
     expect(output).not.toContain("Detected MCPs");
     // Both profiles installed
     expect(output).toContain("2 profile(s) installed");
+  });
+});
+
+// ── getShortName ──────────────────────────────────────────────────────────────
+
+describe("getShortName", () => {
+  test("strips mcp__ prefix when no short_name set", () => {
+    const spec = { profile: { id: "mcp__grafana", version: "1.0.0", description: "", mcp_pattern: "" } };
+    expect(getShortName(spec)).toBe("grafana");
+  });
+
+  test("uses explicit short_name when set", () => {
+    const spec = { profile: { id: "mcp__grafana", short_name: "graf", version: "1.0.0", description: "", mcp_pattern: "" } };
+    expect(getShortName(spec)).toBe("graf");
+  });
+
+  test("leaves ids without mcp__ prefix unchanged", () => {
+    const spec = { profile: { id: "custom_profile", version: "1.0.0", description: "", mcp_pattern: "" } };
+    expect(getShortName(spec)).toBe("custom_profile");
+  });
+});
+
+// ── cmdList short names ───────────────────────────────────────────────────────
+
+describe("cmdList short names", () => {
+  let userDir: string;
+
+  beforeEach(() => {
+    userDir = mkdtempSync(join(tmpdir(), "recall-list-sn-"));
+    clearProfileCache();
+    process.env.RECALL_USER_PROFILES_PATH = userDir;
+    process.env.RECALL_COMMUNITY_PROFILES_PATH = join(tmpdir(), "nonexistent-c");
+    process.env.RECALL_BUNDLED_PROFILES_PATH = join(tmpdir(), "nonexistent-b");
+  });
+
+  afterEach(() => {
+    rmSync(userDir, { recursive: true, force: true });
+    delete process.env.RECALL_USER_PROFILES_PATH;
+    delete process.env.RECALL_COMMUNITY_PROFILES_PATH;
+    delete process.env.RECALL_BUNDLED_PROFILES_PATH;
+    clearProfileCache();
+  });
+
+  test("table output shows short name column (not full id)", () => {
+    writeFileSync(
+      join(userDir, "jira.toml"),
+      `[profile]
+id = "mcp__jira"
+version = "1.0.0"
+description = "Jira issues"
+mcp_pattern = "mcp__jira__*"
+[strategy]
+type = "text_truncate"`
+    );
+
+    const lines: string[] = [];
+    const orig = console.log;
+    console.log = (...args: unknown[]) => lines.push(args.join(" "));
+    try {
+      clearProfileCache();
+      cmdList([]);
+    } finally {
+      console.log = orig;
+    }
+
+    const output = lines.join("\n");
+    expect(output).toContain("jira");
+    expect(output).toContain("Jira issues");
+    // Full id should not appear as a table row value
+    expect(output).not.toContain("mcp__jira  ");
+  });
+
+  test("explicit short_name appears in table output", () => {
+    writeFileSync(
+      join(userDir, "g.toml"),
+      `[profile]
+id = "mcp__grafana"
+short_name = "gf"
+version = "1.0.0"
+description = "Grafana"
+mcp_pattern = "mcp__grafana__*"
+[strategy]
+type = "text_truncate"`
+    );
+
+    const lines: string[] = [];
+    const orig = console.log;
+    console.log = (...args: unknown[]) => lines.push(args.join(" "));
+    try {
+      clearProfileCache();
+      cmdList([]);
+    } finally {
+      console.log = orig;
+    }
+
+    expect(lines.join("\n")).toContain("gf");
+  });
+});
+
+// ── cmdInstall + cmdRemove short name resolution ──────────────────────────────
+
+describe("cmdInstall short name resolution", () => {
+  let communityDir: string;
+  let originalFetch: typeof globalThis.fetch;
+
+  const fakeManifest = {
+    profiles: [
+      {
+        id: "mcp__grafana",
+        short_name: "grafana",
+        version: "1.0.0",
+        description: "Grafana",
+        mcp_pattern: "mcp__grafana__*",
+        file: "profiles/mcp__grafana/default.toml",
+        mcp_url: "https://github.com/grafana/mcp-grafana",
+      },
+    ],
+  };
+
+  const fakeToml = `[profile]
+id = "mcp__grafana"
+version = "1.0.0"
+description = "Grafana"
+mcp_pattern = "mcp__grafana__*"
+[strategy]
+type = "text_truncate"`;
+
+  beforeEach(() => {
+    communityDir = mkdtempSync(join(tmpdir(), "recall-install-sn-"));
+    clearProfileCache();
+    process.env.RECALL_COMMUNITY_PROFILES_PATH = communityDir;
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const u = url.toString();
+      if (u.includes("manifest.json")) return new Response(JSON.stringify(fakeManifest), { status: 200 });
+      if (u.includes("mcp__grafana")) return new Response(fakeToml, { status: 200 });
+      return new Response("not found", { status: 404 });
+    }) as typeof globalThis.fetch;
+  });
+
+  afterEach(() => {
+    rmSync(communityDir, { recursive: true, force: true });
+    delete process.env.RECALL_COMMUNITY_PROFILES_PATH;
+    clearProfileCache();
+    globalThis.fetch = originalFetch;
+  });
+
+  test("installs profile by short name", async () => {
+    // cmdInstall imported at top
+    await cmdInstall(["grafana"]);
+    expect(existsSync(join(communityDir, "mcp__grafana", "default.toml"))).toBe(true);
+  });
+
+  test("installs profile by full id", async () => {
+    // cmdInstall imported at top
+    await cmdInstall(["mcp__grafana"]);
+    expect(existsSync(join(communityDir, "mcp__grafana", "default.toml"))).toBe(true);
+  });
+});
+
+describe("cmdRemove short name resolution", () => {
+  let communityDir: string;
+
+  const fakeToml = `[profile]
+id = "mcp__grafana"
+version = "1.0.0"
+description = "Grafana"
+mcp_pattern = "mcp__grafana__*"
+[strategy]
+type = "text_truncate"`;
+
+  beforeEach(() => {
+    communityDir = mkdtempSync(join(tmpdir(), "recall-remove-sn-"));
+    clearProfileCache();
+    process.env.RECALL_COMMUNITY_PROFILES_PATH = communityDir;
+    process.env.RECALL_USER_PROFILES_PATH = join(tmpdir(), "nonexistent-u");
+    process.env.RECALL_BUNDLED_PROFILES_PATH = join(tmpdir(), "nonexistent-b");
+    mkdirSync(join(communityDir, "mcp__grafana"), { recursive: true });
+    writeFileSync(join(communityDir, "mcp__grafana", "default.toml"), fakeToml);
+  });
+
+  afterEach(() => {
+    rmSync(communityDir, { recursive: true, force: true });
+    delete process.env.RECALL_COMMUNITY_PROFILES_PATH;
+    delete process.env.RECALL_USER_PROFILES_PATH;
+    delete process.env.RECALL_BUNDLED_PROFILES_PATH;
+    clearProfileCache();
+  });
+
+  test("removes profile by short name", () => {
+    // cmdRemove imported at top
+    clearProfileCache();
+    cmdRemove(["grafana"]);
+    expect(existsSync(join(communityDir, "mcp__grafana", "default.toml"))).toBe(false);
+  });
+
+  test("removes profile by full id", () => {
+    // cmdRemove imported at top
+    clearProfileCache();
+    cmdRemove(["mcp__grafana"]);
+    expect(existsSync(join(communityDir, "mcp__grafana", "default.toml"))).toBe(false);
+  });
+});
+
+// ── cmdAvailable ──────────────────────────────────────────────────────────────
+
+describe("cmdAvailable", () => {
+  let communityDir: string;
+  let originalFetch: typeof globalThis.fetch;
+
+  const fakeManifest = {
+    profiles: [
+      {
+        id: "mcp__grafana",
+        short_name: "grafana",
+        version: "1.0.0",
+        description: "Grafana dashboards and alerts",
+        mcp_pattern: "mcp__grafana__*",
+        file: "profiles/mcp__grafana/default.toml",
+        mcp_url: "https://github.com/grafana/mcp-grafana",
+        author: "sakebomb",
+      },
+      {
+        id: "mcp__jira",
+        short_name: "jira",
+        version: "1.0.0",
+        description: "Jira issue tracking",
+        mcp_pattern: "mcp__jira__*",
+        file: "profiles/mcp__jira/default.toml",
+        mcp_url: "https://github.com/atlassian/jira-mcp",
+        author: "atlassian",
+      },
+    ],
+  };
+
+  const fakeToml = (id: string) => `[profile]
+id = "${id}"
+version = "1.0.0"
+description = "Test"
+mcp_pattern = "${id}__*"
+[strategy]
+type = "text_truncate"`;
+
+  beforeEach(() => {
+    communityDir = mkdtempSync(join(tmpdir(), "recall-avail-"));
+    clearProfileCache();
+    process.env.RECALL_COMMUNITY_PROFILES_PATH = communityDir;
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const u = url.toString();
+      if (u.includes("manifest.json")) return new Response(JSON.stringify(fakeManifest), { status: 200 });
+      return new Response("not found", { status: 404 });
+    }) as typeof globalThis.fetch;
+  });
+
+  afterEach(() => {
+    rmSync(communityDir, { recursive: true, force: true });
+    delete process.env.RECALL_COMMUNITY_PROFILES_PATH;
+    clearProfileCache();
+    globalThis.fetch = originalFetch;
+  });
+
+  test("lists all profiles with short names", async () => {
+    // cmdAvailable imported at top
+    const lines: string[] = [];
+    const orig = console.log;
+    console.log = (...args: unknown[]) => lines.push(args.join(" "));
+    try {
+      await cmdAvailable([]);
+    } finally {
+      console.log = orig;
+    }
+    const output = lines.join("\n");
+    expect(output).toContain("grafana");
+    expect(output).toContain("jira");
+    expect(output).toContain("2 available, 0 installed");
+  });
+
+  test("marks installed profiles", async () => {
+    // Pre-install grafana
+    mkdirSync(join(communityDir, "mcp__grafana"), { recursive: true });
+    writeFileSync(join(communityDir, "mcp__grafana", "default.toml"), fakeToml("mcp__grafana"));
+
+    // cmdAvailable imported at top
+    const lines: string[] = [];
+    const orig = console.log;
+    console.log = (...args: unknown[]) => lines.push(args.join(" "));
+    try {
+      clearProfileCache();
+      await cmdAvailable([]);
+    } finally {
+      console.log = orig;
+    }
+    const output = lines.join("\n");
+    expect(output).toContain("installed");
+    expect(output).toContain("2 available, 1 installed");
+  });
+
+  test("--verbose shows mcp_url column", async () => {
+    // cmdAvailable imported at top
+    const lines: string[] = [];
+    const orig = console.log;
+    console.log = (...args: unknown[]) => lines.push(args.join(" "));
+    try {
+      await cmdAvailable(["--verbose"]);
+    } finally {
+      console.log = orig;
+    }
+    const output = lines.join("\n");
+    expect(output).toContain("https://github.com/grafana/mcp-grafana");
+    expect(output).toContain("MCP URL");
   });
 });
