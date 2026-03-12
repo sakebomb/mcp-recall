@@ -17,6 +17,7 @@ import { homedir } from "os";
 import { createHash } from "crypto";
 import { parse } from "smol-toml";
 import { loadProfiles, clearProfileCache, getShortName } from "./loader";
+import { formatBytes } from "../format";
 import { resolveProfile } from "./index";
 import { getHandler } from "../handlers/index";
 import { getDb, defaultDbPath } from "../db/index";
@@ -164,19 +165,20 @@ export function patternsOverlap(a: string, b: string): boolean {
 
 // ── short-name resolution ─────────────────────────────────────────────────────
 
-/** Prompts the user to pick a number in [min, max] when running in a TTY. */
+/** Prompts the user to pick a number in [min, max] when running in a TTY. Re-prompts up to 3 times on invalid input. */
 async function promptNumber(msg: string, min: number, max: number): Promise<number> {
-  process.stdout.write(msg);
-  const line = await new Promise<string>((resolve) => {
-    process.stdin.setEncoding("utf8");
-    process.stdin.once("data", (d) => resolve(String(d).trim()));
-  });
-  const n = parseInt(line);
-  if (isNaN(n) || n < min || n > max) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    process.stdout.write(msg);
+    const line = await new Promise<string>((resolve) => {
+      process.stdin.setEncoding("utf8");
+      process.stdin.once("data", (d) => resolve(String(d).trim()));
+    });
+    const n = parseInt(line);
+    if (!isNaN(n) && n >= min && n <= max) return n;
     console.error(`Invalid choice. Enter a number between ${min} and ${max}.`);
-    process.exit(1);
   }
-  return n;
+  console.error("Too many invalid attempts.");
+  process.exit(1);
 }
 
 /**
@@ -202,7 +204,7 @@ async function resolveManifestEntry(
   }
 
   // Multiple matches — interactive picker when TTY, hard error otherwise
-  if (!process.stdout.isTTY) {
+  if (!process.stdin.isTTY) {
     const ids = matches.map((e) => e.id).join(", ");
     console.error(
       `Error: "${nameOrId}" is ambiguous. Matches: ${ids}. Use the full id to disambiguate.`
@@ -340,14 +342,20 @@ export function cmdRemove(args: string[]): void {
     process.exit(1);
   }
 
-  // Resolve short name or exact id against installed community profiles
-  const installed = loadProfiles().filter((p) => p.tier === "community");
+  // Resolve short name or exact id. Only community profiles can be removed
+  // (user profiles live in user-managed directories; bundled profiles are read-only).
+  const allInstalled = loadProfiles();
   const target =
-    installed.find((p) => p.spec.profile.id === nameOrId) ??
-    installed.find((p) => getShortName(p.spec) === nameOrId);
+    allInstalled.find((p) => p.spec.profile.id === nameOrId) ??
+    allInstalled.find((p) => getShortName(p.spec) === nameOrId);
 
   if (!target) {
     console.error(`"${nameOrId}" is not installed.`);
+    process.exit(1);
+  }
+
+  if (target.tier !== "community") {
+    console.error(`"${nameOrId}" is a ${target.tier} profile and cannot be removed via this command.`);
     process.exit(1);
   }
 
@@ -578,11 +586,6 @@ function cmdCheck(): void {
 
 // ── test ──────────────────────────────────────────────────────────────────────
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 export interface TestResult {
   toolName: string;

@@ -7753,17 +7753,19 @@ function patternsOverlap(a, b) {
   return aPrefix.startsWith(bPrefix) || bPrefix.startsWith(aPrefix);
 }
 async function promptNumber(msg, min, max) {
-  process.stdout.write(msg);
-  const line = await new Promise((resolve) => {
-    process.stdin.setEncoding("utf8");
-    process.stdin.once("data", (d) => resolve(String(d).trim()));
-  });
-  const n = parseInt(line);
-  if (isNaN(n) || n < min || n > max) {
+  for (let attempt = 0;attempt < 3; attempt++) {
+    process.stdout.write(msg);
+    const line = await new Promise((resolve) => {
+      process.stdin.setEncoding("utf8");
+      process.stdin.once("data", (d) => resolve(String(d).trim()));
+    });
+    const n = parseInt(line);
+    if (!isNaN(n) && n >= min && n <= max)
+      return n;
     console.error(`Invalid choice. Enter a number between ${min} and ${max}.`);
-    process.exit(1);
   }
-  return n;
+  console.error("Too many invalid attempts.");
+  process.exit(1);
 }
 async function resolveManifestEntry(nameOrId, entries) {
   const exact = entries.find((e) => e.id === nameOrId);
@@ -7777,7 +7779,7 @@ async function resolveManifestEntry(nameOrId, entries) {
     console.log(`Run: mcp-recall profiles available`);
     process.exit(1);
   }
-  if (!process.stdout.isTTY) {
+  if (!process.stdin.isTTY) {
     const ids = matches.map((e) => e.id).join(", ");
     console.error(`Error: "${nameOrId}" is ambiguous. Matches: ${ids}. Use the full id to disambiguate.`);
     process.exit(1);
@@ -7888,10 +7890,14 @@ function cmdRemove(args) {
     console.error("Usage: mcp-recall profiles remove <name>");
     process.exit(1);
   }
-  const installed = loadProfiles().filter((p) => p.tier === "community");
-  const target = installed.find((p) => p.spec.profile.id === nameOrId) ?? installed.find((p) => getShortName(p.spec) === nameOrId);
+  const allInstalled = loadProfiles();
+  const target = allInstalled.find((p) => p.spec.profile.id === nameOrId) ?? allInstalled.find((p) => getShortName(p.spec) === nameOrId);
   if (!target) {
     console.error(`"${nameOrId}" is not installed.`);
+    process.exit(1);
+  }
+  if (target.tier !== "community") {
+    console.error(`"${nameOrId}" is a ${target.tier} profile and cannot be removed via this command.`);
     process.exit(1);
   }
   const id = target.spec.profile.id;
@@ -8083,13 +8089,6 @@ ${conflicts.length} conflict(s):
 `);
   }
 }
-function formatBytes2(bytes) {
-  if (bytes < 1024)
-    return `${bytes} B`;
-  if (bytes < 1024 * 1024)
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 function testProfile(toolName, content) {
   const profiles = loadProfiles();
   const matchedProfile = resolveProfile(toolName, profiles);
@@ -8169,11 +8168,11 @@ To add a profile:`);
     console.log(`  https://github.com/sakebomb/mcp-recall/blob/main/docs/profile-schema.md`);
   }
   console.log(`
-Input:  ${formatBytes2(result.inputBytes)}  (${contentSource})`);
+Input:  ${formatBytes(result.inputBytes)}  (${contentSource})`);
   console.log("\u2500".repeat(60));
   console.log(result.summary);
   console.log("\u2500".repeat(60));
-  console.log(`Output: ${formatBytes2(result.outputBytes)}  (${result.reductionPct}% reduction)
+  console.log(`Output: ${formatBytes(result.outputBytes)}  (${result.reductionPct}% reduction)
 `);
 }
 async function cmdInfo(args) {

@@ -4,7 +4,10 @@ Active work and upcoming tasks.
 
 ## In Progress
 
-### #122 — Friendly profile names, deconfliction, and rich metadata
+### #122 — Friendly profile names, deconfliction, and rich metadata (PRs open — awaiting merge)
+
+PR A: https://github.com/sakebomb/mcp-recall/pull/130
+PR B: https://github.com/sakebomb/mcp-recall-profiles/pull/6
 
 Two PRs: **PR A** (core — this repo) + **PR B** (community profiles repo).
 
