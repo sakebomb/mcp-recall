@@ -4,7 +4,44 @@ Active work and upcoming tasks.
 
 ## In Progress
 
-_nothing in progress_
+### #122 — Friendly profile names, deconfliction, and rich metadata
+
+Two PRs: **PR A** (core — this repo) + **PR B** (community profiles repo).
+
+#### PR A — `mcp-recall` core (`feat/profile-friendly-names`)
+
+**Schema changes**
+- [ ] 1. Add `short_name`, `mcp_url`, `author`, `version` to `[profile]` TOML schema (Zod) — all optional; `short_name` defaults to `id.replace(/^mcp__/, "")`
+- [ ] 2. Update `manifest.json` entry type in `src/profiles/loader.ts` to include new fields
+- [ ] 3. Add `getShortName(profile)` helper — returns `short_name ?? id.replace(/^mcp__/, "")`
+
+**CLI: short name resolution**
+- [ ] 4. Add `resolveProfileId(nameOrId, profiles)` — exact id match wins; then short_name match; collision → TTY picker or non-TTY error list
+- [ ] 5. Wire resolution into `cmdInstall`, `cmdRemove` (any command that takes a profile id arg)
+
+**New: `profiles info <name>`**
+- [ ] 6. Implement `cmdInfo(args)` — shows full metadata for one profile (installed or from manifest)
+- [ ] 7. Add dispatcher entry in CLI
+
+**New: `profiles available`**
+- [ ] 8. Implement `cmdAvailable(args)` — fetches community manifest, tabulates with install status markers
+- [ ] 9. Add `--verbose` flag (show URLs)
+- [ ] 10. Add dispatcher entry in CLI
+
+**`profiles list` update**
+- [ ] 11. Rework output to use `short_name` as ID column, add `Description` column
+
+**Tests**
+- [ ] 12. `resolveProfileId` — exact match, short-name match, collision non-TTY error, no-match error
+- [ ] 13. `cmdInfo` — installed profile, available-only profile, unknown name
+- [ ] 14. `cmdAvailable` — catalog output, installed status markers, `--verbose` URLs
+- [ ] 15. `profiles list` — short names, description column
+
+#### PR B — `mcp-recall-profiles` community repo
+
+- [ ] 16. Add `short_name`, `mcp_url`, `author`, `version` to all 18 profile TOMLs
+- [ ] 17. Add same fields to `manifest.json` entries
+- [ ] 18. Update `validate.ts` to enforce unique `short_name` values across the manifest
 
 ## Up Next
 

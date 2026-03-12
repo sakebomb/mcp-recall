@@ -196,3 +196,11 @@ export function loadProfiles(): LoadedProfile[] {
 export function clearProfileCache(): void {
   fileCache.clear();
 }
+
+/**
+ * Returns the short, user-friendly name for a profile.
+ * Uses the explicit `short_name` field if set, otherwise strips the `mcp__` prefix from the id.
+ */
+export function getShortName(spec: { profile: { id: string; short_name?: string } }): string {
+  return spec.profile.short_name ?? spec.profile.id.replace(/^mcp__/, "");
+}

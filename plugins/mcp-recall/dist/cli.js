@@ -7090,6 +7090,9 @@ function loadProfiles() {
 function clearProfileCache() {
   fileCache.clear();
 }
+function getShortName(spec) {
+  return spec.profile.short_name ?? spec.profile.id.replace(/^mcp__/, "");
+}
 
 // src/profiles/strategies.ts
 function resolvePath(obj, path) {
@@ -7385,7 +7388,7 @@ ${summary}`,
 }
 
 // src/profiles/commands.ts
-import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync2, statSync as statSync2, rmSync } from "fs";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync2, rmSync } from "fs";
 import { join as join4 } from "path";
 import { homedir as homedir4 } from "os";
 import { createHash as createHash3 } from "crypto";
@@ -7686,6 +7689,9 @@ function communityDir() {
 function userDir() {
   return process.env.RECALL_USER_PROFILES_PATH ?? join4(homedir4(), ".config", "mcp-recall", "profiles");
 }
+function manifestShortName(e) {
+  return e.short_name ?? e.id.replace(/^mcp__/, "");
+}
 async function fetchManifest() {
   const res = await fetch(MANIFEST_URL);
   if (!res.ok)
@@ -7746,12 +7752,53 @@ function patternsOverlap(a, b) {
   const bPrefix = b.slice(0, -1);
   return aPrefix.startsWith(bPrefix) || bPrefix.startsWith(aPrefix);
 }
+async function promptNumber(msg, min, max) {
+  process.stdout.write(msg);
+  const line = await new Promise((resolve) => {
+    process.stdin.setEncoding("utf8");
+    process.stdin.once("data", (d) => resolve(String(d).trim()));
+  });
+  const n = parseInt(line);
+  if (isNaN(n) || n < min || n > max) {
+    console.error(`Invalid choice. Enter a number between ${min} and ${max}.`);
+    process.exit(1);
+  }
+  return n;
+}
+async function resolveManifestEntry(nameOrId, entries) {
+  const exact = entries.find((e) => e.id === nameOrId);
+  if (exact)
+    return exact;
+  const matches = entries.filter((e) => manifestShortName(e) === nameOrId);
+  if (matches.length === 1)
+    return matches[0];
+  if (matches.length === 0) {
+    console.error(`Profile "${nameOrId}" not found.`);
+    console.log(`Run: mcp-recall profiles available`);
+    process.exit(1);
+  }
+  if (!process.stdout.isTTY) {
+    const ids = matches.map((e) => e.id).join(", ");
+    console.error(`Error: "${nameOrId}" is ambiguous. Matches: ${ids}. Use the full id to disambiguate.`);
+    process.exit(1);
+  }
+  console.log(`
+Multiple profiles match "${nameOrId}":`);
+  matches.forEach((e, i) => {
+    const pattern = Array.isArray(e.mcp_pattern) ? e.mcp_pattern[0] : e.mcp_pattern;
+    const name = sanitize(manifestShortName(e)).padEnd(22);
+    const pat = (pattern ?? "").padEnd(32);
+    console.log(`  ${i + 1}. ${name} ${pat} ${sanitize(e.description).slice(0, 40)}`);
+  });
+  const choice = await promptNumber(`Pick one (1-${matches.length}): `, 1, matches.length);
+  return matches[choice - 1];
+}
 function cmdList(args) {
   const machineReadable = args.includes("--machine-readable");
   const profiles = loadProfiles();
   if (machineReadable) {
     for (const p of profiles) {
-      process.stdout.write(sanitize(p.spec.profile.id) + `
+      process.stdout.write(sanitize(getShortName(p.spec)) + `
 `);
     }
     return;
@@ -7761,17 +7808,17 @@ function cmdList(args) {
     console.log("Run: mcp-recall profiles seed");
     return;
   }
-  const COL = { id: 28, tier: 10, pattern: 22 };
-  const header = "ID".padEnd(COL.id) + "  " + "Tier".padEnd(COL.tier) + "  " + "Pattern".padEnd(COL.pattern) + "  Description";
+  const COL = { name: 20, tier: 10, pattern: 26 };
+  const header = "Name".padEnd(COL.name) + "  " + "Tier".padEnd(COL.tier) + "  " + "Pattern".padEnd(COL.pattern) + "  Description";
   console.log(`
 ${header}`);
   console.log("\u2500".repeat(Math.min(header.length, 100)));
   for (const p of profiles) {
-    const id = sanitize(p.spec.profile.id).slice(0, COL.id - 1).padEnd(COL.id);
+    const name = sanitize(getShortName(p.spec)).slice(0, COL.name - 1).padEnd(COL.name);
     const tier = p.tier.padEnd(COL.tier);
     const pattern = (p.patterns[0] ?? "").slice(0, COL.pattern - 1).padEnd(COL.pattern);
     const desc = sanitize(p.spec.profile.description).slice(0, 55);
-    console.log(`${id}  ${tier}  ${pattern}  ${desc}`);
+    console.log(`${name}  ${tier}  ${pattern}  ${desc}`);
   }
   const counts = profiles.reduce((acc, p) => {
     acc[p.tier] = (acc[p.tier] ?? 0) + 1;
@@ -7783,22 +7830,15 @@ ${profiles.length} total (${summary})
 `);
 }
 async function cmdInstall(args) {
-  const id = args[0];
-  if (!id) {
-    console.error("Usage: mcp-recall profiles install <id>");
+  const nameOrId = args[0];
+  if (!nameOrId) {
+    console.error("Usage: mcp-recall profiles install <name>");
     process.exit(1);
   }
   process.stdout.write("Fetching manifest\u2026 ");
   const entries = await fetchManifest();
-  const entry = entries.find((e) => e.id === id);
   console.log("done");
-  if (!entry) {
-    console.error(`Profile "${id}" not found.`);
-    console.log(`Available:
-${entries.map((e) => `  ${e.id}`).join(`
-`)}`);
-    process.exit(1);
-  }
+  const entry = await resolveManifestEntry(nameOrId, entries);
   assertSafeId(entry.id);
   assertSafeFile(entry.file);
   process.stdout.write(`Installing ${sanitize(entry.id)} v${sanitize(entry.version)}\u2026 `);
@@ -7843,20 +7883,20 @@ async function cmdUpdate() {
 ${updated} profile(s) updated.`);
 }
 function cmdRemove(args) {
-  const id = args[0];
-  if (!id) {
-    console.error("Usage: mcp-recall profiles remove <id>");
+  const nameOrId = args[0];
+  if (!nameOrId) {
+    console.error("Usage: mcp-recall profiles remove <name>");
     process.exit(1);
   }
+  const installed = loadProfiles().filter((p) => p.tier === "community");
+  const target = installed.find((p) => p.spec.profile.id === nameOrId) ?? installed.find((p) => getShortName(p.spec) === nameOrId);
+  if (!target) {
+    console.error(`"${nameOrId}" is not installed.`);
+    process.exit(1);
+  }
+  const id = target.spec.profile.id;
   assertSafeId(id);
-  const dir = join4(communityDir(), id);
-  try {
-    statSync2(dir);
-  } catch {
-    console.error(`"${id}" is not installed.`);
-    process.exit(1);
-  }
-  rmSync(dir, { recursive: true });
+  rmSync(join4(communityDir(), id), { recursive: true });
   clearProfileCache();
   console.log(`\u2713 Removed ${id}`);
 }
@@ -8136,6 +8176,75 @@ Input:  ${formatBytes2(result.inputBytes)}  (${contentSource})`);
   console.log(`Output: ${formatBytes2(result.outputBytes)}  (${result.reductionPct}% reduction)
 `);
 }
+async function cmdInfo(args) {
+  const nameOrId = args[0];
+  if (!nameOrId) {
+    console.error("Usage: mcp-recall profiles info <name>");
+    process.exit(1);
+  }
+  const allProfiles = loadProfiles();
+  const local = allProfiles.find((p) => p.spec.profile.id === nameOrId) ?? allProfiles.find((p) => getShortName(p.spec) === nameOrId);
+  let manifestEntry;
+  try {
+    process.stdout.write("Fetching manifest\u2026 ");
+    const entries = await fetchManifest();
+    console.log("done");
+    const lookupId = local?.spec.profile.id ?? nameOrId;
+    manifestEntry = entries.find((e) => e.id === lookupId) ?? entries.find((e) => manifestShortName(e) === nameOrId);
+  } catch {
+    console.log("(offline \u2014 showing local data only)");
+  }
+  if (!local && !manifestEntry) {
+    console.error(`Profile "${nameOrId}" not found (not installed and not in community catalog).`);
+    process.exit(1);
+  }
+  const id = local?.spec.profile.id ?? manifestEntry.id;
+  const shortName = local ? getShortName(local.spec) : manifestShortName(manifestEntry);
+  const version = local?.spec.profile.version ?? manifestEntry.version;
+  const description = sanitize(local?.spec.profile.description ?? manifestEntry.description ?? "\u2014");
+  const author = sanitize(String(local?.spec.profile.author ?? manifestEntry?.author ?? "\u2014"));
+  const mcpUrl = sanitize(String(local?.spec.profile.mcp_url ?? manifestEntry?.mcp_url ?? "\u2014"));
+  const patterns = local?.patterns ?? (Array.isArray(manifestEntry.mcp_pattern) ? manifestEntry.mcp_pattern : [manifestEntry.mcp_pattern]);
+  const tier = local ? local.tier : "community (not installed)";
+  console.log(`
+${shortName} (${id} v${version})`);
+  console.log(`  Description: ${description}`);
+  console.log(`  Pattern:     ${patterns.join(", ")}`);
+  console.log(`  Author:      ${author}`);
+  console.log(`  MCP:         ${mcpUrl}`);
+  if (local)
+    console.log(`  Strategy:    ${local.spec.strategy.type}`);
+  console.log(`  Tier:        ${tier}`);
+  console.log(`  Installed:   ${local?.filePath ?? "not installed"}`);
+  console.log();
+}
+async function cmdAvailable(args) {
+  const verbose = args.includes("--verbose");
+  process.stdout.write("Fetching manifest\u2026 ");
+  const entries = await fetchManifest();
+  console.log(`done
+`);
+  const installed = installedCommunityMap();
+  const COL = { name: 20, desc: 46 };
+  const statusLabel = "Status";
+  const header = "Name".padEnd(COL.name) + "  " + "Description".padEnd(COL.desc) + "  " + statusLabel + (verbose ? "  MCP URL" : "");
+  console.log(header);
+  console.log("\u2500".repeat(Math.min(header.length + (verbose ? 50 : 0), 120)));
+  let installedCount = 0;
+  for (const e of entries) {
+    const name = sanitize(manifestShortName(e)).slice(0, COL.name - 1).padEnd(COL.name);
+    const desc = sanitize(e.description).slice(0, COL.desc - 1).padEnd(COL.desc);
+    const isInstalled = installed.has(e.id);
+    if (isInstalled)
+      installedCount++;
+    const status = isInstalled ? "installed" : "         ";
+    const urlPart = verbose ? `  ${sanitize(e.mcp_url ?? "\u2014")}` : "";
+    console.log(`${name}  ${desc}  ${status}${urlPart}`);
+  }
+  console.log(`
+${entries.length} available, ${installedCount} installed
+`);
+}
 async function handleProfilesCommand(args) {
   const cmd = args[0];
   const rest = args.slice(1);
@@ -8164,6 +8273,12 @@ async function handleProfilesCommand(args) {
     case "retrain":
       await handleRetrainCommand(rest);
       break;
+    case "info":
+      await cmdInfo(rest);
+      break;
+    case "available":
+      await cmdAvailable(rest);
+      break;
     case "test":
       cmdTest(rest);
       break;
@@ -8173,13 +8288,15 @@ async function handleProfilesCommand(args) {
       console.error(`Usage: mcp-recall profiles <command>
 `);
       console.error("Commands:");
-      console.error("  list              Show all installed profiles");
-      console.error("  install <id>      Install a community profile by ID");
-      console.error("  update            Update all installed community profiles");
-      console.error("  remove <id>       Remove a community profile");
-      console.error("  seed [--all]      Install profiles for all detected MCPs (--all for entire catalog)");
-      console.error("  feed [path]       Contribute a local profile to the community");
-      console.error("  check             Detect pattern conflicts");
+      console.error("  list                    Show all installed profiles");
+      console.error("  available [--verbose]   Browse the community catalog");
+      console.error("  info <name>             Show full metadata for a profile");
+      console.error("  install <name>          Install a community profile");
+      console.error("  update                  Update all installed community profiles");
+      console.error("  remove <name>           Remove a community profile");
+      console.error("  seed [--all]            Install profiles for all detected MCPs (--all for entire catalog)");
+      console.error("  feed [path]             Contribute a local profile to the community");
+      console.error("  check                   Detect pattern conflicts");
       console.error("  retrain [--apply] [--depth N] [filter]  Suggest profile improvements from stored corpus");
       console.error("  test <tool> [--stored <id>] [--input <file>]  Test a profile against real input");
       process.exit(1);

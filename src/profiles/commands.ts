@@ -16,7 +16,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { createHash } from "crypto";
 import { parse } from "smol-toml";
-import { loadProfiles, clearProfileCache } from "./loader";
+import { loadProfiles, clearProfileCache, getShortName } from "./loader";
 import { resolveProfile } from "./index";
 import { getHandler } from "../handlers/index";
 import { getDb, defaultDbPath } from "../db/index";
@@ -84,6 +84,12 @@ interface ManifestEntry {
   file: string;
   sha256?: string;
   author?: string;
+  short_name?: string;
+  mcp_url?: string;
+}
+
+function manifestShortName(e: ManifestEntry): string {
+  return e.short_name ?? e.id.replace(/^mcp__/, "");
 }
 
 async function fetchManifest(): Promise<ManifestEntry[]> {
@@ -156,6 +162,65 @@ export function patternsOverlap(a: string, b: string): boolean {
   return aPrefix.startsWith(bPrefix) || bPrefix.startsWith(aPrefix);
 }
 
+// ── short-name resolution ─────────────────────────────────────────────────────
+
+/** Prompts the user to pick a number in [min, max] when running in a TTY. */
+async function promptNumber(msg: string, min: number, max: number): Promise<number> {
+  process.stdout.write(msg);
+  const line = await new Promise<string>((resolve) => {
+    process.stdin.setEncoding("utf8");
+    process.stdin.once("data", (d) => resolve(String(d).trim()));
+  });
+  const n = parseInt(line);
+  if (isNaN(n) || n < min || n > max) {
+    console.error(`Invalid choice. Enter a number between ${min} and ${max}.`);
+    process.exit(1);
+  }
+  return n;
+}
+
+/**
+ * Resolves a user-supplied name-or-id to a ManifestEntry.
+ * Precedence: exact id → exact short_name → TTY picker / non-TTY error on ambiguity.
+ */
+async function resolveManifestEntry(
+  nameOrId: string,
+  entries: ManifestEntry[]
+): Promise<ManifestEntry> {
+  // Exact id match always wins
+  const exact = entries.find((e) => e.id === nameOrId);
+  if (exact) return exact;
+
+  const matches = entries.filter((e) => manifestShortName(e) === nameOrId);
+
+  if (matches.length === 1) return matches[0]!;
+
+  if (matches.length === 0) {
+    console.error(`Profile "${nameOrId}" not found.`);
+    console.log(`Run: mcp-recall profiles available`);
+    process.exit(1);
+  }
+
+  // Multiple matches — interactive picker when TTY, hard error otherwise
+  if (!process.stdout.isTTY) {
+    const ids = matches.map((e) => e.id).join(", ");
+    console.error(
+      `Error: "${nameOrId}" is ambiguous. Matches: ${ids}. Use the full id to disambiguate.`
+    );
+    process.exit(1);
+  }
+
+  console.log(`\nMultiple profiles match "${nameOrId}":`);
+  matches.forEach((e, i) => {
+    const pattern = Array.isArray(e.mcp_pattern) ? e.mcp_pattern[0] : e.mcp_pattern;
+    const name = sanitize(manifestShortName(e)).padEnd(22);
+    const pat = (pattern ?? "").padEnd(32);
+    console.log(`  ${i + 1}. ${name} ${pat} ${sanitize(e.description).slice(0, 40)}`);
+  });
+  const choice = await promptNumber(`Pick one (1-${matches.length}): `, 1, matches.length);
+  return matches[choice - 1]!;
+}
+
 // ── list ──────────────────────────────────────────────────────────────────────
 
 export function cmdList(args: string[]): void {
@@ -164,7 +229,7 @@ export function cmdList(args: string[]): void {
 
   if (machineReadable) {
     for (const p of profiles) {
-      process.stdout.write(sanitize(p.spec.profile.id) + "\n");
+      process.stdout.write(sanitize(getShortName(p.spec)) + "\n");
     }
     return;
   }
@@ -175,9 +240,9 @@ export function cmdList(args: string[]): void {
     return;
   }
 
-  const COL = { id: 28, tier: 10, pattern: 22 };
+  const COL = { name: 20, tier: 10, pattern: 26 };
   const header =
-    "ID".padEnd(COL.id) +
+    "Name".padEnd(COL.name) +
     "  " +
     "Tier".padEnd(COL.tier) +
     "  " +
@@ -188,11 +253,11 @@ export function cmdList(args: string[]): void {
   console.log("─".repeat(Math.min(header.length, 100)));
 
   for (const p of profiles) {
-    const id = sanitize(p.spec.profile.id).slice(0, COL.id - 1).padEnd(COL.id);
+    const name = sanitize(getShortName(p.spec)).slice(0, COL.name - 1).padEnd(COL.name);
     const tier = p.tier.padEnd(COL.tier);
     const pattern = (p.patterns[0] ?? "").slice(0, COL.pattern - 1).padEnd(COL.pattern);
     const desc = sanitize(p.spec.profile.description).slice(0, 55);
-    console.log(`${id}  ${tier}  ${pattern}  ${desc}`);
+    console.log(`${name}  ${tier}  ${pattern}  ${desc}`);
   }
 
   const counts = profiles.reduce<Record<string, number>>((acc, p) => {
@@ -207,24 +272,18 @@ export function cmdList(args: string[]): void {
 
 // ── install ───────────────────────────────────────────────────────────────────
 
-async function cmdInstall(args: string[]): Promise<void> {
-  const id = args[0];
-  if (!id) {
-    console.error("Usage: mcp-recall profiles install <id>");
+export async function cmdInstall(args: string[]): Promise<void> {
+  const nameOrId = args[0];
+  if (!nameOrId) {
+    console.error("Usage: mcp-recall profiles install <name>");
     process.exit(1);
   }
 
   process.stdout.write("Fetching manifest… ");
   const entries = await fetchManifest();
-  const entry = entries.find((e) => e.id === id);
   console.log("done");
 
-  if (!entry) {
-    console.error(`Profile "${id}" not found.`);
-    console.log(`Available:\n${entries.map((e) => `  ${e.id}`).join("\n")}`);
-    process.exit(1);
-  }
-
+  const entry = await resolveManifestEntry(nameOrId, entries);
   assertSafeId(entry.id);
   assertSafeFile(entry.file);
   process.stdout.write(`Installing ${sanitize(entry.id)} v${sanitize(entry.version)}… `);
@@ -274,24 +333,27 @@ async function cmdUpdate(): Promise<void> {
 
 // ── remove ────────────────────────────────────────────────────────────────────
 
-function cmdRemove(args: string[]): void {
-  const id = args[0];
-  if (!id) {
-    console.error("Usage: mcp-recall profiles remove <id>");
+export function cmdRemove(args: string[]): void {
+  const nameOrId = args[0];
+  if (!nameOrId) {
+    console.error("Usage: mcp-recall profiles remove <name>");
     process.exit(1);
   }
 
+  // Resolve short name or exact id against installed community profiles
+  const installed = loadProfiles().filter((p) => p.tier === "community");
+  const target =
+    installed.find((p) => p.spec.profile.id === nameOrId) ??
+    installed.find((p) => getShortName(p.spec) === nameOrId);
+
+  if (!target) {
+    console.error(`"${nameOrId}" is not installed.`);
+    process.exit(1);
+  }
+
+  const id = target.spec.profile.id;
   assertSafeId(id);
-
-  const dir = join(communityDir(), id);
-  try {
-    statSync(dir);
-  } catch {
-    console.error(`"${id}" is not installed.`);
-    process.exit(1);
-  }
-
-  rmSync(dir, { recursive: true });
+  rmSync(join(communityDir(), id), { recursive: true });
   clearProfileCache();
   console.log(`✓ Removed ${id}`);
 }
@@ -626,6 +688,102 @@ function cmdTest(args: string[]): void {
   console.log(`Output: ${formatBytes(result.outputBytes)}  (${result.reductionPct}% reduction)\n`);
 }
 
+// ── info ──────────────────────────────────────────────────────────────────────
+
+export async function cmdInfo(args: string[]): Promise<void> {
+  const nameOrId = args[0];
+  if (!nameOrId) {
+    console.error("Usage: mcp-recall profiles info <name>");
+    process.exit(1);
+  }
+
+  // Check locally installed profiles first
+  const allProfiles = loadProfiles();
+  const local =
+    allProfiles.find((p) => p.spec.profile.id === nameOrId) ??
+    allProfiles.find((p) => getShortName(p.spec) === nameOrId);
+
+  // Fetch manifest for richer metadata (or non-installed profiles)
+  let manifestEntry: ManifestEntry | undefined;
+  try {
+    process.stdout.write("Fetching manifest… ");
+    const entries = await fetchManifest();
+    console.log("done");
+    const lookupId = local?.spec.profile.id ?? nameOrId;
+    manifestEntry =
+      entries.find((e) => e.id === lookupId) ??
+      entries.find((e) => manifestShortName(e) === nameOrId);
+  } catch {
+    console.log("(offline — showing local data only)");
+  }
+
+  if (!local && !manifestEntry) {
+    console.error(`Profile "${nameOrId}" not found (not installed and not in community catalog).`);
+    process.exit(1);
+  }
+
+  const id = local?.spec.profile.id ?? manifestEntry!.id;
+  const shortName = local ? getShortName(local.spec) : manifestShortName(manifestEntry!);
+  const version = local?.spec.profile.version ?? manifestEntry!.version;
+  const description = sanitize(local?.spec.profile.description ?? manifestEntry!.description ?? "—");
+  const author = sanitize(String(local?.spec.profile.author ?? manifestEntry?.author ?? "—"));
+  const mcpUrl = sanitize(String(local?.spec.profile.mcp_url ?? manifestEntry?.mcp_url ?? "—"));
+  const patterns = local?.patterns ?? (
+    Array.isArray(manifestEntry!.mcp_pattern)
+      ? manifestEntry!.mcp_pattern
+      : [manifestEntry!.mcp_pattern]
+  );
+  const tier = local ? local.tier : "community (not installed)";
+
+  console.log(`\n${shortName} (${id} v${version})`);
+  console.log(`  Description: ${description}`);
+  console.log(`  Pattern:     ${patterns.join(", ")}`);
+  console.log(`  Author:      ${author}`);
+  console.log(`  MCP:         ${mcpUrl}`);
+  if (local) console.log(`  Strategy:    ${local.spec.strategy.type}`);
+  console.log(`  Tier:        ${tier}`);
+  console.log(`  Installed:   ${local?.filePath ?? "not installed"}`);
+  console.log();
+}
+
+// ── available ─────────────────────────────────────────────────────────────────
+
+export async function cmdAvailable(args: string[]): Promise<void> {
+  const verbose = args.includes("--verbose");
+
+  process.stdout.write("Fetching manifest… ");
+  const entries = await fetchManifest();
+  console.log("done\n");
+
+  const installed = installedCommunityMap();
+
+  const COL = { name: 20, desc: 46 };
+  const statusLabel = "Status";
+  const header =
+    "Name".padEnd(COL.name) +
+    "  " +
+    "Description".padEnd(COL.desc) +
+    "  " +
+    statusLabel +
+    (verbose ? "  MCP URL" : "");
+
+  console.log(header);
+  console.log("─".repeat(Math.min(header.length + (verbose ? 50 : 0), 120)));
+
+  let installedCount = 0;
+  for (const e of entries) {
+    const name = sanitize(manifestShortName(e)).slice(0, COL.name - 1).padEnd(COL.name);
+    const desc = sanitize(e.description).slice(0, COL.desc - 1).padEnd(COL.desc);
+    const isInstalled = installed.has(e.id);
+    if (isInstalled) installedCount++;
+    const status = isInstalled ? "installed" : "         ";
+    const urlPart = verbose ? `  ${sanitize(e.mcp_url ?? "—")}` : "";
+    console.log(`${name}  ${desc}  ${status}${urlPart}`);
+  }
+
+  console.log(`\n${entries.length} available, ${installedCount} installed\n`);
+}
+
 // ── dispatcher ────────────────────────────────────────────────────────────────
 
 export async function handleProfilesCommand(args: string[]): Promise<void> {
@@ -657,6 +815,12 @@ export async function handleProfilesCommand(args: string[]): Promise<void> {
     case "retrain":
       await handleRetrainCommand(rest);
       break;
+    case "info":
+      await cmdInfo(rest);
+      break;
+    case "available":
+      await cmdAvailable(rest);
+      break;
     case "test":
       cmdTest(rest);
       break;
@@ -664,13 +828,15 @@ export async function handleProfilesCommand(args: string[]): Promise<void> {
       console.error(`Unknown subcommand: ${cmd ?? "(none)"}\n`);
       console.error("Usage: mcp-recall profiles <command>\n");
       console.error("Commands:");
-      console.error("  list              Show all installed profiles");
-      console.error("  install <id>      Install a community profile by ID");
-      console.error("  update            Update all installed community profiles");
-      console.error("  remove <id>       Remove a community profile");
-      console.error("  seed [--all]      Install profiles for all detected MCPs (--all for entire catalog)");
-      console.error("  feed [path]       Contribute a local profile to the community");
-      console.error("  check             Detect pattern conflicts");
+      console.error("  list                    Show all installed profiles");
+      console.error("  available [--verbose]   Browse the community catalog");
+      console.error("  info <name>             Show full metadata for a profile");
+      console.error("  install <name>          Install a community profile");
+      console.error("  update                  Update all installed community profiles");
+      console.error("  remove <name>           Remove a community profile");
+      console.error("  seed [--all]            Install profiles for all detected MCPs (--all for entire catalog)");
+      console.error("  feed [path]             Contribute a local profile to the community");
+      console.error("  check                   Detect pattern conflicts");
       console.error("  retrain [--apply] [--depth N] [filter]  Suggest profile improvements from stored corpus");
       console.error("  test <tool> [--stored <id>] [--input <file>]  Test a profile against real input");
       process.exit(1);
