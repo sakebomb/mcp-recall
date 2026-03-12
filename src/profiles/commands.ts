@@ -298,7 +298,37 @@ function cmdRemove(args: string[]): void {
 
 // ── seed ──────────────────────────────────────────────────────────────────────
 
-async function cmdSeed(): Promise<void> {
+export async function cmdSeed(args: string[]): Promise<void> {
+  const all = args.includes("--all");
+
+  process.stdout.write("Fetching manifest… ");
+  const entries = await fetchManifest();
+  console.log("done\n");
+
+  const installed = installedCommunityMap();
+  let installCount = 0;
+  let alreadyCount = 0;
+
+  if (all) {
+    for (const entry of entries) {
+      if (installed.has(entry.id)) {
+        console.log(`    ${entry.id}: already installed`);
+        alreadyCount++;
+        continue;
+      }
+      assertSafeId(entry.id);
+      assertSafeFile(entry.file);
+      const content = await fetchProfileContent(entry.file);
+      verifyHash(content, entry.sha256, entry.id);
+      saveToCommunitDir(entry.id, content);
+      console.log(`  ✓ ${entry.id} installed`);
+      installCount++;
+    }
+    clearProfileCache();
+    console.log(`\n${installCount} profile(s) installed (${alreadyCount} already installed, ${entries.length} total available)`);
+    return;
+  }
+
   let serverKeys: string[] = [];
   try {
     const raw = JSON.parse(
@@ -317,12 +347,6 @@ async function cmdSeed(): Promise<void> {
   }
 
   console.log(`Detected MCPs: ${serverKeys.join(", ")}`);
-  process.stdout.write("Fetching manifest… ");
-  const entries = await fetchManifest();
-  console.log("done\n");
-
-  const installed = installedCommunityMap();
-  let count = 0;
 
   for (const key of serverKeys) {
     const prefix = `mcp__${key.replace(/-/g, "_")}__`;
@@ -342,6 +366,7 @@ async function cmdSeed(): Promise<void> {
     for (const entry of matches) {
       if (installed.has(entry.id)) {
         console.log(`  ${entry.id}: already installed`);
+        alreadyCount++;
         continue;
       }
       assertSafeId(entry.id);
@@ -350,12 +375,12 @@ async function cmdSeed(): Promise<void> {
       verifyHash(content, entry.sha256, entry.id);
       saveToCommunitDir(entry.id, content);
       console.log(`  ✓ ${entry.id} installed (matched ${key})`);
-      count++;
+      installCount++;
     }
   }
 
   clearProfileCache();
-  console.log(`\n${count} profile(s) installed.`);
+  console.log(`\n${installCount} profile(s) installed.`);
 }
 
 // ── feed ──────────────────────────────────────────────────────────────────────
@@ -621,7 +646,7 @@ export async function handleProfilesCommand(args: string[]): Promise<void> {
       cmdRemove(rest);
       break;
     case "seed":
-      await cmdSeed();
+      await cmdSeed(rest);
       break;
     case "feed":
       cmdFeed(rest);
@@ -643,7 +668,7 @@ export async function handleProfilesCommand(args: string[]): Promise<void> {
       console.error("  install <id>      Install a community profile by ID");
       console.error("  update            Update all installed community profiles");
       console.error("  remove <id>       Remove a community profile");
-      console.error("  seed              Install profiles for all detected MCPs");
+      console.error("  seed [--all]      Install profiles for all detected MCPs (--all for entire catalog)");
       console.error("  feed [path]       Contribute a local profile to the community");
       console.error("  check             Detect pattern conflicts");
       console.error("  retrain [--apply] [--depth N] [filter]  Suggest profile improvements from stored corpus");

@@ -297,3 +297,129 @@ type = "text_truncate"`
     expect(lines.join("").trim()).toBe("");
   });
 });
+
+// ── cmdSeed --all ─────────────────────────────────────────────────────────────
+
+describe("cmdSeed --all", () => {
+  let communityDir: string;
+  let originalFetch: typeof globalThis.fetch;
+
+  const fakeManifest = {
+    profiles: [
+      {
+        id: "mcp__grafana",
+        version: "1.0.0",
+        description: "Grafana",
+        mcp_pattern: "mcp__grafana__*",
+        file: "profiles/mcp__grafana/default.toml",
+        sha256: undefined,
+      },
+      {
+        id: "mcp__jira",
+        version: "1.0.0",
+        description: "Jira",
+        mcp_pattern: "mcp__jira__*",
+        file: "profiles/mcp__jira/default.toml",
+        sha256: undefined,
+      },
+    ],
+  };
+
+  const fakeToml = (id: string) => `[profile]
+id = "${id}"
+version = "1.0.0"
+description = "Test"
+mcp_pattern = "${id}__*"
+[strategy]
+type = "text_truncate"`;
+
+  beforeEach(() => {
+    communityDir = mkdtempSync(join(tmpdir(), "recall-seed-"));
+    clearProfileCache();
+    process.env.RECALL_COMMUNITY_PROFILES_PATH = communityDir;
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const u = url.toString();
+      if (u.includes("manifest.json")) {
+        return new Response(JSON.stringify(fakeManifest), { status: 200 });
+      }
+      if (u.includes("mcp__grafana")) {
+        return new Response(fakeToml("mcp__grafana"), { status: 200 });
+      }
+      if (u.includes("mcp__jira")) {
+        return new Response(fakeToml("mcp__jira"), { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    }) as typeof globalThis.fetch;
+  });
+
+  afterEach(() => {
+    rmSync(communityDir, { recursive: true, force: true });
+    delete process.env.RECALL_COMMUNITY_PROFILES_PATH;
+    clearProfileCache();
+    globalThis.fetch = originalFetch;
+  });
+
+  test("installs all profiles from manifest when --all is passed", async () => {
+    const { cmdSeed } = require("../src/profiles/commands");
+    const lines: string[] = [];
+    const orig = console.log;
+    console.log = (...args: unknown[]) => lines.push(args.join(" "));
+    try {
+      await cmdSeed(["--all"]);
+    } finally {
+      console.log = orig;
+    }
+    const output = lines.join("\n");
+    expect(output).toContain("mcp__grafana installed");
+    expect(output).toContain("mcp__jira installed");
+    expect(output).toContain("2 profile(s) installed");
+    expect(output).toContain("0 already installed");
+    expect(output).toContain("2 total available");
+
+    // Files should exist on disk
+    const { existsSync } = require("fs");
+    expect(existsSync(join(communityDir, "mcp__grafana", "default.toml"))).toBe(true);
+    expect(existsSync(join(communityDir, "mcp__jira", "default.toml"))).toBe(true);
+  });
+
+  test("skips already-installed profiles and reports them in summary", async () => {
+    // Pre-install grafana
+    mkdirSync(join(communityDir, "mcp__grafana"), { recursive: true });
+    writeFileSync(join(communityDir, "mcp__grafana", "default.toml"), fakeToml("mcp__grafana"));
+
+    const { cmdSeed } = require("../src/profiles/commands");
+    const lines: string[] = [];
+    const orig = console.log;
+    console.log = (...args: unknown[]) => lines.push(args.join(" "));
+    try {
+      clearProfileCache();
+      await cmdSeed(["--all"]);
+    } finally {
+      console.log = orig;
+    }
+    const output = lines.join("\n");
+    expect(output).toContain("mcp__grafana: already installed");
+    expect(output).toContain("mcp__jira installed");
+    expect(output).toContain("1 profile(s) installed");
+    expect(output).toContain("1 already installed");
+  });
+
+  test("--all installs profiles without reading claude.json (no Detected MCPs line)", async () => {
+    const { cmdSeed } = require("../src/profiles/commands");
+    const lines: string[] = [];
+    const orig = console.log;
+    console.log = (...args: unknown[]) => lines.push(args.join(" "));
+    try {
+      clearProfileCache();
+      await cmdSeed(["--all"]);
+    } finally {
+      console.log = orig;
+    }
+    const output = lines.join("\n");
+    // --all skips MCP detection entirely
+    expect(output).not.toContain("Detected MCPs");
+    // Both profiles installed
+    expect(output).toContain("2 profile(s) installed");
+  });
+});
