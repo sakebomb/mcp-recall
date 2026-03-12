@@ -8,6 +8,21 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ---
 
+## [1.6.0] — 2026-03-12
+
+### Added
+
+- Five new Bash tool handlers: git status, package install (npm/bun/yarn/pnpm/pip), test runners (pytest, jest, bun test, vitest, go test), docker ps, and build tools (make/just) — compressed output instead of raw terminal walls (#119)
+- `profiles info <name>` — full metadata for any profile: version, description, mcp_pattern, author, mcp_url, source tier, file path; manifest-first with local fallback for offline use (#122)
+- `profiles available` — lists community catalog with install status and optional `--verbose` for mcp_url (#122)
+- Friendly short names throughout: `profiles list`, `profiles install`, `profiles remove` all accept short names (e.g. `grafana` instead of `mcp__grafana`); TTY-aware picker on ambiguous match (#122)
+- `--help` and `--version` flags, `completions` subcommand, `profiles list --machine-readable` (#123)
+- `--all` flag for `profiles seed` (#125)
+- Profile seeding discoverability improvements (#126)
+- `recall__context` output now includes generated-at timestamp (#128)
+
+---
+
 ## [1.5.1] — 2026-03-10
 
 ### Security
