@@ -24,7 +24,7 @@ import {
   type ForgetOptions,
 } from "./db/index";
 import { loadConfig } from "./config";
-import { formatBytes } from "./format";
+import { formatBytes, formatRelativeTime } from "./format";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -326,7 +326,8 @@ export function toolContext(
   args: ContextArgs
 ): string {
   const data = getContext(db, projectKey, args);
-  const today = new Date().toISOString().slice(0, 10);
+  const now = Date.now();
+  const today = new Date(now).toISOString().slice(0, 10);
 
   const isEmpty =
     data.pinned.length === 0 &&
@@ -342,6 +343,7 @@ export function toolContext(
   const lines: string[] = [
     `Context — ${today}`,
     "═".repeat(36),
+    `Generated ${formatRelativeTime(Date.now() - now)}`,
   ];
 
   if (data.pinned.length > 0) {

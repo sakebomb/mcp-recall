@@ -5463,6 +5463,21 @@ function formatBytes(bytes) {
     return `${(bytes / 1024).toFixed(1)}KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
+function formatRelativeTime(ms) {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60)
+    return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60)
+    return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours < 24) {
+    return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m ago` : `${hours}h ago`;
+  }
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
 
 // src/tools.ts
 function formatDate(unixSecs) {
@@ -5475,14 +5490,16 @@ function reductionPct(original, summary) {
 }
 function toolContext(db, projectKey, args) {
   const data = getContext(db, projectKey, args);
-  const today = new Date().toISOString().slice(0, 10);
+  const now = Date.now();
+  const today = new Date(now).toISOString().slice(0, 10);
   const isEmpty = data.pinned.length === 0 && data.notes.length === 0 && data.recent.length === 0 && data.hot.length === 0 && data.last_session === null;
   if (isEmpty) {
     return `[recall: no context available yet \u2014 use recall tools to build up your context store]`;
   }
   const lines = [
     `Context \u2014 ${today}`,
-    "\u2550".repeat(36)
+    "\u2550".repeat(36),
+    `Generated ${formatRelativeTime(Date.now() - now)}`
   ];
   if (data.pinned.length > 0) {
     lines.push("", `Pinned (${data.pinned.length}):`);
