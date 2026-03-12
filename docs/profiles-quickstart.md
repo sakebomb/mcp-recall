@@ -110,8 +110,8 @@ mcp-recall profiles remove grafana
 # profiles test takes a full tool name, not a short name
 mcp-recall profiles test mcp__grafana__search_dashboards
 
-# Test a profile against real stored output
-mcp-recall profiles test mcp__grafana__search_dashboards
+# Test against a specific stored item
+mcp-recall profiles test mcp__grafana__search_dashboards --stored <recall_id>
 
 # Suggest field improvements using your stored data
 mcp-recall profiles retrain

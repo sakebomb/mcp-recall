@@ -17,7 +17,7 @@ Profiles are declarative TOML files that tell mcp-recall how to compress the out
 
 | Tier | Path | Priority |
 |------|------|----------|
-| User (local) | `~/.config/mcp-recall/profiles/<id>.toml` | Highest |
+| User (local) | `~/.config/mcp-recall/profiles/<id>/default.toml` | Highest |
 | Community (installed) | `~/.local/share/mcp-recall/profiles/community/<id>.toml` | Middle |
 | Bundled | Shipped with mcp-recall | Lowest |
 

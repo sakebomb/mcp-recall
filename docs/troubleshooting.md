@@ -99,7 +99,7 @@ If a tool is running but nothing appears in `recall__list_stored()`:
 
 ```bash
 RECALL_DEBUG=1 claude
-# Look for: [recall:debug] denied · mcp__myservice__get_item
+# Look for: [recall:debug] SKIP denylist · mcp__myservice__get_item
 ```
 
 Common causes — the tool name matches a built-in keyword pattern (`*token*`, `*secret*`, `*api_key*`, etc.) or an explicit entry (`mcp__1password__*`, etc.). If the tool is legitimate, add it to the allowlist in `~/.config/mcp-recall/config.toml`:
@@ -111,11 +111,10 @@ allowlist = ["mcp__myservice__get_item"]
 
 **2. Check for secret detection:**
 
-If a secret pattern (PEM header, AWS key, etc.) is found in the output, the item is skipped with a warning. Enable debug logging to confirm:
+If a secret pattern (PEM header, AWS key, etc.) is found in the output, the item is skipped with a warning written to stderr — no debug flag needed:
 
-```bash
-RECALL_DEBUG=1 claude
-# Look for: [recall:debug] secret detected · skipping
+```
+[recall] skipped mcp__myservice__get_item: detected aws_access_key, pem_header
 ```
 
 **3. Check the tool is actually going through the hook:**

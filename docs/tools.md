@@ -128,8 +128,10 @@ By tool (sorted by original size):
   mcp__filesystem__read_file           2 items     21KB →  4.4KB    79%
 
 Suggestions:
-  📌 Pin candidates (accessed ≥5×): recall_ab12 mcp__playwright__browser_snapshot
-  🗑  Stale items (never accessed, >3 days): recall_cd34 mcp__github__list_issues
+  📌 Consider pinning:
+     recall_ab12  mcp__playwright__browser_snapshot    accessed 6×
+  🗑  Never accessed (consider forgetting):
+     recall_cd34  mcp__github__list_issues             created 4 days ago
 ```
 
 The Suggestions section is omitted when nothing qualifies. Thresholds are configurable via `pin_recommendation_threshold` and `stale_item_days`.
@@ -198,14 +200,16 @@ Delete stored items.
 recall__forget(id?, tool?, session_id?, older_than_days?, all?, confirmed?, force?)
 ```
 
-| Usage | Effect | Response |
-|---|---|---|
-| `forget(id: "recall_abc12345")` | Delete one item | `Deleted 1 item.` |
-| `forget(tool: "mcp__github__list_issues")` | Delete all items from that tool | `Deleted 5 items from mcp__github__list_issues.` |
-| `forget(session_id: "xyz")` | Delete everything from a specific session | `Deleted 8 items from session xyz.` |
-| `forget(older_than_days: 3)` | Delete items older than 3 calendar days | `Deleted 12 items older than 3 days.` |
-| `forget(all: true, confirmed: true)` | Wipe the entire store | `Deleted 42 items. (3 pinned items skipped)` |
-| `forget(all: true, confirmed: true, force: true)` | Wipe including pinned items | `Deleted 45 items.` |
+| Usage | Effect |
+|---|---|
+| `forget(id: "recall_abc12345")` | Delete one item |
+| `forget(tool: "mcp__github__list_issues")` | Delete all items from that tool |
+| `forget(session_id: "xyz")` | Delete everything from a specific session |
+| `forget(older_than_days: 3)` | Delete items older than 3 calendar days |
+| `forget(all: true, confirmed: true)` | Wipe the entire store (pinned items skipped) |
+| `forget(all: true, confirmed: true, force: true)` | Wipe including pinned items |
+
+All modes return `[recall: deleted N item(s)]`. Calling `forget(all: true)` without `confirmed: true` returns `[recall: clearing all stored items requires confirmed: true]`.
 
 Pinned items are skipped by default. Pass `force: true` to override.
 
