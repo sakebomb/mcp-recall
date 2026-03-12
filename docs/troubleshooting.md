@@ -69,6 +69,8 @@ mcp-recall profiles list
 # Verify your profile appears and the Pattern column matches the tool name
 ```
 
+> **Short names**: `profiles list`, `profiles install`, `profiles remove`, `profiles info`, and `profiles test` all accept short names (e.g. `grafana` instead of `mcp__grafana`). If a short name matches multiple profiles, an interactive picker appears on TTY. On non-TTY (CI, scripts), it prints the full list and exits — use the full `id` to disambiguate.
+
 Common causes:
 - Pattern uses `mcp__myserver__*` but the tool is actually named `mcp__my-server__*` (hyphens vs underscores)
 - Profile file is in the wrong location — user profiles go in `~/.config/mcp-recall/profiles/<id>/default.toml`

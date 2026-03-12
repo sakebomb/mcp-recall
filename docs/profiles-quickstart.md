@@ -17,12 +17,20 @@ mcp-recall profiles seed
 # Or install the entire community catalog at once
 mcp-recall profiles seed --all
 
-# Verify
+# See what's available in the community catalog (with install status)
+mcp-recall profiles available
+
+# Verify what's installed
 mcp-recall profiles list
+
+# Get full metadata for a profile (works offline)
+mcp-recall profiles info grafana
 
 # Keep profiles current
 mcp-recall profiles update
 ```
+
+`npx mcp-recall` and `bunx mcp-recall` also work without a global install — useful for one-off commands.
 
 ---
 
@@ -92,11 +100,19 @@ Local profiles live in `~/.config/mcp-recall/profiles/` and always take preceden
 # See which tier each profile comes from (user / community / bundled)
 mcp-recall profiles list
 
+# Short names work everywhere — "grafana" is the same as "mcp__grafana"
+mcp-recall profiles info grafana
+mcp-recall profiles test grafana
+mcp-recall profiles remove grafana
+
 # Test a profile against real stored output
 mcp-recall profiles test mcp__grafana__search_dashboards
 
 # Suggest field improvements using your stored data
 mcp-recall profiles retrain
+
+# For scripting — outputs bare short names, one per line
+mcp-recall profiles list --machine-readable
 ```
 
 ---
