@@ -72,6 +72,7 @@ recall__search(query, tool?, limit?)
 - Each result includes a `> …excerpt…` snippet from the matching content
 - Filter by tool name with `tool` (substring match — e.g. `"github"` matches all `mcp__github__*` tools)
 - Default `limit`: 5 results
+- When you already know the item ID, use `recall__retrieve(id, query?)` instead — it returns the full content or a focused excerpt without scanning the whole index
 
 ---
 
@@ -127,8 +128,10 @@ By tool (sorted by original size):
   mcp__filesystem__read_file           2 items     21KB →  4.4KB    79%
 
 Suggestions:
-  📌 Pin candidates (accessed ≥5×): recall_ab12 mcp__playwright__browser_snapshot
-  🗑  Stale items (never accessed, >3 days): recall_cd34 mcp__github__list_issues
+  📌 Consider pinning:
+     recall_ab12  mcp__playwright__browser_snapshot    accessed 6×
+  🗑  Never accessed (consider forgetting):
+     recall_cd34  mcp__github__list_issues             created 4 days ago
 ```
 
 The Suggestions section is omitted when nothing qualifies. Thresholds are configurable via `pin_recommendation_threshold` and `stale_item_days`.
@@ -144,6 +147,7 @@ recall__session_summary(session_id?, date?)
 ```
 
 - Defaults to today (UTC). Pass `date` (YYYY-MM-DD) for a specific day, or `session_id` for a specific Claude session.
+- Session IDs appear in `recall__context` output and in the `recall__list_stored` table — look for the `session` column.
 - Shows: items stored, compression savings, tool breakdown, most-accessed items, pinned items, notes.
 
 Example output:
@@ -202,8 +206,10 @@ recall__forget(id?, tool?, session_id?, older_than_days?, all?, confirmed?, forc
 | `forget(tool: "mcp__github__list_issues")` | Delete all items from that tool |
 | `forget(session_id: "xyz")` | Delete everything from a specific session |
 | `forget(older_than_days: 3)` | Delete items older than 3 calendar days |
-| `forget(all: true, confirmed: true)` | Wipe the entire store |
+| `forget(all: true, confirmed: true)` | Wipe the entire store (pinned items skipped) |
 | `forget(all: true, confirmed: true, force: true)` | Wipe including pinned items |
+
+All modes return `[recall: deleted N item(s)]`. Calling `forget(all: true)` without `confirmed: true` returns `[recall: clearing all stored items requires confirmed: true]`.
 
 Pinned items are skipped by default. Pass `force: true` to override.
 
