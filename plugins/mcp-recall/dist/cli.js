@@ -5981,6 +5981,8 @@ ${fmt.body}`,
 // src/handlers/bash.ts
 var MAX_LOG_COMMITS = 20;
 var MAX_TERRAFORM_RESOURCES = 10;
+var MAX_DOCKER_CONTAINERS = 20;
+var MAX_BUILD_ERRORS = 20;
 function extractStdout(output) {
   if (output !== null && typeof output === "object") {
     const obj = output;
@@ -5990,6 +5992,14 @@ function extractStdout(output) {
       return stripSshNoise(stripAnsi(obj.output));
   }
   return stripSshNoise(stripAnsi(extractText(output)));
+}
+function extractStderr(output) {
+  if (output !== null && typeof output === "object") {
+    const obj = output;
+    if (typeof obj.stderr === "string")
+      return stripAnsi(obj.stderr);
+  }
+  return "";
 }
 function extractCommand(input) {
   if (input !== null && typeof input === "object") {
@@ -6092,6 +6102,74 @@ var gitLogHandler = (_toolName, output) => {
     originalSize
   };
 };
+var gitStatusHandler = (toolName, output) => {
+  const stdout = extractStdout(output);
+  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  if (!stdout.trim()) {
+    return { summary: "[git status \u2014 clean working tree]", originalSize };
+  }
+  const staged = [];
+  const unstaged = [];
+  const untracked = [];
+  const conflicts = [];
+  let section = null;
+  for (const line of stdout.split(`
+`)) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("Changes to be committed")) {
+      section = "staged";
+      continue;
+    }
+    if (trimmed.startsWith("Changes not staged")) {
+      section = "unstaged";
+      continue;
+    }
+    if (trimmed.startsWith("Untracked files")) {
+      section = "untracked";
+      continue;
+    }
+    if (trimmed.startsWith("both modified") || trimmed.startsWith("both added")) {
+      conflicts.push(trimmed);
+      continue;
+    }
+    if (!trimmed || trimmed.startsWith("(") || trimmed.startsWith("no changes"))
+      continue;
+    if (trimmed.startsWith("On branch") || trimmed.startsWith("HEAD") || trimmed.startsWith("Your branch") || trimmed.startsWith("nothing"))
+      continue;
+    const porcelain = line.match(/^([MADRCU?!]{1,2})\s+(.+)$/);
+    if (porcelain) {
+      const [, code, file] = porcelain;
+      if (code.startsWith("?"))
+        untracked.push(file);
+      else if (code[0] !== " " && code[0] !== "?")
+        staged.push(`${code[0]} ${file}`);
+      if (code[1] && code[1] !== " " && code[1] !== "?")
+        unstaged.push(`${code[1]} ${file}`);
+      continue;
+    }
+    if (section === "staged" && trimmed.match(/^(modified|new file|deleted|renamed):/)) {
+      staged.push(trimmed);
+    } else if (section === "unstaged" && trimmed.match(/^(modified|deleted):/)) {
+      unstaged.push(trimmed);
+    } else if (section === "untracked" && trimmed && !trimmed.startsWith("(")) {
+      untracked.push(trimmed);
+    }
+  }
+  if (staged.length === 0 && unstaged.length === 0 && untracked.length === 0 && conflicts.length === 0) {
+    return shellHandler(toolName, output);
+  }
+  const lines = ["git status"];
+  if (conflicts.length > 0)
+    lines.push(`  conflicts (${conflicts.length}): ${conflicts.slice(0, 5).join(", ")}`);
+  if (staged.length > 0)
+    lines.push(`  staged (${staged.length}): ${staged.slice(0, 5).map((f) => f.replace(/^(modified|new file|deleted|renamed):\s*/, "")).join(", ")}${staged.length > 5 ? ` +${staged.length - 5} more` : ""}`);
+  if (unstaged.length > 0)
+    lines.push(`  unstaged (${unstaged.length}): ${unstaged.slice(0, 5).map((f) => f.replace(/^(modified|deleted):\s*/, "")).join(", ")}${unstaged.length > 5 ? ` +${unstaged.length - 5} more` : ""}`);
+  if (untracked.length > 0)
+    lines.push(`  untracked (${untracked.length}): ${untracked.slice(0, 5).join(", ")}${untracked.length > 5 ? ` +${untracked.length - 5} more` : ""}`);
+  return { summary: lines.join(`
+`), originalSize };
+};
 var TERRAFORM_RESOURCE_RE = /^\s+#\s+(.+?)\s+will\s+be\s+(created|destroyed|updated in-place|replaced)/;
 var TERRAFORM_PLAN_SUMMARY_RE = /^Plan:\s+.+$/m;
 var TERRAFORM_SYMBOL = {
@@ -6128,6 +6206,232 @@ var terraformPlanHandler = (toolName, output) => {
   return { summary: lines.join(`
 `), originalSize };
 };
+var packageInstallHandler = (toolName, output) => {
+  const stdout = extractStdout(output);
+  const stderr = extractStderr(output);
+  const combined = `${stdout}
+${stderr}`.trim();
+  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const warnings = [];
+  const errors2 = [];
+  for (const line of combined.split(`
+`)) {
+    const t = line.trim();
+    if (!t)
+      continue;
+    if (/^(npm warn|warn |warning )/i.test(t))
+      warnings.push(t.slice(0, 100));
+    else if (/^(npm error|error |err )/i.test(t))
+      errors2.push(t.slice(0, 100));
+  }
+  let countLine = null;
+  const bunMatch = combined.match(/(\d+)\s+packages?\s+installed/i);
+  if (bunMatch)
+    countLine = `${bunMatch[1]} packages installed`;
+  if (!countLine) {
+    const npmMatch = combined.match(/added\s+(\d+)[^,\n]*/i);
+    if (npmMatch)
+      countLine = npmMatch[0].trim().slice(0, 60);
+  }
+  if (!countLine) {
+    const pipMatch = combined.match(/Successfully installed (.+)/);
+    if (pipMatch) {
+      const pkgs = pipMatch[1].trim().split(/\s+/);
+      countLine = `pip: ${pkgs.length} package${pkgs.length === 1 ? "" : "s"} installed`;
+    }
+  }
+  if (!countLine) {
+    const yarnMatch = combined.match(/success Saved (\d+) new dependenc/i);
+    if (yarnMatch)
+      countLine = `yarn: ${yarnMatch[1]} new dependencies saved`;
+  }
+  if (!countLine && errors2.length === 0) {
+    return shellHandler(toolName, output);
+  }
+  const lines = [countLine ?? "package install"];
+  if (warnings.length > 0)
+    lines.push(`  ${warnings.length} warning${warnings.length === 1 ? "" : "s"}${warnings.length <= 3 ? ": " + warnings.join("; ") : ""}`);
+  if (errors2.length > 0)
+    lines.push(...errors2.slice(0, 5).map((e) => `  error: ${e}`));
+  return { summary: lines.join(`
+`), originalSize };
+};
+var testRunnerHandler = (toolName, output) => {
+  const stdout = extractStdout(output);
+  const stderr = extractStderr(output);
+  const combined = `${stdout}
+${stderr}`.trim();
+  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const failureLines = [];
+  for (const line of combined.split(`
+`)) {
+    const t = line.trim();
+    if (!t)
+      continue;
+    if (/^(FAILED|FAIL)\s+/.test(t) || /^[\u2715\u2717\u00D7\u25CF]\s/.test(t) || /^\(fail\)\s/.test(t) || /^--- FAIL:/.test(t)) {
+      failureLines.push(t.slice(0, 120));
+    }
+  }
+  let passed = 0, failed = 0, skipped = 0;
+  let foundSummary = false;
+  for (const line of combined.split(`
+`)) {
+    const t = line.trim();
+    const bunPass = t.match(/^(\d+)\s+pass$/);
+    const bunFail = t.match(/^(\d+)\s+fail$/);
+    if (bunPass) {
+      passed = parseInt(bunPass[1]);
+      foundSummary = true;
+    }
+    if (bunFail) {
+      failed = parseInt(bunFail[1]);
+      foundSummary = true;
+    }
+    const pytestMatch = t.match(/(\d+)\s+passed(?:,\s+(\d+)\s+failed)?(?:,\s+(\d+)\s+(?:skipped|warning))?/);
+    if (pytestMatch) {
+      passed = parseInt(pytestMatch[1]);
+      if (pytestMatch[2])
+        failed = parseInt(pytestMatch[2]);
+      if (pytestMatch[3])
+        skipped = parseInt(pytestMatch[3]);
+      foundSummary = true;
+    }
+    const jestMatch = t.match(/Tests:\s+(?:(\d+)\s+failed,\s+)?(\d+)\s+passed(?:,\s+(\d+)\s+skipped)?/);
+    if (jestMatch) {
+      if (jestMatch[1])
+        failed = parseInt(jestMatch[1]);
+      passed = parseInt(jestMatch[2]);
+      if (jestMatch[3])
+        skipped = parseInt(jestMatch[3]);
+      foundSummary = true;
+    }
+    const goOk = t.match(/^ok\s+\S+/);
+    const goFail = t.match(/^FAIL\s+\S+/);
+    if (goOk) {
+      passed++;
+      foundSummary = true;
+    }
+    if (goFail) {
+      failed++;
+      foundSummary = true;
+    }
+  }
+  if (!foundSummary && failureLines.length === 0) {
+    return shellHandler(toolName, output);
+  }
+  const total = passed + failed + skipped;
+  const status = failed > 0 ? "FAIL" : "pass";
+  const parts = [];
+  if (passed > 0)
+    parts.push(`${passed} passed`);
+  if (failed > 0)
+    parts.push(`${failed} failed`);
+  if (skipped > 0)
+    parts.push(`${skipped} skipped`);
+  const summaryStr = parts.length > 0 ? parts.join(", ") : "no results";
+  const lines = [`test runner \u2014 ${status}: ${summaryStr}${total > 0 ? ` (${total} total)` : ""}`];
+  if (failureLines.length > 0) {
+    lines.push(`  failures:`);
+    lines.push(...failureLines.slice(0, MAX_BUILD_ERRORS).map((l) => `    ${l}`));
+    if (failureLines.length > MAX_BUILD_ERRORS) {
+      lines.push(`    \u2026 (+${failureLines.length - MAX_BUILD_ERRORS} more)`);
+    }
+  }
+  return { summary: lines.join(`
+`), originalSize };
+};
+var dockerPsHandler = (toolName, output) => {
+  const stdout = extractStdout(output);
+  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const lines = stdout.trim().split(`
+`).filter((l) => l.trim());
+  if (lines.length === 0) {
+    return { summary: "[docker ps \u2014 no containers]", originalSize };
+  }
+  const dataLines = lines[0]?.toUpperCase().includes("CONTAINER") ? lines.slice(1) : lines;
+  if (dataLines.length === 0) {
+    return { summary: "[docker ps \u2014 no containers running]", originalSize };
+  }
+  const containers = [];
+  for (const line of dataLines) {
+    const parts = line.trim().split(/\s{2,}/);
+    if (parts.length < 2)
+      continue;
+    const name = parts[parts.length - 1] ?? "";
+    const statusPart = parts.find((p) => /^(Up|Exited|Restarting|Created|Paused|Dead)/i.test(p)) ?? "";
+    const portsPart = parts.find((p) => p.includes("->") || p.includes("0.0.0.0:")) ?? "";
+    if (!name)
+      continue;
+    const statusShort = statusPart.slice(0, 20);
+    const portsShort = portsPart.slice(0, 40);
+    containers.push({ name, status: statusShort, ports: portsShort });
+  }
+  if (containers.length === 0) {
+    return shellHandler(toolName, output);
+  }
+  const shown = containers.slice(0, MAX_DOCKER_CONTAINERS);
+  const overflow = containers.length > MAX_DOCKER_CONTAINERS ? `
+  \u2026 (+${containers.length - MAX_DOCKER_CONTAINERS} more)` : "";
+  const rows = shown.map((c) => {
+    const name = c.name.padEnd(30);
+    const status = c.status.padEnd(22);
+    return `  ${name}  ${status}  ${c.ports}`;
+  });
+  const header = `docker ps \u2014 ${containers.length} container${containers.length === 1 ? "" : "s"}`;
+  return {
+    summary: [header, ...rows].join(`
+`) + overflow,
+    originalSize
+  };
+};
+var buildToolHandler = (toolName, output) => {
+  const stdout = extractStdout(output);
+  const stderr = extractStderr(output);
+  const combined = `${stdout}
+${stderr}`.trim();
+  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const errorLines = [];
+  const targetLines = [];
+  for (const line of combined.split(`
+`)) {
+    const t = line.trim();
+    if (!t)
+      continue;
+    if (/^make(\[\d+\])?:\s/.test(t)) {
+      if (t.includes("Error") || t.includes("***"))
+        errorLines.push(t.slice(0, 120));
+      else if (t.includes("Leaving directory") || t.includes("Entering directory"))
+        continue;
+      else
+        targetLines.push(t.slice(0, 80));
+      continue;
+    }
+    if (/^(error:|justfile|warning:)\s/i.test(t)) {
+      errorLines.push(t.slice(0, 120));
+      continue;
+    }
+    if (/^[^\s]+:\d+:\d*:?\s*(error|fatal error):/i.test(t) || /^error\[/.test(t) || /^\s*\^\s*$/.test(t)) {
+      errorLines.push(t.slice(0, 120));
+    }
+  }
+  if (errorLines.length === 0 && targetLines.length === 0) {
+    return shellHandler(toolName, output);
+  }
+  const exitCode = output?.exit_code;
+  const status = exitCode === 0 ? "\u2713" : exitCode !== undefined ? "\u2717" : "";
+  const lines = [`${status ? status + " " : ""}build`];
+  if (errorLines.length > 0) {
+    lines.push(`  errors (${errorLines.length}):`);
+    lines.push(...errorLines.slice(0, MAX_BUILD_ERRORS).map((e) => `    ${e}`));
+    if (errorLines.length > MAX_BUILD_ERRORS) {
+      lines.push(`    \u2026 (+${errorLines.length - MAX_BUILD_ERRORS} more)`);
+    }
+  } else {
+    lines.push(`  completed successfully`);
+  }
+  return { summary: lines.join(`
+`), originalSize };
+};
 function getBashHandler(input) {
   const command = extractCommand(input);
   if (!command)
@@ -6136,8 +6440,18 @@ function getBashHandler(input) {
     return gitDiffHandler;
   if (/^git\s+log(\s|$)/.test(command))
     return gitLogHandler;
+  if (/^git\s+status(\s|$)/.test(command))
+    return gitStatusHandler;
   if (/^terraform\s+plan(\s|$)/.test(command))
     return terraformPlanHandler;
+  if (/^(npm|bun|yarn|pnpm)\s+install(\s|$)/.test(command) || /^pip\d*\s+install(\s|$)/.test(command))
+    return packageInstallHandler;
+  if (/^(pytest|python\s+-m\s+pytest)(\s|$)/.test(command) || /^(jest|npx\s+jest|bun\s+test|vitest|npx\s+vitest)(\s|$)/.test(command) || /^go\s+test(\s|$)/.test(command))
+    return testRunnerHandler;
+  if (/^docker(-compose)?\s+(ps|compose\s+ps)(\s|$)/.test(command) || /^docker\s+compose\s+ps(\s|$)/.test(command))
+    return dockerPsHandler;
+  if (/^(make|just)(\s|$)/.test(command))
+    return buildToolHandler;
   return shellHandler;
 }
 
