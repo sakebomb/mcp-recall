@@ -210,7 +210,7 @@ mcp-recall works out of the box. To customize, create `~/.config/mcp-recall/conf
 # Vacations and context switches to other projects don't count —
 # only days you actively used Claude Code on this project.
 # See "Session days" below.
-expire_after_session_days = 7
+expire_after_session_days = 30
 
 # How to identify a project.
 # "git_root" is recommended — stable regardless of launch directory.

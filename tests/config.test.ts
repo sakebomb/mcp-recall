@@ -22,7 +22,7 @@ describe("loadConfig", () => {
 
   it("returns defaults when no config file exists", () => {
     const config = loadConfig();
-    expect(config.store.expire_after_session_days).toBe(7);
+    expect(config.store.expire_after_session_days).toBe(30);
     expect(config.store.key).toBe("git_root");
     expect(config.store.max_size_mb).toBe(500);
     expect(config.store.pin_recommendation_threshold).toBe(5);
@@ -49,7 +49,7 @@ describe("loadConfig", () => {
     writeFileSync(TEST_CONFIG_PATH, "[store]\nmax_size_mb = 1024\n");
     const config = loadConfig();
     expect(config.store.max_size_mb).toBe(1024);
-    expect(config.store.expire_after_session_days).toBe(7);
+    expect(config.store.expire_after_session_days).toBe(30);
     expect(config.store.key).toBe("git_root");
     expect(config.retrieve.default_max_bytes).toBe(8192);
   });
@@ -63,7 +63,7 @@ describe("loadConfig", () => {
   it("falls back to defaults on malformed TOML", () => {
     writeFileSync(TEST_CONFIG_PATH, "this is not @@## valid toml");
     const config = loadConfig();
-    expect(config.store.expire_after_session_days).toBe(7);
+    expect(config.store.expire_after_session_days).toBe(30);
   });
 
   it("strips unknown keys from TOML", () => {

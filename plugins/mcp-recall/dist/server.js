@@ -20928,7 +20928,7 @@ var RecallConfigSchema = exports_external.object({
 var PartialConfigSchema = RecallConfigSchema.deepPartial();
 var DEFAULTS = {
   store: {
-    expire_after_session_days: 7,
+    expire_after_session_days: 30,
     key: "git_root",
     max_size_mb: 500,
     pin_recommendation_threshold: 5,
@@ -21100,6 +21100,9 @@ function toolExport(db, projectKey) {
 function toolForget(db, projectKey, args) {
   if (args.all && !args.confirmed) {
     return `[recall: clearing all stored items requires confirmed: true]`;
+  }
+  if (args.older_than_days !== undefined && args.older_than_days < 1) {
+    return `[recall: older_than_days must be at least 1 \u2014 use all: true with confirmed: true to delete everything]`;
   }
   const options = {
     id: args.id,
