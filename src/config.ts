@@ -20,6 +20,9 @@ const RecallConfigSchema = z.object({
     override_defaults: z.array(z.string()),
     allowlist: z.array(z.string()),
   }),
+  profiles: z.object({
+    verify_signature: z.enum(["warn", "error", "skip"]),
+  }),
   debug: z.object({
     enabled: z.boolean(),
   }),
@@ -44,6 +47,9 @@ const DEFAULTS: RecallConfig = {
     additional: [],
     override_defaults: [],
     allowlist: [],
+  },
+  profiles: {
+    verify_signature: "warn" as const,
   },
   debug: {
     enabled: false,

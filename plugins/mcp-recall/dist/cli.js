@@ -5044,6 +5044,9 @@ var RecallConfigSchema = exports_external.object({
     override_defaults: exports_external.array(exports_external.string()),
     allowlist: exports_external.array(exports_external.string())
   }),
+  profiles: exports_external.object({
+    verify_signature: exports_external.enum(["warn", "error", "skip"])
+  }),
   debug: exports_external.object({
     enabled: exports_external.boolean()
   })
@@ -5064,6 +5067,9 @@ var DEFAULTS = {
     additional: [],
     override_defaults: [],
     allowlist: []
+  },
+  profiles: {
+    verify_signature: "warn"
   },
   debug: {
     enabled: false
@@ -7702,9 +7708,9 @@ ${summary}`,
 }
 
 // src/profiles/commands.ts
-import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync2, rmSync } from "fs";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync2, rmSync, unlinkSync } from "fs";
 import { join as join4 } from "path";
-import { homedir as homedir4 } from "os";
+import { homedir as homedir4, tmpdir } from "os";
 import { createHash as createHash3 } from "crypto";
 
 // src/learn/retrain.ts
@@ -8006,13 +8012,6 @@ function userDir() {
 function manifestShortName(e) {
   return e.short_name ?? e.id.replace(/^mcp__/, "");
 }
-async function fetchManifest() {
-  const res = await fetch(MANIFEST_URL);
-  if (!res.ok)
-    throw new Error(`manifest fetch failed: ${res.status} ${res.statusText}`);
-  const data = await res.json();
-  return data.profiles;
-}
 async function fetchProfileContent(filePath) {
   const res = await fetch(`${PROFILE_BASE_URL}${filePath}`);
   if (!res.ok)
@@ -8027,6 +8026,50 @@ function verifyHash(content, expected, id) {
   if (actual !== expected) {
     throw new Error(`Profile ${id}: hash mismatch (expected ${expected.slice(0, 8)}\u2026, got ${actual.slice(0, 8)}\u2026)`);
   }
+}
+function verifyManifest(manifestPath, mode) {
+  if (mode === "skip")
+    return;
+  let ghAvailable = false;
+  try {
+    const probe = Bun.spawnSync(["gh", "--version"], { stderr: "ignore", stdout: "ignore" });
+    ghAvailable = probe.exitCode === 0;
+  } catch {}
+  if (!ghAvailable) {
+    process.stderr.write(`[recall] manifest signature verification skipped: gh CLI not found in PATH
+`);
+    return;
+  }
+  const result = Bun.spawnSync(["gh", "attestation", "verify", manifestPath, "--repo", COMMUNITY_REPO], { stderr: "pipe", stdout: "ignore" });
+  if (result.exitCode !== 0) {
+    const errText = result.stderr ? new TextDecoder().decode(result.stderr).trim() : "";
+    const msg = `[recall] manifest signature verification failed${errText ? `: ${errText}` : ""}
+`;
+    if (mode === "error") {
+      throw new Error(msg.trim());
+    }
+    process.stderr.write(msg);
+  }
+}
+async function fetchManifest(skipVerify = false) {
+  const res = await fetch(MANIFEST_URL);
+  if (!res.ok)
+    throw new Error(`manifest fetch failed: ${res.status} ${res.statusText}`);
+  const text = await res.text();
+  if (!skipVerify) {
+    const tmpPath = join4(tmpdir(), `mcp-recall-manifest-${process.pid}.json`);
+    try {
+      writeFileSync2(tmpPath, text, "utf8");
+      const config = loadConfig();
+      verifyManifest(tmpPath, config.profiles.verify_signature);
+    } finally {
+      try {
+        unlinkSync(tmpPath);
+      } catch {}
+    }
+  }
+  const data = JSON.parse(text);
+  return data.profiles;
 }
 function saveToCommunitDir(profileId, content) {
   const dir = join4(communityDir(), profileId);
@@ -8146,13 +8189,14 @@ ${profiles.length} total (${summary})
 `);
 }
 async function cmdInstall(args) {
-  const nameOrId = args[0];
+  const skipVerify = args.includes("--skip-verify");
+  const nameOrId = args.find((a) => !a.startsWith("-"));
   if (!nameOrId) {
-    console.error("Usage: mcp-recall profiles install <name>");
+    console.error("Usage: mcp-recall profiles install <name> [--skip-verify]");
     process.exit(1);
   }
   process.stdout.write("Fetching manifest\u2026 ");
-  const entries = await fetchManifest();
+  const entries = await fetchManifest(skipVerify);
   console.log("done");
   const entry = await resolveManifestEntry(nameOrId, entries);
   assertSafeId(entry.id);
@@ -8165,14 +8209,15 @@ async function cmdInstall(args) {
   console.log(`done
 \u2713 ${filePath}`);
 }
-async function cmdUpdate() {
+async function cmdUpdate(args = []) {
+  const skipVerify = args.includes("--skip-verify");
   const installed = installedCommunityMap();
   if (installed.size === 0) {
     console.log("No community profiles installed.");
     return;
   }
   process.stdout.write("Fetching manifest\u2026 ");
-  const entries = await fetchManifest();
+  const entries = await fetchManifest(skipVerify);
   console.log(`done
 `);
   let updated = 0;
@@ -8222,8 +8267,9 @@ function cmdRemove(args) {
 }
 async function cmdSeed(args) {
   const all = args.includes("--all");
+  const skipVerify = args.includes("--skip-verify");
   process.stdout.write("Fetching manifest\u2026 ");
-  const entries = await fetchManifest();
+  const entries = await fetchManifest(skipVerify);
   console.log(`done
 `);
   const installed = installedCommunityMap();
@@ -8569,7 +8615,7 @@ async function handleProfilesCommand(args) {
       await cmdInstall(rest);
       break;
     case "update":
-      await cmdUpdate();
+      await cmdUpdate(rest);
       break;
     case "remove":
       cmdRemove(rest);
