@@ -10,7 +10,7 @@ import { slackHandler } from "../src/handlers/slack";
 import { jsonHandler } from "../src/handlers/json";
 import { genericHandler } from "../src/handlers/generic";
 import { getHandler, extractText } from "../src/handlers/index";
-import { getBashHandler, gitDiffHandler, gitLogHandler, terraformPlanHandler } from "../src/handlers/bash";
+import { getBashHandler, gitDiffHandler, gitLogHandler, terraformPlanHandler, gitStatusHandler, packageInstallHandler, testRunnerHandler, dockerPsHandler, buildToolHandler } from "../src/handlers/bash";
 import { tavilyHandler } from "../src/handlers/tavily";
 import { databaseHandler } from "../src/handlers/database";
 import { sentryHandler } from "../src/handlers/sentry";
@@ -771,6 +771,40 @@ describe("getBashHandler", () => {
     expect(getBashHandler({ command: "terraform plan -out=tfplan" })).toBe(terraformPlanHandler);
   });
 
+  it("routes git status to gitStatusHandler", () => {
+    expect(getBashHandler({ command: "git status" })).toBe(gitStatusHandler);
+    expect(getBashHandler({ command: "git status --short" })).toBe(gitStatusHandler);
+  });
+
+  it("routes npm/bun/yarn install to packageInstallHandler", () => {
+    expect(getBashHandler({ command: "npm install" })).toBe(packageInstallHandler);
+    expect(getBashHandler({ command: "bun install" })).toBe(packageInstallHandler);
+    expect(getBashHandler({ command: "yarn install --frozen-lockfile" })).toBe(packageInstallHandler);
+    expect(getBashHandler({ command: "pip install -r requirements.txt" })).toBe(packageInstallHandler);
+    expect(getBashHandler({ command: "pip3 install requests" })).toBe(packageInstallHandler);
+  });
+
+  it("routes test runners to testRunnerHandler", () => {
+    expect(getBashHandler({ command: "pytest tests/" })).toBe(testRunnerHandler);
+    expect(getBashHandler({ command: "jest --coverage" })).toBe(testRunnerHandler);
+    expect(getBashHandler({ command: "bun test" })).toBe(testRunnerHandler);
+    expect(getBashHandler({ command: "vitest run" })).toBe(testRunnerHandler);
+    expect(getBashHandler({ command: "go test ./..." })).toBe(testRunnerHandler);
+    expect(getBashHandler({ command: "npx jest" })).toBe(testRunnerHandler);
+  });
+
+  it("routes docker ps to dockerPsHandler", () => {
+    expect(getBashHandler({ command: "docker ps" })).toBe(dockerPsHandler);
+    expect(getBashHandler({ command: "docker ps -a" })).toBe(dockerPsHandler);
+    expect(getBashHandler({ command: "docker compose ps" })).toBe(dockerPsHandler);
+  });
+
+  it("routes make/just to buildToolHandler", () => {
+    expect(getBashHandler({ command: "make build" })).toBe(buildToolHandler);
+    expect(getBashHandler({ command: "just test" })).toBe(buildToolHandler);
+    expect(getBashHandler({ command: "make" })).toBe(buildToolHandler);
+  });
+
   it("routes unrecognised commands to shellHandler", () => {
     expect(getBashHandler({ command: "npm test" })).toBe(shellHandler);
   });
@@ -936,6 +970,292 @@ describe("terraformPlanHandler", () => {
     const { summary } = terraformPlanHandler("Bash", plainOutput);
     // Falls back to shellHandler — no terraform-specific content, just plain output
     expect(summary).toContain("lines");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// gitStatusHandler
+// ---------------------------------------------------------------------------
+
+const GIT_STATUS_LONG = `On branch feat/foo
+Your branch is up to date with 'origin/feat/foo'.
+
+Changes to be committed:
+  (use "git restore --staged <file>..." to unstage)
+	modified:   src/tools.ts
+	new file:   src/format.ts
+
+Changes not staged for commit:
+  (use "git add <file>..." to update an unstaged file)
+	modified:   README.md
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	docs/new-guide.md
+	tmp/scratch.ts
+`;
+
+const GIT_STATUS_SHORT = `M  src/tools.ts
+A  src/format.ts
+ M README.md
+?? docs/new-guide.md
+`;
+
+describe("gitStatusHandler", () => {
+  it("reports staged files count and names (long format)", () => {
+    const { summary } = gitStatusHandler("Bash", { stdout: GIT_STATUS_LONG, stderr: "", exit_code: 0 });
+    expect(summary).toContain("staged");
+    expect(summary).toContain("src/tools.ts");
+  });
+
+  it("reports unstaged files (long format)", () => {
+    const { summary } = gitStatusHandler("Bash", { stdout: GIT_STATUS_LONG, stderr: "", exit_code: 0 });
+    expect(summary).toContain("unstaged");
+    expect(summary).toContain("README.md");
+  });
+
+  it("reports untracked files (long format)", () => {
+    const { summary } = gitStatusHandler("Bash", { stdout: GIT_STATUS_LONG, stderr: "", exit_code: 0 });
+    expect(summary).toContain("untracked");
+    expect(summary).toContain("docs/new-guide.md");
+  });
+
+  it("parses porcelain (short) format", () => {
+    const { summary } = gitStatusHandler("Bash", { stdout: GIT_STATUS_SHORT, stderr: "", exit_code: 0 });
+    expect(summary).toContain("staged");
+    expect(summary).toContain("untracked");
+  });
+
+  it("returns clean message for empty output", () => {
+    const { summary } = gitStatusHandler("Bash", { stdout: "", stderr: "", exit_code: 0 });
+    expect(summary).toContain("clean working tree");
+  });
+
+  it("reports originalSize correctly", () => {
+    const output = { stdout: GIT_STATUS_LONG, stderr: "", exit_code: 0 };
+    const { originalSize } = gitStatusHandler("Bash", output);
+    expect(originalSize).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// packageInstallHandler
+// ---------------------------------------------------------------------------
+
+const BUN_INSTALL_OUTPUT = `bun install v1.1.0
+  + express@4.19.2
+  + typescript@5.4.3
+  120 packages installed [1.23s]
+`;
+
+const NPM_INSTALL_OUTPUT = `
+added 42 packages, and audited 43 packages in 3s
+
+2 packages are looking for funding
+  run \`npm fund\` for details
+
+found 0 vulnerabilities
+`;
+
+const PIP_INSTALL_OUTPUT = `
+Collecting requests>=2.28
+  Downloading requests-2.31.0-py3-none-any.whl (62 kB)
+Successfully installed certifi-2024.2.2 charset-normalizer-3.3.2 requests-2.31.0
+`;
+
+describe("packageInstallHandler", () => {
+  it("extracts bun package count", () => {
+    const { summary } = packageInstallHandler("Bash", { stdout: BUN_INSTALL_OUTPUT, stderr: "", exit_code: 0 });
+    expect(summary).toContain("120 packages installed");
+  });
+
+  it("extracts npm added count", () => {
+    const { summary } = packageInstallHandler("Bash", { stdout: NPM_INSTALL_OUTPUT, stderr: "", exit_code: 0 });
+    expect(summary).toContain("added 42 packages");
+  });
+
+  it("extracts pip install count", () => {
+    const { summary } = packageInstallHandler("Bash", { stdout: PIP_INSTALL_OUTPUT, stderr: "", exit_code: 0 });
+    expect(summary).toContain("pip: 3 packages installed");
+  });
+
+  it("surfaces errors from stderr", () => {
+    const output = {
+      stdout: "",
+      stderr: "error: Cannot find module 'missing-package'\nnpm error Exit status 1",
+      exit_code: 1,
+    };
+    const { summary } = packageInstallHandler("Bash", output);
+    expect(summary).toContain("error:");
+  });
+
+  it("reports originalSize correctly", () => {
+    const output = { stdout: BUN_INSTALL_OUTPUT, stderr: "", exit_code: 0 };
+    const { originalSize } = packageInstallHandler("Bash", output);
+    expect(originalSize).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// testRunnerHandler
+// ---------------------------------------------------------------------------
+
+const BUN_TEST_PASS = `
+ tests/tools.test.ts:
+   ✓ forget guard rejects older_than_days = 0
+
+ 543 pass
+ 0 fail
+ Ran 543 tests across 15 files. [923.00ms]
+`;
+
+const PYTEST_OUTPUT = `
+=========================== test session starts ============================
+collected 47 items
+
+tests/test_api.py ...........
+tests/test_models.py ...
+
+=============================== 3 passed, 1 warning in 0.45s ===============
+`;
+
+const JEST_FAIL_OUTPUT = `
+  ● AuthService › login fails with invalid creds
+
+Tests: 1 failed, 4 passed, 5 total
+`;
+
+const GO_TEST_OUTPUT = `
+ok  	github.com/user/repo/pkg/auth	0.043s
+ok  	github.com/user/repo/pkg/db	0.112s
+FAIL	github.com/user/repo/pkg/api	0.034s
+--- FAIL: TestHandleRequest (0.00s)
+`;
+
+describe("testRunnerHandler", () => {
+  it("summarises bun test pass result", () => {
+    const { summary } = testRunnerHandler("Bash", { stdout: BUN_TEST_PASS, stderr: "", exit_code: 0 });
+    expect(summary).toContain("pass");
+    expect(summary).toContain("543 passed");
+  });
+
+  it("summarises pytest pass result", () => {
+    const { summary } = testRunnerHandler("Bash", { stdout: PYTEST_OUTPUT, stderr: "", exit_code: 0 });
+    expect(summary).toContain("3 passed");
+  });
+
+  it("shows FAIL status and failure details for jest failures", () => {
+    const { summary } = testRunnerHandler("Bash", { stdout: JEST_FAIL_OUTPUT, stderr: "", exit_code: 1 });
+    expect(summary).toContain("FAIL");
+    expect(summary).toContain("1 failed");
+    expect(summary).toContain("4 passed");
+  });
+
+  it("handles go test output with per-package results", () => {
+    const { summary } = testRunnerHandler("Bash", { stdout: GO_TEST_OUTPUT, stderr: "", exit_code: 1 });
+    expect(summary).toContain("FAIL");
+    expect(summary).toContain("--- FAIL: TestHandleRequest");
+  });
+
+  it("reports originalSize correctly", () => {
+    const output = { stdout: BUN_TEST_PASS, stderr: "", exit_code: 0 };
+    const { originalSize } = testRunnerHandler("Bash", output);
+    expect(originalSize).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dockerPsHandler
+// ---------------------------------------------------------------------------
+
+const DOCKER_PS_OUTPUT = `CONTAINER ID   IMAGE              COMMAND                  CREATED        STATUS          PORTS                    NAMES
+a1b2c3d4e5f6   nginx:latest       "/docker-entrypoint.…"   2 hours ago    Up 2 hours      0.0.0.0:80->80/tcp       web
+b2c3d4e5f6a1   postgres:16        "docker-entrypoint.s…"   2 hours ago    Up 2 hours      0.0.0.0:5432->5432/tcp   db
+c3d4e5f6a1b2   redis:7-alpine     "docker-entrypoint.s…"   2 hours ago    Up 2 hours      6379/tcp                 cache
+`;
+
+describe("dockerPsHandler", () => {
+  it("shows container count in header", () => {
+    const { summary } = dockerPsHandler("Bash", { stdout: DOCKER_PS_OUTPUT, stderr: "", exit_code: 0 });
+    expect(summary).toContain("3 containers");
+  });
+
+  it("includes container names", () => {
+    const { summary } = dockerPsHandler("Bash", { stdout: DOCKER_PS_OUTPUT, stderr: "", exit_code: 0 });
+    expect(summary).toContain("web");
+    expect(summary).toContain("db");
+    expect(summary).toContain("cache");
+  });
+
+  it("includes status info", () => {
+    const { summary } = dockerPsHandler("Bash", { stdout: DOCKER_PS_OUTPUT, stderr: "", exit_code: 0 });
+    expect(summary).toContain("Up");
+  });
+
+  it("returns no-containers message for empty output", () => {
+    const { summary } = dockerPsHandler("Bash", { stdout: "", stderr: "", exit_code: 0 });
+    expect(summary).toContain("no containers");
+  });
+
+  it("returns no-running message for header-only output", () => {
+    const headerOnly = `CONTAINER ID   IMAGE   COMMAND   CREATED   STATUS   PORTS   NAMES\n`;
+    const { summary } = dockerPsHandler("Bash", { stdout: headerOnly, stderr: "", exit_code: 0 });
+    expect(summary).toContain("no containers running");
+  });
+
+  it("reports originalSize correctly", () => {
+    const output = { stdout: DOCKER_PS_OUTPUT, stderr: "", exit_code: 0 };
+    const { originalSize } = dockerPsHandler("Bash", output);
+    expect(originalSize).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildToolHandler
+// ---------------------------------------------------------------------------
+
+const MAKE_SUCCESS_OUTPUT = `make[1]: Nothing to be done for 'all'.
+`;
+
+const MAKE_ERROR_OUTPUT = `make[1]: Entering directory '/home/user/project'
+cc -Wall -o main main.c
+main.c:42:10: error: 'undefined_var' undeclared (first use in this function)
+main.c:42:10: note: each undeclared identifier is reported only once
+make[1]: *** [Makefile:15: main] Error 1
+make[1]: Leaving directory '/home/user/project'
+`;
+
+const JUST_ERROR_OUTPUT = `error: recipe \`build\` failed with exit code 1
+justfile:12
+`;
+
+describe("buildToolHandler", () => {
+  it("shows success for clean make output", () => {
+    const { summary } = buildToolHandler("Bash", { stdout: MAKE_SUCCESS_OUTPUT, stderr: "", exit_code: 0 });
+    expect(summary).toContain("build");
+    expect(summary).toContain("completed successfully");
+  });
+
+  it("shows compiler error lines", () => {
+    const { summary } = buildToolHandler("Bash", { stdout: MAKE_ERROR_OUTPUT, stderr: "", exit_code: 2 });
+    expect(summary).toContain("error");
+    expect(summary).toContain("undefined_var");
+  });
+
+  it("shows make error summary line", () => {
+    const { summary } = buildToolHandler("Bash", { stdout: MAKE_ERROR_OUTPUT, stderr: "", exit_code: 2 });
+    expect(summary).toContain("Error 1");
+  });
+
+  it("handles just error output", () => {
+    const { summary } = buildToolHandler("Bash", { stdout: JUST_ERROR_OUTPUT, stderr: "", exit_code: 1 });
+    expect(summary).toContain("error");
+  });
+
+  it("reports originalSize correctly", () => {
+    const output = { stdout: MAKE_SUCCESS_OUTPUT, stderr: "", exit_code: 0 };
+    const { originalSize } = buildToolHandler("Bash", output);
+    expect(originalSize).toBeGreaterThan(0);
   });
 });
 
