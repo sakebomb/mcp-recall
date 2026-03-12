@@ -8734,6 +8734,19 @@ Installation: ${BOLD}${label}${RESET}
     }
   }
   console.log("");
+  const profiles = loadProfiles();
+  if (profiles.length === 0) {
+    console.log(`  ${RED}\u2717${RESET} Profiles: none installed`);
+    console.log(`    \u2192 Run: ${BOLD}mcp-recall profiles seed${RESET}`);
+  } else {
+    const counts = profiles.reduce((acc, p) => {
+      acc[p.tier] = (acc[p.tier] ?? 0) + 1;
+      return acc;
+    }, {});
+    const summary = Object.entries(counts).map(([t, n]) => `${n} ${t}`).join(", ");
+    console.log(`  ${GREEN}\u2713${RESET} Profiles: ${profiles.length} installed (${summary})`);
+  }
+  console.log("");
 }
 
 // src/cli.ts

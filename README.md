@@ -160,8 +160,43 @@ git clone https://github.com/sakebomb/mcp-recall
 cd mcp-recall
 bun install
 bun run build
-mcp-recall install
+./bin/recall install
 ```
+
+The `mcp-recall` binary is not on PATH for source installs. Add an alias so the CLI works everywhere:
+
+```bash
+echo 'alias mcp-recall="bun /path/to/mcp-recall/plugins/mcp-recall/dist/cli.js"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+Or symlink it:
+
+```bash
+ln -sf /path/to/mcp-recall/plugins/mcp-recall/dist/cli.js ~/.local/bin/mcp-recall
+```
+
+---
+
+## Profiles
+
+Profiles teach mcp-recall how to compress output from specific MCPs. **[18 community profiles](https://github.com/sakebomb/mcp-recall-profiles)** cover Jira, Stripe, Grafana, Shopify, Notion, and more.
+
+```bash
+# Install profiles for all your connected MCPs
+mcp-recall profiles seed
+
+# Or install the full community catalog at once
+mcp-recall profiles seed --all
+
+# See what's installed
+mcp-recall profiles list
+
+# Keep profiles up to date
+mcp-recall profiles update
+```
+
+→ [Profiles quickstart](docs/profiles-quickstart.md) · [Profile schema](docs/profile-schema.md) · [Community catalog](https://github.com/sakebomb/mcp-recall-profiles)
 
 ---
 
@@ -343,7 +378,7 @@ mcp-recall profiles test <tool>     # apply a profile and show compression resul
 mcp-recall profiles list            # show all installed profiles
 ```
 
-→ [Profile schema](docs/profile-schema.md) · [retrain guide](docs/retrain.md) · [AI profile guide](docs/ai-profile-guide.md) · [Contributing a profile](CONTRIBUTING.md#contributing-a-profile)
+→ [Profiles quickstart](docs/profiles-quickstart.md) · [Profile schema](docs/profile-schema.md) · [retrain guide](docs/retrain.md) · [AI profile guide](docs/ai-profile-guide.md) · [Contributing a profile](CONTRIBUTING.md#contributing-a-profile)
 
 ---
 
