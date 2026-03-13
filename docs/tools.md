@@ -2,6 +2,8 @@
 
 Ten tools are available to Claude in every session. All are prefixed `recall__`.
 
+The `recall__` prefix is a naming convention for MCP tools — it namespaces them so Claude and users can tell at a glance which plugin owns them. You don't type these names yourself; Claude calls them automatically as part of normal tool use.
+
 ---
 
 ## `recall__context`

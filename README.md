@@ -338,7 +338,7 @@ This means a 7-day setting gives you 7 working sessions of stored context, regar
 
 ## Tools
 
-Ten `recall__*` tools are available to Claude in every session.
+Ten `recall__*` tools are available to Claude in every session. The `recall__` prefix is the MCP naming convention — it namespaces the tools so Claude knows which plugin owns them. You don't call these yourself; Claude uses them automatically.
 
 | Tool | Use when |
 |---|---|
