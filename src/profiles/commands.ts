@@ -170,7 +170,7 @@ async function fetchManifest(skipVerify = false): Promise<ManifestEntry[]> {
   return data.profiles;
 }
 
-function saveToCommunitDir(profileId: string, content: string): string {
+function saveToCommunityDir(profileId: string, content: string): string {
   const dir = join(communityDir(), profileId);
   mkdirSync(dir, { recursive: true });
   const filePath = join(dir, "default.toml");
@@ -343,7 +343,7 @@ export async function cmdInstall(args: string[]): Promise<void> {
   process.stdout.write(`Installing ${sanitize(entry.id)} v${sanitize(entry.version)}… `);
   const content = await fetchProfileContent(entry.file);
   verifyHash(content, entry.sha256, entry.id);
-  const filePath = saveToCommunitDir(entry.id, content);
+  const filePath = saveToCommunityDir(entry.id, content);
   clearProfileCache();
   console.log(`done\n✓ ${filePath}`);
 }
@@ -377,7 +377,7 @@ async function cmdUpdate(args: string[] = []): Promise<void> {
     assertSafeFile(entry.file);
     const content = await fetchProfileContent(entry.file);
     verifyHash(content, entry.sha256, entry.id);
-    saveToCommunitDir(id, content);
+    saveToCommunityDir(id, content);
     console.log(`  ✓ ${id}: ${currentVersion} → ${entry.version}`);
     updated++;
   }
@@ -444,7 +444,7 @@ export async function cmdSeed(args: string[]): Promise<void> {
       assertSafeFile(entry.file);
       const content = await fetchProfileContent(entry.file);
       verifyHash(content, entry.sha256, entry.id);
-      saveToCommunitDir(entry.id, content);
+      saveToCommunityDir(entry.id, content);
       console.log(`  ✓ ${entry.id} installed`);
       installCount++;
     }
@@ -497,7 +497,7 @@ export async function cmdSeed(args: string[]): Promise<void> {
       assertSafeFile(entry.file);
       const content = await fetchProfileContent(entry.file);
       verifyHash(content, entry.sha256, entry.id);
-      saveToCommunitDir(entry.id, content);
+      saveToCommunityDir(entry.id, content);
       console.log(`  ✓ ${entry.id} installed (matched ${key})`);
       installCount++;
     }

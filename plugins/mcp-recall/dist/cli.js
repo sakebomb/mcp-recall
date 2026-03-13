@@ -8071,7 +8071,7 @@ async function fetchManifest(skipVerify = false) {
   const data = JSON.parse(text);
   return data.profiles;
 }
-function saveToCommunitDir(profileId, content) {
+function saveToCommunityDir(profileId, content) {
   const dir = join4(communityDir(), profileId);
   mkdirSync2(dir, { recursive: true });
   const filePath = join4(dir, "default.toml");
@@ -8204,7 +8204,7 @@ async function cmdInstall(args) {
   process.stdout.write(`Installing ${sanitize(entry.id)} v${sanitize(entry.version)}\u2026 `);
   const content = await fetchProfileContent(entry.file);
   verifyHash(content, entry.sha256, entry.id);
-  const filePath = saveToCommunitDir(entry.id, content);
+  const filePath = saveToCommunityDir(entry.id, content);
   clearProfileCache();
   console.log(`done
 \u2713 ${filePath}`);
@@ -8235,7 +8235,7 @@ async function cmdUpdate(args = []) {
     assertSafeFile(entry.file);
     const content = await fetchProfileContent(entry.file);
     verifyHash(content, entry.sha256, entry.id);
-    saveToCommunitDir(id, content);
+    saveToCommunityDir(id, content);
     console.log(`  \u2713 ${id}: ${currentVersion} \u2192 ${entry.version}`);
     updated++;
   }
@@ -8286,7 +8286,7 @@ async function cmdSeed(args) {
       assertSafeFile(entry.file);
       const content = await fetchProfileContent(entry.file);
       verifyHash(content, entry.sha256, entry.id);
-      saveToCommunitDir(entry.id, content);
+      saveToCommunityDir(entry.id, content);
       console.log(`  \u2713 ${entry.id} installed`);
       installCount++;
     }
@@ -8332,7 +8332,7 @@ ${installCount} profile(s) installed (${alreadyCount} already installed, ${entri
       assertSafeFile(entry.file);
       const content = await fetchProfileContent(entry.file);
       verifyHash(content, entry.sha256, entry.id);
-      saveToCommunitDir(entry.id, content);
+      saveToCommunityDir(entry.id, content);
       console.log(`  \u2713 ${entry.id} installed (matched ${key})`);
       installCount++;
     }

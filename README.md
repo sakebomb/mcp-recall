@@ -146,7 +146,24 @@ mcp-recall install       # register hooks + MCP server in Claude Code
 mcp-recall status        # verify
 ```
 
-`mcp-recall install` writes the MCP server entry and both hooks directly to `~/.claude.json` and `~/.claude/settings.json`. It's idempotent — safe to re-run after updates.
+`mcp-recall install` writes the MCP server entry and hooks to `~/.claude.json` and `~/.claude/settings.json`, and adds a short instruction block to `~/.claude/CLAUDE.md` so Claude knows how to use the recall tools. It's idempotent — safe to re-run after updates.
+
+A fully installed `mcp-recall status` looks like this:
+
+```
+Installation: installed
+
+  ~/.claude.json                    ✓ mcpServers.recall
+  ~/.claude/settings.json           ✓ SessionStart hook
+                                    ✓ PostToolUse hook
+  ~/.claude/CLAUDE.md               ✓ mcp-recall instructions
+
+  Build artifacts
+    dist/server.js                  ✓ /path/to/dist/server.js
+    dist/cli.js                     ✓ /path/to/dist/cli.js
+
+  ✓ Profiles: 12 installed (4 user, 8 community)
+```
 
 Update: `bun update -g mcp-recall && mcp-recall install`
 
