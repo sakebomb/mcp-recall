@@ -28,11 +28,17 @@ For marketplace installs, add the [Claude instructions](#claude-instructions) ma
 
 ## 2. Install compression profiles
 
-Profiles teach mcp-recall how to compress output from specific MCPs. Install profiles for the MCPs you use:
+Profiles teach mcp-recall how to compress output from specific MCPs. Install community profiles for the MCPs you use:
 
 ```bash
 mcp-recall profiles seed        # installs profiles for MCPs detected in ~/.claude.json
 mcp-recall profiles seed --all  # or install the full community catalog
+```
+
+If your MCP isn't in the community catalog, generate a profile from your session data:
+
+```bash
+mcp-recall learn   # analyses your installed MCPs and generates TOML profiles automatically
 ```
 
 ---
@@ -68,6 +74,7 @@ When a tool output was compressed by mcp-recall (you'll see a summary with a rec
 Proactively:
 - `recall__note("…")` — save important decisions or context worth keeping across sessions
 - `recall__pin("recall_abc123")` — protect frequently-needed items from expiry and eviction
+- `recall__search("query")` — find stored outputs by content when you don't have an ID
 <!-- END mcp-recall -->
 ```
 

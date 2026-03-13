@@ -94,7 +94,8 @@ When a tool output was compressed by mcp-recall (you'll see a summary with a rec
 
 Proactively:
 - \`recall__note("…")\` — save important decisions or context worth keeping across sessions
-- \`recall__pin("recall_abc123")\` — protect frequently-needed items from expiry and eviction`;
+- \`recall__pin("recall_abc123")\` — protect frequently-needed items from expiry and eviction
+- \`recall__search("query")\` — find stored outputs by content when you don't have an ID`;
 
 export const CLAUDE_MD_BLOCK = `${CLAUDE_MD_MARKER_START}\n${CLAUDE_MD_SNIPPET}\n${CLAUDE_MD_MARKER_END}`;
 
