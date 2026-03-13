@@ -8970,6 +8970,9 @@ function defaultClaudeJsonPath() {
 function defaultSettingsPath() {
   return path.join(os.homedir(), ".claude", "settings.json");
 }
+function defaultClaudeMdPath() {
+  return path.join(os.homedir(), ".claude", "CLAUDE.md");
+}
 function detectPaths() {
   const isBuilt = import.meta.path.endsWith(".js");
   const distDir = isBuilt ? import.meta.dir : path.resolve(import.meta.dir, "../../plugins/mcp-recall/dist");
@@ -8996,6 +8999,82 @@ async function writeJsonFile(filePath, data) {
   const tmp = filePath + ".tmp";
   await Bun.write(tmp, content);
   await rename(tmp, filePath);
+}
+var CLAUDE_MD_MARKER_START = "<!-- BEGIN mcp-recall -->";
+var CLAUDE_MD_MARKER_END = "<!-- END mcp-recall -->";
+var CLAUDE_MD_SNIPPET = `## mcp-recall
+
+Session context from previous sessions is automatically injected at startup (pinned items, notes, recent activity). If it was truncated, call \`recall__context()\` for the full view.
+
+When a tool output was compressed by mcp-recall (you'll see a summary with a recall ID like \`recall_abc123\`), call \`recall__retrieve("recall_abc123")\` when you need the full content.
+
+Proactively:
+- \`recall__note("\u2026")\` \u2014 save important decisions or context worth keeping across sessions
+- \`recall__pin("recall_abc123")\` \u2014 protect frequently-needed items from expiry and eviction
+- \`recall__search("query")\` \u2014 find stored outputs by content when you don't have an ID`;
+var CLAUDE_MD_BLOCK = `${CLAUDE_MD_MARKER_START}
+${CLAUDE_MD_SNIPPET}
+${CLAUDE_MD_MARKER_END}`;
+async function writeTextFile(filePath, content) {
+  const dir = path.dirname(filePath);
+  await mkdir(dir, { recursive: true });
+  const tmp = filePath + ".tmp";
+  await Bun.write(tmp, content);
+  await rename(tmp, filePath);
+}
+function isClaudeMdInjected(content) {
+  return content.includes(CLAUDE_MD_MARKER_START);
+}
+async function injectClaudeMd(filePath, dryRun = false) {
+  let existing = "";
+  try {
+    existing = await readFile(filePath, "utf8");
+  } catch (e) {
+    if (e.code !== "ENOENT")
+      throw e;
+  }
+  const startIdx = existing.indexOf(CLAUDE_MD_MARKER_START);
+  const endIdx = existing.indexOf(CLAUDE_MD_MARKER_END);
+  if (startIdx !== -1 && endIdx !== -1) {
+    const currentBlock = existing.slice(startIdx, endIdx + CLAUDE_MD_MARKER_END.length);
+    if (currentBlock === CLAUDE_MD_BLOCK)
+      return "present";
+    if (!dryRun) {
+      const updated = existing.slice(0, startIdx) + CLAUDE_MD_BLOCK + existing.slice(endIdx + CLAUDE_MD_MARKER_END.length);
+      await writeTextFile(filePath, updated);
+    }
+    return "updated";
+  }
+  if (!dryRun) {
+    const newContent = existing ? existing.trimEnd() + `
+
+` + CLAUDE_MD_BLOCK + `
+` : CLAUDE_MD_BLOCK + `
+`;
+    await writeTextFile(filePath, newContent);
+  }
+  return "added";
+}
+async function removeClaudeMd(filePath) {
+  let existing = "";
+  try {
+    existing = await readFile(filePath, "utf8");
+  } catch (e) {
+    if (e.code === "ENOENT")
+      return false;
+    throw e;
+  }
+  const startIdx = existing.indexOf(CLAUDE_MD_MARKER_START);
+  const endIdx = existing.indexOf(CLAUDE_MD_MARKER_END);
+  if (startIdx === -1 || endIdx === -1)
+    return false;
+  const before = existing.slice(0, startIdx).trimEnd();
+  const after = existing.slice(endIdx + CLAUDE_MD_MARKER_END.length).replace(/^\n+/, `
+`);
+  const result = (before + after).trimEnd();
+  await writeTextFile(filePath, result ? result + `
+` : "");
+  return true;
 }
 var SESSION_START_MARKER = "session-start";
 var POST_TOOL_USE_MARKER = "post-tool-use";
@@ -9040,7 +9119,8 @@ async function installCommand(opts = {}) {
   const {
     dryRun = false,
     claudeJsonPath = defaultClaudeJsonPath(),
-    settingsPath = defaultSettingsPath()
+    settingsPath = defaultSettingsPath(),
+    claudeMdPath = defaultClaudeMdPath()
   } = opts;
   const paths = detectPaths();
   if (!existsSync(paths.serverJs) || !existsSync(paths.cliJs)) {
@@ -9123,6 +9203,16 @@ async function installCommand(opts = {}) {
     settings["hooks"] = hooks;
     await writeJsonFile(settingsPath, settings);
   }
+  const claudeMdResult = await injectClaudeMd(claudeMdPath, dryRun);
+  if (claudeMdResult === "added") {
+    console.log(`${GREEN}\u2713${RESET} CLAUDE.md instructions added  ${DIM}(${claudeMdPath})${RESET}`);
+    anyChange = true;
+  } else if (claudeMdResult === "updated") {
+    console.log(`${YELLOW}\u21BA${RESET} CLAUDE.md instructions updated ${DIM}(${claudeMdPath})${RESET}`);
+    anyChange = true;
+  } else {
+    console.log(`${DIM}\u2139 CLAUDE.md instructions already present${RESET}`);
+  }
   if (anyChange && !dryRun) {
     console.log(`
 Restart Claude Code to activate mcp-recall.`);
@@ -9140,7 +9230,8 @@ Next steps:`);
 async function uninstallCommand(opts = {}) {
   const {
     claudeJsonPath = defaultClaudeJsonPath(),
-    settingsPath = defaultSettingsPath()
+    settingsPath = defaultSettingsPath(),
+    claudeMdPath = defaultClaudeMdPath()
   } = opts;
   let anyChange = false;
   const claudeJson = await readJsonFile(claudeJsonPath);
@@ -9180,6 +9271,13 @@ async function uninstallCommand(opts = {}) {
     settings["hooks"] = hooks;
     await writeJsonFile(settingsPath, settings);
   }
+  const removed = await removeClaudeMd(claudeMdPath);
+  if (removed) {
+    console.log(`${GREEN}\u2713${RESET} Removed CLAUDE.md instructions  ${DIM}(${claudeMdPath})${RESET}`);
+    anyChange = true;
+  } else {
+    console.log(`${DIM}\u2139 CLAUDE.md instructions not present${RESET}`);
+  }
   if (anyChange) {
     console.log(`
 Restart Claude Code to deactivate mcp-recall.`);
@@ -9188,7 +9286,8 @@ Restart Claude Code to deactivate mcp-recall.`);
 async function statusCommand(opts = {}) {
   const {
     claudeJsonPath = defaultClaudeJsonPath(),
-    settingsPath = defaultSettingsPath()
+    settingsPath = defaultSettingsPath(),
+    claudeMdPath = defaultClaudeMdPath()
   } = opts;
   const recallPaths = detectPaths();
   function tick(ok) {
@@ -9204,9 +9303,14 @@ async function statusCommand(opts = {}) {
   const serverRegistered = !!mcpServers?.["recall"];
   const ssRegistered = (hooks["SessionStart"] ?? []).some(isOurSessionStartHook);
   const ptuRegistered = (hooks["PostToolUse"] ?? []).some(isOurPostToolUseHook);
+  let claudeMdContent = "";
+  try {
+    claudeMdContent = await readFile(claudeMdPath, "utf8");
+  } catch {}
+  const claudeMdOk = isClaudeMdInjected(claudeMdContent);
   const serverExists = existsSync(recallPaths.serverJs);
   const cliExists = existsSync(recallPaths.cliJs);
-  const fullyInstalled = serverRegistered && ssRegistered && ptuRegistered && serverExists && cliExists;
+  const fullyInstalled = serverRegistered && ssRegistered && ptuRegistered && claudeMdOk && serverExists && cliExists;
   const label = fullyInstalled ? `${GREEN}installed${RESET}` : serverRegistered || ssRegistered || ptuRegistered ? `${YELLOW}partial / stale${RESET}` : `${RED}not installed${RESET}`;
   console.log(`
 Installation: ${BOLD}${label}${RESET}
@@ -9214,6 +9318,7 @@ Installation: ${BOLD}${label}${RESET}
   console.log(`  ${pad("~/.claude.json", 30)}  ${tick(serverRegistered)} mcpServers.recall`);
   console.log(`  ${pad("~/.claude/settings.json", 30)}  ${tick(ssRegistered)} SessionStart hook`);
   console.log(`  ${pad("", 30)}  ${tick(ptuRegistered)} PostToolUse hook`);
+  console.log(`  ${pad("~/.claude/CLAUDE.md", 30)}  ${tick(claudeMdOk)} mcp-recall instructions`);
   console.log("");
   console.log(`  ${pad("Build artifacts", 30)}`);
   console.log(`  ${pad("  dist/server.js", 30)}  ${tick(serverExists)} ${DIM}${recallPaths.serverJs}${RESET}`);
@@ -9224,6 +9329,9 @@ Installation: ${BOLD}${label}${RESET}
       console.log(`  Run ${BOLD}bun run build${RESET} then ${BOLD}mcp-recall install${RESET}`);
     } else {
       console.log(`  Run ${BOLD}mcp-recall install${RESET}`);
+    }
+    if (!claudeMdOk) {
+      console.log(`  Or add instructions manually: see ${BOLD}docs/quickstart.md${RESET}`);
     }
   }
   console.log("");
