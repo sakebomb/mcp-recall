@@ -13,6 +13,12 @@ import {
   makeSessionStartEntry,
   makePostToolUseEntry,
   POST_TOOL_USE_MATCHER,
+  isClaudeMdInjected,
+  injectClaudeMd,
+  removeClaudeMd,
+  CLAUDE_MD_MARKER_START,
+  CLAUDE_MD_MARKER_END,
+  CLAUDE_MD_BLOCK,
 } from "../src/install/index";
 
 const FAKE_CLI    = "/fake/mcp-recall/dist/cli.js";
@@ -242,5 +248,101 @@ describe("mcpServers merge", () => {
     const servers = result["mcpServers"] as Record<string, unknown>;
     expect(servers["github"]).toBeDefined();
     expect(servers["recall"]).toBeDefined();
+  });
+});
+
+// ── CLAUDE.md helpers ─────────────────────────────────────────────────────────
+
+describe("isClaudeMdInjected", () => {
+  it("returns true when marker is present", () => {
+    expect(isClaudeMdInjected(`# My notes\n\n${CLAUDE_MD_BLOCK}\n`)).toBe(true);
+  });
+
+  it("returns false when marker is absent", () => {
+    expect(isClaudeMdInjected("# My notes\n\nsome content\n")).toBe(false);
+  });
+
+  it("returns false for empty string", () => {
+    expect(isClaudeMdInjected("")).toBe(false);
+  });
+});
+
+describe("injectClaudeMd", () => {
+  it("creates file and adds block when file does not exist", async () => {
+    const filePath = path.join(tmpDir, "CLAUDE.md");
+    const result = await injectClaudeMd(filePath);
+    expect(result).toBe("added");
+    const content = await Bun.file(filePath).text();
+    expect(content).toContain(CLAUDE_MD_MARKER_START);
+    expect(content).toContain(CLAUDE_MD_MARKER_END);
+  });
+
+  it("appends block to existing content", async () => {
+    const filePath = path.join(tmpDir, "CLAUDE.md");
+    await Bun.write(filePath, "# Existing notes\n\nsome content\n");
+    await injectClaudeMd(filePath);
+    const content = await Bun.file(filePath).text();
+    expect(content).toContain("# Existing notes");
+    expect(content).toContain(CLAUDE_MD_MARKER_START);
+  });
+
+  it("returns 'present' when block is already correct", async () => {
+    const filePath = path.join(tmpDir, "CLAUDE.md");
+    await injectClaudeMd(filePath);
+    const result = await injectClaudeMd(filePath);
+    expect(result).toBe("present");
+  });
+
+  it("updates stale block and returns 'updated'", async () => {
+    const filePath = path.join(tmpDir, "CLAUDE.md");
+    const stale = `${CLAUDE_MD_MARKER_START}\nold content\n${CLAUDE_MD_MARKER_END}`;
+    await Bun.write(filePath, `# Notes\n\n${stale}\n`);
+    const result = await injectClaudeMd(filePath);
+    expect(result).toBe("updated");
+    const content = await Bun.file(filePath).text();
+    expect(content).not.toContain("old content");
+    expect(content).toContain(CLAUDE_MD_BLOCK);
+  });
+
+  it("dry run does not write the file", async () => {
+    const filePath = path.join(tmpDir, "CLAUDE.md");
+    const result = await injectClaudeMd(filePath, true);
+    expect(result).toBe("added");
+    expect(existsSync(filePath)).toBe(false);
+  });
+});
+
+describe("removeClaudeMd", () => {
+  it("removes the block and returns true", async () => {
+    const filePath = path.join(tmpDir, "CLAUDE.md");
+    await Bun.write(filePath, `# Notes\n\n${CLAUDE_MD_BLOCK}\n`);
+    const removed = await removeClaudeMd(filePath);
+    expect(removed).toBe(true);
+    const content = await Bun.file(filePath).text();
+    expect(content).not.toContain(CLAUDE_MD_MARKER_START);
+    expect(content).toContain("# Notes");
+  });
+
+  it("leaves surrounding content intact", async () => {
+    const filePath = path.join(tmpDir, "CLAUDE.md");
+    await Bun.write(filePath, `# Before\n\n${CLAUDE_MD_BLOCK}\n\n# After\n`);
+    await removeClaudeMd(filePath);
+    const content = await Bun.file(filePath).text();
+    expect(content).toContain("# Before");
+    expect(content).toContain("# After");
+    expect(content).not.toContain(CLAUDE_MD_MARKER_START);
+  });
+
+  it("returns false when marker is not present", async () => {
+    const filePath = path.join(tmpDir, "CLAUDE.md");
+    await Bun.write(filePath, "# Notes\n\nno recall block here\n");
+    const removed = await removeClaudeMd(filePath);
+    expect(removed).toBe(false);
+  });
+
+  it("returns false when file does not exist", async () => {
+    const filePath = path.join(tmpDir, "nonexistent-CLAUDE.md");
+    const removed = await removeClaudeMd(filePath);
+    expect(removed).toBe(false);
   });
 });

@@ -13,11 +13,14 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ### Added
 
-- `README.md`: `mcp-recall status` output example showing all rows including CLAUDE.md
-- `docs/profile-schema.md`: `description` now listed as required field; numeric ceiling limits documented in validation rules table; new Manifest signature verification section covering `profiles.verify_signature` config and `--skip-verify` flag (#135)
-- `docs/profiles-quickstart.md`: `--skip-verify` examples for `seed` and `install` (#135)
+- `mcp-recall install` now writes a `<!-- BEGIN mcp-recall -->` instruction block to `~/.claude/CLAUDE.md` so Claude knows to call `recall__context()`, `recall__retrieve()`, `recall__search()`, `recall__note()`, and `recall__pin()` appropriately (#136)
+- `mcp-recall uninstall` removes the CLAUDE.md block cleanly (#136)
+- `mcp-recall status` shows a `~/.claude/CLAUDE.md` row and includes it in the fully-installed check (#136)
+- New `docs/quickstart.md` — 2-minute getting-started guide with manual CLAUDE.md snippet for marketplace installs (#136)
+- `README.md`: `mcp-recall status` output example; new Updating section; `[profiles] verify_signature` config block; `recall__` prefix convention explained; quickstart link (#135, #136, #137)
+- `docs/profile-schema.md`: `description` as required field; numeric ceiling limits; Manifest signature verification section for `profiles.verify_signature` and `--skip-verify` (#135)
+- `docs/profiles-quickstart.md`: `--skip-verify` examples (#135)
 - `docs/troubleshooting.md`: new entry for stale binary path after upgrade (#135)
-- `README.md`: new Updating section covering all three install methods; `[profiles] verify_signature` in config block; `recall__` prefix convention explained; quickstart link in Install section (#135)
 
 ---
 
