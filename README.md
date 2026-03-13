@@ -1,9 +1,13 @@
 # mcp-recall
 
-![CI](https://github.com/sakebomb/mcp-recall/actions/workflows/ci.yml/badge.svg)
+[![CI](https://github.com/sakebomb/mcp-recall/actions/workflows/ci.yml/badge.svg)](https://github.com/sakebomb/mcp-recall/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/mcp-recall.svg)](https://www.npmjs.com/package/mcp-recall)
+[![npm downloads](https://img.shields.io/npm/dw/mcp-recall.svg)](https://www.npmjs.com/package/mcp-recall)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 ![Runtime: Bun](https://img.shields.io/badge/runtime-Bun-f472b6.svg)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6.svg)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 **Your context window is finite. MCP tool outputs aren't. mcp-recall bridges the gap.**
 
