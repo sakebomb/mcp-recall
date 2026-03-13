@@ -31,6 +31,10 @@ mcp-recall profiles info grafana
 
 # Keep profiles current
 mcp-recall profiles update
+
+# Skip manifest signature verification (useful in CI without gh installed)
+mcp-recall profiles seed --skip-verify
+mcp-recall profiles install grafana --skip-verify
 ```
 
 `npx mcp-recall` and `bunx mcp-recall` also work without a global install — useful for one-off commands.

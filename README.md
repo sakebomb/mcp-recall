@@ -203,6 +203,41 @@ ln -sf /path/to/mcp-recall/plugins/mcp-recall/dist/cli.js ~/.local/bin/mcp-recal
 
 ---
 
+## Updating
+
+### Option A — npm / bun global install
+
+```bash
+bun update -g mcp-recall && mcp-recall install
+```
+
+`mcp-recall install` is idempotent — it updates hook paths and the MCP server entry in place without touching your stored data or config.
+
+### Option B — Claude Code plugin marketplace
+
+```bash
+claude plugin update mcp-recall@mcp-recall
+```
+
+### Option C — from source
+
+```bash
+git pull
+bun install
+bun run build
+mcp-recall install   # re-registers hooks with the new binary path
+```
+
+### After updating
+
+Run `mcp-recall status` to confirm the new version is active and hooks are registered correctly. Then update community profiles to pick up any new or revised ones:
+
+```bash
+mcp-recall profiles update
+```
+
+---
+
 ## Profiles
 
 Profiles teach mcp-recall how to compress output from specific MCPs. **[18 community profiles](https://github.com/sakebomb/mcp-recall-profiles)** cover Jira, Stripe, Grafana, Shopify, Notion, and more.
@@ -286,6 +321,11 @@ override_defaults = [
   # "mcp__recall__*",
   # "mcp__1password__*",
 ]
+
+[profiles]
+# Manifest signature verification mode when installing/updating community profiles.
+# Requires the gh CLI. Options: "warn" (default), "error", "skip".
+verify_signature = "warn"
 ```
 
 ### Session days

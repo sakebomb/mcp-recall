@@ -1,5 +1,21 @@
 # Troubleshooting
 
+## Version not updating after upgrade
+
+If `mcp-recall --version` still shows the old version after upgrading, the hook script is pointing at a stale binary path. Re-run the install step to fix it:
+
+```bash
+# npm / bun global install
+bun update -g mcp-recall && mcp-recall install
+
+# from source
+git pull && bun install && bun run build && mcp-recall install
+```
+
+`mcp-recall install` is idempotent — it rewrites the hook and MCP server paths without touching stored data or config. Restart Claude Code afterward so the MCP server picks up the new binary.
+
+---
+
 ## Plugin not loading
 
 ```bash
