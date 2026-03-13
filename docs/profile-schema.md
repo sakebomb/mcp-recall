@@ -18,7 +18,7 @@ Profiles are declarative TOML files that tell mcp-recall how to compress the out
 | Tier | Path | Priority |
 |------|------|----------|
 | User (local) | `~/.config/mcp-recall/profiles/<id>/default.toml` | Highest |
-| Community (installed) | `~/.local/share/mcp-recall/profiles/community/<id>.toml` | Middle |
+| Community (installed) | `~/.local/share/mcp-recall/profiles/community/<id>/default.toml` | Middle |
 | Bundled | Shipped with mcp-recall | Lowest |
 
 Local always wins. Install community profiles with `mcp-recall profiles seed`.
@@ -160,14 +160,44 @@ When two profiles in the **same tier** match the same tool name, the one with th
 
 The profile evaluator rejects profiles that fail these checks at load time (they are skipped, not fatal):
 
-1. `profile.id`, `profile.version`, `profile.mcp_pattern`, and `strategy.type` are all required.
+1. `profile.id`, `profile.version`, `profile.description`, `profile.mcp_pattern`, and `strategy.type` are all required.
 2. `profile.id` must match `[a-z0-9_-]+`.
 3. `profile.version` must be valid semver.
 4. `strategy.type` must be one of `json_extract`, `json_truncate`, `text_truncate`.
 5. `json_extract` must define at least one entry in `fields`.
-6. All numeric limits (`max_items`, `max_chars_per_field`, `max_depth`, `max_array_items`, `max_chars`, `fallback_chars`) must be positive integers.
+6. All numeric limits must be positive integers and within ceilings:
+
+| Field | Maximum |
+|-------|---------|
+| `max_depth` | 20 |
+| `max_items` | 1 000 |
+| `max_array_items` | 1 000 |
+| `max_chars` | 1 000 000 |
+| `max_chars_per_field` | 100 000 |
+| `fallback_chars` | 100 000 |
 
 A validation CLI is available: `mcp-recall profiles check`.
+
+---
+
+## Manifest signature verification
+
+When `install`, `update`, or `seed` download the community manifest, mcp-recall verifies its GitHub Artifact Attestation using `gh attestation verify`. This requires the `gh` CLI. Behaviour is controlled by `profiles.verify_signature` in `~/.config/mcp-recall/config.toml`:
+
+```toml
+[profiles]
+verify_signature = "warn"   # default — logs a warning if verification fails or gh is absent
+# verify_signature = "error"  # hard-fail on any verification problem
+# verify_signature = "skip"   # disable verification entirely
+```
+
+To skip verification for a single command (e.g. in CI without `gh` installed):
+
+```bash
+mcp-recall profiles seed --skip-verify
+mcp-recall profiles install grafana --skip-verify
+mcp-recall profiles update --skip-verify
+```
 
 ---
 
