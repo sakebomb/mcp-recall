@@ -9,10 +9,15 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 ### Fixed
 
 - Renamed `saveToCommunitDir` → `saveToCommunityDir` (typo)
+- Corrected community profile path in `docs/profile-schema.md` (`<id>.toml` → `<id>/default.toml`) (#135)
 
 ### Added
 
 - `README.md`: `mcp-recall status` output example showing all rows including CLAUDE.md
+- `docs/profile-schema.md`: `description` now listed as required field; numeric ceiling limits documented in validation rules table; new Manifest signature verification section covering `profiles.verify_signature` config and `--skip-verify` flag (#135)
+- `docs/profiles-quickstart.md`: `--skip-verify` examples for `seed` and `install` (#135)
+- `docs/troubleshooting.md`: new entry for stale binary path after upgrade (#135)
+- `README.md`: new Updating section covering all three install methods; `[profiles] verify_signature` in config block; `recall__` prefix convention explained; quickstart link in Install section (#135)
 
 ---
 
