@@ -6,6 +6,14 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Fixed
+
+- Renamed `saveToCommunitDir` → `saveToCommunityDir` (typo)
+
+### Added
+
+- `README.md`: `mcp-recall status` output example showing all rows including CLAUDE.md
+
 ---
 
 ## [1.6.0] — 2026-03-12
