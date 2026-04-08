@@ -470,6 +470,12 @@ TypeScript handlers are welcome for tools with complex, non-JSON output (HTML, D
 
 ---
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the full release history.
+
+---
+
 ## License
 
 MIT — see [LICENSE](LICENSE)
