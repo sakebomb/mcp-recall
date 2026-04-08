@@ -58,7 +58,7 @@ server.tool(
   "recall__retrieve",
   "Fetch stored content from a previous tool call. Pass a query to return the most relevant excerpt via FTS. Use when you need more detail from a compressed result.",
   {
-    id: z.string().describe("8-char or full item ID"),
+    id: z.string().describe("recall_* item ID"),
     query: z.string().optional().describe("FTS query to return a focused excerpt"),
     max_bytes: z
       .number()
@@ -118,7 +118,7 @@ server.tool(
 
 server.tool(
   "recall__forget",
-  "Delete stored items by ID, tool pattern, session, age, or clear all. Pinned items are skipped unless force: true.",
+  "Delete stored items by ID, tool pattern, session, age, or clear all. Pinned items are skipped unless force: true. Note: single-ID deletes (id:) always bypass pin protection.",
   {
     id: z.string().optional().describe("Delete a single item by ID"),
     tool: z.string().optional().describe("Delete all items matching tool name substring"),

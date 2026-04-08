@@ -19931,8 +19931,7 @@ function getContext(db, project_key, opts = {}) {
   if (lastDate) {
     const startOfDay = Math.floor(new Date(`${lastDate}T00:00:00Z`).getTime() / 1000);
     const endOfDay = startOfDay + 86400;
-    const excludeIds = [...pinned, ...notes, ...recent].map((i) => i.id);
-    const notIn = excludeIds.length > 0 ? `AND id NOT IN (${excludeIds.map(() => "?").join(",")})` : "";
+    const excludeSet = new Set([...pinned, ...notes, ...recent].map((i) => i.id));
     const rows = db.prepare(`
       SELECT * FROM stored_outputs
       WHERE project_key = ?
@@ -19940,11 +19939,10 @@ function getContext(db, project_key, opts = {}) {
         AND tool_name != 'recall__note'
         AND created_at >= ? AND created_at < ?
         AND access_count > 0
-        ${notIn}
       ORDER BY access_count DESC
-      LIMIT 5
-    `).all(project_key, startOfDay, endOfDay, ...excludeIds);
-    hot.push(...rows);
+      LIMIT ?
+    `).all(project_key, startOfDay, endOfDay, 5 + excludeSet.size);
+    hot.push(...rows.filter((r) => !excludeSet.has(r.id)).slice(0, 5));
   }
   return { pinned, notes, recent, hot, last_session };
 }
@@ -21061,6 +21059,7 @@ function formatRelativeTime(ms) {
 }
 
 // src/tools.ts
+var CONTEXT_EMPTY_RESPONSE = "[recall: no context available yet \u2014 use recall tools to build up your context store]";
 function formatDate(unixSecs) {
   return new Date(unixSecs * 1000).toISOString().slice(0, 10);
 }
@@ -21216,7 +21215,7 @@ function toolContext(db, projectKey, args) {
   const today = new Date(now).toISOString().slice(0, 10);
   const isEmpty = data.pinned.length === 0 && data.notes.length === 0 && data.recent.length === 0 && data.hot.length === 0 && data.last_session === null;
   if (isEmpty) {
-    return `[recall: no context available yet \u2014 use recall tools to build up your context store]`;
+    return CONTEXT_EMPTY_RESPONSE;
   }
   const lines = [
     `Context \u2014 ${today}`,
@@ -21394,7 +21393,7 @@ var server = new McpServer({
   version: version2
 });
 server.tool("recall__retrieve", "Fetch stored content from a previous tool call. Pass a query to return the most relevant excerpt via FTS. Use when you need more detail from a compressed result.", {
-  id: exports_external.string().describe("8-char or full item ID"),
+  id: exports_external.string().describe("recall_* item ID"),
   query: exports_external.string().optional().describe("FTS query to return a focused excerpt"),
   max_bytes: exports_external.number().optional().describe("Override default 8KB cap on returned bytes (used when FTS returns no match)")
 }, safeTool((args) => ({
@@ -21422,7 +21421,7 @@ server.tool("recall__note", "Store arbitrary text as a recall note \u2014 conclu
 server.tool("recall__export", "Export all stored items for this project as JSON. Use before a full clear to preserve data.", {}, safeTool(() => ({
   content: [{ type: "text", text: toolExport(db, projectKey) }]
 })));
-server.tool("recall__forget", "Delete stored items by ID, tool pattern, session, age, or clear all. Pinned items are skipped unless force: true.", {
+server.tool("recall__forget", "Delete stored items by ID, tool pattern, session, age, or clear all. Pinned items are skipped unless force: true. Note: single-ID deletes (id:) always bypass pin protection.", {
   id: exports_external.string().optional().describe("Delete a single item by ID"),
   tool: exports_external.string().optional().describe("Delete all items matching tool name substring"),
   session_id: exports_external.string().optional().describe("Delete all items from a session"),

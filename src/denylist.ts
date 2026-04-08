@@ -67,6 +67,8 @@ export function isDenied(toolName: string, config: RecallConfig): boolean {
  * Supports * as a wildcard matching any sequence of characters.
  * Matching is case-sensitive. Compiled regexes are cached.
  */
+// Bounded in practice: BUILTIN_PATTERNS is fixed and user-supplied additional
+// patterns are small relative to the tool namespace.
 const regexCache = new Map<string, RegExp>();
 
 export function matchesPattern(toolName: string, pattern: string): boolean {

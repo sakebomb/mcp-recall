@@ -5418,8 +5418,7 @@ function getContext(db, project_key, opts = {}) {
   if (lastDate) {
     const startOfDay = Math.floor(new Date(`${lastDate}T00:00:00Z`).getTime() / 1000);
     const endOfDay = startOfDay + 86400;
-    const excludeIds = [...pinned, ...notes, ...recent].map((i) => i.id);
-    const notIn = excludeIds.length > 0 ? `AND id NOT IN (${excludeIds.map(() => "?").join(",")})` : "";
+    const excludeSet = new Set([...pinned, ...notes, ...recent].map((i) => i.id));
     const rows = db.prepare(`
       SELECT * FROM stored_outputs
       WHERE project_key = ?
@@ -5427,11 +5426,10 @@ function getContext(db, project_key, opts = {}) {
         AND tool_name != 'recall__note'
         AND created_at >= ? AND created_at < ?
         AND access_count > 0
-        ${notIn}
       ORDER BY access_count DESC
-      LIMIT 5
-    `).all(project_key, startOfDay, endOfDay, ...excludeIds);
-    hot.push(...rows);
+      LIMIT ?
+    `).all(project_key, startOfDay, endOfDay, 5 + excludeSet.size);
+    hot.push(...rows.filter((r) => !excludeSet.has(r.id)).slice(0, 5));
   }
   return { pinned, notes, recent, hot, last_session };
 }
@@ -5522,6 +5520,7 @@ function formatRelativeTime(ms) {
 }
 
 // src/tools.ts
+var CONTEXT_EMPTY_RESPONSE = "[recall: no context available yet \u2014 use recall tools to build up your context store]";
 function formatDate(unixSecs) {
   return new Date(unixSecs * 1000).toISOString().slice(0, 10);
 }
@@ -5536,7 +5535,7 @@ function toolContext(db, projectKey, args) {
   const today = new Date(now).toISOString().slice(0, 10);
   const isEmpty = data.pinned.length === 0 && data.notes.length === 0 && data.recent.length === 0 && data.hot.length === 0 && data.last_session === null;
   if (isEmpty) {
-    return `[recall: no context available yet \u2014 use recall tools to build up your context store]`;
+    return CONTEXT_EMPTY_RESPONSE;
   }
   const lines = [
     `Context \u2014 ${today}`,
@@ -5612,10 +5611,10 @@ function handleSessionStart(raw) {
   const today = new Date().toISOString().slice(0, 10);
   recordSession(db, today);
   pruneExpired(db, projectKey, config.store.expire_after_session_days);
-  const data = getContext(db, projectKey);
-  const isEmpty = data.pinned.length === 0 && data.notes.length === 0 && data.recent.length === 0 && data.hot.length === 0 && data.last_session === null;
-  if (!isEmpty) {
-    let snapshot = toolContext(db, projectKey, {});
+  let snapshot = toolContext(db, projectKey, {});
+  if (snapshot === CONTEXT_EMPTY_RESPONSE) {
+    log.debug(`session-start \xB7 project=${projectKey.slice(0, 8)} \xB7 nothing to inject`);
+  } else {
     if (snapshot.length > INJECT_MAX_CHARS) {
       snapshot = snapshot.slice(0, INJECT_MAX_CHARS) + `
 \u2026 (truncated \u2014 call recall__context for the full view)`;
@@ -5623,8 +5622,6 @@ function handleSessionStart(raw) {
     process.stdout.write(snapshot + `
 `);
     log.debug(`session-start \xB7 project=${projectKey.slice(0, 8)} \xB7 injected ${snapshot.length} chars`);
-  } else {
-    log.debug(`session-start \xB7 project=${projectKey.slice(0, 8)} \xB7 nothing to inject`);
   }
 }
 
@@ -5697,7 +5694,7 @@ var SECRET_PATTERNS = [
   },
   {
     name: "OpenAI API key",
-    pattern: /sk-(?!ant-)[A-Za-z0-9]{32,}/
+    pattern: /sk-(?!ant-)[\w-]{32,}/
   },
   {
     name: "AWS access key ID",
@@ -6219,7 +6216,7 @@ var gitLogHandler = (_toolName, output) => {
     if (line.startsWith("commit ")) {
       hash = line.slice(7, 14);
       seenBlank = false;
-    } else if (hash && line.trim() === "" && !seenBlank) {
+    } else if (hash && !seenBlank && (line.startsWith("Author:") || line.startsWith("Date:") || line.startsWith("Merge:") || line.startsWith("gpgsig ") || line.startsWith(" ") && line.trim() !== "")) {} else if (hash && line.trim() === "" && !seenBlank) {
       seenBlank = true;
     } else if (hash && seenBlank && line.startsWith("    ") && line.trim()) {
       const subject = line.trim().slice(0, 72);
@@ -7432,7 +7429,9 @@ function getBundledProfilesDir() {
   try {
     statSync(devPath);
     return devPath;
-  } catch {
+  } catch (e) {
+    if (e.code !== "ENOENT")
+      throw e;
     return distPath;
   }
 }

@@ -1,7 +1,7 @@
 import { loadConfig } from "../config";
 import { getProjectKey } from "../project-key";
-import { getDb, defaultDbPath, recordSession, pruneExpired, getContext } from "../db/index";
-import { toolContext } from "../tools";
+import { getDb, defaultDbPath, recordSession, pruneExpired } from "../db/index";
+import { toolContext, CONTEXT_EMPTY_RESPONSE } from "../tools";
 import { log } from "../log";
 
 interface SessionStartInput {
@@ -36,16 +36,10 @@ export function handleSessionStart(raw: string): void {
 
   // Inject a compact context snapshot into Claude's initial context via stdout.
   // Claude Code adds SessionStart hook stdout as context before the first message.
-  const data = getContext(db, projectKey);
-  const isEmpty =
-    data.pinned.length === 0 &&
-    data.notes.length === 0 &&
-    data.recent.length === 0 &&
-    data.hot.length === 0 &&
-    data.last_session === null;
-
-  if (!isEmpty) {
-    let snapshot = toolContext(db, projectKey, {});
+  let snapshot = toolContext(db, projectKey, {});
+  if (snapshot === CONTEXT_EMPTY_RESPONSE) {
+    log.debug(`session-start · project=${projectKey.slice(0, 8)} · nothing to inject`);
+  } else {
     if (snapshot.length > INJECT_MAX_CHARS) {
       snapshot =
         snapshot.slice(0, INJECT_MAX_CHARS) +
@@ -53,7 +47,5 @@ export function handleSessionStart(raw: string): void {
     }
     process.stdout.write(snapshot + "\n");
     log.debug(`session-start · project=${projectKey.slice(0, 8)} · injected ${snapshot.length} chars`);
-  } else {
-    log.debug(`session-start · project=${projectKey.slice(0, 8)} · nothing to inject`);
   }
 }

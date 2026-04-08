@@ -26,7 +26,7 @@ export const SECRET_PATTERNS: SecretPattern[] = [
   },
   {
     name: "OpenAI API key",
-    pattern: /sk-(?!ant-)[A-Za-z0-9]{32,}/,
+    pattern: /sk-(?!ant-)[\w-]{32,}/,
   },
   {
     name: "AWS access key ID",
