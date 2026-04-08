@@ -19714,7 +19714,7 @@ function sanitizeFtsQuery(query) {
   return trimmed.split(/\s+/).map((term) => `"${term.replace(/"/g, '""')}"`).join(" ");
 }
 function generateId() {
-  return `recall_${randomBytes(4).toString("hex")}`;
+  return `recall_${randomBytes(8).toString("hex")}`;
 }
 function storeOutput(db, input) {
   const id = generateId();

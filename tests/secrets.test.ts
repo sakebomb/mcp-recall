@@ -38,6 +38,14 @@ describe("containsSecret", () => {
     expect(containsSecret(`OPENAI_API_KEY=${key}`)).toBe(true);
   });
 
+  it("OpenAI pattern does not false-positive on Anthropic keys (sk-ant-)", () => {
+    // sk-ant- keys must be caught by the Anthropic pattern, not reported as OpenAI
+    const key = "sk-ant-" + "A".repeat(32);
+    const hits = findSecrets(key);
+    expect(hits).toContain("Anthropic API key");
+    expect(hits).not.toContain("OpenAI API key");
+  });
+
   it("detects Anthropic API key (sk-ant-)", () => {
     const key = "sk-ant-" + "A".repeat(32);
     expect(containsSecret(`ANTHROPIC_API_KEY=${key}`)).toBe(true);

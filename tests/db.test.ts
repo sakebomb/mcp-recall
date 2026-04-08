@@ -57,7 +57,7 @@ describe("db", () => {
   describe("storeOutput", () => {
     it("returns a stored output with generated id", () => {
       const result = storeOutput(db, makeInput());
-      expect(result.id).toMatch(/^recall_[0-9a-f]{8}$/);
+      expect(result.id).toMatch(/^recall_[0-9a-f]{16}$/);
     });
 
     it("computes summary_size from summary bytes", () => {
@@ -535,6 +535,17 @@ describe("db", () => {
       // Even with a 0 limit, pinned item is not evicted
       evictIfNeeded(db, PROJECT_KEY, 0);
       expect(retrieveOutput(db, stored.id)).not.toBeNull();
+    });
+
+    it("returns 0 and evicts nothing when all items are pinned", () => {
+      const a = storeOutput(db, makeInput({ original_size: 500000 }));
+      const b = storeOutput(db, makeInput({ original_size: 500000 }));
+      pinOutput(db, a.id, PROJECT_KEY, true);
+      pinOutput(db, b.id, PROJECT_KEY, true);
+      const evicted = evictIfNeeded(db, PROJECT_KEY, 0);
+      expect(evicted).toBe(0);
+      expect(retrieveOutput(db, a.id)).not.toBeNull();
+      expect(retrieveOutput(db, b.id)).not.toBeNull();
     });
   });
 
