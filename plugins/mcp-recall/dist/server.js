@@ -19673,6 +19673,7 @@ function getDb(path) {
   instance = new Database(path);
   instance.run("PRAGMA journal_mode=WAL");
   instance.run("PRAGMA foreign_keys=ON");
+  instance.run("PRAGMA auto_vacuum=INCREMENTAL");
   instance.run(SCHEMA);
   applyMigrations(instance);
   return instance;
@@ -19831,9 +19832,9 @@ function forgetOutputs(db, project_key, options) {
   }
   if (deleted >= VACUUM_THRESHOLD) {
     try {
-      db.run("VACUUM");
+      db.run("PRAGMA incremental_vacuum");
     } catch (e) {
-      log.warn(`VACUUM failed \u2014 ${e instanceof Error ? e.message : e}`);
+      log.warn(`incremental_vacuum failed \u2014 ${e instanceof Error ? e.message : e}`);
     }
   }
   return deleted;

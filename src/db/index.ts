@@ -221,6 +221,10 @@ export function getDb(path: string): Database {
   instance = new Database(path);
   instance.run("PRAGMA journal_mode=WAL");
   instance.run("PRAGMA foreign_keys=ON");
+  // Prefer incremental auto-vacuum so free pages can be reclaimed in small
+  // batches without blocking. Has no effect on existing databases that were
+  // created with auto_vacuum=NONE; those gracefully skip reclamation.
+  instance.run("PRAGMA auto_vacuum=INCREMENTAL");
   instance.run(SCHEMA);
   applyMigrations(instance);
   return instance;
@@ -529,7 +533,7 @@ function countAndDelete(db: Database, where: string, params: SQLQueryBindings[])
  * Exactly one selector (`id`, `tool`, `session_id`, `older_than_days`, or `all`) should be set.
  * Returns the number of items deleted.
  */
-/** Minimum number of deleted rows that triggers a VACUUM to reclaim disk space. */
+/** Minimum number of deleted rows that triggers incremental_vacuum to reclaim disk space. */
 const VACUUM_THRESHOLD = 50;
 
 export function forgetOutputs(
@@ -556,9 +560,11 @@ export function forgetOutputs(
 
   if (deleted >= VACUUM_THRESHOLD) {
     try {
-      db.run("VACUUM");
+      // Non-blocking incremental reclamation; no-op on databases that were
+      // created without auto_vacuum=INCREMENTAL.
+      db.run("PRAGMA incremental_vacuum");
     } catch (e) {
-      log.warn(`VACUUM failed — ${e instanceof Error ? e.message : e}`);
+      log.warn(`incremental_vacuum failed — ${e instanceof Error ? e.message : e}`);
     }
   }
 
