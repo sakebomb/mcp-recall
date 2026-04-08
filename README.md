@@ -122,8 +122,11 @@ Real numbers from actual tool calls:
 | `mcp__github__list_issues` (20 items) | 59.1 KB | 1.1 KB | 98.1% |
 | `mcp__filesystem__read_file` (large file) | 85.0 KB | 2.2 KB | 97.4% |
 | Analytics CSV (500 rows) | 85.0 KB | 222 B | 99.7% |
+| Tavily web extracts (12 calls, one session) | 170.3 KB | 2.0 KB | 99% |
 
 Across a full session: 315 KB of tool output → 5.4 KB delivered to context.
+
+Used daily in development of this project for over 40 days across 9 releases. No broken sessions, no data loss.
 
 ---
 
@@ -229,7 +232,7 @@ mcp-recall profiles update
 
 ## Profiles
 
-Profiles teach mcp-recall how to compress output from specific MCPs. **[18 community profiles](https://github.com/sakebomb/mcp-recall-profiles)** cover Jira, Stripe, Grafana, Shopify, Notion, and more.
+Profiles teach mcp-recall how to compress output from specific MCPs. Four profiles ship built in (Jira, Gmail, Context7, Docker). **[18 community profiles](https://github.com/sakebomb/mcp-recall-profiles)** cover Grafana, Shopify, Notion, and more.
 
 ```bash
 # Install profiles for all your connected MCPs
@@ -366,6 +369,7 @@ Repeated identical tool calls return a cached header instead of re-compressing:
 | Playwright | tool name contains `playwright` and `snapshot` | Interactive elements (buttons, inputs, links), visible text, headings. Drops aria noise. |
 | GitHub | `mcp__github__*` | Number, title, state, body (200 chars), labels, URL. Lists: first 10 + overflow count. |
 | GitLab | `mcp__gitlab__*` | IID, title, state, description excerpt (200 chars), labels, web URL. Lists: first 10 + overflow count. |
+| Stripe | `mcp__stripe__*` | Amount formatting (smallest currency unit, zero-decimal currencies like JPY/KRW handled separately), per-tool routing: customers, invoices, payment intents, subscriptions, products, prices, disputes, payment links, balance, account. |
 | Shell | tool name contains `bash`, `shell`, `terminal`, `run_command`, `ssh_exec`, `exec_command`, `remote_exec`, or `container_exec` | Strips ANSI escape codes and SSH post-quantum advisory noise. Parses structured `{stdout, stderr, returncode}` JSON; falls back to plain text. Stdout: first 50 lines + overflow count. Stderr: first 20 lines, shown in a separate section. Exit code in header. |
 | Linear | tool name contains `linear` | Identifier, title, state, priority (numeric → label), description excerpt (200 chars), URL. Handles single, array, GraphQL, and Relay shapes. |
 | Slack | tool name contains `slack` | Channel, formatted timestamp, user/display name, message text (200 chars). Handles `{ok, messages}` wrappers and bare arrays. Lists: first 10 + overflow count. |
@@ -428,7 +432,7 @@ mcp-recall never breaks a tool call. Every failure mode — hook crash, SQLite e
 
 ## Profile system
 
-Declarative TOML profiles extend compression to any MCP — no TypeScript required. **[18 community profiles](https://github.com/sakebomb/mcp-recall-profiles)** cover Jira, Stripe, Shopify, Datadog, Notion, Teams, and more.
+Declarative TOML profiles extend compression to any MCP — no TypeScript required. Four profiles ship built in (Jira, Gmail, Context7, Docker), and **[18 community profiles](https://github.com/sakebomb/mcp-recall-profiles)** cover Stripe, Grafana, Shopify, Datadog, Notion, Teams, and more.
 
 ```bash
 mcp-recall learn                         # auto-generate profiles from your installed MCPs
