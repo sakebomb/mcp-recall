@@ -70,8 +70,8 @@ describe("concurrent DB access", () => {
     const { dir, dbPath } = tempDb();
     cleanupDir = dir;
 
-    const db1 = getDb(dbPath);                    // initialises schema + WAL
-    db1.run("PRAGMA wal_checkpoint(PASSIVE)");    // flush schema to main DB file before db2 opens
+    const db1 = getDb(dbPath);                     // initialises schema + WAL
+    db1.run("PRAGMA wal_checkpoint(TRUNCATE)");   // flush + truncate WAL so db2 sees schema in main DB file
     const db2 = openSecondConnection(dbPath);     // second writer
 
     for (let i = 0; i < 15; i++) {
