@@ -83,9 +83,13 @@ describe("concurrent DB access", () => {
     }
 
     db2.close();
-    // Checkpoint the WAL so db1's next read sees all of db2's committed frames.
-    db1.run("PRAGMA wal_checkpoint(FULL)");
-    expect(listOutputs(db1, { project_key: PROJECT_KEY, limit: 100 }).length).toBe(30);
+    // Close and reopen db1 so the new connection gets a fresh WAL read mark
+    // that includes all of db2's committed frames. A checkpoint alone is not
+    // sufficient because db1's read snapshot is anchored to when it last
+    // started a transaction, which may predate db2's writes.
+    closeDb();
+    const dbVerify = getDb(dbPath);
+    expect(listOutputs(dbVerify, { project_key: PROJECT_KEY, limit: 100 }).length).toBe(30);
   });
 
   // -------------------------------------------------------------------------
