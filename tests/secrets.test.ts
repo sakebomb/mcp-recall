@@ -57,6 +57,74 @@ describe("containsSecret", () => {
   });
 });
 
+describe("containsSecret — new patterns", () => {
+  it("detects GCP service account JSON", () => {
+    expect(containsSecret('{"type": "service_account", "project_id": "my-proj"}')).toBe(true);
+    expect(containsSecret('{"type":"service_account"}')).toBe(true);
+  });
+
+  it("does not flag non-service-account type fields", () => {
+    expect(containsSecret('{"type": "user"}')).toBe(false);
+    expect(containsSecret('{"type": "authorized_user"}')).toBe(false);
+  });
+
+  it("detects Azure storage connection string", () => {
+    const key = "A".repeat(88) + "==";
+    expect(containsSecret(`DefaultEndpointsProtocol=https;AccountName=myaccount;AccountKey=${key}`)).toBe(true);
+  });
+
+  it("does not flag Azure string missing AccountKey", () => {
+    expect(containsSecret("DefaultEndpointsProtocol=https;AccountName=myaccount")).toBe(false);
+  });
+
+  it("detects Stripe live secret key (sk_live_)", () => {
+    const key = "sk_live_" + "A".repeat(24);
+    expect(containsSecret(`STRIPE_SECRET_KEY=${key}`)).toBe(true);
+  });
+
+  it("detects Stripe restricted key (rk_live_)", () => {
+    const key = "rk_live_" + "A".repeat(24);
+    expect(containsSecret(key)).toBe(true);
+  });
+
+  it("detects Stripe test secret key (sk_test_)", () => {
+    const key = "sk_test_" + "A".repeat(24);
+    expect(containsSecret(key)).toBe(true);
+  });
+
+  it("does not flag Stripe publishable keys (pk_)", () => {
+    const key = "pk_live_" + "A".repeat(24);
+    expect(containsSecret(key)).toBe(false);
+  });
+
+  it("detects SendGrid API key", () => {
+    const key = "SG." + "A".repeat(22) + "." + "B".repeat(43);
+    expect(containsSecret(`SENDGRID_API_KEY=${key}`)).toBe(true);
+  });
+
+  it("does not flag short SG. values", () => {
+    expect(containsSecret("SG.short.value")).toBe(false);
+  });
+
+  it("detects Twilio Account SID", () => {
+    const sid = "AC" + "a".repeat(32);
+    expect(containsSecret(`TWILIO_ACCOUNT_SID=${sid}`)).toBe(true);
+  });
+
+  it("does not flag short AC hex strings", () => {
+    expect(containsSecret("AC" + "a".repeat(31))).toBe(false);
+  });
+
+  it("detects npm publish token", () => {
+    const token = "npm_" + "A".repeat(36);
+    expect(containsSecret(`NPM_TOKEN=${token}`)).toBe(true);
+  });
+
+  it("does not flag short npm_ strings", () => {
+    expect(containsSecret("npm_" + "A".repeat(35))).toBe(false);
+  });
+});
+
 describe("findSecrets", () => {
   it("returns empty array for clean content", () => {
     expect(findSecrets("normal output")).toEqual([]);
