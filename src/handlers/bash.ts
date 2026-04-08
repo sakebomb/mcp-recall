@@ -153,7 +153,9 @@ export const gitLogHandler: Handler = (
     return { summary, originalSize };
   }
 
-  // Full format: extract short hash + subject line from each "commit <hash>" block
+  // Full format: extract short hash + subject line from each "commit <hash>" block.
+  // Skip known git header lines (Author:, Date:, Merge:, gpgsig continuation lines
+  // starting with a space) so GPG-signed commits parse correctly.
   const commits: string[] = [];
   let hash = "";
   let seenBlank = false;
@@ -162,6 +164,14 @@ export const gitLogHandler: Handler = (
     if (line.startsWith("commit ")) {
       hash = line.slice(7, 14);
       seenBlank = false;
+    } else if (hash && !seenBlank && (
+      line.startsWith("Author:") ||
+      line.startsWith("Date:") ||
+      line.startsWith("Merge:") ||
+      line.startsWith("gpgsig ") ||
+      (line.startsWith(" ") && line.trim() !== "")  // gpgsig continuation lines
+    )) {
+      // skip git metadata headers before the blank separator
     } else if (hash && line.trim() === "" && !seenBlank) {
       seenBlank = true;
     } else if (hash && seenBlank && line.startsWith("    ") && line.trim()) {

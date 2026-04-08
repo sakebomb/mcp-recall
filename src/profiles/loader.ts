@@ -41,7 +41,8 @@ function getBundledProfilesDir(): string {
   try {
     statSync(devPath);
     return devPath;
-  } catch {
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
     return distPath;
   }
 }

@@ -765,10 +765,10 @@ export function getContext(
   if (lastDate) {
     const startOfDay = Math.floor(new Date(`${lastDate}T00:00:00Z`).getTime() / 1000);
     const endOfDay = startOfDay + 86400;
-    const excludeIds = [...pinned, ...notes, ...recent].map((i) => i.id);
-    const notIn = excludeIds.length > 0
-      ? `AND id NOT IN (${excludeIds.map(() => "?").join(",")})`
-      : "";
+    // Filter duplicates in JS to avoid unbounded NOT IN bind-param expansion.
+    // Pinned and note items are already excluded by SQL predicates; only
+    // recent items can overlap, but we build the full set for safety.
+    const excludeSet = new Set([...pinned, ...notes, ...recent].map((i) => i.id));
     const rows = db.prepare(`
       SELECT * FROM stored_outputs
       WHERE project_key = ?
@@ -776,11 +776,10 @@ export function getContext(
         AND tool_name != 'recall__note'
         AND created_at >= ? AND created_at < ?
         AND access_count > 0
-        ${notIn}
       ORDER BY access_count DESC
-      LIMIT 5
-    `).all(project_key, startOfDay, endOfDay, ...excludeIds) as StoredOutput[];
-    hot.push(...rows);
+      LIMIT ?
+    `).all(project_key, startOfDay, endOfDay, 5 + excludeSet.size) as StoredOutput[];
+    hot.push(...rows.filter((r) => !excludeSet.has(r.id)).slice(0, 5));
   }
 
   return { pinned, notes, recent, hot, last_session };

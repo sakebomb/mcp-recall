@@ -4,6 +4,9 @@
  * Server.ts wires these to the MCP SDK.
  */
 
+export const CONTEXT_EMPTY_RESPONSE =
+  "[recall: no context available yet — use recall tools to build up your context store]";
+
 import type { Database } from "bun:sqlite";
 import {
   retrieveOutput,
@@ -337,7 +340,7 @@ export function toolContext(
     data.last_session === null;
 
   if (isEmpty) {
-    return `[recall: no context available yet — use recall tools to build up your context store]`;
+    return CONTEXT_EMPTY_RESPONSE;
   }
 
   const lines: string[] = [
