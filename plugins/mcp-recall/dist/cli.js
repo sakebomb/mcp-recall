@@ -5696,6 +5696,30 @@ var SECRET_PATTERNS = [
   {
     name: "SSH private key",
     pattern: /-----BEGIN OPENSSH PRIVATE KEY-----/
+  },
+  {
+    name: "GCP service account key",
+    pattern: /"type"\s*:\s*"service_account"/
+  },
+  {
+    name: "Azure storage connection string",
+    pattern: /DefaultEndpointsProtocol=https?;AccountName=[^;]{1,100};AccountKey=[A-Za-z0-9+/=]{32,}/
+  },
+  {
+    name: "Stripe secret/restricted key",
+    pattern: /[sr]k_(?:live|test)_[A-Za-z0-9]{24,}/
+  },
+  {
+    name: "SendGrid API key",
+    pattern: /SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}/
+  },
+  {
+    name: "Twilio Account SID",
+    pattern: /\bAC[0-9a-f]{32}\b/
+  },
+  {
+    name: "npm publish token",
+    pattern: /npm_[A-Za-z0-9]{36}/
   }
 ];
 function findSecrets(content) {
