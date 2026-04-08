@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { playwrightHandler } from "../src/handlers/playwright";
 import { githubHandler } from "../src/handlers/github";
 import { gitlabHandler } from "../src/handlers/gitlab";
@@ -15,6 +15,27 @@ import { tavilyHandler } from "../src/handlers/tavily";
 import { databaseHandler } from "../src/handlers/database";
 import { sentryHandler } from "../src/handlers/sentry";
 import { stripeHandler } from "../src/handlers/stripe";
+import { clearProfileCache } from "../src/profiles/loader";
+import { tmpdir } from "os";
+import { join } from "path";
+
+// Isolate profile loading for routing tests so that installed user/community
+// profiles on the developer's machine don't interfere with handler dispatch.
+function isolateProfiles() {
+  const empty = join(tmpdir(), "nonexistent-recall-profiles");
+  beforeEach(() => {
+    process.env.RECALL_USER_PROFILES_PATH = empty;
+    process.env.RECALL_COMMUNITY_PROFILES_PATH = empty;
+    process.env.RECALL_BUNDLED_PROFILES_PATH = empty;
+    clearProfileCache();
+  });
+  afterEach(() => {
+    delete process.env.RECALL_USER_PROFILES_PATH;
+    delete process.env.RECALL_COMMUNITY_PROFILES_PATH;
+    delete process.env.RECALL_BUNDLED_PROFILES_PATH;
+    clearProfileCache();
+  });
+}
 
 // ---------------------------------------------------------------------------
 // extractText
@@ -597,6 +618,8 @@ describe("stripAnsi", () => {
 // ---------------------------------------------------------------------------
 
 describe("shellHandler", () => {
+  isolateProfiles();
+
   it("includes line count in header for plain output", () => {
     const input = "line1\nline2\nline3";
     const { summary } = shellHandler("mcp__bash__execute", input);
@@ -1689,6 +1712,8 @@ const STRIPE_BALANCE = JSON.stringify({
 });
 
 describe("stripeHandler", () => {
+  isolateProfiles();
+
   it("formats customer list with name and email", () => {
     const { summary } = stripeHandler("mcp__stripe__list_customers", STRIPE_CUSTOMERS);
     expect(summary).toContain("cus_JW2RJx1dRFf8kZ");
