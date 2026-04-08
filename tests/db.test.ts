@@ -293,7 +293,7 @@ describe("db", () => {
       }).not.toThrow();
     });
 
-    it("data integrity is preserved after bulk delete triggers VACUUM", () => {
+    it("data integrity is preserved after bulk delete with incremental_vacuum", () => {
       const survivor = storeOutput(db, makeInput({ project_key: "other-project", summary: "keep me" }));
       for (let i = 0; i < 55; i++) {
         storeOutput(db, makeInput({ summary: `vacuum-test item ${i}` }));
