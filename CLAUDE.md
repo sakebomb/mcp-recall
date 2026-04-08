@@ -37,7 +37,7 @@ src/
   config.ts             TOML config loader (Zod-validated, cached)
   project-key.ts        Git root detection + SHA256 path hash
   db/                   SQLite + FTS5 + chunking layer
-  handlers/             Compression handlers per tool type (9 handlers)
+  handlers/             Compression handlers per tool type (15 handlers)
   hooks/                Hook implementations (SessionStart, PostToolUse)
   denylist.ts           Built-in + configurable denylist
   secrets.ts            Secret pattern detection before any write
