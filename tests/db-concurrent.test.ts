@@ -74,20 +74,24 @@ describe("concurrent DB access", () => {
     const { dir, dbPath } = tempDb();
     cleanupDir = dir;
 
-    const db1 = getDb(dbPath);                // initialises schema + WAL
-    const db2 = openSecondConnection(dbPath); // second writer — initSchema() called inside
-
+    // Phase 1: db1 writes 15 rows, then checkpoints everything to the main DB
+    // file so that db2 opens against a clean, fully-materialised file.
+    const db1 = getDb(dbPath);
     for (let i = 0; i < 15; i++) {
       storeOutput(db1, makeInput({ summary: `db1 item ${i}` }));
+    }
+    db1.run("PRAGMA wal_checkpoint(TRUNCATE)");
+    closeDb(); // release db1
+
+    // Phase 2: db2 opens the now-checkpointed file (schema + 15 rows in main
+    // DB) and appends 15 more rows to the WAL.
+    const db2 = openSecondConnection(dbPath);
+    for (let i = 0; i < 15; i++) {
       storeOutput(db2, makeInput({ summary: `db2 item ${i}` }));
     }
-
     db2.close();
-    // Close and reopen db1 so the new connection gets a fresh WAL read mark
-    // that includes all of db2's committed frames. A checkpoint alone is not
-    // sufficient because db1's read snapshot is anchored to when it last
-    // started a transaction, which may predate db2's writes.
-    closeDb();
+
+    // Phase 3: fresh connection reads main DB (15 rows) + WAL (15 rows) = 30.
     const dbVerify = getDb(dbPath);
     expect(listOutputs(dbVerify, { project_key: PROJECT_KEY, limit: 100 }).length).toBe(30);
   });
