@@ -6,6 +6,10 @@ export interface SecretPattern {
 /**
  * Patterns for detecting secrets in tool output content.
  * Any match prevents storage regardless of denylist settings.
+ *
+ * ReDoS audit (2026-04-08): no catastrophic backtracking. Worst case is the
+ * AWS secret pattern (.{0,20}…{0,20}) at 400 max backtracks — fully bounded.
+ * All other patterns use simple character classes with no nested quantifiers.
  */
 export const SECRET_PATTERNS: SecretPattern[] = [
   {
