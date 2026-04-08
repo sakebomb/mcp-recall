@@ -8,6 +8,31 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ---
 
+## [1.8.0] — 2026-04-08
+
+### Added
+
+- Bash handler: `gh` CLI routing — list output compressed to count + first 10 rows, check output to pass/fail summary, view output to key-value metadata (#143)
+- Bash handler: JSON stdout detection — any command whose stdout is valid JSON is routed through the JSON handler instead of the generic shell cap (#143)
+- Six new secret detection patterns: GCP service account key, Azure storage connection string, Stripe secret/restricted key, SendGrid API key, Twilio Account SID, npm publish token (#158)
+- `src/log.ts` — unified `log.info/warn/error/debug` interface writing to stderr with consistent `[mcp-recall] level:` prefix; `log.debug` is gated on `RECALL_DEBUG=1` (#159)
+- Concurrent DB access tests covering two-writer data integrity, reader-during-delete non-blocking, and busy timeout behaviour (#162)
+- Stress tests for 1,000 item eviction, 2 MB payload chunking, 500-item dedup, and near-zero size cap — gated behind `RECALL_STRESS=1` (#163)
+
+### Changed
+
+- Handler dispatch refactored from a 13-branch `if/else` chain to a `HANDLER_REGISTRY` array — adding a new handler is now a single entry, priority is explicit via array order (#161)
+- `PRAGMA busy_timeout=5000` added to `getDb()` — writers now retry for up to 5 s under lock contention instead of failing immediately with `SQLITE_BUSY` (#162)
+
+### Fixed
+
+- Guard hook handlers against malformed or empty JSON input — hooks that receive bad JSON now fail open (empty `{}` response) rather than crashing (#156)
+- Hardened error handling in DB migrations, VACUUM, install, and MCP server exit — stale lock files cleaned up on exit (#157)
+- Diagnostic log format standardised across all call sites — replaced ad-hoc `process.stderr.write('[recall] ...')` calls with `log.*` (#159)
+- `PRAGMA auto_vacuum=INCREMENTAL` set at DB open; bulk deletes now call `PRAGMA incremental_vacuum` instead of blocking `VACUUM` (#160)
+
+---
+
 ## [1.7.0] — 2026-03-13
 
 ### Fixed

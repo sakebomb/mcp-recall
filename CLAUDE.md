@@ -68,7 +68,7 @@ plugins/mcp-recall/     Marketplace-installable plugin bundle
 |-------|-------|--------|
 | 1 | Scaffold, config, project-key | Complete |
 | 2 | Denylist + secret detection | Complete |
-| 3 | Compression handlers (9 types) | Complete |
+| 3 | Compression handlers (15 types) | Complete |
 | 4 | SQLite + FTS5 + chunking DB layer | Complete |
 | 5 | Hook pipeline (dedup, eviction) | Complete |
 | 6 | MCP server tools (10 tools) | Complete |
