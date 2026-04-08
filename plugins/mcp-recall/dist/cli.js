@@ -5566,7 +5566,20 @@ function dbg(msg) {
 // src/hooks/session-start.ts
 var INJECT_MAX_CHARS = 2000;
 function handleSessionStart(raw) {
-  const input = JSON.parse(raw);
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    process.stderr.write(`[mcp-recall] error: session-start received invalid JSON \u2014 skipping
+`);
+    return;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    process.stderr.write(`[mcp-recall] error: session-start received unexpected input shape \u2014 skipping
+`);
+    return;
+  }
+  const input = parsed;
   const config = loadConfig();
   const projectKey = getProjectKey(input.cwd);
   const db = getDb(defaultDbPath(projectKey));
@@ -7648,7 +7661,20 @@ function getHandler(toolName, output, input) {
 
 // src/hooks/post-tool-use.ts
 function handlePostToolUse(raw) {
-  const input = JSON.parse(raw);
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    process.stderr.write(`[mcp-recall] error: post-tool-use received invalid JSON \u2014 skipping
+`);
+    return {};
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    process.stderr.write(`[mcp-recall] error: post-tool-use received unexpected input shape \u2014 skipping
+`);
+    return {};
+  }
+  const input = parsed;
   const { tool_name, tool_input, tool_response, cwd, session_id } = input;
   const config = loadConfig();
   if (isDenied(tool_name, config)) {

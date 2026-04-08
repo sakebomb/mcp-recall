@@ -14,7 +14,18 @@ interface SessionStartInput {
 const INJECT_MAX_CHARS = 2000;
 
 export function handleSessionStart(raw: string): void {
-  const input = JSON.parse(raw) as SessionStartInput;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    process.stderr.write(`[mcp-recall] error: session-start received invalid JSON — skipping\n`);
+    return;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    process.stderr.write(`[mcp-recall] error: session-start received unexpected input shape — skipping\n`);
+    return;
+  }
+  const input = parsed as SessionStartInput;
   const config = loadConfig();
   const projectKey = getProjectKey(input.cwd);
   const db = getDb(defaultDbPath(projectKey));
