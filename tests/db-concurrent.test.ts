@@ -79,6 +79,8 @@ describe("concurrent DB access", () => {
     }
 
     db2.close();
+    // Checkpoint the WAL so db1's next read sees all of db2's committed frames.
+    db1.run("PRAGMA wal_checkpoint(FULL)");
     expect(listOutputs(db1, { project_key: PROJECT_KEY, limit: 100 }).length).toBe(30);
   });
 
