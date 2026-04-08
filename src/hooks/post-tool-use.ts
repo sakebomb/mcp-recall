@@ -7,6 +7,7 @@ import { getHandler, extractText } from "../handlers/index";
 import { getDb, defaultDbPath, storeOutput, checkDedup, evictIfNeeded } from "../db/index";
 import { formatBytes } from "../format";
 import { dbg } from "../debug";
+import { log } from "../log";
 
 interface PostToolUseInput {
   session_id: string;
@@ -27,11 +28,11 @@ export function handlePostToolUse(raw: string): HookOutput {
   try {
     parsed = JSON.parse(raw);
   } catch {
-    process.stderr.write(`[mcp-recall] error: post-tool-use received invalid JSON — skipping\n`);
+    log.error("post-tool-use received invalid JSON — skipping");
     return {};
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    process.stderr.write(`[mcp-recall] error: post-tool-use received unexpected input shape — skipping\n`);
+    log.error("post-tool-use received unexpected input shape — skipping");
     return {};
   }
   const input = parsed as PostToolUseInput;
@@ -49,7 +50,7 @@ export function handlePostToolUse(raw: string): HookOutput {
   dbg(`intercepted ${tool_name} · ${formatBytes(Buffer.byteLength(fullContent, "utf8"))}`);
   const secretNames = findSecrets(fullContent);
   if (secretNames.length > 0) {
-    process.stderr.write(`[recall] skipped ${tool_name}: detected ${secretNames.join(", ")}\n`);
+    log.warn(`skipped ${tool_name}: detected ${secretNames.join(", ")}`);
     return {};
   }
 

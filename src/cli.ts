@@ -21,6 +21,7 @@ import { handlePostToolUse } from "./hooks/post-tool-use";
 import { handleProfilesCommand } from "./profiles/commands";
 import { handleLearnCommand } from "./learn/index";
 import { installCommand, uninstallCommand, statusCommand } from "./install/index";
+import { log } from "./log";
 
 export async function getVersion(): Promise<string> {
   const pkg = await import("../package.json");
@@ -330,15 +331,13 @@ async function main(): Promise<void> {
         break;
       }
       default:
-        process.stderr.write(`[recall] unknown subcommand: ${subcommand}\n`);
+        log.error(`unknown subcommand: ${subcommand}`);
         process.exit(1);
     }
   } catch (err) {
     // Fail open — a recall error must never break Claude's workflow
-    if (process.env.RECALL_DEBUG) {
-      process.stderr.write(`[recall:debug] STACK: ${err instanceof Error ? err.stack : String(err)}\n`);
-    }
-    process.stderr.write(`[recall] error in ${subcommand}: ${err}\n`);
+    log.debug(`STACK: ${err instanceof Error ? err.stack : String(err)}`);
+    log.error(`error in ${subcommand}: ${err}`);
     process.stdout.write("{}\n");
     process.exit(0);
   }

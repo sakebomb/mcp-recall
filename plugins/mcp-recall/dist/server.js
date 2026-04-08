@@ -19567,6 +19567,30 @@ import { join } from "path";
 import { homedir } from "os";
 import { mkdirSync } from "fs";
 import { randomBytes } from "crypto";
+
+// src/log.ts
+var log = {
+  info: (msg) => {
+    process.stderr.write(`[mcp-recall] info: ${msg}
+`);
+  },
+  warn: (msg) => {
+    process.stderr.write(`[mcp-recall] warn: ${msg}
+`);
+  },
+  error: (msg) => {
+    process.stderr.write(`[mcp-recall] error: ${msg}
+`);
+  },
+  debug: (msg) => {
+    if (process.env.RECALL_DEBUG === "1") {
+      process.stderr.write(`[mcp-recall] debug: ${msg}
+`);
+    }
+  }
+};
+
+// src/db/index.ts
 var SCHEMA = `
   CREATE TABLE IF NOT EXISTS stored_outputs (
     id TEXT PRIMARY KEY,
@@ -19809,8 +19833,7 @@ function forgetOutputs(db, project_key, options) {
     try {
       db.run("VACUUM");
     } catch (e) {
-      process.stderr.write(`[mcp-recall] warn: VACUUM failed \u2014 ${e instanceof Error ? e.message : e}
-`);
+      log.warn(`VACUUM failed \u2014 ${e instanceof Error ? e.message : e}`);
     }
   }
   return deleted;
@@ -20993,15 +21016,13 @@ function loadConfig() {
       cached2 = deepMerge(DEFAULTS, result.data);
     } else {
       const issues = result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(", ");
-      process.stderr.write(`[recall] invalid config (${issues}); using defaults
-`);
+      log.warn(`invalid config (${issues}); using defaults`);
       cached2 = deepMerge(DEFAULTS, {});
     }
   } catch (err) {
     const isNotFound = err instanceof Error && "code" in err && err.code === "ENOENT";
     if (!isNotFound) {
-      process.stderr.write(`[recall] failed to load config: ${err}; using defaults
-`);
+      log.warn(`failed to load config: ${err}; using defaults`);
     }
     cached2 = deepMerge(DEFAULTS, {});
   }

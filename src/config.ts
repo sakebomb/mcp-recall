@@ -3,6 +3,7 @@ import { readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { z } from "zod";
+import { log } from "./log";
 
 const RecallConfigSchema = z.object({
   store: z.object({
@@ -105,7 +106,7 @@ export function loadConfig(): RecallConfig {
       const issues = result.error.issues
         .map((i) => `${i.path.join(".")}: ${i.message}`)
         .join(", ");
-      process.stderr.write(`[recall] invalid config (${issues}); using defaults\n`);
+      log.warn(`invalid config (${issues}); using defaults`);
       cached = deepMerge(DEFAULTS, {});
     }
   } catch (err: unknown) {
@@ -114,7 +115,7 @@ export function loadConfig(): RecallConfig {
       "code" in err &&
       (err as NodeJS.ErrnoException).code === "ENOENT";
     if (!isNotFound) {
-      process.stderr.write(`[recall] failed to load config: ${err}; using defaults\n`);
+      log.warn(`failed to load config: ${err}; using defaults`);
     }
     cached = deepMerge(DEFAULTS, {});
   }
