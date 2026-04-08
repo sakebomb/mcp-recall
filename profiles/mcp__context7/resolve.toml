@@ -1,0 +1,15 @@
+[profile]
+id          = "mcp__context7__resolve"
+version     = "1.0.0"
+description = "Context7 resolve-library-id — truncates library search results to top-level fields"
+mcp_pattern = "mcp__context7__resolve-library-id"
+short_name  = "context7-resolve"
+author      = "sakebomb"
+mcp_url     = "https://github.com/upstash/context7"
+sample_tool = "mcp__context7__resolve-library-id"
+
+[strategy]
+type            = "json_truncate"
+max_depth       = 2
+max_array_items = 5
+fallback_chars  = 500

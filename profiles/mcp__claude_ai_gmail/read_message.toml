@@ -1,0 +1,23 @@
+[profile]
+id          = "mcp__claude_ai_gmail__read_message"
+version     = "1.0.0"
+description = "Gmail single message — extracts id, threadId, snippet, and labelIds; skips full payload"
+mcp_pattern = "mcp__claude_ai_Gmail__gmail_read_message"
+short_name  = "gmail-message"
+author      = "sakebomb"
+mcp_url     = "https://gmail.mcp.claude.com"
+sample_tool = "mcp__claude_ai_Gmail__gmail_read_message"
+
+[strategy]
+type                = "json_extract"
+items_path          = ["."]
+fields              = ["id", "threadId", "snippet", "labelIds"]
+max_items           = 1
+max_chars_per_field = 300
+fallback_chars      = 500
+
+[strategy.labels]
+"id"       = "ID"
+"threadId" = "Thread"
+"snippet"  = "Preview"
+"labelIds" = "Labels"

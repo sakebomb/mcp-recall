@@ -1,0 +1,14 @@
+[profile]
+id          = "mcp__claude_ai_gmail"
+version     = "1.0.0"
+description = "Gmail MCP catch-all — truncates any tool output not matched by a more specific profile"
+mcp_pattern = "mcp__claude_ai_Gmail__*"
+short_name  = "gmail"
+author      = "sakebomb"
+mcp_url     = "https://gmail.mcp.claude.com"
+
+[strategy]
+type            = "json_truncate"
+max_depth       = 2
+max_array_items = 3
+fallback_chars  = 500
