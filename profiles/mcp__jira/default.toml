@@ -1,9 +1,11 @@
 [profile]
 id          = "mcp__jira"
-version     = "1.0.0"
-description = "Jira issue and search results — extracts key, summary, status, assignee, priority"
+version     = "1.1.0"
+description = "Jira issue and search results — extracts key, type, summary, status, assignee, priority"
 mcp_pattern = "mcp__jira__*"
+short_name  = "jira"
 author      = "sakebomb"
+mcp_url     = "https://developer.atlassian.com/cloud/jira/platform/rest/v3/"
 sample_tool = "mcp__jira__search_issues"
 
 [strategy]
@@ -11,6 +13,7 @@ type       = "json_extract"
 items_path = ["issues", "nodes"]
 fields     = [
   "key",
+  "fields.issuetype.name",
   "fields.summary",
   "fields.status.name",
   "fields.assignee.displayName",
@@ -22,6 +25,7 @@ fallback_chars      = 500
 
 [strategy.labels]
 "key"                         = "Key"
+"fields.issuetype.name"       = "Type"
 "fields.summary"              = "Summary"
 "fields.status.name"          = "Status"
 "fields.assignee.displayName" = "Assignee"
