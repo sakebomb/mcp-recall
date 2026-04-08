@@ -66,9 +66,9 @@ export async function readJsonFile(filePath: string): Promise<Record<string, unk
   try {
     const content = await readFile(filePath, "utf8");
     return JSON.parse(content) as Record<string, unknown>;
-  } catch (e: any) {
-    if (e.code === "ENOENT") return {};
-    throw new Error(`Cannot parse ${filePath}: ${e.message}`);
+  } catch (e: unknown) {
+    if (e instanceof Error && (e as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw new Error(`Cannot parse ${filePath}: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
@@ -172,6 +172,12 @@ export async function removeClaudeMd(filePath: string): Promise<boolean> {
 export const SESSION_START_MARKER = "session-start";
 export const POST_TOOL_USE_MARKER = "post-tool-use";
 export const POST_TOOL_USE_MATCHER = "(mcp__(?!recall__).*|Bash)";
+
+/** Shape of a single hook entry in Claude Code's settings.json hooks array. */
+interface HookEntry {
+  hooks: Array<{ type: string; command: string; timeout?: number }>;
+  matcher?: string;
+}
 
 export function makeSessionStartEntry(cliJs: string) {
   return {
@@ -287,7 +293,7 @@ export async function installCommand(opts: InstallOptions = {}): Promise<void> {
     anyChange = true;
     console.log(`${GREEN}✓${RESET} SessionStart hook added    ${DIM}(${settingsPath})${RESET}`);
   } else {
-    const currentCmd = ((ssHooks[ssIdx] as any)?.hooks?.[0]?.command as string | undefined);
+    const currentCmd = (ssHooks[ssIdx] as HookEntry).hooks[0]?.command;
     if (currentCmd !== newSS.hooks[0].command) {
       ssHooks[ssIdx] = newSS;
       hooks["SessionStart"] = ssHooks;
@@ -310,7 +316,7 @@ export async function installCommand(opts: InstallOptions = {}): Promise<void> {
     anyChange = true;
     console.log(`${GREEN}✓${RESET} PostToolUse hook added     ${DIM}(${settingsPath})${RESET}`);
   } else {
-    const currentCmd = ((ptuHooks[ptuIdx] as any)?.hooks?.[0]?.command as string | undefined);
+    const currentCmd = (ptuHooks[ptuIdx] as HookEntry).hooks[0]?.command;
     if (currentCmd !== newPTU.hooks[0].command) {
       ptuHooks[ptuIdx] = newPTU;
       hooks["PostToolUse"] = ptuHooks;

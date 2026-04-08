@@ -179,8 +179,12 @@ function applyMigrations(db: Database): void {
   for (const sql of MIGRATIONS) {
     try {
       db.run(sql);
-    } catch {
-      // Column already exists — safe to ignore
+    } catch (e) {
+      // Only swallow "duplicate column" errors — ALTER TABLE IF NOT EXISTS is not
+      // supported for columns in SQLite, so this is the standard approach.
+      if (!(e instanceof Error) || !e.message.includes("duplicate column")) {
+        throw e;
+      }
     }
   }
 }
@@ -550,7 +554,11 @@ export function forgetOutputs(
   }
 
   if (deleted >= VACUUM_THRESHOLD) {
-    try { db.run("VACUUM"); } catch {}
+    try {
+      db.run("VACUUM");
+    } catch (e) {
+      process.stderr.write(`[mcp-recall] warn: VACUUM failed — ${e instanceof Error ? e.message : e}\n`);
+    }
   }
 
   return deleted;

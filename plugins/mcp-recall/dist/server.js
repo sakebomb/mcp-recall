@@ -19629,7 +19629,11 @@ function applyMigrations(db) {
   for (const sql of MIGRATIONS) {
     try {
       db.run(sql);
-    } catch {}
+    } catch (e) {
+      if (!(e instanceof Error) || !e.message.includes("duplicate column")) {
+        throw e;
+      }
+    }
   }
 }
 var instance = null;
@@ -19648,6 +19652,13 @@ function getDb(path) {
   instance.run(SCHEMA);
   applyMigrations(instance);
   return instance;
+}
+function closeDb() {
+  if (instance) {
+    instance.run("PRAGMA optimize");
+    instance.close();
+  }
+  instance = null;
 }
 var CHUNK_SIZE = 512;
 var CHUNK_OVERLAP = 64;
@@ -19797,7 +19808,10 @@ function forgetOutputs(db, project_key, options) {
   if (deleted >= VACUUM_THRESHOLD) {
     try {
       db.run("VACUUM");
-    } catch {}
+    } catch (e) {
+      process.stderr.write(`[mcp-recall] warn: VACUUM failed \u2014 ${e instanceof Error ? e.message : e}
+`);
+    }
   }
   return deleted;
 }
@@ -21420,5 +21434,10 @@ server.tool("recall__context", "Session orientation: pinned items, recent notes,
 }, safeTool((args) => ({
   content: [{ type: "text", text: toolContext(db, projectKey, args) }]
 })));
+process.on("exit", () => closeDb());
+process.on("SIGTERM", () => {
+  closeDb();
+  process.exit(0);
+});
 var transport = new StdioServerTransport;
 await server.connect(transport);
