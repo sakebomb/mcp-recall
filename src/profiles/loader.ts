@@ -12,7 +12,7 @@ import { readdirSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import type { LoadedProfile, ProfileSpec, ProfileTier } from "./types";
-import { dbg } from "../debug";
+import { log } from "../log";
 
 // ── path resolution ──────────────────────────────────────────────────────────
 
@@ -78,7 +78,7 @@ function loadSpec(filePath: string): ProfileSpec | null {
   try {
     parsed = parse(raw);
   } catch (e) {
-    dbg(`profile parse error · ${filePath}: ${e instanceof Error ? e.message : String(e)}`);
+    log.debug(`profile parse error · ${filePath}: ${e instanceof Error ? e.message : String(e)}`);
     return null;
   }
 
@@ -101,7 +101,7 @@ function validateSpec(raw: unknown, filePath: string): ProfileSpec | null {
   const strategy = obj["strategy"] as Record<string, unknown> | undefined;
 
   if (!profile || !strategy) {
-    dbg(`profile skip · missing [profile] or [strategy] · ${filePath}`);
+    log.debug(`profile skip · missing [profile] or [strategy] · ${filePath}`);
     return null;
   }
 
@@ -111,20 +111,20 @@ function validateSpec(raw: unknown, filePath: string): ProfileSpec | null {
     typeof profile["description"] !== "string" ||
     (typeof profile["mcp_pattern"] !== "string" && !Array.isArray(profile["mcp_pattern"]))
   ) {
-    dbg(`profile skip · missing required fields · ${filePath}`);
+    log.debug(`profile skip · missing required fields · ${filePath}`);
     return null;
   }
 
   const type = strategy["type"];
   if (!VALID_TYPES.has(type as string)) {
-    dbg(`profile skip · unknown strategy.type "${type}" · ${filePath}`);
+    log.debug(`profile skip · unknown strategy.type "${type}" · ${filePath}`);
     return null;
   }
 
   if (type === "json_extract") {
     const fields = strategy["fields"];
     if (!Array.isArray(fields) || fields.length === 0) {
-      dbg(`profile skip · json_extract missing fields · ${filePath}`);
+      log.debug(`profile skip · json_extract missing fields · ${filePath}`);
       return null;
     }
   }
@@ -140,7 +140,7 @@ function validateSpec(raw: unknown, filePath: string): ProfileSpec | null {
   for (const [field, ceiling] of numericCeilings) {
     const val = strategy[field];
     if (val !== undefined && typeof val === "number" && val > ceiling) {
-      dbg(`profile skip · ${field} exceeds maximum allowed value of ${ceiling} · ${filePath}`);
+      log.debug(`profile skip · ${field} exceeds maximum allowed value of ${ceiling} · ${filePath}`);
       return null;
     }
   }
