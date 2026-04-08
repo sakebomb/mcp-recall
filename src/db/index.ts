@@ -233,6 +233,17 @@ export function getDb(path: string): Database {
   return instance;
 }
 
+/**
+ * Applies the full schema and migrations to an existing connection.
+ * Useful in tests that open a second raw connection to the same DB file and
+ * need the schema available without depending on WAL checkpoint visibility.
+ * All DDL uses IF NOT EXISTS / duplicate-column guards so it is idempotent.
+ */
+export function initSchema(db: Database): void {
+  db.run(SCHEMA);
+  applyMigrations(db);
+}
+
 /** Closes the singleton database connection and resets the instance. Call in tests after each case. */
 export function closeDb(): void {
   if (instance) {

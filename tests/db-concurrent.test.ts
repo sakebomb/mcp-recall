@@ -14,6 +14,7 @@ import { tmpdir } from "os";
 import {
   getDb,
   closeDb,
+  initSchema,
   storeOutput,
   listOutputs,
   forgetOutputs,
@@ -42,12 +43,15 @@ function tempDb(): { dir: string; dbPath: string } {
 
 /**
  * Open a second raw connection to an already-initialised WAL file.
+ * Runs initSchema() so the connection has the full schema regardless of
+ * WAL checkpoint visibility — avoids flaky "no such table" errors in CI.
  * The caller is responsible for closing it.
  */
 function openSecondConnection(dbPath: string, busyTimeout = 5000): Database {
   const db = new Database(dbPath);
   db.run("PRAGMA journal_mode=WAL");
   db.run(`PRAGMA busy_timeout=${busyTimeout}`);
+  initSchema(db);
   return db;
 }
 
@@ -70,9 +74,8 @@ describe("concurrent DB access", () => {
     const { dir, dbPath } = tempDb();
     cleanupDir = dir;
 
-    const db1 = getDb(dbPath);                     // initialises schema + WAL
-    db1.run("PRAGMA wal_checkpoint(TRUNCATE)");   // flush + truncate WAL so db2 sees schema in main DB file
-    const db2 = openSecondConnection(dbPath);     // second writer
+    const db1 = getDb(dbPath);                // initialises schema + WAL
+    const db2 = openSecondConnection(dbPath); // second writer — initSchema() called inside
 
     for (let i = 0; i < 15; i++) {
       storeOutput(db1, makeInput({ summary: `db1 item ${i}` }));
@@ -80,9 +83,13 @@ describe("concurrent DB access", () => {
     }
 
     db2.close();
-    // Checkpoint the WAL so db1's next read sees all of db2's committed frames.
-    db1.run("PRAGMA wal_checkpoint(FULL)");
-    expect(listOutputs(db1, { project_key: PROJECT_KEY, limit: 100 }).length).toBe(30);
+    // Close and reopen db1 so the new connection gets a fresh WAL read mark
+    // that includes all of db2's committed frames. A checkpoint alone is not
+    // sufficient because db1's read snapshot is anchored to when it last
+    // started a transaction, which may predate db2's writes.
+    closeDb();
+    const dbVerify = getDb(dbPath);
+    expect(listOutputs(dbVerify, { project_key: PROJECT_KEY, limit: 100 }).length).toBe(30);
   });
 
   // -------------------------------------------------------------------------
