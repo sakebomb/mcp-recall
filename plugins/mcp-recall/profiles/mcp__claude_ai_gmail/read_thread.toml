@@ -1,0 +1,15 @@
+[profile]
+id          = "mcp__claude_ai_gmail__read_thread"
+version     = "1.0.0"
+description = "Gmail thread — depth-truncates to show thread snippet and first 3 messages without full payloads"
+mcp_pattern = "mcp__claude_ai_Gmail__gmail_read_thread"
+short_name  = "gmail-thread"
+author      = "sakebomb"
+mcp_url     = "https://gmail.mcp.claude.com"
+sample_tool = "mcp__claude_ai_Gmail__gmail_read_thread"
+
+[strategy]
+type            = "json_truncate"
+max_depth       = 2
+max_array_items = 3
+fallback_chars  = 500

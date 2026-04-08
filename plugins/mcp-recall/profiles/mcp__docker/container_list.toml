@@ -1,0 +1,23 @@
+[profile]
+id          = "mcp__docker__container_list"
+version     = "1.0.0"
+description = "Docker container list — extracts name, image, status, and state per container"
+mcp_pattern = "mcp__docker__docker_container_list"
+short_name  = "docker-list"
+author      = "sakebomb"
+mcp_url     = "https://github.com/docker/mcp-servers"
+sample_tool = "mcp__docker__docker_container_list"
+
+[strategy]
+type                = "json_extract"
+items_path          = [""]
+fields              = ["Names", "Image", "Status", "State"]
+max_items           = 25
+max_chars_per_field = 100
+fallback_chars      = 500
+
+[strategy.labels]
+"Names"  = "Name"
+"Image"  = "Image"
+"Status" = "Status"
+"State"  = "State"

@@ -5913,8 +5913,49 @@ ${head}${truncated ? `
   return { summary, originalSize };
 };
 
+// src/handlers/json.ts
+var MAX_DEPTH = 3;
+var MAX_ARRAY_ITEMS = 3;
+function truncate(value, depth) {
+  if (depth > MAX_DEPTH)
+    return "\u2026";
+  if (Array.isArray(value)) {
+    const items = value.slice(0, MAX_ARRAY_ITEMS).map((v) => truncate(v, depth + 1));
+    const more = value.length - MAX_ARRAY_ITEMS;
+    if (more > 0)
+      items.push(`\u2026${more} more`);
+    return items;
+  }
+  if (value !== null && typeof value === "object") {
+    const result = {};
+    for (const [k, v] of Object.entries(value)) {
+      result[k] = truncate(v, depth + 1);
+    }
+    return result;
+  }
+  return value;
+}
+var jsonHandler = (_toolName, output) => {
+  const raw = extractText(output);
+  const originalSize = Buffer.byteLength(raw, "utf8");
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    const excerpt = raw.slice(0, 500).trimEnd();
+    return {
+      summary: excerpt.length < raw.length ? `${excerpt}
+\u2026` : excerpt,
+      originalSize
+    };
+  }
+  const truncated = truncate(parsed, 0);
+  const summary = JSON.stringify(truncated, null, 2);
+  return { summary, originalSize };
+};
+
 // src/handlers/shell.ts
-var HEAD_STDOUT = 50;
+var HEAD_STDOUT = 25;
 var HEAD_STDERR = 20;
 var ANSI_RE = /[\x1b\x9b][\[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><~]/g;
 function stripAnsi(text) {
@@ -5976,6 +6017,14 @@ var shellHandler = (_toolName, output) => {
     const stdout = stripSshNoise(stripAnsi(structured.stdout ?? structured.output ?? ""));
     const stderr = stripSshNoise(stripAnsi(structured.stderr ?? ""));
     const exitCode = structured.returncode ?? structured.exit_code;
+    const trimmedStdout = stdout.trim();
+    if (trimmedStdout.startsWith("{") || trimmedStdout.startsWith("[")) {
+      try {
+        JSON.parse(trimmedStdout);
+        const { summary } = jsonHandler(_toolName, trimmedStdout);
+        return { summary, originalSize };
+      } catch {}
+    }
     const exitStr = exitCode !== undefined ? `exit:${exitCode} \xB7 ` : "";
     const stdoutFmt = formatLines(stdout, HEAD_STDOUT);
     const hasStderr = stderr.trim().length > 0;
@@ -5993,6 +6042,14 @@ var shellHandler = (_toolName, output) => {
 `), originalSize };
   }
   const text = stripSshNoise(stripAnsi(raw));
+  const trimmedText = text.trim();
+  if (trimmedText.startsWith("{") || trimmedText.startsWith("[")) {
+    try {
+      JSON.parse(trimmedText);
+      const { summary } = jsonHandler(_toolName, trimmedText);
+      return { summary, originalSize };
+    } catch {}
+  }
   const fmt = formatLines(text, HEAD_STDOUT);
   return {
     summary: `[bash \xB7 ${fmt.header}]
@@ -6014,7 +6071,18 @@ function extractStdout(output) {
     if (typeof obj.output === "string")
       return stripSshNoise(stripAnsi(obj.output));
   }
-  return stripSshNoise(stripAnsi(extractText(output)));
+  const text = extractText(output);
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const p = parsed;
+      if (typeof p.stdout === "string")
+        return stripSshNoise(stripAnsi(p.stdout));
+      if (typeof p.output === "string")
+        return stripSshNoise(stripAnsi(p.output));
+    }
+  } catch {}
+  return stripSshNoise(stripAnsi(text));
 }
 function extractStderr(output) {
   if (output !== null && typeof output === "object") {
@@ -6455,6 +6523,54 @@ ${stderr}`.trim();
   return { summary: lines.join(`
 `), originalSize };
 };
+var ghHandler = (toolName, output) => {
+  const stdout = extractStdout(output);
+  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const lines = stdout.trim().split(`
+`).filter((l) => l.trim());
+  if (lines.length <= 5)
+    return shellHandler(toolName, output);
+  const listLines = lines.filter((l) => /^#?\d+\t/.test(l));
+  if (listLines.length >= Math.ceil(lines.length * 0.5)) {
+    const shown = listLines.slice(0, 10);
+    const overflow = listLines.length > 10 ? `
+  \u2026 (+${listLines.length - 10} more)` : "";
+    const rows = shown.map((l) => {
+      const parts = l.split("\t").slice(0, 3);
+      return `  ${parts.join("  ").slice(0, 100)}`;
+    });
+    return {
+      summary: `gh \u2014 ${listLines.length} item${listLines.length === 1 ? "" : "s"}
+` + rows.join(`
+`) + overflow,
+      originalSize
+    };
+  }
+  const passCount = lines.filter((l) => /\tpass\b/i.test(l)).length;
+  const failCount = lines.filter((l) => /\tfail\b/i.test(l)).length;
+  if (passCount + failCount >= Math.ceil(lines.length * 0.4)) {
+    const failLines = lines.filter((l) => /\tfail\b/i.test(l)).slice(0, 5).map((l) => `  fail: ${l.split("\t")[0].trim().slice(0, 80)}`);
+    return {
+      summary: [`gh checks \u2014 ${passCount} pass, ${failCount} fail`, ...failLines].join(`
+`),
+      originalSize
+    };
+  }
+  const kvLines = lines.filter((l) => /^(title|state|author|labels|number|assignees|milestone):\t/i.test(l));
+  if (kvLines.length >= 2) {
+    const meta = kvLines.slice(0, 5).map((l) => {
+      const [key, ...vals] = l.split("\t");
+      return `  ${(key ?? "").replace(/:$/, "")}: ${vals.join(" ").trim().slice(0, 100)}`;
+    });
+    return {
+      summary: `gh view
+${meta.join(`
+`)}`,
+      originalSize
+    };
+  }
+  return shellHandler(toolName, output);
+};
 function getBashHandler(input) {
   const command = extractCommand(input);
   if (!command)
@@ -6475,6 +6591,8 @@ function getBashHandler(input) {
     return dockerPsHandler;
   if (/^(make|just)(\s|$)/.test(command))
     return buildToolHandler;
+  if (/^gh\s+/.test(command))
+    return ghHandler;
   return shellHandler;
 }
 
@@ -7236,47 +7354,6 @@ function looksLikeCsv(text) {
   const firstLineCommas = (lines[0].match(/,/g) ?? []).length;
   return firstLineCommas >= 2;
 }
-
-// src/handlers/json.ts
-var MAX_DEPTH = 3;
-var MAX_ARRAY_ITEMS = 3;
-function truncate(value, depth) {
-  if (depth > MAX_DEPTH)
-    return "\u2026";
-  if (Array.isArray(value)) {
-    const items = value.slice(0, MAX_ARRAY_ITEMS).map((v) => truncate(v, depth + 1));
-    const more = value.length - MAX_ARRAY_ITEMS;
-    if (more > 0)
-      items.push(`\u2026${more} more`);
-    return items;
-  }
-  if (value !== null && typeof value === "object") {
-    const result = {};
-    for (const [k, v] of Object.entries(value)) {
-      result[k] = truncate(v, depth + 1);
-    }
-    return result;
-  }
-  return value;
-}
-var jsonHandler = (_toolName, output) => {
-  const raw = extractText(output);
-  const originalSize = Buffer.byteLength(raw, "utf8");
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    const excerpt = raw.slice(0, 500).trimEnd();
-    return {
-      summary: excerpt.length < raw.length ? `${excerpt}
-\u2026` : excerpt,
-      originalSize
-    };
-  }
-  const truncated = truncate(parsed, 0);
-  const summary = JSON.stringify(truncated, null, 2);
-  return { summary, originalSize };
-};
 
 // src/handlers/generic.ts
 var MAX_CHARS = 500;

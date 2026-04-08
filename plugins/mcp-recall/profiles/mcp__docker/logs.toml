@@ -1,0 +1,13 @@
+[profile]
+id          = "mcp__docker__logs"
+version     = "1.0.0"
+description = "Docker container logs — truncates raw log output to the first 1500 characters"
+mcp_pattern = "mcp__docker__docker_container_logs"
+short_name  = "docker-logs"
+author      = "sakebomb"
+mcp_url     = "https://github.com/docker/mcp-servers"
+sample_tool = "mcp__docker__docker_container_logs"
+
+[strategy]
+type      = "text_truncate"
+max_chars = 1500

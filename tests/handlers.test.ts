@@ -10,7 +10,7 @@ import { slackHandler } from "../src/handlers/slack";
 import { jsonHandler } from "../src/handlers/json";
 import { genericHandler } from "../src/handlers/generic";
 import { getHandler, extractText } from "../src/handlers/index";
-import { getBashHandler, gitDiffHandler, gitLogHandler, terraformPlanHandler, gitStatusHandler, packageInstallHandler, testRunnerHandler, dockerPsHandler, buildToolHandler } from "../src/handlers/bash";
+import { getBashHandler, gitDiffHandler, gitLogHandler, terraformPlanHandler, gitStatusHandler, packageInstallHandler, testRunnerHandler, dockerPsHandler, buildToolHandler, ghHandler } from "../src/handlers/bash";
 import { tavilyHandler } from "../src/handlers/tavily";
 import { databaseHandler } from "../src/handlers/database";
 import { sentryHandler } from "../src/handlers/sentry";
@@ -633,12 +633,34 @@ describe("shellHandler", () => {
     expect(summary).not.toContain("\x1b[");
   });
 
-  it("truncates at 50 lines with overflow count", () => {
-    const input = Array.from({ length: 60 }, (_, i) => `line${i + 1}`).join("\n");
+  it("truncates at 25 lines with overflow count", () => {
+    const input = Array.from({ length: 35 }, (_, i) => `line${i + 1}`).join("\n");
     const { summary } = shellHandler("mcp__bash__execute", input);
     expect(summary).toContain("line1");
     expect(summary).toContain("+10 more lines");
-    expect(summary).not.toContain("line60");
+    expect(summary).not.toContain("line35");
+  });
+
+  it("routes JSON stdout through the JSON handler (structured)", () => {
+    const json = JSON.stringify({ id: 1, name: "foo", tags: ["a", "b"] });
+    const input = JSON.stringify({ stdout: json, stderr: "", returncode: 0 });
+    const { summary } = shellHandler("mcp__bash__execute", input);
+    // JSON handler output — not the raw line-count header
+    expect(summary).not.toContain("[bash ·");
+    expect(summary).toContain('"foo"');
+  });
+
+  it("routes JSON stdout through the JSON handler (plain string)", () => {
+    const json = JSON.stringify({ status: "ok", count: 42 });
+    const { summary } = shellHandler("mcp__bash__execute", json);
+    expect(summary).not.toContain("[bash ·");
+    expect(summary).toContain('"ok"');
+  });
+
+  it("does not misroute invalid JSON-looking output", () => {
+    const input = "{ this is not json }";
+    const { summary } = shellHandler("mcp__bash__execute", input);
+    expect(summary).toContain("[bash ·");
   });
 
   it("handles structured stdout/stderr output", () => {
@@ -832,9 +854,84 @@ describe("getBashHandler", () => {
     expect(getBashHandler({ command: "npm test" })).toBe(shellHandler);
   });
 
+  it("routes gh commands to ghHandler", () => {
+    expect(getBashHandler({ command: "gh pr list" })).toBe(ghHandler);
+    expect(getBashHandler({ command: "gh issue list" })).toBe(ghHandler);
+    expect(getBashHandler({ command: "gh pr checks 142" })).toBe(ghHandler);
+  });
+
   it("getHandler routes Bash tool name to bash dispatcher", () => {
     const handler = getHandler("Bash", "output", { command: "git diff HEAD" });
     expect(handler).toBe(gitDiffHandler);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ghHandler
+// ---------------------------------------------------------------------------
+
+describe("ghHandler", () => {
+  isolateProfiles();
+
+  const makeOutput = (stdout: string) =>
+    JSON.stringify({ stdout, stderr: "", exit_code: 0 });
+
+  it("compresses gh issue list / pr list tab output", () => {
+    const rows = Array.from(
+      { length: 12 },
+      (_, i) => `#${i + 1}\tIssue title ${i + 1}\tbug\t2026-03-0${(i % 9) + 1}`
+    ).join("\n");
+    const { summary } = ghHandler("Bash", makeOutput(rows));
+    expect(summary).toContain("12 items");
+    expect(summary).toContain("#1");
+    expect(summary).toContain("… (+2 more)");
+  });
+
+  it("compresses gh pr checks tab output", () => {
+    const rows = [
+      "Test & typecheck\tpass\t14s\thttps://github.com/...",
+      "Bundle freshness\tpass\t6s\thttps://github.com/...",
+      "Lint\tfail\t2s\thttps://github.com/...",
+      "Security scan\tpass\t30s\thttps://github.com/...",
+      "Deploy preview\tpass\t45s\thttps://github.com/...",
+      "E2E tests\tpass\t90s\thttps://github.com/...",
+    ].join("\n");
+    const { summary } = ghHandler("Bash", makeOutput(rows));
+    expect(summary).toContain("5 pass");
+    expect(summary).toContain("1 fail");
+    expect(summary).toContain("fail: Lint");
+  });
+
+  it("compresses gh pr view / issue view tab metadata", () => {
+    const view = [
+      "title:\tFix the thing",
+      "state:\tOPEN",
+      "author:\tsakebomb",
+      "labels:\tbug, P1: High",
+      "number:\t42",
+      "",
+      "Some longer body content that goes on for a while.",
+      "More body content here.",
+    ].join("\n");
+    const { summary } = ghHandler("Bash", makeOutput(view));
+    expect(summary).toContain("gh view");
+    expect(summary).toContain("title: Fix the thing");
+    expect(summary).toContain("state: OPEN");
+  });
+
+  it("falls back to shellHandler for short output", () => {
+    const short = "Pull request #142 was successfully merged.";
+    const { summary } = ghHandler("Bash", makeOutput(short));
+    // Short output goes through shellHandler which wraps it normally
+    expect(summary).toContain("merged");
+  });
+
+  it("routes JSON stdout through JSON handler via fallback", () => {
+    const json = JSON.stringify({ id: 123, name: "mcp-recall", stars: 7 });
+    const { summary } = ghHandler("Bash", makeOutput(json));
+    // JSON handler output, not line-count header
+    expect(summary).not.toContain("[bash ·");
+    expect(summary).toContain('"mcp-recall"');
   });
 });
 

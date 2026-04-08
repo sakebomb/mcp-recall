@@ -26,7 +26,18 @@ function extractStdout(output: unknown): string {
     if (typeof obj.stdout === "string") return stripSshNoise(stripAnsi(obj.stdout));
     if (typeof obj.output === "string") return stripSshNoise(stripAnsi(obj.output));
   }
-  return stripSshNoise(stripAnsi(extractText(output)));
+  const text = extractText(output);
+  // Bash tool responses arrive as a JSON string: {exit_code, stdout, stderr}.
+  // Extract just the stdout so handlers work on the actual command output.
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const p = parsed as Record<string, unknown>;
+      if (typeof p.stdout === "string") return stripSshNoise(stripAnsi(p.stdout));
+      if (typeof p.output === "string") return stripSshNoise(stripAnsi(p.output));
+    }
+  } catch { /* not a structured JSON response */ }
+  return stripSshNoise(stripAnsi(text));
 }
 
 function extractStderr(output: unknown): string {
@@ -578,6 +589,76 @@ export const buildToolHandler: Handler = (
 };
 
 // ---------------------------------------------------------------------------
+// gh CLI (GitHub CLI)
+// ---------------------------------------------------------------------------
+
+export const ghHandler: Handler = (
+  toolName: string,
+  output: unknown
+): CompressionResult => {
+  const stdout = extractStdout(output);
+  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+
+  const lines = stdout.trim().split("\n").filter((l) => l.trim());
+
+  // Already compact — not worth specialising.
+  if (lines.length <= 5) return shellHandler(toolName, output);
+
+  // List output: gh issue list, gh pr list, gh run list, gh release list.
+  // Default format is tab-separated starting with #NUM or bare NUM.
+  const listLines = lines.filter((l) => /^#?\d+\t/.test(l));
+  if (listLines.length >= Math.ceil(lines.length * 0.5)) {
+    const shown = listLines.slice(0, 10);
+    const overflow =
+      listLines.length > 10 ? `\n  … (+${listLines.length - 10} more)` : "";
+    const rows = shown.map((l) => {
+      const parts = l.split("\t").slice(0, 3);
+      return `  ${parts.join("  ").slice(0, 100)}`;
+    });
+    return {
+      summary:
+        `gh — ${listLines.length} item${listLines.length === 1 ? "" : "s"}\n` +
+        rows.join("\n") + overflow,
+      originalSize,
+    };
+  }
+
+  // Check/run status output: gh pr checks, gh run view.
+  // Tab-separated with "pass" or "fail" as the second field.
+  const passCount = lines.filter((l) => /\tpass\b/i.test(l)).length;
+  const failCount = lines.filter((l) => /\tfail\b/i.test(l)).length;
+  if (passCount + failCount >= Math.ceil(lines.length * 0.4)) {
+    const failLines = lines
+      .filter((l) => /\tfail\b/i.test(l))
+      .slice(0, 5)
+      .map((l) => `  fail: ${l.split("\t")[0]!.trim().slice(0, 80)}`);
+    return {
+      summary: [`gh checks — ${passCount} pass, ${failCount} fail`, ...failLines].join("\n"),
+      originalSize,
+    };
+  }
+
+  // View/metadata output: gh pr view, gh issue view (non-JSON format).
+  // Lines like "title:\tPR title" or "state:\tOPEN".
+  const kvLines = lines.filter((l) =>
+    /^(title|state|author|labels|number|assignees|milestone):\t/i.test(l)
+  );
+  if (kvLines.length >= 2) {
+    const meta = kvLines.slice(0, 5).map((l) => {
+      const [key, ...vals] = l.split("\t");
+      return `  ${(key ?? "").replace(/:$/, "")}: ${vals.join(" ").trim().slice(0, 100)}`;
+    });
+    return {
+      summary: `gh view\n${meta.join("\n")}`,
+      originalSize,
+    };
+  }
+
+  // Fall through: shellHandler handles JSON detection + 25-line cap.
+  return shellHandler(toolName, output);
+};
+
+// ---------------------------------------------------------------------------
 // Dispatcher
 // ---------------------------------------------------------------------------
 
@@ -602,6 +683,7 @@ export function getBashHandler(input: unknown): Handler {
   if (/^docker(-compose)?\s+(ps|compose\s+ps)(\s|$)/.test(command) ||
       /^docker\s+compose\s+ps(\s|$)/.test(command)) return dockerPsHandler;
   if (/^(make|just)(\s|$)/.test(command)) return buildToolHandler;
+  if (/^gh\s+/.test(command)) return ghHandler;
 
   return shellHandler;
 }

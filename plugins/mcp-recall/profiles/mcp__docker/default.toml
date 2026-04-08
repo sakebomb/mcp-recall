@@ -1,0 +1,14 @@
+[profile]
+id          = "mcp__docker"
+version     = "1.0.0"
+description = "Docker MCP catch-all — depth-truncates JSON for inspect, system info, and other tool outputs"
+mcp_pattern = "mcp__docker__*"
+short_name  = "docker"
+author      = "sakebomb"
+mcp_url     = "https://github.com/docker/mcp-servers"
+
+[strategy]
+type            = "json_truncate"
+max_depth       = 3
+max_array_items = 5
+fallback_chars  = 500
