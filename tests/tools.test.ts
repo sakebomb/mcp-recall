@@ -260,8 +260,8 @@ describe("MCP tool handlers", () => {
       const page1 = toolListStored(db, PROJECT_KEY, { limit: 2, offset: 0 });
       const page2 = toolListStored(db, PROJECT_KEY, { limit: 2, offset: 2 });
       // First IDs should differ between pages
-      const id1 = page1.match(/recall_[0-9a-f]{8}/)?.[0];
-      const id2 = page2.match(/recall_[0-9a-f]{8}/)?.[0];
+      const id1 = page1.match(/recall_[0-9a-f]{16}/)?.[0];
+      const id2 = page2.match(/recall_[0-9a-f]{16}/)?.[0];
       expect(id1).not.toBe(id2);
     });
 
@@ -482,7 +482,7 @@ describe("MCP tool handlers", () => {
 
     it("returns stored id in response", () => {
       const result = toolNote(db, PROJECT_KEY, { text: "some note text" });
-      expect(result).toMatch(/recall_[0-9a-f]{8}/);
+      expect(result).toMatch(/recall_[0-9a-f]{16}/);
     });
 
     it("includes title in summary when provided", () => {

@@ -238,7 +238,7 @@ describe("handlePostToolUse", () => {
         content: [{ type: "text", text: LARGE_GITHUB_RESPONSE }],
       })
     );
-    expect(result.updatedMCPToolOutput).toMatch(/^\[recall:recall_[0-9a-f]{8}/);
+    expect(result.updatedMCPToolOutput).toMatch(/^\[recall:recall_[0-9a-f]{16}/);
   });
 
   it("updatedMCPToolOutput contains size and reduction info", () => {
@@ -309,7 +309,7 @@ describe("handlePostToolUse", () => {
     }, { tool_input: { owner: "org", repo: "repo" } });
 
     const first = handlePostToolUse(input);
-    const idMatch = first.updatedMCPToolOutput!.match(/\[recall:(recall_[0-9a-f]{8})/);
+    const idMatch = first.updatedMCPToolOutput!.match(/\[recall:(recall_[0-9a-f]{16})/);
     const originalId = idMatch![1];
 
     const second = handlePostToolUse(input);

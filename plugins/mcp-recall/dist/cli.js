@@ -5278,7 +5278,7 @@ function storeChunks(db, id, full_content) {
   }
 }
 function generateId() {
-  return `recall_${randomBytes(4).toString("hex")}`;
+  return `recall_${randomBytes(8).toString("hex")}`;
 }
 function storeOutput(db, input) {
   const id = generateId();
@@ -5316,26 +5316,31 @@ function checkDedup(db, project_key, input_hash) {
 }
 function evictIfNeeded(db, project_key, max_size_mb) {
   const max_bytes = max_size_mb * 1024 * 1024;
-  let evicted = 0;
-  while (true) {
-    const total = db.prepare(`
-      SELECT COALESCE(SUM(original_size), 0) as n
-      FROM stored_outputs WHERE project_key = ?
-    `).get(project_key).n;
-    if (total <= max_bytes)
+  const { total } = db.prepare(`
+    SELECT COALESCE(SUM(original_size), 0) as total
+    FROM stored_outputs WHERE project_key = ?
+  `).get(project_key);
+  if (total <= max_bytes)
+    return 0;
+  const bytesToShed = total - max_bytes;
+  const candidates = db.prepare(`
+    SELECT id, original_size FROM stored_outputs
+    WHERE project_key = ? AND pinned = 0
+    ORDER BY access_count ASC, last_accessed ASC NULLS FIRST, created_at ASC
+  `).all(project_key);
+  if (candidates.length === 0)
+    return 0;
+  const toEvict = [];
+  let shed = 0;
+  for (const row of candidates) {
+    if (shed >= bytesToShed)
       break;
-    const candidate = db.prepare(`
-      SELECT id FROM stored_outputs
-      WHERE project_key = ? AND pinned = 0
-      ORDER BY access_count ASC, last_accessed ASC NULLS FIRST, created_at ASC
-      LIMIT 1
-    `).get(project_key);
-    if (!candidate)
-      break;
-    db.prepare(`DELETE FROM stored_outputs WHERE id = ?`).run(candidate.id);
-    evicted++;
+    toEvict.push(row.id);
+    shed += row.original_size;
   }
-  return evicted;
+  const placeholders = toEvict.map(() => "?").join(",");
+  db.prepare(`DELETE FROM stored_outputs WHERE id IN (${placeholders})`).run(...toEvict);
+  return toEvict.length;
 }
 function countAndDelete(db, where, params) {
   const count = db.prepare(`SELECT COUNT(*) as n FROM stored_outputs WHERE ${where}`).get(...params).n;
@@ -5695,7 +5700,7 @@ var SECRET_PATTERNS = [
   },
   {
     name: "OpenAI API key",
-    pattern: /sk-[A-Za-z0-9]{32,}/
+    pattern: /sk-(?!ant-)[A-Za-z0-9]{32,}/
   },
   {
     name: "AWS access key ID",

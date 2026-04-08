@@ -297,7 +297,7 @@ export function sanitizeFtsQuery(query: string): string {
 // ---------------------------------------------------------------------------
 
 function generateId(): string {
-  return `recall_${randomBytes(4).toString("hex")}`;
+  return `recall_${randomBytes(8).toString("hex")}`;
 }
 
 /**
@@ -395,31 +395,41 @@ export function evictIfNeeded(
   max_size_mb: number
 ): number {
   const max_bytes = max_size_mb * 1024 * 1024;
-  let evicted = 0;
 
-  while (true) {
-    const total = (db.prepare(`
-      SELECT COALESCE(SUM(original_size), 0) as n
-      FROM stored_outputs WHERE project_key = ?
-    `).get(project_key) as { n: number }).n;
+  const { total } = db.prepare(`
+    SELECT COALESCE(SUM(original_size), 0) as total
+    FROM stored_outputs WHERE project_key = ?
+  `).get(project_key) as { total: number };
 
-    if (total <= max_bytes) break;
+  if (total <= max_bytes) return 0;
 
-    // Evict the least-frequently-accessed non-pinned item
-    const candidate = db.prepare(`
-      SELECT id FROM stored_outputs
-      WHERE project_key = ? AND pinned = 0
-      ORDER BY access_count ASC, last_accessed ASC NULLS FIRST, created_at ASC
-      LIMIT 1
-    `).get(project_key) as { id: string } | null;
+  const bytesToShed = total - max_bytes;
 
-    if (!candidate) break; // all remaining items are pinned
+  // Fetch all eviction candidates in LFU order — one query instead of one per item.
+  const candidates = db.prepare(`
+    SELECT id, original_size FROM stored_outputs
+    WHERE project_key = ? AND pinned = 0
+    ORDER BY access_count ASC, last_accessed ASC NULLS FIRST, created_at ASC
+  `).all(project_key) as { id: string; original_size: number }[];
 
-    db.prepare(`DELETE FROM stored_outputs WHERE id = ?`).run(candidate.id);
-    evicted++;
+  if (candidates.length === 0) return 0; // all remaining items are pinned
+
+  // Walk the candidate list, collecting IDs until we have shed enough bytes.
+  const toEvict: string[] = [];
+  let shed = 0;
+  for (const row of candidates) {
+    if (shed >= bytesToShed) break;
+    toEvict.push(row.id);
+    shed += row.original_size;
   }
 
-  return evicted;
+  // Single DELETE for all selected IDs.
+  const placeholders = toEvict.map(() => "?").join(",");
+  db.prepare(`DELETE FROM stored_outputs WHERE id IN (${placeholders})`).run(
+    ...(toEvict as unknown as SQLQueryBindings[])
+  );
+
+  return toEvict.length;
 }
 
 /**
@@ -532,7 +542,9 @@ function countAndDelete(db: Database, where: string, params: SQLQueryBindings[])
 
 /**
  * Deletes stored outputs matching the given criteria.
- * Pinned items are skipped unless `options.force` is true.
+ * Pinned items are skipped unless `options.force` is true — except for
+ * single-ID deletes (`options.id`), which always bypass pin protection
+ * since an explicit ID is an intentional target.
  * Exactly one selector (`id`, `tool`, `session_id`, `older_than_days`, or `all`) should be set.
  * Returns the number of items deleted.
  */
