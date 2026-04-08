@@ -20,30 +20,106 @@ import { getProfileHandler } from "../profiles";
 export type { CompressionResult, Handler } from "./types";
 export { extractText } from "./types";
 
+// ---------------------------------------------------------------------------
+// Typed-handler registry
+// ---------------------------------------------------------------------------
+
+/** A single entry in the handler registry. First match wins. */
+type HandlerMatcher = {
+  match: (toolName: string) => boolean;
+  handler: Handler;
+};
+
+/**
+ * Ordered list of typed handlers.  Dispatch walks this array and returns the
+ * first entry whose `match` function returns true for the tool name.
+ *
+ * Order is load-bearing: more-specific patterns (exact prefix matches) come
+ * before broader keyword matches so they are not shadowed.
+ */
+const HANDLER_REGISTRY: HandlerMatcher[] = [
+  {
+    match: (t) => t.includes("playwright") && t.includes("snapshot"),
+    handler: playwrightHandler,
+  },
+  {
+    match: (t) => t.startsWith("mcp__github__"),
+    handler: githubHandler,
+  },
+  {
+    match: (t) => t.startsWith("mcp__gitlab__"),
+    handler: gitlabHandler,
+  },
+  {
+    match: (t) => t.startsWith("mcp__stripe__"),
+    handler: stripeHandler,
+  },
+  {
+    match: (t) =>
+      t.startsWith("mcp__filesystem__") ||
+      t.includes("read_file") ||
+      t.includes("get_file"),
+    handler: filesystemHandler,
+  },
+  {
+    match: (t) =>
+      t.includes("bash") ||
+      t.includes("shell") ||
+      t.includes("terminal") ||
+      t.includes("run_command") ||
+      t.includes("ssh_exec") ||
+      t.includes("exec_command") ||
+      t.includes("remote_exec") ||
+      t.includes("container_exec"),
+    handler: shellHandler,
+  },
+  {
+    match: (t) => t.includes("linear"),
+    handler: linearHandler,
+  },
+  {
+    match: (t) => t.includes("slack"),
+    handler: slackHandler,
+  },
+  {
+    match: (t) => t.includes("tavily"),
+    handler: tavilyHandler,
+  },
+  {
+    match: (t) =>
+      t.includes("postgres") ||
+      t.includes("mysql") ||
+      t.includes("sqlite") ||
+      t.includes("database"),
+    handler: databaseHandler,
+  },
+  {
+    match: (t) => t.includes("sentry"),
+    handler: sentryHandler,
+  },
+  {
+    match: (t) => t.includes("csv"),
+    handler: csvHandler,
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Dispatch
+// ---------------------------------------------------------------------------
+
 /**
  * Returns the appropriate compression handler for a given MCP tool name.
  *
  * Dispatch order:
- *   1. Native Bash tool                     → bash handler (CLI-aware, routes on command)
- *   2. User / community profile match       → profile handler (beats TypeScript handlers)
- *   3. Playwright browser_snapshot          → playwright handler
- *   4. GitHub tools                         → github handler
- *   5. GitLab tools                         → gitlab handler
- *   6. Stripe tools                         → stripe handler
- *   7. Filesystem tools                     → filesystem handler
- *   8. Shell/bash/remote-exec               → shell handler
- *   9. Linear tools                         → linear handler
- *  10. Slack tools                          → slack handler
- *  11. Tavily search/research               → tavily handler
- *  12. Database query tools                 → database handler
- *  13. Sentry tools                         → sentry handler
- *  14. CSV tools (name-based)               → csv handler
- *  15. Bundled profile match                → profile handler
- *  16. Unmatched with JSON output           → json handler
- *  17. CSV content-based fallback           → csv handler
- *  18. Everything else                      → generic handler
+ *   1. Native Bash tool              → bash handler (CLI-aware, routes on command)
+ *   2. User / community profiles     → profile handler (beats TypeScript handlers)
+ *   3. HANDLER_REGISTRY (first match wins, ordered by specificity)
+ *   4. Bundled profile match         → profile handler
+ *   5. JSON content fallback         → json handler
+ *   6. CSV content fallback          → csv handler
+ *   7. Everything else               → generic handler
  *
- * `input` (tool_input) is used for the Bash tool to route on the command string.
+ * `input` (tool_input) is passed through to the Bash handler for CLI-aware routing.
  */
 export function getHandler(toolName: string, output: unknown, input?: unknown): Handler {
   // Native Bash tool — inspect tool_input.command for CLI-aware routing
@@ -55,70 +131,9 @@ export function getHandler(toolName: string, output: unknown, input?: unknown): 
   const highPriorityProfile = getProfileHandler(toolName, ["user", "community"]);
   if (highPriorityProfile) return highPriorityProfile;
 
-  if (toolName.includes("playwright") && toolName.includes("snapshot")) {
-    return playwrightHandler;
-  }
-
-  if (toolName.startsWith("mcp__github__")) {
-    return githubHandler;
-  }
-
-  if (toolName.startsWith("mcp__gitlab__")) {
-    return gitlabHandler;
-  }
-
-  if (toolName.startsWith("mcp__stripe__")) {
-    return stripeHandler;
-  }
-
-  if (
-    toolName.startsWith("mcp__filesystem__") ||
-    toolName.includes("read_file") ||
-    toolName.includes("get_file")
-  ) {
-    return filesystemHandler;
-  }
-
-  if (
-    toolName.includes("bash") ||
-    toolName.includes("shell") ||
-    toolName.includes("terminal") ||
-    toolName.includes("run_command") ||
-    toolName.includes("ssh_exec") ||
-    toolName.includes("exec_command") ||
-    toolName.includes("remote_exec") ||
-    toolName.includes("container_exec")
-  ) {
-    return shellHandler;
-  }
-
-  if (toolName.includes("linear")) {
-    return linearHandler;
-  }
-
-  if (toolName.includes("slack")) {
-    return slackHandler;
-  }
-
-  if (toolName.includes("tavily")) {
-    return tavilyHandler;
-  }
-
-  if (
-    toolName.includes("postgres") ||
-    toolName.includes("mysql") ||
-    toolName.includes("sqlite") ||
-    toolName.includes("database")
-  ) {
-    return databaseHandler;
-  }
-
-  if (toolName.includes("sentry")) {
-    return sentryHandler;
-  }
-
-  if (toolName.includes("csv")) {
-    return csvHandler;
+  // Walk the typed-handler registry in priority order
+  for (const { match, handler } of HANDLER_REGISTRY) {
+    if (match(toolName)) return handler;
   }
 
   // Bundled profiles — for tools without a TypeScript handler

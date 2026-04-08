@@ -7726,6 +7726,56 @@ function getProfileHandler(toolName, tiers = TIER_ORDER) {
 }
 
 // src/handlers/index.ts
+var HANDLER_REGISTRY = [
+  {
+    match: (t) => t.includes("playwright") && t.includes("snapshot"),
+    handler: playwrightHandler
+  },
+  {
+    match: (t) => t.startsWith("mcp__github__"),
+    handler: githubHandler
+  },
+  {
+    match: (t) => t.startsWith("mcp__gitlab__"),
+    handler: gitlabHandler
+  },
+  {
+    match: (t) => t.startsWith("mcp__stripe__"),
+    handler: stripeHandler
+  },
+  {
+    match: (t) => t.startsWith("mcp__filesystem__") || t.includes("read_file") || t.includes("get_file"),
+    handler: filesystemHandler
+  },
+  {
+    match: (t) => t.includes("bash") || t.includes("shell") || t.includes("terminal") || t.includes("run_command") || t.includes("ssh_exec") || t.includes("exec_command") || t.includes("remote_exec") || t.includes("container_exec"),
+    handler: shellHandler
+  },
+  {
+    match: (t) => t.includes("linear"),
+    handler: linearHandler
+  },
+  {
+    match: (t) => t.includes("slack"),
+    handler: slackHandler
+  },
+  {
+    match: (t) => t.includes("tavily"),
+    handler: tavilyHandler
+  },
+  {
+    match: (t) => t.includes("postgres") || t.includes("mysql") || t.includes("sqlite") || t.includes("database"),
+    handler: databaseHandler
+  },
+  {
+    match: (t) => t.includes("sentry"),
+    handler: sentryHandler
+  },
+  {
+    match: (t) => t.includes("csv"),
+    handler: csvHandler
+  }
+];
 function getHandler(toolName, output, input) {
   if (toolName === "Bash") {
     return getBashHandler(input);
@@ -7733,41 +7783,9 @@ function getHandler(toolName, output, input) {
   const highPriorityProfile = getProfileHandler(toolName, ["user", "community"]);
   if (highPriorityProfile)
     return highPriorityProfile;
-  if (toolName.includes("playwright") && toolName.includes("snapshot")) {
-    return playwrightHandler;
-  }
-  if (toolName.startsWith("mcp__github__")) {
-    return githubHandler;
-  }
-  if (toolName.startsWith("mcp__gitlab__")) {
-    return gitlabHandler;
-  }
-  if (toolName.startsWith("mcp__stripe__")) {
-    return stripeHandler;
-  }
-  if (toolName.startsWith("mcp__filesystem__") || toolName.includes("read_file") || toolName.includes("get_file")) {
-    return filesystemHandler;
-  }
-  if (toolName.includes("bash") || toolName.includes("shell") || toolName.includes("terminal") || toolName.includes("run_command") || toolName.includes("ssh_exec") || toolName.includes("exec_command") || toolName.includes("remote_exec") || toolName.includes("container_exec")) {
-    return shellHandler;
-  }
-  if (toolName.includes("linear")) {
-    return linearHandler;
-  }
-  if (toolName.includes("slack")) {
-    return slackHandler;
-  }
-  if (toolName.includes("tavily")) {
-    return tavilyHandler;
-  }
-  if (toolName.includes("postgres") || toolName.includes("mysql") || toolName.includes("sqlite") || toolName.includes("database")) {
-    return databaseHandler;
-  }
-  if (toolName.includes("sentry")) {
-    return sentryHandler;
-  }
-  if (toolName.includes("csv")) {
-    return csvHandler;
+  for (const { match, handler } of HANDLER_REGISTRY) {
+    if (match(toolName))
+      return handler;
   }
   const bundledProfile = getProfileHandler(toolName, ["bundled"]);
   if (bundledProfile)
