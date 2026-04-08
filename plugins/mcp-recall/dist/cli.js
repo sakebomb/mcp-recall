@@ -5028,6 +5028,10 @@ var coerce = {
 };
 var NEVER = INVALID;
 // src/log.ts
+var _configDebugEnabled = false;
+function setDebugEnabled(enabled) {
+  _configDebugEnabled = enabled;
+}
 var log = {
   info: (msg) => {
     process.stderr.write(`[mcp-recall] info: ${msg}
@@ -5042,7 +5046,7 @@ var log = {
 `);
   },
   debug: (msg) => {
-    if (process.env.RECALL_DEBUG === "1") {
+    if (process.env.RECALL_DEBUG === "1" || _configDebugEnabled) {
       process.stderr.write(`[mcp-recall] debug: ${msg}
 `);
     }
@@ -5134,6 +5138,7 @@ function loadConfig() {
     }
     cached = deepMerge(DEFAULTS, {});
   }
+  setDebugEnabled(cached.debug.enabled);
   return cached;
 }
 
@@ -5586,14 +5591,6 @@ function toolContext(db, projectKey, args) {
 `);
 }
 
-// src/debug.ts
-function dbg(msg) {
-  if (process.env.RECALL_DEBUG === "1" || loadConfig().debug.enabled) {
-    process.stderr.write(`[mcp-recall] debug: ${msg}
-`);
-  }
-}
-
 // src/hooks/session-start.ts
 var INJECT_MAX_CHARS = 2000;
 function handleSessionStart(raw) {
@@ -5625,9 +5622,9 @@ function handleSessionStart(raw) {
     }
     process.stdout.write(snapshot + `
 `);
-    dbg(`session-start \xB7 project=${projectKey.slice(0, 8)} \xB7 injected ${snapshot.length} chars`);
+    log.debug(`session-start \xB7 project=${projectKey.slice(0, 8)} \xB7 injected ${snapshot.length} chars`);
   } else {
-    dbg(`session-start \xB7 project=${projectKey.slice(0, 8)} \xB7 nothing to inject`);
+    log.debug(`session-start \xB7 project=${projectKey.slice(0, 8)} \xB7 nothing to inject`);
   }
 }
 
@@ -7461,7 +7458,7 @@ function loadSpec(filePath) {
   try {
     parsed = parse(raw);
   } catch (e) {
-    dbg(`profile parse error \xB7 ${filePath}: ${e instanceof Error ? e.message : String(e)}`);
+    log.debug(`profile parse error \xB7 ${filePath}: ${e instanceof Error ? e.message : String(e)}`);
     return null;
   }
   const spec = validateSpec(parsed, filePath);
@@ -7478,22 +7475,22 @@ function validateSpec(raw, filePath) {
   const profile = obj["profile"];
   const strategy = obj["strategy"];
   if (!profile || !strategy) {
-    dbg(`profile skip \xB7 missing [profile] or [strategy] \xB7 ${filePath}`);
+    log.debug(`profile skip \xB7 missing [profile] or [strategy] \xB7 ${filePath}`);
     return null;
   }
   if (typeof profile["id"] !== "string" || typeof profile["version"] !== "string" || typeof profile["description"] !== "string" || typeof profile["mcp_pattern"] !== "string" && !Array.isArray(profile["mcp_pattern"])) {
-    dbg(`profile skip \xB7 missing required fields \xB7 ${filePath}`);
+    log.debug(`profile skip \xB7 missing required fields \xB7 ${filePath}`);
     return null;
   }
   const type = strategy["type"];
   if (!VALID_TYPES.has(type)) {
-    dbg(`profile skip \xB7 unknown strategy.type "${type}" \xB7 ${filePath}`);
+    log.debug(`profile skip \xB7 unknown strategy.type "${type}" \xB7 ${filePath}`);
     return null;
   }
   if (type === "json_extract") {
     const fields = strategy["fields"];
     if (!Array.isArray(fields) || fields.length === 0) {
-      dbg(`profile skip \xB7 json_extract missing fields \xB7 ${filePath}`);
+      log.debug(`profile skip \xB7 json_extract missing fields \xB7 ${filePath}`);
       return null;
     }
   }
@@ -7508,7 +7505,7 @@ function validateSpec(raw, filePath) {
   for (const [field, ceiling] of numericCeilings) {
     const val = strategy[field];
     if (val !== undefined && typeof val === "number" && val > ceiling) {
-      dbg(`profile skip \xB7 ${field} exceeds maximum allowed value of ${ceiling} \xB7 ${filePath}`);
+      log.debug(`profile skip \xB7 ${field} exceeds maximum allowed value of ${ceiling} \xB7 ${filePath}`);
       return null;
     }
   }
@@ -7727,7 +7724,7 @@ function getProfileHandler(toolName, tiers = TIER_ORDER) {
   const match = resolveProfile(toolName, profiles, tiers);
   if (!match)
     return null;
-  dbg(`profile match \xB7 ${match.spec.profile.id} (${match.tier}) \xB7 ${toolName}`);
+  log.debug(`profile match \xB7 ${match.spec.profile.id} (${match.tier}) \xB7 ${toolName}`);
   return makeHandler(match);
 }
 
@@ -7824,11 +7821,11 @@ function handlePostToolUse(raw) {
   const { tool_name, tool_input, tool_response, cwd, session_id } = input;
   const config = loadConfig();
   if (isDenied(tool_name, config)) {
-    dbg(`SKIP denylist \xB7 ${tool_name}`);
+    log.debug(`SKIP denylist \xB7 ${tool_name}`);
     return {};
   }
   const fullContent = extractText(tool_response);
-  dbg(`intercepted ${tool_name} \xB7 ${formatBytes(Buffer.byteLength(fullContent, "utf8"))}`);
+  log.debug(`intercepted ${tool_name} \xB7 ${formatBytes(Buffer.byteLength(fullContent, "utf8"))}`);
   const secretNames = findSecrets(fullContent);
   if (secretNames.length > 0) {
     log.warn(`skipped ${tool_name}: detected ${secretNames.join(", ")}`);
@@ -7841,7 +7838,7 @@ function handlePostToolUse(raw) {
     const cached2 = checkDedup(db, projectKey, input_hash);
     if (cached2) {
       const cachedDate = new Date(cached2.created_at * 1000).toISOString().slice(0, 10);
-      dbg(`CACHE HIT \xB7 ${tool_name} \xB7 id=${cached2.id} \xB7 cached ${cachedDate}`);
+      log.debug(`CACHE HIT \xB7 ${tool_name} \xB7 id=${cached2.id} \xB7 cached ${cachedDate}`);
       const header2 = `[recall:${cached2.id} \xB7 cached \xB7 ${cachedDate}]`;
       return {
         updatedMCPToolOutput: `${header2}
@@ -7851,11 +7848,11 @@ ${cached2.summary}`,
     }
   }
   const handler = getHandler(tool_name, tool_response, tool_input);
-  dbg(`handler: ${handler.name} \xB7 ${tool_name}`);
+  log.debug(`handler: ${handler.name} \xB7 ${tool_name}`);
   const { summary, originalSize } = handler(tool_name, tool_response);
   const summarySize = Buffer.byteLength(summary, "utf8");
   if (summarySize >= originalSize) {
-    dbg(`SKIP no-compression \xB7 ${tool_name} \xB7 ${formatBytes(summarySize)} \u2265 ${formatBytes(originalSize)}`);
+    log.debug(`SKIP no-compression \xB7 ${tool_name} \xB7 ${formatBytes(summarySize)} \u2265 ${formatBytes(originalSize)}`);
     return {};
   }
   const stored = storeOutput(db, {
@@ -7869,7 +7866,7 @@ ${cached2.summary}`,
   });
   evictIfNeeded(db, projectKey, config.store.max_size_mb);
   const reduction = ((1 - summarySize / originalSize) * 100).toFixed(0);
-  dbg(`STORED \xB7 ${tool_name} \xB7 id=${stored.id} \xB7 ${formatBytes(originalSize)}\u2192${formatBytes(summarySize)} (${reduction}% reduction)`);
+  log.debug(`STORED \xB7 ${tool_name} \xB7 id=${stored.id} \xB7 ${formatBytes(originalSize)}\u2192${formatBytes(summarySize)} (${reduction}% reduction)`);
   const header = `[recall:${stored.id} \xB7 ${formatBytes(originalSize)}\u2192${formatBytes(summarySize)} (${reduction}% reduction)]`;
   return {
     updatedMCPToolOutput: `${header}

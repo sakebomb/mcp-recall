@@ -19569,6 +19569,10 @@ import { mkdirSync } from "fs";
 import { randomBytes } from "crypto";
 
 // src/log.ts
+var _configDebugEnabled = false;
+function setDebugEnabled(enabled) {
+  _configDebugEnabled = enabled;
+}
 var log = {
   info: (msg) => {
     process.stderr.write(`[mcp-recall] info: ${msg}
@@ -19583,7 +19587,7 @@ var log = {
 `);
   },
   debug: (msg) => {
-    if (process.env.RECALL_DEBUG === "1") {
+    if (process.env.RECALL_DEBUG === "1" || _configDebugEnabled) {
       process.stderr.write(`[mcp-recall] debug: ${msg}
 `);
     }
@@ -21028,6 +21032,7 @@ function loadConfig() {
     }
     cached2 = deepMerge(DEFAULTS, {});
   }
+  setDebugEnabled(cached2.debug.enabled);
   return cached2;
 }
 

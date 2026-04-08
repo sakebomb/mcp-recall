@@ -9,7 +9,7 @@ import type { Handler } from "../handlers/types";
 import type { LoadedProfile, ProfileTier } from "./types";
 import { loadProfiles } from "./loader";
 import { applyJsonExtract, applyJsonTruncate, applyTextTruncate } from "./strategies";
-import { dbg } from "../debug";
+import { log } from "../log";
 
 // ── pattern matching ──────────────────────────────────────────────────────────
 
@@ -86,7 +86,7 @@ export function getProfileHandler(
   const profiles = loadProfiles();
   const match = resolveProfile(toolName, profiles, tiers);
   if (!match) return null;
-  dbg(`profile match · ${match.spec.profile.id} (${match.tier}) · ${toolName}`);
+  log.debug(`profile match · ${match.spec.profile.id} (${match.tier}) · ${toolName}`);
   return makeHandler(match);
 }
 

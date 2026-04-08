@@ -3,7 +3,7 @@ import { readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { z } from "zod";
-import { log } from "./log";
+import { log, setDebugEnabled } from "./log";
 
 const RecallConfigSchema = z.object({
   store: z.object({
@@ -120,9 +120,11 @@ export function loadConfig(): RecallConfig {
     cached = deepMerge(DEFAULTS, {});
   }
 
+  setDebugEnabled(cached.debug.enabled);
   return cached;
 }
 
 export function resetConfig(): void {
   cached = null;
+  setDebugEnabled(false);
 }

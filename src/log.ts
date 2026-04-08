@@ -4,8 +4,17 @@
  * All output goes to stderr using the format:
  *   [mcp-recall] <level>: <message>
  *
- * Debug messages are gated on RECALL_DEBUG=1.
+ * Debug messages are gated on RECALL_DEBUG=1 or config.debug.enabled.
+ * Call setDebugEnabled() after loading config to activate config-based debug.
  */
+
+let _configDebugEnabled = false;
+
+/** Called by config loader to sync config.debug.enabled into the log module. */
+export function setDebugEnabled(enabled: boolean): void {
+  _configDebugEnabled = enabled;
+}
+
 export const log = {
   info: (msg: string): void => {
     process.stderr.write(`[mcp-recall] info: ${msg}\n`);
@@ -17,7 +26,7 @@ export const log = {
     process.stderr.write(`[mcp-recall] error: ${msg}\n`);
   },
   debug: (msg: string): void => {
-    if (process.env.RECALL_DEBUG === "1") {
+    if (process.env.RECALL_DEBUG === "1" || _configDebugEnabled) {
       process.stderr.write(`[mcp-recall] debug: ${msg}\n`);
     }
   },
