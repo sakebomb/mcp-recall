@@ -368,6 +368,111 @@ describe("handlePostToolUse", () => {
 });
 
 // ---------------------------------------------------------------------------
+// handlePostToolUse — malformed input
+// ---------------------------------------------------------------------------
+
+describe("handlePostToolUse — malformed input", () => {
+  beforeEach(() => {
+    process.env.RECALL_DB_PATH = ":memory:";
+  });
+
+  afterEach(() => {
+    closeDb();
+    resetConfig();
+    delete process.env.RECALL_DB_PATH;
+  });
+
+  it("returns empty object on empty string input", () => {
+    const result = handlePostToolUse("");
+    expect(result).toEqual({});
+  });
+
+  it("returns empty object on plain text input", () => {
+    const result = handlePostToolUse("not json at all");
+    expect(result).toEqual({});
+  });
+
+  it("returns empty object on truncated JSON", () => {
+    const result = handlePostToolUse('{"session_id":"x","cwd":"/tmp"');
+    expect(result).toEqual({});
+  });
+
+  it("returns empty object on JSON array instead of object", () => {
+    const result = handlePostToolUse("[]");
+    expect(result).toEqual({});
+  });
+
+  it("returns empty object on JSON primitive instead of object", () => {
+    const result = handlePostToolUse('"just a string"');
+    expect(result).toEqual({});
+  });
+
+  it("logs invalid JSON error to stderr", () => {
+    const spy = spyOn(process.stderr, "write");
+    handlePostToolUse("bad input");
+    const output = spy.mock.calls.map(([c]) => String(c)).join("");
+    spy.mockRestore();
+    expect(output).toContain("invalid JSON");
+  });
+
+  it("logs shape error to stderr on JSON array", () => {
+    const spy = spyOn(process.stderr, "write");
+    handlePostToolUse("[]");
+    const output = spy.mock.calls.map(([c]) => String(c)).join("");
+    spy.mockRestore();
+    expect(output).toContain("unexpected input shape");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleSessionStart — malformed input
+// ---------------------------------------------------------------------------
+
+describe("handleSessionStart — malformed input", () => {
+  beforeEach(() => {
+    process.env.RECALL_DB_PATH = ":memory:";
+  });
+
+  afterEach(() => {
+    closeDb();
+    resetConfig();
+    delete process.env.RECALL_DB_PATH;
+  });
+
+  it("does not throw on empty string input", () => {
+    expect(() => handleSessionStart("")).not.toThrow();
+  });
+
+  it("does not throw on plain text input", () => {
+    expect(() => handleSessionStart("not json")).not.toThrow();
+  });
+
+  it("does not throw on truncated JSON", () => {
+    expect(() => handleSessionStart('{"session_id":"x"')).not.toThrow();
+  });
+
+  it("does not throw on JSON array instead of object", () => {
+    expect(() => handleSessionStart("[]")).not.toThrow();
+  });
+
+  it("logs invalid JSON error to stderr", () => {
+    const spy = spyOn(process.stderr, "write");
+    handleSessionStart("bad input");
+    const output = spy.mock.calls.map(([c]) => String(c)).join("");
+    spy.mockRestore();
+    expect(output).toContain("invalid JSON");
+  });
+
+  it("logs shape error to stderr on JSON array", () => {
+    const spy = spyOn(process.stderr, "write");
+    handleSessionStart("[]");
+    const output = spy.mock.calls.map(([c]) => String(c)).join("");
+    spy.mockRestore();
+    expect(output).toContain("unexpected input shape");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // handlePostToolUse — debug output
 // ---------------------------------------------------------------------------
 

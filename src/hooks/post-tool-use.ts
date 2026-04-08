@@ -23,7 +23,18 @@ export interface HookOutput {
 }
 
 export function handlePostToolUse(raw: string): HookOutput {
-  const input = JSON.parse(raw) as PostToolUseInput;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    process.stderr.write(`[mcp-recall] error: post-tool-use received invalid JSON — skipping\n`);
+    return {};
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    process.stderr.write(`[mcp-recall] error: post-tool-use received unexpected input shape — skipping\n`);
+    return {};
+  }
+  const input = parsed as PostToolUseInput;
   const { tool_name, tool_input, tool_response, cwd, session_id } = input;
   const config = loadConfig();
 
