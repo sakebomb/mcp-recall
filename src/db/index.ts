@@ -221,6 +221,9 @@ export function getDb(path: string): Database {
   instance = new Database(path);
   instance.run("PRAGMA journal_mode=WAL");
   instance.run("PRAGMA foreign_keys=ON");
+  // Retry for up to 5 s when another writer holds the lock, rather than
+  // failing immediately with SQLITE_BUSY.
+  instance.run("PRAGMA busy_timeout=5000");
   // Prefer incremental auto-vacuum so free pages can be reclaimed in small
   // batches without blocking. Has no effect on existing databases that were
   // created with auto_vacuum=NONE; those gracefully skip reclamation.

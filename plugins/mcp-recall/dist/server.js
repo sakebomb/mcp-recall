@@ -19673,6 +19673,7 @@ function getDb(path) {
   instance = new Database(path);
   instance.run("PRAGMA journal_mode=WAL");
   instance.run("PRAGMA foreign_keys=ON");
+  instance.run("PRAGMA busy_timeout=5000");
   instance.run("PRAGMA auto_vacuum=INCREMENTAL");
   instance.run(SCHEMA);
   applyMigrations(instance);
