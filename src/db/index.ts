@@ -3,6 +3,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { mkdirSync } from "fs";
 import { randomBytes } from "crypto";
+import { log } from "../log";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -557,7 +558,7 @@ export function forgetOutputs(
     try {
       db.run("VACUUM");
     } catch (e) {
-      process.stderr.write(`[mcp-recall] warn: VACUUM failed — ${e instanceof Error ? e.message : e}\n`);
+      log.warn(`VACUUM failed — ${e instanceof Error ? e.message : e}`);
     }
   }
 

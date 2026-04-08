@@ -41,13 +41,16 @@ describe("dbg", () => {
   it("writes to stderr when RECALL_DEBUG=1", () => {
     process.env.RECALL_DEBUG = "1";
     const output = captureStderr(() => dbg("test message"));
-    expect(output).toBe("[recall:debug] test message\n");
+    expect(output).toBe("[mcp-recall] debug: test message\n");
   });
 
-  it("writes to stderr when RECALL_DEBUG is any truthy string", () => {
+  it("does not write when RECALL_DEBUG is a non-'1' truthy string", () => {
+    process.env.RECALL_CONFIG_PATH = TEST_CONFIG_PATH;
+    writeFileSync(TEST_CONFIG_PATH, "[debug]\nenabled = false\n");
+    resetConfig();
     process.env.RECALL_DEBUG = "true";
     const output = captureStderr(() => dbg("truthy check"));
-    expect(output).toContain("[recall:debug]");
+    expect(output).toBe("");
   });
 
   it("writes to stderr when config.debug.enabled is true", () => {
@@ -55,12 +58,12 @@ describe("dbg", () => {
     writeFileSync(TEST_CONFIG_PATH, "[debug]\nenabled = true\n");
     resetConfig();
     const output = captureStderr(() => dbg("config-based debug"));
-    expect(output).toBe("[recall:debug] config-based debug\n");
+    expect(output).toBe("[mcp-recall] debug: config-based debug\n");
   });
 
-  it("output always starts with [recall:debug] prefix", () => {
+  it("output uses [mcp-recall] debug: prefix", () => {
     process.env.RECALL_DEBUG = "1";
     const output = captureStderr(() => dbg("prefix check"));
-    expect(output).toMatch(/^\[recall:debug\]/);
+    expect(output).toMatch(/^\[mcp-recall\] debug:/);
   });
 });

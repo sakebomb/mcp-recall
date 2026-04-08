@@ -5027,6 +5027,28 @@ var coerce = {
   date: (arg) => ZodDate.create({ ...arg, coerce: true })
 };
 var NEVER = INVALID;
+// src/log.ts
+var log = {
+  info: (msg) => {
+    process.stderr.write(`[mcp-recall] info: ${msg}
+`);
+  },
+  warn: (msg) => {
+    process.stderr.write(`[mcp-recall] warn: ${msg}
+`);
+  },
+  error: (msg) => {
+    process.stderr.write(`[mcp-recall] error: ${msg}
+`);
+  },
+  debug: (msg) => {
+    if (process.env.RECALL_DEBUG === "1") {
+      process.stderr.write(`[mcp-recall] debug: ${msg}
+`);
+    }
+  }
+};
+
 // src/config.ts
 var RecallConfigSchema = exports_external.object({
   store: exports_external.object({
@@ -5102,15 +5124,13 @@ function loadConfig() {
       cached = deepMerge(DEFAULTS, result.data);
     } else {
       const issues = result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(", ");
-      process.stderr.write(`[recall] invalid config (${issues}); using defaults
-`);
+      log.warn(`invalid config (${issues}); using defaults`);
       cached = deepMerge(DEFAULTS, {});
     }
   } catch (err) {
     const isNotFound = err instanceof Error && "code" in err && err.code === "ENOENT";
     if (!isNotFound) {
-      process.stderr.write(`[recall] failed to load config: ${err}; using defaults
-`);
+      log.warn(`failed to load config: ${err}; using defaults`);
     }
     cached = deepMerge(DEFAULTS, {});
   }
@@ -5561,8 +5581,8 @@ function toolContext(db, projectKey, args) {
 
 // src/debug.ts
 function dbg(msg) {
-  if (process.env.RECALL_DEBUG || loadConfig().debug.enabled) {
-    process.stderr.write(`[recall:debug] ${msg}
+  if (process.env.RECALL_DEBUG === "1" || loadConfig().debug.enabled) {
+    process.stderr.write(`[mcp-recall] debug: ${msg}
 `);
   }
 }
@@ -5574,13 +5594,11 @@ function handleSessionStart(raw) {
   try {
     parsed = JSON.parse(raw);
   } catch {
-    process.stderr.write(`[mcp-recall] error: session-start received invalid JSON \u2014 skipping
-`);
+    log.error("session-start received invalid JSON \u2014 skipping");
     return;
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    process.stderr.write(`[mcp-recall] error: session-start received unexpected input shape \u2014 skipping
-`);
+    log.error("session-start received unexpected input shape \u2014 skipping");
     return;
   }
   const input = parsed;
@@ -7770,13 +7788,11 @@ function handlePostToolUse(raw) {
   try {
     parsed = JSON.parse(raw);
   } catch {
-    process.stderr.write(`[mcp-recall] error: post-tool-use received invalid JSON \u2014 skipping
-`);
+    log.error("post-tool-use received invalid JSON \u2014 skipping");
     return {};
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    process.stderr.write(`[mcp-recall] error: post-tool-use received unexpected input shape \u2014 skipping
-`);
+    log.error("post-tool-use received unexpected input shape \u2014 skipping");
     return {};
   }
   const input = parsed;
@@ -7790,8 +7806,7 @@ function handlePostToolUse(raw) {
   dbg(`intercepted ${tool_name} \xB7 ${formatBytes(Buffer.byteLength(fullContent, "utf8"))}`);
   const secretNames = findSecrets(fullContent);
   if (secretNames.length > 0) {
-    process.stderr.write(`[recall] skipped ${tool_name}: detected ${secretNames.join(", ")}
-`);
+    log.warn(`skipped ${tool_name}: detected ${secretNames.join(", ")}`);
     return {};
   }
   const projectKey = getProjectKey(cwd);
@@ -9772,17 +9787,12 @@ async function main() {
         break;
       }
       default:
-        process.stderr.write(`[recall] unknown subcommand: ${subcommand}
-`);
+        log.error(`unknown subcommand: ${subcommand}`);
         process.exit(1);
     }
   } catch (err) {
-    if (process.env.RECALL_DEBUG) {
-      process.stderr.write(`[recall:debug] STACK: ${err instanceof Error ? err.stack : String(err)}
-`);
-    }
-    process.stderr.write(`[recall] error in ${subcommand}: ${err}
-`);
+    log.debug(`STACK: ${err instanceof Error ? err.stack : String(err)}`);
+    log.error(`error in ${subcommand}: ${err}`);
     process.stdout.write(`{}
 `);
     process.exit(0);

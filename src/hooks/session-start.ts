@@ -3,6 +3,7 @@ import { getProjectKey } from "../project-key";
 import { getDb, defaultDbPath, recordSession, pruneExpired, getContext } from "../db/index";
 import { toolContext } from "../tools";
 import { dbg } from "../debug";
+import { log } from "../log";
 
 interface SessionStartInput {
   session_id: string;
@@ -18,11 +19,11 @@ export function handleSessionStart(raw: string): void {
   try {
     parsed = JSON.parse(raw);
   } catch {
-    process.stderr.write(`[mcp-recall] error: session-start received invalid JSON — skipping\n`);
+    log.error("session-start received invalid JSON — skipping");
     return;
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    process.stderr.write(`[mcp-recall] error: session-start received unexpected input shape — skipping\n`);
+    log.error("session-start received unexpected input shape — skipping");
     return;
   }
   const input = parsed as SessionStartInput;
