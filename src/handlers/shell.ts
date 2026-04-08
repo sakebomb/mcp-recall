@@ -7,8 +7,9 @@
  */
 import type { CompressionResult, Handler } from "./types";
 import { extractText } from "./types";
+import { jsonHandler } from "./json";
 
-const HEAD_STDOUT = 50;
+const HEAD_STDOUT = 25;
 const HEAD_STDERR = 20;
 
 // Covers colors, cursor movement, erase sequences, and other common escapes.
@@ -107,6 +108,16 @@ export const shellHandler: Handler = (
     const stderr = stripSshNoise(stripAnsi(structured.stderr ?? ""));
     const exitCode = structured.returncode ?? structured.exit_code;
 
+    // If stdout is JSON, delegate to the JSON handler for deeper compression.
+    const trimmedStdout = stdout.trim();
+    if (trimmedStdout.startsWith("{") || trimmedStdout.startsWith("[")) {
+      try {
+        JSON.parse(trimmedStdout);
+        const { summary } = jsonHandler(_toolName, trimmedStdout);
+        return { summary, originalSize };
+      } catch { /* not valid JSON — fall through */ }
+    }
+
     const exitStr = exitCode !== undefined ? `exit:${exitCode} · ` : "";
     const stdoutFmt = formatLines(stdout, HEAD_STDOUT);
     const hasStderr = stderr.trim().length > 0;
@@ -127,6 +138,17 @@ export const shellHandler: Handler = (
 
   // Plain string — treat as stdout
   const text = stripSshNoise(stripAnsi(raw));
+
+  // If the output is JSON, delegate to the JSON handler.
+  const trimmedText = text.trim();
+  if (trimmedText.startsWith("{") || trimmedText.startsWith("[")) {
+    try {
+      JSON.parse(trimmedText);
+      const { summary } = jsonHandler(_toolName, trimmedText);
+      return { summary, originalSize };
+    } catch { /* not valid JSON — fall through */ }
+  }
+
   const fmt = formatLines(text, HEAD_STDOUT);
   return {
     summary: `[bash · ${fmt.header}]\n${fmt.body}`,
