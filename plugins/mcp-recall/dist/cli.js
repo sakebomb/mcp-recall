@@ -5210,7 +5210,11 @@ function applyMigrations(db) {
   for (const sql of MIGRATIONS) {
     try {
       db.run(sql);
-    } catch {}
+    } catch (e) {
+      if (!(e instanceof Error) || !e.message.includes("duplicate column")) {
+        throw e;
+      }
+    }
   }
 }
 var instance = null;
@@ -9012,9 +9016,9 @@ async function readJsonFile(filePath) {
     const content = await readFile(filePath, "utf8");
     return JSON.parse(content);
   } catch (e) {
-    if (e.code === "ENOENT")
+    if (e instanceof Error && e.code === "ENOENT")
       return {};
-    throw new Error(`Cannot parse ${filePath}: ${e.message}`);
+    throw new Error(`Cannot parse ${filePath}: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 async function writeJsonFile(filePath, data) {
@@ -9194,7 +9198,7 @@ async function installCommand(opts = {}) {
     anyChange = true;
     console.log(`${GREEN}\u2713${RESET} SessionStart hook added    ${DIM}(${settingsPath})${RESET}`);
   } else {
-    const currentCmd = ssHooks[ssIdx]?.hooks?.[0]?.command;
+    const currentCmd = ssHooks[ssIdx].hooks[0]?.command;
     if (currentCmd !== newSS.hooks[0].command) {
       ssHooks[ssIdx] = newSS;
       hooks["SessionStart"] = ssHooks;
@@ -9214,7 +9218,7 @@ async function installCommand(opts = {}) {
     anyChange = true;
     console.log(`${GREEN}\u2713${RESET} PostToolUse hook added     ${DIM}(${settingsPath})${RESET}`);
   } else {
-    const currentCmd = ptuHooks[ptuIdx]?.hooks?.[0]?.command;
+    const currentCmd = ptuHooks[ptuIdx].hooks[0]?.command;
     if (currentCmd !== newPTU.hooks[0].command) {
       ptuHooks[ptuIdx] = newPTU;
       hooks["PostToolUse"] = ptuHooks;

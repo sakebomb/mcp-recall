@@ -17,7 +17,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { getProjectKey } from "./project-key";
-import { getDb, defaultDbPath } from "./db/index";
+import { getDb, closeDb, defaultDbPath } from "./db/index";
 import { loadConfig } from "./config";
 import {
   toolRetrieve,
@@ -203,6 +203,10 @@ server.tool(
     content: [{ type: "text", text: toolContext(db, projectKey, args) }],
   }))
 );
+
+// Close the DB cleanly on exit so WAL is checkpointed before the process ends.
+process.on("exit", () => closeDb());
+process.on("SIGTERM", () => { closeDb(); process.exit(0); });
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
