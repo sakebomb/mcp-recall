@@ -6,7 +6,7 @@
  * crashes.  In-memory DBs cannot be shared across connections, so every test
  * here uses a real temp file that is cleaned up in afterEach.
  */
-import { describe, it, expect, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
@@ -58,6 +58,14 @@ function openSecondConnection(dbPath: string, busyTimeout = 5000): Database {
 describe("concurrent DB access", () => {
   let cleanupDir: string | undefined;
 
+  beforeEach(() => {
+    // Guarantee a clean singleton before every test. Bun 1.3.13+ may share
+    // sub-module state across parallel test workers; calling closeDb() here
+    // ensures `instance` in schema.ts is null even if another worker left it
+    // pointing to a different database.
+    closeDb();
+  });
+
   afterEach(() => {
     closeDb(); // reset singleton
     if (cleanupDir) {
@@ -74,27 +82,27 @@ describe("concurrent DB access", () => {
     const { dir, dbPath } = tempDb();
     cleanupDir = dir;
 
-    // Phase 1: db1 writes 15 rows, then checkpoints everything to the main DB
-    // file so that db2 opens against a clean, fully-materialised file.
-    // TRUNCATE is required: without it, db1's frames stay only in the WAL and
-    // whether db2 can read them depends on SQLite's platform-specific WAL
-    // recovery behaviour (reliable locally, flaky on Ubuntu CI).
-    const db1 = getDb(dbPath);
+    // Phase 1: first raw connection writes 15 rows then checkpoints everything
+    // to the main DB file so that db2 opens against a clean, fully-materialised
+    // file.  Uses openSecondConnection (raw new Database, no singleton) so that
+    // stale singleton state from a parallel Bun test worker cannot redirect
+    // writes to a different database.
+    const db1 = openSecondConnection(dbPath);
     for (let i = 0; i < 15; i++) {
       storeOutput(db1, makeInput({ summary: `db1 item ${i}` }));
     }
     db1.run("PRAGMA wal_checkpoint(TRUNCATE)");
-    closeDb();
+    db1.close();
 
-    // Phase 2: db2 opens the now-checkpointed file (schema + 15 rows in main
-    // DB) and appends 15 more rows to the WAL.
+    // Phase 2: second raw connection opens the now-checkpointed file (schema +
+    // 15 rows in main DB) and appends 15 more rows to the WAL.
     const db2 = openSecondConnection(dbPath);
     for (let i = 0; i < 15; i++) {
       storeOutput(db2, makeInput({ summary: `db2 item ${i}` }));
     }
     db2.close();
 
-    // Phase 3: fresh connection reads main DB (15 rows) + WAL (15 rows) = 30.
+    // Phase 3: getDb (singleton) reads main DB (15 rows) + WAL (15 rows) = 30.
     const dbVerify = getDb(dbPath);
     expect(listOutputs(dbVerify, { project_key: PROJECT_KEY, limit: 100 }).length).toBe(30);
   });
