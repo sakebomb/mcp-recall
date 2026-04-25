@@ -74,24 +74,27 @@ describe("concurrent DB access", () => {
     const { dir, dbPath } = tempDb();
     cleanupDir = dir;
 
-    // Phase 1: db1 writes 15 rows and closes. closeDb() performs a passive
-    // checkpoint; committed WAL frames remain visible to new connections.
+    // Phase 1: db1 writes 15 rows, then checkpoints everything to the main DB
+    // file so that db2 opens against a clean, fully-materialised file.
+    // TRUNCATE is required: without it, db1's frames stay only in the WAL and
+    // whether db2 can read them depends on SQLite's platform-specific WAL
+    // recovery behaviour (reliable locally, flaky on Ubuntu CI).
     const db1 = getDb(dbPath);
     for (let i = 0; i < 15; i++) {
       storeOutput(db1, makeInput({ summary: `db1 item ${i}` }));
     }
+    db1.run("PRAGMA wal_checkpoint(TRUNCATE)");
     closeDb();
 
-    // Phase 2: db2 opens the existing WAL file, appends 15 rows, and closes.
-    // No explicit checkpoint — SQLite WAL guarantees committed frames are
-    // visible to any connection that opens after they were written.
+    // Phase 2: db2 opens the now-checkpointed file (schema + 15 rows in main
+    // DB) and appends 15 more rows to the WAL.
     const db2 = openSecondConnection(dbPath);
     for (let i = 0; i < 15; i++) {
       storeOutput(db2, makeInput({ summary: `db2 item ${i}` }));
     }
     db2.close();
 
-    // Phase 3: fresh connection sees all 30 rows (from main DB + WAL).
+    // Phase 3: fresh connection reads main DB (15 rows) + WAL (15 rows) = 30.
     const dbVerify = getDb(dbPath);
     expect(listOutputs(dbVerify, { project_key: PROJECT_KEY, limit: 100 }).length).toBe(30);
   });
