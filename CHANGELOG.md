@@ -6,6 +6,12 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Changed
+
+- `src/db/index.ts` (899 lines) split into five focused modules: `types.ts`, `schema.ts`, `chunking.ts`, `queries.ts`, `analytics.ts` — `db/index.ts` is now a 5-line re-export barrel; all callers unchanged
+- `src/profiles/commands.ts` (901 lines) split into `shared.ts` (manifest utilities), `cmd-local.ts` (list/remove/feed/check), `cmd-catalog.ts` (install/update/seed/info/available), `cmd-test.ts` (test/testProfile) — `commands.ts` is now a 67-line dispatcher; all callers unchanged
+- `CLAUDE.md` updated to reflect current architecture: `log.ts`, `format.ts`, `tools.ts`, `install/`, `learn/`, `profiles/` modules documented; CLI commands section added; phase table extended through phase 9
+
 ---
 
 ## [1.8.0] — 2026-04-08
