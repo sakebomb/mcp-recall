@@ -212,27 +212,26 @@ server.tool(
   {
     pin_threshold: z
       .number()
+      .int()
+      .positive()
       .optional()
       .describe("Min access count to qualify as a pin candidate (default 5)"),
     stale_days: z
       .number()
+      .int()
+      .positive()
       .optional()
       .describe("Items with zero accesses older than N days are stale (default 3)"),
     limit: z
       .number()
+      .int()
+      .positive()
       .optional()
       .describe("Max items per category (default 3)"),
   },
-  safeTool((args) => {
-    const config = loadConfig();
-    return {
-      content: [{ type: "text", text: toolSuggest(db, projectKey, {
-        pin_threshold: args.pin_threshold ?? config.store.pin_recommendation_threshold,
-        stale_days: args.stale_days ?? config.store.stale_item_days,
-        limit: args.limit,
-      }) }],
-    };
-  })
+  safeTool((args) => ({
+    content: [{ type: "text", text: toolSuggest(db, projectKey, args) }],
+  }))
 );
 
 // Close the DB cleanly on exit so WAL is checkpointed before the process ends.

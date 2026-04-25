@@ -21375,9 +21375,10 @@ function toolStats(db, projectKey, args = {}) {
 `);
 }
 function toolSuggest(db, projectKey, args = {}) {
+  const config2 = loadConfig();
   const suggestions = getSuggestions(db, projectKey, {
-    pin_threshold: args.pin_threshold,
-    stale_days: args.stale_days,
+    pin_threshold: args.pin_threshold ?? config2.store.pin_recommendation_threshold,
+    stale_days: args.stale_days ?? config2.store.stale_item_days,
     limit: args.limit
   });
   const hasPin = suggestions.pin_candidates.length > 0;
@@ -21500,19 +21501,12 @@ server.tool("recall__context", "Session orientation: pinned items, recent notes,
   content: [{ type: "text", text: toolContext(db, projectKey, args) }]
 })));
 server.tool("recall__suggest", "Surface actionable maintenance suggestions: items worth pinning (frequently accessed but unpinned) and stale items (never accessed, candidates for deletion). Call periodically to keep the store healthy.", {
-  pin_threshold: exports_external.number().optional().describe("Min access count to qualify as a pin candidate (default 5)"),
-  stale_days: exports_external.number().optional().describe("Items with zero accesses older than N days are stale (default 3)"),
-  limit: exports_external.number().optional().describe("Max items per category (default 3)")
-}, safeTool((args) => {
-  const config2 = loadConfig();
-  return {
-    content: [{ type: "text", text: toolSuggest(db, projectKey, {
-      pin_threshold: args.pin_threshold ?? config2.store.pin_recommendation_threshold,
-      stale_days: args.stale_days ?? config2.store.stale_item_days,
-      limit: args.limit
-    }) }]
-  };
-}));
+  pin_threshold: exports_external.number().int().positive().optional().describe("Min access count to qualify as a pin candidate (default 5)"),
+  stale_days: exports_external.number().int().positive().optional().describe("Items with zero accesses older than N days are stale (default 3)"),
+  limit: exports_external.number().int().positive().optional().describe("Max items per category (default 3)")
+}, safeTool((args) => ({
+  content: [{ type: "text", text: toolSuggest(db, projectKey, args) }]
+})));
 process.on("exit", () => closeDb());
 process.on("SIGTERM", () => {
   closeDb();

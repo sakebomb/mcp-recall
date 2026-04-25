@@ -575,9 +575,10 @@ export function toolSuggest(
   projectKey: string,
   args: SuggestArgs = {}
 ): string {
+  const config = loadConfig();
   const suggestions = getSuggestions(db, projectKey, {
-    pin_threshold: args.pin_threshold,
-    stale_days: args.stale_days,
+    pin_threshold: args.pin_threshold ?? config.store.pin_recommendation_threshold,
+    stale_days: args.stale_days ?? config.store.stale_item_days,
     limit: args.limit,
   });
 
