@@ -73,6 +73,7 @@ plugins/mcp-recall/     Marketplace-installable plugin bundle
 - `recall__export` — JSON dump of all items, oldest-first
 - `recall__session_summary` — per-session digest (tool breakdown, top accessed, pinned, notes)
 - `recall__context` — orientation snapshot: pinned + notes + recently accessed + last session headline
+- `recall__suggest` — surface pin candidates (frequently accessed) and stale items (never accessed) with actionable commands
 
 ## CLI Commands
 

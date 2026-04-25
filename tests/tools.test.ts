@@ -11,6 +11,7 @@ import {
   toolStats,
   toolSessionSummary,
   toolContext,
+  toolSuggest,
 } from "../src/tools";
 import { resetConfig } from "../src/config";
 import { formatRelativeTime } from "../src/format";
@@ -770,6 +771,78 @@ describe("MCP tool handlers", () => {
       const result = toolContext(db, PROJECT_KEY, {});
       expect(result).not.toContain("Generated ");
       expect(result).toContain("no context available");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // toolSuggest
+  // -------------------------------------------------------------------------
+
+  describe("toolSuggest", () => {
+    it("returns no-suggestions message when store is empty", () => {
+      const result = toolSuggest(db, PROJECT_KEY);
+      expect(result).toContain("no suggestions");
+    });
+
+    it("returns no-suggestions when items are fresh and not accessed enough", () => {
+      storeOutput(db, makeInput());
+      const result = toolSuggest(db, PROJECT_KEY, { pin_threshold: 5, stale_days: 3 });
+      expect(result).toContain("no suggestions");
+    });
+
+    it("shows pin candidates when access_count meets threshold", () => {
+      const stored = storeOutput(db, makeInput());
+      recordAccess(db, stored.id);
+      const result = toolSuggest(db, PROJECT_KEY, { pin_threshold: 1 });
+      expect(result).toContain("Pin candidates");
+      expect(result).toContain(stored.id);
+      expect(result).toContain("accessed 1×");
+      expect(result).toContain(`recall__pin id="${stored.id}"`);
+    });
+
+    it("shows stale items when old and never accessed", () => {
+      const stored = storeOutput(db, makeInput());
+      const fiveDaysAgo = Math.floor(Date.now() / 1000) - 5 * 86400;
+      db.prepare(`UPDATE stored_outputs SET created_at = ? WHERE id = ?`)
+        .run(fiveDaysAgo, stored.id);
+      const result = toolSuggest(db, PROJECT_KEY, { stale_days: 3 });
+      expect(result).toContain("Stale items");
+      expect(result).toContain(stored.id);
+      expect(result).toContain("days old");
+      expect(result).toContain(`recall__forget id="${stored.id}"`);
+    });
+
+    it("shows both sections when both qualify", () => {
+      const pinItem = storeOutput(db, makeInput());
+      recordAccess(db, pinItem.id);
+
+      const staleItem = storeOutput(db, makeInput());
+      const fiveDaysAgo = Math.floor(Date.now() / 1000) - 5 * 86400;
+      db.prepare(`UPDATE stored_outputs SET created_at = ? WHERE id = ?`)
+        .run(fiveDaysAgo, staleItem.id);
+
+      const result = toolSuggest(db, PROJECT_KEY, { pin_threshold: 1, stale_days: 3 });
+      expect(result).toContain("Pin candidates");
+      expect(result).toContain("Stale items");
+    });
+
+    it("does not suggest already-pinned items as pin candidates", () => {
+      const stored = storeOutput(db, makeInput());
+      pinOutput(db, stored.id, PROJECT_KEY, true);
+      recordAccess(db, stored.id);
+      const result = toolSuggest(db, PROJECT_KEY, { pin_threshold: 1 });
+      expect(result).not.toContain("Pin candidates");
+    });
+
+    it("respects limit option", () => {
+      for (let i = 0; i < 5; i++) {
+        const stored = storeOutput(db, makeInput({ summary: `item ${i}` }));
+        recordAccess(db, stored.id);
+      }
+      const result = toolSuggest(db, PROJECT_KEY, { pin_threshold: 1, limit: 2 });
+      // Only 2 pin candidates should appear — count recall__pin occurrences
+      const pinCount = (result.match(/recall__pin/g) ?? []).length;
+      expect(pinCount).toBe(2);
     });
   });
 });

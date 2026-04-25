@@ -559,3 +559,60 @@ export function toolStats(
 
   return lines.join("\n");
 }
+
+// ---------------------------------------------------------------------------
+// recall__suggest
+// ---------------------------------------------------------------------------
+
+export interface SuggestArgs {
+  pin_threshold?: number;
+  stale_days?: number;
+  limit?: number;
+}
+
+export function toolSuggest(
+  db: Database,
+  projectKey: string,
+  args: SuggestArgs = {}
+): string {
+  const suggestions = getSuggestions(db, projectKey, {
+    pin_threshold: args.pin_threshold,
+    stale_days: args.stale_days,
+    limit: args.limit,
+  });
+
+  const hasPin = suggestions.pin_candidates.length > 0;
+  const hasStale = suggestions.stale_candidates.length > 0;
+
+  if (!hasPin && !hasStale) {
+    return "[recall: no suggestions — no frequently accessed unpinned items and no stale items]";
+  }
+
+  const lines: string[] = ["Recall suggestions:"];
+
+  if (hasPin) {
+    lines.push("", "Pin candidates (frequently accessed, not yet pinned):");
+    for (const item of suggestions.pin_candidates) {
+      const excerpt = item.summary.slice(0, 80).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > 80 ? "…" : "";
+      lines.push(`  ${item.id}  (accessed ${item.access_count}×)  ${item.tool_name}`);
+      lines.push(`    ${excerpt}${ellipsis}`);
+      lines.push(`    → recall__pin id="${item.id}"`);
+    }
+  }
+
+  if (hasStale) {
+    lines.push("", "Stale items (never accessed, consider forgetting):");
+    const now = Math.floor(Date.now() / 1000);
+    for (const item of suggestions.stale_candidates) {
+      const ageDays = Math.floor((now - item.created_at) / 86400);
+      const excerpt = item.summary.slice(0, 80).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > 80 ? "…" : "";
+      lines.push(`  ${item.id}  (${ageDays} day${ageDays === 1 ? "" : "s"} old)  ${item.tool_name}`);
+      lines.push(`    ${excerpt}${ellipsis}`);
+      lines.push(`    → recall__forget id="${item.id}"`);
+    }
+  }
+
+  return lines.join("\n");
+}
