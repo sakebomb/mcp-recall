@@ -19560,41 +19560,11 @@ function resolveProjectPath(cwd) {
 function hashPath(path) {
   return createHash("sha256").update(path).digest("hex").slice(0, 16);
 }
-
-// src/db/index.ts
+// src/db/schema.ts
 import { Database } from "bun:sqlite";
 import { join } from "path";
 import { homedir } from "os";
 import { mkdirSync } from "fs";
-import { randomBytes } from "crypto";
-
-// src/log.ts
-var _configDebugEnabled = false;
-function setDebugEnabled(enabled) {
-  _configDebugEnabled = enabled;
-}
-var log = {
-  info: (msg) => {
-    process.stderr.write(`[mcp-recall] info: ${msg}
-`);
-  },
-  warn: (msg) => {
-    process.stderr.write(`[mcp-recall] warn: ${msg}
-`);
-  },
-  error: (msg) => {
-    process.stderr.write(`[mcp-recall] error: ${msg}
-`);
-  },
-  debug: (msg) => {
-    if (process.env.RECALL_DEBUG === "1" || _configDebugEnabled) {
-      process.stderr.write(`[mcp-recall] debug: ${msg}
-`);
-    }
-  }
-};
-
-// src/db/index.ts
 var SCHEMA = `
   CREATE TABLE IF NOT EXISTS stored_outputs (
     id TEXT PRIMARY KEY,
@@ -19690,6 +19660,7 @@ function closeDb() {
   }
   instance = null;
 }
+// src/db/chunking.ts
 var CHUNK_SIZE = 512;
 var CHUNK_OVERLAP = 64;
 function chunkText(text) {
@@ -19704,6 +19675,45 @@ function chunkText(text) {
   }
   return chunks;
 }
+function sanitizeFtsQuery(query) {
+  const trimmed = query.trim();
+  if (trimmed.length === 0)
+    return '""';
+  return trimmed.split(/\s+/).map((term) => `"${term.replace(/"/g, '""')}"`).join(" ");
+}
+// src/db/queries.ts
+import { randomBytes } from "crypto";
+
+// src/log.ts
+var _configDebugEnabled = false;
+function setDebugEnabled(enabled) {
+  _configDebugEnabled = enabled;
+}
+var log = {
+  info: (msg) => {
+    process.stderr.write(`[mcp-recall] info: ${msg}
+`);
+  },
+  warn: (msg) => {
+    process.stderr.write(`[mcp-recall] warn: ${msg}
+`);
+  },
+  error: (msg) => {
+    process.stderr.write(`[mcp-recall] error: ${msg}
+`);
+  },
+  debug: (msg) => {
+    if (process.env.RECALL_DEBUG === "1" || _configDebugEnabled) {
+      process.stderr.write(`[mcp-recall] debug: ${msg}
+`);
+    }
+  }
+};
+
+// src/db/queries.ts
+function generateId() {
+  return `recall_${randomBytes(8).toString("hex")}`;
+}
 function storeChunks(db, id, full_content) {
   const chunks = chunkText(full_content);
   const stmt = db.prepare(`INSERT INTO content_chunks (output_id, chunk_index, content) VALUES (?, ?, ?)`);
@@ -19711,15 +19721,14 @@ function storeChunks(db, id, full_content) {
     stmt.run(id, i, chunks[i]);
   }
 }
-function sanitizeFtsQuery(query) {
-  const trimmed = query.trim();
-  if (trimmed.length === 0)
-    return '""';
-  return trimmed.split(/\s+/).map((term) => `"${term.replace(/"/g, '""')}"`).join(" ");
+function countAndDelete(db, where, params) {
+  const count = db.prepare(`SELECT COUNT(*) as n FROM stored_outputs WHERE ${where}`).get(...params).n;
+  if (count > 0) {
+    db.prepare(`DELETE FROM stored_outputs WHERE ${where}`).run(...params);
+  }
+  return count;
 }
-function generateId() {
-  return `recall_${randomBytes(8).toString("hex")}`;
-}
+var VACUUM_THRESHOLD = 50;
 function storeOutput(db, input) {
   const id = generateId();
   const summary_size = Buffer.byteLength(input.summary, "utf8");
@@ -19812,14 +19821,6 @@ function searchOutputs(db, query, options) {
     return [];
   }
 }
-function countAndDelete(db, where, params) {
-  const count = db.prepare(`SELECT COUNT(*) as n FROM stored_outputs WHERE ${where}`).get(...params).n;
-  if (count > 0) {
-    db.prepare(`DELETE FROM stored_outputs WHERE ${where}`).run(...params);
-  }
-  return count;
-}
-var VACUUM_THRESHOLD = 50;
 function forgetOutputs(db, project_key, options) {
   const pinGuard = options.force ? "" : "AND pinned = 0";
   let deleted = 0;
@@ -19844,6 +19845,10 @@ function forgetOutputs(db, project_key, options) {
   }
   return deleted;
 }
+function getSessionDays(db) {
+  return db.prepare(`SELECT date FROM sessions ORDER BY date DESC`).all().map((r) => r.date);
+}
+// src/db/analytics.ts
 function getStats(db, project_key) {
   const row = db.prepare(`
     SELECT
@@ -19887,6 +19892,57 @@ function getSuggestions(db, project_key, opts = {}) {
     LIMIT ?
   `).all(project_key, staleCutoff, limit);
   return { pin_candidates, stale_candidates };
+}
+function getSessionSummary(db, project_key, opts = {}) {
+  let filter;
+  let filterParams;
+  let label;
+  if (opts.session_id) {
+    filter = "session_id = ?";
+    filterParams = [opts.session_id];
+    label = opts.session_id;
+  } else {
+    const date4 = opts.date ?? new Date().toISOString().slice(0, 10);
+    const startOfDay = Math.floor(new Date(`${date4}T00:00:00Z`).getTime() / 1000);
+    const endOfDay = startOfDay + 86400;
+    filter = "created_at >= ? AND created_at < ?";
+    filterParams = [startOfDay, endOfDay];
+    label = date4;
+  }
+  const base = `WHERE project_key = ? AND ${filter}`;
+  const bp = [project_key, ...filterParams];
+  const agg = db.prepare(`
+    SELECT
+      COUNT(*) as stored_count,
+      COALESCE(SUM(original_size), 0) as total_original_bytes,
+      COALESCE(SUM(summary_size), 0) as total_summary_bytes,
+      COUNT(CASE WHEN access_count > 0 THEN 1 END) as accessed_count,
+      COALESCE(SUM(access_count), 0) as total_accesses
+    FROM stored_outputs ${base}
+  `).get(...bp);
+  const tool_counts = db.prepare(`
+    SELECT tool_name, COUNT(*) as count
+    FROM stored_outputs ${base}
+    GROUP BY tool_name
+    ORDER BY count DESC
+  `).all(...bp);
+  const top_accessed = db.prepare(`
+    SELECT id, tool_name, summary, access_count
+    FROM stored_outputs ${base} AND access_count > 0
+    ORDER BY access_count DESC
+    LIMIT 5
+  `).all(...bp);
+  const pinned = db.prepare(`
+    SELECT id, tool_name, summary
+    FROM stored_outputs ${base} AND pinned = 1
+    ORDER BY created_at DESC
+  `).all(...bp);
+  const notes = db.prepare(`
+    SELECT id, summary
+    FROM stored_outputs ${base} AND tool_name = 'recall__note'
+    ORDER BY created_at DESC
+  `).all(...bp);
+  return { label, ...agg, tool_counts, top_accessed, pinned, notes };
 }
 function getContext(db, project_key, opts = {}) {
   const days = opts.days ?? 7;
@@ -19946,61 +20002,6 @@ function getContext(db, project_key, opts = {}) {
   }
   return { pinned, notes, recent, hot, last_session };
 }
-function getSessionSummary(db, project_key, opts = {}) {
-  let filter;
-  let filterParams;
-  let label;
-  if (opts.session_id) {
-    filter = "session_id = ?";
-    filterParams = [opts.session_id];
-    label = opts.session_id;
-  } else {
-    const date4 = opts.date ?? new Date().toISOString().slice(0, 10);
-    const startOfDay = Math.floor(new Date(`${date4}T00:00:00Z`).getTime() / 1000);
-    const endOfDay = startOfDay + 86400;
-    filter = "created_at >= ? AND created_at < ?";
-    filterParams = [startOfDay, endOfDay];
-    label = date4;
-  }
-  const base = `WHERE project_key = ? AND ${filter}`;
-  const bp = [project_key, ...filterParams];
-  const agg = db.prepare(`
-    SELECT
-      COUNT(*) as stored_count,
-      COALESCE(SUM(original_size), 0) as total_original_bytes,
-      COALESCE(SUM(summary_size), 0) as total_summary_bytes,
-      COUNT(CASE WHEN access_count > 0 THEN 1 END) as accessed_count,
-      COALESCE(SUM(access_count), 0) as total_accesses
-    FROM stored_outputs ${base}
-  `).get(...bp);
-  const tool_counts = db.prepare(`
-    SELECT tool_name, COUNT(*) as count
-    FROM stored_outputs ${base}
-    GROUP BY tool_name
-    ORDER BY count DESC
-  `).all(...bp);
-  const top_accessed = db.prepare(`
-    SELECT id, tool_name, summary, access_count
-    FROM stored_outputs ${base} AND access_count > 0
-    ORDER BY access_count DESC
-    LIMIT 5
-  `).all(...bp);
-  const pinned = db.prepare(`
-    SELECT id, tool_name, summary
-    FROM stored_outputs ${base} AND pinned = 1
-    ORDER BY created_at DESC
-  `).all(...bp);
-  const notes = db.prepare(`
-    SELECT id, summary
-    FROM stored_outputs ${base} AND tool_name = 'recall__note'
-    ORDER BY created_at DESC
-  `).all(...bp);
-  return { label, ...agg, tool_counts, top_accessed, pinned, notes };
-}
-function getSessionDays(db) {
-  return db.prepare(`SELECT date FROM sessions ORDER BY date DESC`).all().map((r) => r.date);
-}
-
 // node_modules/smol-toml/dist/error.js
 /*!
  * Copyright (c) Squirrel Chat et al., All rights reserved.

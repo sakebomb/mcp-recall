@@ -33,14 +33,26 @@ No `just` / `make` in this project. Use `bun test` directly (not `just test`).
 bin/recall              Shell entrypoint for hooks (session-start, post-tool-use)
 src/
   server.ts             MCP server — exposes 10 recall__* tools
-  cli.ts                Hook CLI dispatcher
+  cli.ts                Hook CLI dispatcher (mcp-recall install / learn / profiles / …)
   config.ts             TOML config loader (Zod-validated, cached)
   project-key.ts        Git root detection + SHA256 path hash
-  db/                   SQLite + FTS5 + chunking layer
-  handlers/             Compression handlers per tool type (15 handlers)
-  hooks/                Hook implementations (SessionStart, PostToolUse)
+  log.ts                Unified stderr logging — info/warn/error/debug, gated on RECALL_DEBUG=1
+  format.ts             Shared byte-size and relative-time formatting utilities
+  tools.ts              Tool handler logic for all recall__* tools (pure functions; server.ts wires to MCP SDK)
   denylist.ts           Built-in + configurable denylist
   secrets.ts            Secret pattern detection before any write
+  db/
+    types.ts            All TypeScript interfaces for the DB layer
+    schema.ts           DDL, migrations, getDb / closeDb / initSchema / defaultDbPath
+    chunking.ts         CHUNK_SIZE, chunkText(), sanitizeFtsQuery()
+    queries.ts          Core CRUD — storeOutput, retrieveOutput, evictIfNeeded, forgetOutputs, …
+    analytics.ts        Aggregation queries — getStats, getContext, getSessionSummary, getSuggestions, …
+    index.ts            Re-export barrel (all db/* in one import surface)
+  handlers/             Compression handlers per tool type (15 handlers)
+  hooks/                Hook implementations (SessionStart, PostToolUse)
+  install/              mcp-recall install / uninstall / status — writes to ~/.claude.json, settings.json, CLAUDE.md
+  learn/                mcp-recall learn — reads ~/.claude.json, spawns MCP servers via stdio, generates TOML profiles
+  profiles/             mcp-recall profiles subcommands (list, install, update, remove, seed, feed, check, test, info, available, retrain)
 tests/                  Bun tests, co-located by module name
 .claude-plugin/         Root plugin manifest (local dev / manual install)
 hooks/hooks.json        Hook definitions — canonical source, copied to plugins/ on build
@@ -62,6 +74,26 @@ plugins/mcp-recall/     Marketplace-installable plugin bundle
 - `recall__session_summary` — per-session digest (tool breakdown, top accessed, pinned, notes)
 - `recall__context` — orientation snapshot: pinned + notes + recently accessed + last session headline
 
+## CLI Commands
+
+```bash
+mcp-recall install            # write MCP entry, hooks, and CLAUDE.md instructions into Claude Code config
+mcp-recall uninstall          # reverse of install
+mcp-recall status             # report install health (MCP entry, hooks, CLAUDE.md block)
+mcp-recall learn [server…]    # auto-generate TOML profiles by inspecting installed MCP servers
+mcp-recall profiles list      # list all installed profiles (user + community + built-in)
+mcp-recall profiles install <id>   # download a community profile by ID
+mcp-recall profiles update    # pull updates for all installed community profiles
+mcp-recall profiles remove <id>    # delete an installed community profile
+mcp-recall profiles seed      # install community profiles for all detected MCPs
+mcp-recall profiles feed      # contribute a local profile back to the community repo
+mcp-recall profiles check     # detect pattern conflicts between installed profiles
+mcp-recall profiles test <name>    # apply a profile to a stored or file input and show the result
+mcp-recall profiles retrain   # analyze stored corpus to suggest improved profile fields
+mcp-recall profiles info <id> # show details for a community profile
+mcp-recall profiles available # list community profiles available to install
+```
+
 ## Phases
 
 | Phase | Scope | Status |
@@ -72,6 +104,9 @@ plugins/mcp-recall/     Marketplace-installable plugin bundle
 | 4 | SQLite + FTS5 + chunking DB layer | Complete |
 | 5 | Hook pipeline (dedup, eviction) | Complete |
 | 6 | MCP server tools (10 tools) | Complete |
+| 7 | Install / uninstall / status CLI | Complete |
+| 8 | Profile system (community + user + built-in tiers) | Complete |
+| 9 | `mcp-recall learn` — auto-generate profiles from live MCP servers | Complete |
 
 ## Testing Conventions
 

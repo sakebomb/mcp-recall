@@ -5166,13 +5166,11 @@ function resolveProjectPath(cwd) {
 function hashPath(path) {
   return createHash("sha256").update(path).digest("hex").slice(0, 16);
 }
-
-// src/db/index.ts
+// src/db/schema.ts
 import { Database } from "bun:sqlite";
 import { join as join2 } from "path";
 import { homedir as homedir2 } from "os";
 import { mkdirSync } from "fs";
-import { randomBytes } from "crypto";
 var SCHEMA = `
   CREATE TABLE IF NOT EXISTS stored_outputs (
     id TEXT PRIMARY KEY,
@@ -5261,6 +5259,7 @@ function getDb(path) {
   applyMigrations(instance);
   return instance;
 }
+// src/db/chunking.ts
 var CHUNK_SIZE = 512;
 var CHUNK_OVERLAP = 64;
 function chunkText(text) {
@@ -5275,6 +5274,11 @@ function chunkText(text) {
   }
   return chunks;
 }
+// src/db/queries.ts
+import { randomBytes } from "crypto";
+function generateId() {
+  return `recall_${randomBytes(8).toString("hex")}`;
+}
 function storeChunks(db, id, full_content) {
   const chunks = chunkText(full_content);
   const stmt = db.prepare(`INSERT INTO content_chunks (output_id, chunk_index, content) VALUES (?, ?, ?)`);
@@ -5282,8 +5286,12 @@ function storeChunks(db, id, full_content) {
     stmt.run(id, i, chunks[i]);
   }
 }
-function generateId() {
-  return `recall_${randomBytes(8).toString("hex")}`;
+function countAndDelete(db, where, params) {
+  const count = db.prepare(`SELECT COUNT(*) as n FROM stored_outputs WHERE ${where}`).get(...params).n;
+  if (count > 0) {
+    db.prepare(`DELETE FROM stored_outputs WHERE ${where}`).run(...params);
+  }
+  return count;
 }
 function storeOutput(db, input) {
   const id = generateId();
@@ -5347,13 +5355,17 @@ function evictIfNeeded(db, project_key, max_size_mb) {
   db.prepare(`DELETE FROM stored_outputs WHERE id IN (${placeholders})`).run(...toEvict);
   return toEvict.length;
 }
-function countAndDelete(db, where, params) {
-  const count = db.prepare(`SELECT COUNT(*) as n FROM stored_outputs WHERE ${where}`).get(...params).n;
-  if (count > 0) {
-    db.prepare(`DELETE FROM stored_outputs WHERE ${where}`).run(...params);
-  }
-  return count;
+function pruneExpired(db, project_key, calendar_days) {
+  const cutoff = Math.floor(Date.now() / 1000) - calendar_days * 86400;
+  return countAndDelete(db, "created_at < ? AND project_key = ? AND pinned = 0", [cutoff, project_key]);
 }
+function recordSession(db, date) {
+  db.prepare(`INSERT OR IGNORE INTO sessions (date) VALUES (?)`).run(date);
+}
+function getSessionDays(db) {
+  return db.prepare(`SELECT date FROM sessions ORDER BY date DESC`).all().map((r) => r.date);
+}
+// src/db/analytics.ts
 function getToolBreakdown(db, project_key) {
   return db.prepare(`
     SELECT
@@ -5374,6 +5386,57 @@ function sampleOutputs(db, project_key, tool_name, limit) {
     ORDER BY created_at DESC
     LIMIT ?
   `).all(project_key, tool_name, limit);
+}
+function getSessionSummary(db, project_key, opts = {}) {
+  let filter;
+  let filterParams;
+  let label;
+  if (opts.session_id) {
+    filter = "session_id = ?";
+    filterParams = [opts.session_id];
+    label = opts.session_id;
+  } else {
+    const date = opts.date ?? new Date().toISOString().slice(0, 10);
+    const startOfDay = Math.floor(new Date(`${date}T00:00:00Z`).getTime() / 1000);
+    const endOfDay = startOfDay + 86400;
+    filter = "created_at >= ? AND created_at < ?";
+    filterParams = [startOfDay, endOfDay];
+    label = date;
+  }
+  const base = `WHERE project_key = ? AND ${filter}`;
+  const bp = [project_key, ...filterParams];
+  const agg = db.prepare(`
+    SELECT
+      COUNT(*) as stored_count,
+      COALESCE(SUM(original_size), 0) as total_original_bytes,
+      COALESCE(SUM(summary_size), 0) as total_summary_bytes,
+      COUNT(CASE WHEN access_count > 0 THEN 1 END) as accessed_count,
+      COALESCE(SUM(access_count), 0) as total_accesses
+    FROM stored_outputs ${base}
+  `).get(...bp);
+  const tool_counts = db.prepare(`
+    SELECT tool_name, COUNT(*) as count
+    FROM stored_outputs ${base}
+    GROUP BY tool_name
+    ORDER BY count DESC
+  `).all(...bp);
+  const top_accessed = db.prepare(`
+    SELECT id, tool_name, summary, access_count
+    FROM stored_outputs ${base} AND access_count > 0
+    ORDER BY access_count DESC
+    LIMIT 5
+  `).all(...bp);
+  const pinned = db.prepare(`
+    SELECT id, tool_name, summary
+    FROM stored_outputs ${base} AND pinned = 1
+    ORDER BY created_at DESC
+  `).all(...bp);
+  const notes = db.prepare(`
+    SELECT id, summary
+    FROM stored_outputs ${base} AND tool_name = 'recall__note'
+    ORDER BY created_at DESC
+  `).all(...bp);
+  return { label, ...agg, tool_counts, top_accessed, pinned, notes };
 }
 function getContext(db, project_key, opts = {}) {
   const days = opts.days ?? 7;
@@ -5433,68 +5496,6 @@ function getContext(db, project_key, opts = {}) {
   }
   return { pinned, notes, recent, hot, last_session };
 }
-function getSessionSummary(db, project_key, opts = {}) {
-  let filter;
-  let filterParams;
-  let label;
-  if (opts.session_id) {
-    filter = "session_id = ?";
-    filterParams = [opts.session_id];
-    label = opts.session_id;
-  } else {
-    const date = opts.date ?? new Date().toISOString().slice(0, 10);
-    const startOfDay = Math.floor(new Date(`${date}T00:00:00Z`).getTime() / 1000);
-    const endOfDay = startOfDay + 86400;
-    filter = "created_at >= ? AND created_at < ?";
-    filterParams = [startOfDay, endOfDay];
-    label = date;
-  }
-  const base = `WHERE project_key = ? AND ${filter}`;
-  const bp = [project_key, ...filterParams];
-  const agg = db.prepare(`
-    SELECT
-      COUNT(*) as stored_count,
-      COALESCE(SUM(original_size), 0) as total_original_bytes,
-      COALESCE(SUM(summary_size), 0) as total_summary_bytes,
-      COUNT(CASE WHEN access_count > 0 THEN 1 END) as accessed_count,
-      COALESCE(SUM(access_count), 0) as total_accesses
-    FROM stored_outputs ${base}
-  `).get(...bp);
-  const tool_counts = db.prepare(`
-    SELECT tool_name, COUNT(*) as count
-    FROM stored_outputs ${base}
-    GROUP BY tool_name
-    ORDER BY count DESC
-  `).all(...bp);
-  const top_accessed = db.prepare(`
-    SELECT id, tool_name, summary, access_count
-    FROM stored_outputs ${base} AND access_count > 0
-    ORDER BY access_count DESC
-    LIMIT 5
-  `).all(...bp);
-  const pinned = db.prepare(`
-    SELECT id, tool_name, summary
-    FROM stored_outputs ${base} AND pinned = 1
-    ORDER BY created_at DESC
-  `).all(...bp);
-  const notes = db.prepare(`
-    SELECT id, summary
-    FROM stored_outputs ${base} AND tool_name = 'recall__note'
-    ORDER BY created_at DESC
-  `).all(...bp);
-  return { label, ...agg, tool_counts, top_accessed, pinned, notes };
-}
-function pruneExpired(db, project_key, calendar_days) {
-  const cutoff = Math.floor(Date.now() / 1000) - calendar_days * 86400;
-  return countAndDelete(db, "created_at < ? AND project_key = ? AND pinned = 0", [cutoff, project_key]);
-}
-function recordSession(db, date) {
-  db.prepare(`INSERT OR IGNORE INTO sessions (date) VALUES (?)`).run(date);
-}
-function getSessionDays(db) {
-  return db.prepare(`SELECT date FROM sessions ORDER BY date DESC`).all().map((r) => r.date);
-}
-
 // src/format.ts
 function formatBytes(bytes) {
   if (bytes < 1024)
