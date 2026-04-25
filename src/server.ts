@@ -12,6 +12,7 @@
  *   recall__stats            — aggregate session efficiency report
  *   recall__session_summary  — digest of a single session's activity
  *   recall__context          — session orientation: pinned, notes, recent, last session
+ *   recall__suggest          — surface pin candidates and stale items
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -30,6 +31,7 @@ import {
   toolStats,
   toolSessionSummary,
   toolContext,
+  toolSuggest,
 } from "./tools";
 
 const projectKey = getProjectKey(process.cwd());
@@ -201,6 +203,34 @@ server.tool(
   },
   safeTool((args) => ({
     content: [{ type: "text", text: toolContext(db, projectKey, args) }],
+  }))
+);
+
+server.tool(
+  "recall__suggest",
+  "Surface actionable maintenance suggestions: items worth pinning (frequently accessed but unpinned) and stale items (never accessed, candidates for deletion). Call periodically to keep the store healthy.",
+  {
+    pin_threshold: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Min access count to qualify as a pin candidate (default 5)"),
+    stale_days: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Items with zero accesses older than N days are stale (default 3)"),
+    limit: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Max items per category (default 3)"),
+  },
+  safeTool((args) => ({
+    content: [{ type: "text", text: toolSuggest(db, projectKey, args) }],
   }))
 );
 
