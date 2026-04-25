@@ -7875,12 +7875,6 @@ ${summary}`,
   };
 }
 
-// src/profiles/commands.ts
-import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync2, rmSync, unlinkSync } from "fs";
-import { join as join4 } from "path";
-import { homedir as homedir4, tmpdir } from "os";
-import { createHash as createHash3 } from "crypto";
-
 // src/learn/retrain.ts
 import { readFileSync as readFileSync3, writeFileSync } from "fs";
 var MIN_SAMPLES = 3;
@@ -8152,7 +8146,15 @@ ${"\u2500".repeat(54)}`);
   }
 }
 
-// src/profiles/commands.ts
+// src/profiles/cmd-local.ts
+import { readFileSync as readFileSync5, readdirSync as readdirSync3, rmSync } from "fs";
+import { join as join5 } from "path";
+
+// src/profiles/shared.ts
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync2, unlinkSync } from "fs";
+import { join as join4 } from "path";
+import { homedir as homedir4, tmpdir } from "os";
+import { createHash as createHash3 } from "crypto";
 var MANIFEST_URL = "https://raw.githubusercontent.com/sakebomb/mcp-recall-profiles/main/manifest.json";
 var PROFILE_BASE_URL = "https://raw.githubusercontent.com/sakebomb/mcp-recall-profiles/main/";
 var COMMUNITY_REPO = "sakebomb/mcp-recall-profiles";
@@ -8264,19 +8266,6 @@ function installedCommunityMap() {
   }
   return map;
 }
-function patternsOverlap(a, b) {
-  const aExact = !a.endsWith("*");
-  const bExact = !b.endsWith("*");
-  if (aExact && bExact)
-    return a === b;
-  if (aExact)
-    return a.startsWith(b.slice(0, -1));
-  if (bExact)
-    return b.startsWith(a.slice(0, -1));
-  const aPrefix = a.slice(0, -1);
-  const bPrefix = b.slice(0, -1);
-  return aPrefix.startsWith(bPrefix) || bPrefix.startsWith(aPrefix);
-}
 async function promptNumber(msg, min, max) {
   for (let attempt = 0;attempt < 3; attempt++) {
     process.stdout.write(msg);
@@ -8320,6 +8309,21 @@ Multiple profiles match "${nameOrId}":`);
   const choice = await promptNumber(`Pick one (1-${matches.length}): `, 1, matches.length);
   return matches[choice - 1];
 }
+
+// src/profiles/cmd-local.ts
+function patternsOverlap(a, b) {
+  const aExact = !a.endsWith("*");
+  const bExact = !b.endsWith("*");
+  if (aExact && bExact)
+    return a === b;
+  if (aExact)
+    return a.startsWith(b.slice(0, -1));
+  if (bExact)
+    return b.startsWith(a.slice(0, -1));
+  const aPrefix = a.slice(0, -1);
+  const bPrefix = b.slice(0, -1);
+  return aPrefix.startsWith(bPrefix) || bPrefix.startsWith(aPrefix);
+}
 function cmdList(args) {
   const machineReadable = args.includes("--machine-readable");
   const profiles = loadProfiles();
@@ -8356,61 +8360,6 @@ ${header}`);
 ${profiles.length} total (${summary})
 `);
 }
-async function cmdInstall(args) {
-  const skipVerify = args.includes("--skip-verify");
-  const nameOrId = args.find((a) => !a.startsWith("-"));
-  if (!nameOrId) {
-    console.error("Usage: mcp-recall profiles install <name> [--skip-verify]");
-    process.exit(1);
-  }
-  process.stdout.write("Fetching manifest\u2026 ");
-  const entries = await fetchManifest(skipVerify);
-  console.log("done");
-  const entry = await resolveManifestEntry(nameOrId, entries);
-  assertSafeId(entry.id);
-  assertSafeFile(entry.file);
-  process.stdout.write(`Installing ${sanitize(entry.id)} v${sanitize(entry.version)}\u2026 `);
-  const content = await fetchProfileContent(entry.file);
-  verifyHash(content, entry.sha256, entry.id);
-  const filePath = saveToCommunityDir(entry.id, content);
-  clearProfileCache();
-  console.log(`done
-\u2713 ${filePath}`);
-}
-async function cmdUpdate(args = []) {
-  const skipVerify = args.includes("--skip-verify");
-  const installed = installedCommunityMap();
-  if (installed.size === 0) {
-    console.log("No community profiles installed.");
-    return;
-  }
-  process.stdout.write("Fetching manifest\u2026 ");
-  const entries = await fetchManifest(skipVerify);
-  console.log(`done
-`);
-  let updated = 0;
-  for (const [id, currentVersion] of installed) {
-    const entry = entries.find((e) => e.id === id);
-    if (!entry) {
-      console.log(`  ${id}: not in registry (skipped)`);
-      continue;
-    }
-    if (entry.version === currentVersion) {
-      console.log(`  ${id}: up to date (${currentVersion})`);
-      continue;
-    }
-    assertSafeId(entry.id);
-    assertSafeFile(entry.file);
-    const content = await fetchProfileContent(entry.file);
-    verifyHash(content, entry.sha256, entry.id);
-    saveToCommunityDir(id, content);
-    console.log(`  \u2713 ${id}: ${currentVersion} \u2192 ${entry.version}`);
-    updated++;
-  }
-  clearProfileCache();
-  console.log(`
-${updated} profile(s) updated.`);
-}
 function cmdRemove(args) {
   const nameOrId = args[0];
   if (!nameOrId) {
@@ -8429,85 +8378,9 @@ function cmdRemove(args) {
   }
   const id = target.spec.profile.id;
   assertSafeId(id);
-  rmSync(join4(communityDir(), id), { recursive: true });
+  rmSync(join5(communityDir(), id), { recursive: true });
   clearProfileCache();
   console.log(`\u2713 Removed ${id}`);
-}
-async function cmdSeed(args) {
-  const all = args.includes("--all");
-  const skipVerify = args.includes("--skip-verify");
-  process.stdout.write("Fetching manifest\u2026 ");
-  const entries = await fetchManifest(skipVerify);
-  console.log(`done
-`);
-  const installed = installedCommunityMap();
-  let installCount = 0;
-  let alreadyCount = 0;
-  if (all) {
-    for (const entry of entries) {
-      if (installed.has(entry.id)) {
-        console.log(`    ${entry.id}: already installed`);
-        alreadyCount++;
-        continue;
-      }
-      assertSafeId(entry.id);
-      assertSafeFile(entry.file);
-      const content = await fetchProfileContent(entry.file);
-      verifyHash(content, entry.sha256, entry.id);
-      saveToCommunityDir(entry.id, content);
-      console.log(`  \u2713 ${entry.id} installed`);
-      installCount++;
-    }
-    clearProfileCache();
-    console.log(`
-${installCount} profile(s) installed (${alreadyCount} already installed, ${entries.length} total available)`);
-    return;
-  }
-  let serverKeys = [];
-  try {
-    const raw = JSON.parse(readFileSync4(join4(homedir4(), ".claude.json"), "utf8"));
-    const mcpServers = raw["mcpServers"];
-    serverKeys = Object.keys(mcpServers ?? {}).filter((k) => k !== "recall");
-  } catch {
-    console.log("Could not read ~/.claude.json \u2014 no MCPs detected.");
-    return;
-  }
-  if (serverKeys.length === 0) {
-    console.log("No MCP servers found in ~/.claude.json (other than recall).");
-    return;
-  }
-  console.log(`Detected MCPs: ${serverKeys.join(", ")}`);
-  for (const key of serverKeys) {
-    const prefix = `mcp__${key.replace(/-/g, "_")}__`;
-    const matches = entries.filter((e) => {
-      const patterns = Array.isArray(e.mcp_pattern) ? e.mcp_pattern : [e.mcp_pattern];
-      return patterns.some((pat) => {
-        const stripped = pat.endsWith("*") ? pat.slice(0, -1) : pat;
-        return stripped === prefix || prefix.startsWith(stripped);
-      });
-    });
-    if (matches.length === 0) {
-      console.log(`  ${key}: no community profile available`);
-      continue;
-    }
-    for (const entry of matches) {
-      if (installed.has(entry.id)) {
-        console.log(`  ${entry.id}: already installed`);
-        alreadyCount++;
-        continue;
-      }
-      assertSafeId(entry.id);
-      assertSafeFile(entry.file);
-      const content = await fetchProfileContent(entry.file);
-      verifyHash(content, entry.sha256, entry.id);
-      saveToCommunityDir(entry.id, content);
-      console.log(`  \u2713 ${entry.id} installed (matched ${key})`);
-      installCount++;
-    }
-  }
-  clearProfileCache();
-  console.log(`
-${installCount} profile(s) installed.`);
 }
 function cmdFeed(args) {
   const profilePath = args[0];
@@ -8515,9 +8388,9 @@ function cmdFeed(args) {
     const dir = userDir();
     const files = [];
     try {
-      for (const entry of readdirSync2(dir)) {
+      for (const entry of readdirSync3(dir)) {
         if (entry.endsWith(".toml"))
-          files.push(join4(dir, entry));
+          files.push(join5(dir, entry));
       }
     } catch {}
     console.log("Usage: mcp-recall profiles feed <path-to-profile.toml>");
@@ -8531,7 +8404,7 @@ Your local profiles:`);
   }
   let content;
   try {
-    content = readFileSync4(profilePath, "utf8");
+    content = readFileSync5(profilePath, "utf8");
   } catch {
     console.error(`Cannot read: ${profilePath}`);
     process.exit(1);
@@ -8617,91 +8490,141 @@ ${conflicts.length} conflict(s):
 `);
   }
 }
-function testProfile(toolName, content) {
-  const profiles = loadProfiles();
-  const matchedProfile = resolveProfile(toolName, profiles);
-  const handler = getHandler(toolName, content);
-  const { summary, originalSize } = handler(toolName, content);
-  const outputBytes = Buffer.byteLength(summary, "utf8");
-  const reductionPct2 = originalSize > 0 ? Math.round((1 - outputBytes / originalSize) * 100) : 0;
-  return { toolName, matchedProfile, handlerName: handler.name, inputBytes: originalSize, outputBytes, reductionPct: reductionPct2, summary };
+
+// src/profiles/cmd-catalog.ts
+import { readFileSync as readFileSync6 } from "fs";
+import { join as join6 } from "path";
+import { homedir as homedir5 } from "os";
+async function cmdInstall(args) {
+  const skipVerify = args.includes("--skip-verify");
+  const nameOrId = args.find((a) => !a.startsWith("-"));
+  if (!nameOrId) {
+    console.error("Usage: mcp-recall profiles install <name> [--skip-verify]");
+    process.exit(1);
+  }
+  process.stdout.write("Fetching manifest\u2026 ");
+  const entries = await fetchManifest(skipVerify);
+  console.log("done");
+  const entry = await resolveManifestEntry(nameOrId, entries);
+  assertSafeId(entry.id);
+  assertSafeFile(entry.file);
+  process.stdout.write(`Installing ${sanitize(entry.id)} v${sanitize(entry.version)}\u2026 `);
+  const content = await fetchProfileContent(entry.file);
+  verifyHash(content, entry.sha256, entry.id);
+  const filePath = saveToCommunityDir(entry.id, content);
+  clearProfileCache();
+  console.log(`done
+\u2713 ${filePath}`);
 }
-function cmdTest(args) {
-  let toolName;
-  let storedId;
-  let inputFile;
-  for (let i = 0;i < args.length; i++) {
-    if (args[i] === "--stored" && args[i + 1]) {
-      storedId = args[++i];
-    } else if (args[i] === "--input" && args[i + 1]) {
-      inputFile = args[++i];
-    } else if (!args[i].startsWith("-")) {
-      toolName = args[i];
-    }
-  }
-  if (!toolName) {
-    console.error("Usage: mcp-recall profiles test <tool_name> [--stored <id>] [--input <file>]");
-    console.error(`
-Examples:`);
-    console.error("  mcp-recall profiles test mcp__jira__search_issues --stored recall_abc123");
-    console.error("  mcp-recall profiles test mcp__stripe__list_customers --input fixture.json");
-    process.exit(1);
-  }
-  if (!storedId && !inputFile) {
-    console.error(`Provide --stored <recall_id> or --input <file>
-`);
-    console.error(`To find a stored item:  recall__list_stored(tool: "${toolName}")`);
-    process.exit(1);
-  }
-  let content;
-  let contentSource;
-  if (storedId) {
-    const projectKey = getProjectKey(process.cwd());
-    const db = getDb(defaultDbPath(projectKey));
-    const row = db.prepare("SELECT full_content FROM stored_outputs WHERE id = ?").get(storedId);
-    if (!row) {
-      console.error(`No stored item found: ${storedId}`);
-      process.exit(1);
-    }
-    content = row.full_content;
-    contentSource = `stored:${storedId}`;
-  } else {
-    try {
-      content = readFileSync4(inputFile, "utf8");
-    } catch {
-      console.error(`Cannot read: ${inputFile}`);
-      process.exit(1);
-    }
-    contentSource = inputFile;
-  }
-  const config = loadConfig();
-  if (isDenied(toolName, config)) {
-    console.log(`Tool "${toolName}" is on the denylist \u2014 output will not be processed or stored.`);
+async function cmdUpdate(args = []) {
+  const skipVerify = args.includes("--skip-verify");
+  const installed = installedCommunityMap();
+  if (installed.size === 0) {
+    console.log("No community profiles installed.");
     return;
   }
-  const result = testProfile(toolName, content);
-  if (result.matchedProfile) {
-    const p = result.matchedProfile;
-    console.log(`
-Profile:  ${p.spec.profile.id} (${p.tier}) \u2014 ${p.patterns.join(", ")}`);
-    console.log(`File:     ${p.filePath}`);
-    console.log(`Strategy: ${p.spec.strategy.type}`);
-  } else {
-    console.log(`
-No profile match for ${toolName}`);
-    console.log(`Handler:  ${result.handlerName} (TypeScript fallback)`);
-    console.log(`
-To add a profile:`);
-    console.log(`  mcp-recall learn`);
-    console.log(`  https://github.com/sakebomb/mcp-recall/blob/main/docs/profile-schema.md`);
-  }
-  console.log(`
-Input:  ${formatBytes(result.inputBytes)}  (${contentSource})`);
-  console.log("\u2500".repeat(60));
-  console.log(result.summary);
-  console.log("\u2500".repeat(60));
-  console.log(`Output: ${formatBytes(result.outputBytes)}  (${result.reductionPct}% reduction)
+  process.stdout.write("Fetching manifest\u2026 ");
+  const entries = await fetchManifest(skipVerify);
+  console.log(`done
 `);
+  let updated = 0;
+  for (const [id, currentVersion] of installed) {
+    const entry = entries.find((e) => e.id === id);
+    if (!entry) {
+      console.log(`  ${id}: not in registry (skipped)`);
+      continue;
+    }
+    if (entry.version === currentVersion) {
+      console.log(`  ${id}: up to date (${currentVersion})`);
+      continue;
+    }
+    assertSafeId(entry.id);
+    assertSafeFile(entry.file);
+    const content = await fetchProfileContent(entry.file);
+    verifyHash(content, entry.sha256, entry.id);
+    saveToCommunityDir(id, content);
+    console.log(`  \u2713 ${id}: ${currentVersion} \u2192 ${entry.version}`);
+    updated++;
+  }
+  clearProfileCache();
+  console.log(`
+${updated} profile(s) updated.`);
+}
+async function cmdSeed(args) {
+  const all = args.includes("--all");
+  const skipVerify = args.includes("--skip-verify");
+  process.stdout.write("Fetching manifest\u2026 ");
+  const entries = await fetchManifest(skipVerify);
+  console.log(`done
+`);
+  const installed = installedCommunityMap();
+  let installCount = 0;
+  let alreadyCount = 0;
+  if (all) {
+    for (const entry of entries) {
+      if (installed.has(entry.id)) {
+        console.log(`    ${entry.id}: already installed`);
+        alreadyCount++;
+        continue;
+      }
+      assertSafeId(entry.id);
+      assertSafeFile(entry.file);
+      const content = await fetchProfileContent(entry.file);
+      verifyHash(content, entry.sha256, entry.id);
+      saveToCommunityDir(entry.id, content);
+      console.log(`  \u2713 ${entry.id} installed`);
+      installCount++;
+    }
+    clearProfileCache();
+    console.log(`
+${installCount} profile(s) installed (${alreadyCount} already installed, ${entries.length} total available)`);
+    return;
+  }
+  let serverKeys = [];
+  try {
+    const raw = JSON.parse(readFileSync6(join6(homedir5(), ".claude.json"), "utf8"));
+    const mcpServers = raw["mcpServers"];
+    serverKeys = Object.keys(mcpServers ?? {}).filter((k) => k !== "recall");
+  } catch {
+    console.log("Could not read ~/.claude.json \u2014 no MCPs detected.");
+    return;
+  }
+  if (serverKeys.length === 0) {
+    console.log("No MCP servers found in ~/.claude.json (other than recall).");
+    return;
+  }
+  console.log(`Detected MCPs: ${serverKeys.join(", ")}`);
+  for (const key of serverKeys) {
+    const prefix = `mcp__${key.replace(/-/g, "_")}__`;
+    const matches = entries.filter((e) => {
+      const patterns = Array.isArray(e.mcp_pattern) ? e.mcp_pattern : [e.mcp_pattern];
+      return patterns.some((pat) => {
+        const stripped = pat.endsWith("*") ? pat.slice(0, -1) : pat;
+        return stripped === prefix || prefix.startsWith(stripped);
+      });
+    });
+    if (matches.length === 0) {
+      console.log(`  ${key}: no community profile available`);
+      continue;
+    }
+    for (const entry of matches) {
+      if (installed.has(entry.id)) {
+        console.log(`  ${entry.id}: already installed`);
+        alreadyCount++;
+        continue;
+      }
+      assertSafeId(entry.id);
+      assertSafeFile(entry.file);
+      const content = await fetchProfileContent(entry.file);
+      verifyHash(content, entry.sha256, entry.id);
+      saveToCommunityDir(entry.id, content);
+      console.log(`  \u2713 ${entry.id} installed (matched ${key})`);
+      installCount++;
+    }
+  }
+  clearProfileCache();
+  console.log(`
+${installCount} profile(s) installed.`);
 }
 async function cmdInfo(args) {
   const nameOrId = args[0];
@@ -8772,6 +8695,97 @@ async function cmdAvailable(args) {
 ${entries.length} available, ${installedCount} installed
 `);
 }
+
+// src/profiles/cmd-test.ts
+import { readFileSync as readFileSync7 } from "fs";
+function testProfile(toolName, content) {
+  const profiles = loadProfiles();
+  const matchedProfile = resolveProfile(toolName, profiles);
+  const handler = getHandler(toolName, content);
+  const { summary, originalSize } = handler(toolName, content);
+  const outputBytes = Buffer.byteLength(summary, "utf8");
+  const reductionPct2 = originalSize > 0 ? Math.round((1 - outputBytes / originalSize) * 100) : 0;
+  return { toolName, matchedProfile, handlerName: handler.name, inputBytes: originalSize, outputBytes, reductionPct: reductionPct2, summary };
+}
+function cmdTest(args) {
+  let toolName;
+  let storedId;
+  let inputFile;
+  for (let i = 0;i < args.length; i++) {
+    if (args[i] === "--stored" && args[i + 1]) {
+      storedId = args[++i];
+    } else if (args[i] === "--input" && args[i + 1]) {
+      inputFile = args[++i];
+    } else if (!args[i].startsWith("-")) {
+      toolName = args[i];
+    }
+  }
+  if (!toolName) {
+    console.error("Usage: mcp-recall profiles test <tool_name> [--stored <id>] [--input <file>]");
+    console.error(`
+Examples:`);
+    console.error("  mcp-recall profiles test mcp__jira__search_issues --stored recall_abc123");
+    console.error("  mcp-recall profiles test mcp__stripe__list_customers --input fixture.json");
+    process.exit(1);
+  }
+  if (!storedId && !inputFile) {
+    console.error(`Provide --stored <recall_id> or --input <file>
+`);
+    console.error(`To find a stored item:  recall__list_stored(tool: "${toolName}")`);
+    process.exit(1);
+  }
+  let content;
+  let contentSource;
+  if (storedId) {
+    const projectKey = getProjectKey(process.cwd());
+    const db = getDb(defaultDbPath(projectKey));
+    const row = db.prepare("SELECT full_content FROM stored_outputs WHERE id = ?").get(storedId);
+    if (!row) {
+      console.error(`No stored item found: ${storedId}`);
+      process.exit(1);
+    }
+    content = row.full_content;
+    contentSource = `stored:${storedId}`;
+  } else {
+    try {
+      content = readFileSync7(inputFile, "utf8");
+    } catch {
+      console.error(`Cannot read: ${inputFile}`);
+      process.exit(1);
+    }
+    contentSource = inputFile;
+  }
+  const config = loadConfig();
+  if (isDenied(toolName, config)) {
+    console.log(`Tool "${toolName}" is on the denylist \u2014 output will not be processed or stored.`);
+    return;
+  }
+  const result = testProfile(toolName, content);
+  if (result.matchedProfile) {
+    const p = result.matchedProfile;
+    console.log(`
+Profile:  ${p.spec.profile.id} (${p.tier}) \u2014 ${p.patterns.join(", ")}`);
+    console.log(`File:     ${p.filePath}`);
+    console.log(`Strategy: ${p.spec.strategy.type}`);
+  } else {
+    console.log(`
+No profile match for ${toolName}`);
+    console.log(`Handler:  ${result.handlerName} (TypeScript fallback)`);
+    console.log(`
+To add a profile:`);
+    console.log(`  mcp-recall learn`);
+    console.log(`  https://github.com/sakebomb/mcp-recall/blob/main/docs/profile-schema.md`);
+  }
+  console.log(`
+Input:  ${formatBytes(result.inputBytes)}  (${contentSource})`);
+  console.log("\u2500".repeat(60));
+  console.log(result.summary);
+  console.log("\u2500".repeat(60));
+  console.log(`Output: ${formatBytes(result.outputBytes)}  (${result.reductionPct}% reduction)
+`);
+}
+
+// src/profiles/commands.ts
 async function handleProfilesCommand(args) {
   const cmd = args[0];
   const rest = args.slice(1);
@@ -8831,9 +8845,9 @@ async function handleProfilesCommand(args) {
 }
 
 // src/learn/index.ts
-import { readFileSync as readFileSync5, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3 } from "fs";
-import { join as join5 } from "path";
-import { homedir as homedir5 } from "os";
+import { readFileSync as readFileSync8, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3 } from "fs";
+import { join as join7 } from "path";
+import { homedir as homedir6 } from "os";
 
 // src/learn/client.ts
 class LineReader {
@@ -9043,11 +9057,11 @@ function generateProfile(serverKey, tools) {
 
 // src/learn/index.ts
 function userProfilesDir() {
-  return process.env.RECALL_USER_PROFILES_PATH ?? join5(homedir5(), ".config", "mcp-recall", "profiles");
+  return process.env.RECALL_USER_PROFILES_PATH ?? join7(homedir6(), ".config", "mcp-recall", "profiles");
 }
 function readClaudeJson() {
-  const path = join5(homedir5(), ".claude.json");
-  const raw = JSON.parse(readFileSync5(path, "utf8"));
+  const path = join7(homedir6(), ".claude.json");
+  const raw = JSON.parse(readFileSync8(path, "utf8"));
   return raw["mcpServers"] ?? {};
 }
 async function handleLearnCommand(args) {
@@ -9099,9 +9113,9 @@ Learning from ${candidates.length} MCP server(s)\u2026
       console.log(toml);
       continue;
     }
-    const profileDir = join5(outputDir, `mcp__${key.replace(/-/g, "_")}`);
+    const profileDir = join7(outputDir, `mcp__${key.replace(/-/g, "_")}`);
     mkdirSync3(profileDir, { recursive: true });
-    const filePath = join5(profileDir, "default.toml");
+    const filePath = join7(profileDir, "default.toml");
     writeFileSync3(filePath, toml);
     console.log(`     \u2192 ${filePath}`);
     written++;
