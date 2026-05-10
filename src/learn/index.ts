@@ -12,6 +12,8 @@ import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { listMcpTools } from "./client";
+import type { McpTool } from "./client";
+import { listMcpToolsHttp } from "./http-client";
 import { generateProfile } from "./generate";
 import { clearProfileCache } from "../profiles/loader";
 
@@ -47,19 +49,19 @@ export async function handleLearnCommand(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  // Filter out recall itself and any HTTP servers
+  // Filter out recall itself and servers with neither command nor url
   const candidates = Object.entries(servers).filter(([key, cfg]) => {
     if (key === "recall") return false;
     if (targets.length > 0 && !targets.includes(key)) return false;
-    if (!cfg.command) {
-      console.log(`  ${key}: skipped (HTTP/SSE server — only stdio supported)`);
+    if (!cfg.command && !cfg.url) {
+      console.log(`  ${key}: skipped (no command or url in config)`);
       return false;
     }
     return true;
   });
 
   if (candidates.length === 0) {
-    console.log("No stdio MCP servers found to learn from.");
+    console.log("No MCP servers found to learn from.");
     return;
   }
 
@@ -71,21 +73,24 @@ export async function handleLearnCommand(args: string[]): Promise<void> {
 
   for (const [key, cfg] of candidates) {
     process.stdout.write(`  ${key}: connecting… `);
-    let tools;
+    let tools: McpTool[];
     try {
-      tools = await listMcpTools(
-        cfg.command!,
-        cfg.args ?? [],
-        cfg.env ?? {},
-        10_000
-      );
+      if (cfg.url) {
+        const result = await listMcpToolsHttp(cfg.url, 10_000);
+        tools = result.tools;
+        if (result.streamableError) {
+          process.stdout.write(`\n    streamable HTTP failed (${result.streamableError}), used legacy SSE — `);
+        }
+        console.log(`${tools.length} tool(s) found (${result.transport})`);
+      } else {
+        tools = await listMcpTools(cfg.command!, cfg.args ?? [], cfg.env ?? {}, 10_000);
+        console.log(`${tools.length} tool(s) found`);
+      }
     } catch (e) {
       console.log(`failed — ${e instanceof Error ? e.message : String(e)}`);
       skipped++;
       continue;
     }
-
-    console.log(`${tools.length} tool(s) found`);
 
     const toml = generateProfile(key, tools);
 

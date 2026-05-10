@@ -8925,7 +8925,7 @@ async function listMcpTools(command, args, env, timeoutMs = 1e4) {
       id: 1,
       method: "initialize",
       params: {
-        protocolVersion: "2024-11-05",
+        protocolVersion: "2025-03-26",
         capabilities: {},
         clientInfo: { name: "mcp-recall-learn", version: "1.0.0" }
       }
@@ -8939,6 +8939,221 @@ async function listMcpTools(command, args, env, timeoutMs = 1e4) {
     reader.release();
     proc.stdin.end();
     proc.kill();
+  }
+}
+
+// src/learn/http-client.ts
+class McpProtocolError extends Error {
+  constructor(msg) {
+    super(msg);
+    this.name = "McpProtocolError";
+  }
+}
+async function* parseSseStream(body, signal) {
+  const reader = body.getReader();
+  const dec = new TextDecoder;
+  let buf = "";
+  try {
+    while (!signal.aborted) {
+      let done, value;
+      try {
+        ({ done, value } = await reader.read());
+      } catch {
+        break;
+      }
+      if (done)
+        break;
+      buf += dec.decode(value, { stream: true });
+      const blocks = buf.split(`
+
+`);
+      buf = blocks.pop() ?? "";
+      for (const block of blocks) {
+        if (!block.trim())
+          continue;
+        let eventType;
+        const dataLines = [];
+        for (const line of block.split(`
+`)) {
+          if (line.startsWith("event: "))
+            eventType = line.slice(7).trim();
+          else if (line.startsWith("data: "))
+            dataLines.push(line.slice(6));
+          else if (line === "data")
+            dataLines.push("");
+        }
+        if (dataLines.length > 0) {
+          yield { event: eventType, data: dataLines.join(`
+`) };
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+async function awaitSseResult(stream, id) {
+  for await (const { data } of stream) {
+    let msg;
+    try {
+      msg = JSON.parse(data);
+    } catch {
+      continue;
+    }
+    if (msg.id !== id)
+      continue;
+    if (msg.error)
+      throw new McpProtocolError(`MCP error: ${msg.error.message}`);
+    return msg.result;
+  }
+  throw new Error("SSE stream ended without a matching response");
+}
+var INIT_PARAMS = {
+  protocolVersion: "2025-03-26",
+  capabilities: {},
+  clientInfo: { name: "mcp-recall-learn", version: "1.0.0" }
+};
+async function streamableRpc(url, body, signal) {
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream"
+    },
+    body: JSON.stringify(body),
+    signal
+  });
+  if (!resp.ok)
+    throw new Error(`HTTP ${resp.status}`);
+  if (body.id === undefined)
+    return;
+  const ct = resp.headers.get("content-type") ?? "";
+  if (ct.includes("application/json")) {
+    const msg = await resp.json();
+    if (msg.error)
+      throw new McpProtocolError(`MCP error: ${msg.error.message}`);
+    return msg.result;
+  }
+  if (ct.includes("text/event-stream")) {
+    const stream = parseSseStream(resp.body, signal);
+    return awaitSseResult(stream, body.id);
+  }
+  throw new Error(`Unexpected Content-Type: ${ct}`);
+}
+async function tryStreamableHttp(url, timeoutMs) {
+  const signal = AbortSignal.timeout(timeoutMs);
+  await streamableRpc(url, { jsonrpc: "2.0", id: 1, method: "initialize", params: INIT_PARAMS }, signal);
+  await streamableRpc(url, { jsonrpc: "2.0", method: "notifications/initialized" }, signal);
+  const result = await streamableRpc(url, { jsonrpc: "2.0", id: 2, method: "tools/list" }, signal);
+  return result?.tools ?? [];
+}
+async function tryLegacySse(url, timeoutMs) {
+  const abort = new AbortController;
+  const timer = setTimeout(() => abort.abort(new Error("timeout")), timeoutMs);
+  try {
+    const sseResp = await fetch(url, {
+      headers: { Accept: "text/event-stream" },
+      signal: abort.signal
+    });
+    if (!sseResp.ok)
+      throw new Error(`HTTP ${sseResp.status}`);
+    const ct = sseResp.headers.get("content-type") ?? "";
+    if (!ct.includes("text/event-stream")) {
+      throw new Error(`Expected SSE stream, got Content-Type: ${ct}`);
+    }
+    const pending = new Map;
+    let postUrl = null;
+    const postUrlResolve = Promise.withResolvers();
+    const sseStream = parseSseStream(sseResp.body, abort.signal);
+    const readerDone = (async () => {
+      try {
+        for await (const { event, data } of sseStream) {
+          if (event === "endpoint") {
+            const resolved = new URL(data.trim(), url).href;
+            assertHttpScheme(resolved, "endpoint URL from SSE event");
+            postUrlResolve.resolve(resolved);
+            postUrl = resolved;
+            continue;
+          }
+          let msg;
+          try {
+            msg = JSON.parse(data);
+          } catch {
+            continue;
+          }
+          if (msg.id === undefined)
+            continue;
+          const p = pending.get(msg.id);
+          if (!p)
+            continue;
+          pending.delete(msg.id);
+          if (msg.error)
+            p.reject(new McpProtocolError(`MCP error: ${msg.error.message}`));
+          else
+            p.resolve(msg.result);
+        }
+        postUrlResolve.reject(new Error("SSE stream closed before endpoint event received"));
+        for (const { reject } of pending.values()) {
+          reject(new Error("SSE stream closed before response received"));
+        }
+      } catch (e) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        postUrlResolve.reject(err);
+        for (const { reject } of pending.values())
+          reject(err);
+      }
+    })();
+    postUrl = await postUrlResolve.promise;
+    const post = (body) => {
+      const req = fetch(postUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: abort.signal
+      });
+      if (body.id === undefined)
+        return req.then(() => {
+          return;
+        });
+      return new Promise((resolve, reject) => {
+        pending.set(body.id, { resolve, reject });
+        req.catch(reject);
+      });
+    };
+    await post({ jsonrpc: "2.0", id: 1, method: "initialize", params: INIT_PARAMS });
+    await post({ jsonrpc: "2.0", method: "notifications/initialized" });
+    const result = await post({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+    abort.abort();
+    await readerDone.catch(() => {});
+    return result?.tools ?? [];
+  } finally {
+    clearTimeout(timer);
+    abort.abort();
+  }
+}
+function assertHttpScheme(rawUrl, label) {
+  const { protocol } = new URL(rawUrl);
+  if (protocol !== "http:" && protocol !== "https:") {
+    throw new Error(`${label} has unsupported URL scheme: ${protocol}`);
+  }
+}
+async function listMcpToolsHttp(url, timeoutMs = 1e4) {
+  assertHttpScheme(url, "MCP server URL");
+  let streamableError = null;
+  try {
+    const tools = await tryStreamableHttp(url, timeoutMs);
+    return { tools, transport: "streamable-http" };
+  } catch (e) {
+    if (e instanceof McpProtocolError)
+      throw e;
+    streamableError = e instanceof Error ? e.message : String(e);
+  }
+  try {
+    const tools = await tryLegacySse(url, timeoutMs);
+    return { tools, transport: "legacy-sse", streamableError: streamableError ?? undefined };
+  } catch (e) {
+    const sseError = e instanceof Error ? e.message : String(e);
+    throw new Error(`streamable HTTP: ${streamableError}; legacy SSE: ${sseError}`);
   }
 }
 
@@ -9079,14 +9294,14 @@ async function handleLearnCommand(args) {
       return false;
     if (targets.length > 0 && !targets.includes(key))
       return false;
-    if (!cfg.command) {
-      console.log(`  ${key}: skipped (HTTP/SSE server \u2014 only stdio supported)`);
+    if (!cfg.command && !cfg.url) {
+      console.log(`  ${key}: skipped (no command or url in config)`);
       return false;
     }
     return true;
   });
   if (candidates.length === 0) {
-    console.log("No stdio MCP servers found to learn from.");
+    console.log("No MCP servers found to learn from.");
     return;
   }
   console.log(`
@@ -9099,13 +9314,23 @@ Learning from ${candidates.length} MCP server(s)\u2026
     process.stdout.write(`  ${key}: connecting\u2026 `);
     let tools;
     try {
-      tools = await listMcpTools(cfg.command, cfg.args ?? [], cfg.env ?? {}, 1e4);
+      if (cfg.url) {
+        const result = await listMcpToolsHttp(cfg.url, 1e4);
+        tools = result.tools;
+        if (result.streamableError) {
+          process.stdout.write(`
+    streamable HTTP failed (${result.streamableError}), used legacy SSE \u2014 `);
+        }
+        console.log(`${tools.length} tool(s) found (${result.transport})`);
+      } else {
+        tools = await listMcpTools(cfg.command, cfg.args ?? [], cfg.env ?? {}, 1e4);
+        console.log(`${tools.length} tool(s) found`);
+      }
     } catch (e) {
       console.log(`failed \u2014 ${e instanceof Error ? e.message : String(e)}`);
       skipped++;
       continue;
     }
-    console.log(`${tools.length} tool(s) found`);
     const toml = generateProfile(key, tools);
     if (dryRun) {
       console.log(`
