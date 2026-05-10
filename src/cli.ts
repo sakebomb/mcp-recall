@@ -20,6 +20,7 @@ import { handleSessionStart } from "./hooks/session-start";
 import { handlePostToolUse } from "./hooks/post-tool-use";
 import { handleProfilesCommand } from "./profiles/commands";
 import { handleLearnCommand } from "./learn/index";
+import { handleImportCommand } from "./import/index";
 import { installCommand, uninstallCommand, statusCommand } from "./install/index";
 import { log } from "./log";
 
@@ -49,6 +50,7 @@ Commands:
     retrain            Suggest profile improvements from stored data
     test <tool>        Test a profile against real input
   learn                Generate profile suggestions from session data
+  import <file>        Restore items from a recall__export JSON dump
   completions <shell>  Print shell completion script (bash, zsh, fish)
 
 Options:
@@ -298,6 +300,11 @@ async function main(): Promise<void> {
 
   if (subcommand === "learn") {
     await handleLearnCommand(process.argv.slice(3));
+    process.exit(0);
+  }
+
+  if (subcommand === "import") {
+    await handleImportCommand(process.argv.slice(3));
     process.exit(0);
   }
 

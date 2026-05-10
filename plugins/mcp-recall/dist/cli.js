@@ -5259,6 +5259,10 @@ function getDb(path) {
   applyMigrations(instance);
   return instance;
 }
+function initSchema(db) {
+  db.run(SCHEMA);
+  applyMigrations(db);
+}
 // src/db/chunking.ts
 var CHUNK_SIZE = 512;
 var CHUNK_OVERLAP = 64;
@@ -9360,6 +9364,129 @@ Next steps:`);
   }
 }
 
+// src/import/index.ts
+import { readFileSync as readFileSync9 } from "fs";
+var StoredOutputSchema = exports_external.object({
+  id: exports_external.string().min(1),
+  project_key: exports_external.string().min(1),
+  session_id: exports_external.string().min(1),
+  tool_name: exports_external.string().min(1),
+  summary: exports_external.string(),
+  full_content: exports_external.string(),
+  original_size: exports_external.number().int().nonnegative(),
+  summary_size: exports_external.number().int().nonnegative(),
+  created_at: exports_external.number().int().positive(),
+  pinned: exports_external.number().int().min(0).max(1),
+  access_count: exports_external.number().int().nonnegative(),
+  last_accessed: exports_external.number().int().nullable(),
+  input_hash: exports_external.string().nullable()
+});
+var ExportSchema = exports_external.array(StoredOutputSchema);
+function importItems(dbPath, items, opts) {
+  if (opts.dryRun) {
+    return { imported: items.length, skipped: 0, overwritten: 0 };
+  }
+  const db = getDb(dbPath);
+  initSchema(db);
+  const result = { imported: 0, skipped: 0, overwritten: 0 };
+  const insertItem = db.transaction((item) => {
+    const projectKey = opts.targetProjectKey ?? item.project_key;
+    const existing = db.prepare(`SELECT id FROM stored_outputs WHERE id = ?`).get(item.id);
+    if (existing) {
+      if (!opts.overwrite) {
+        result.skipped++;
+        return;
+      }
+      db.prepare(`DELETE FROM stored_outputs WHERE id = ?`).run(item.id);
+      result.overwritten++;
+    } else {
+      result.imported++;
+    }
+    db.prepare(`
+      INSERT INTO stored_outputs
+        (id, project_key, session_id, tool_name, summary, full_content,
+         original_size, summary_size, created_at, pinned, access_count,
+         last_accessed, input_hash)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(item.id, projectKey, item.session_id, item.tool_name, item.summary, item.full_content, item.original_size, item.summary_size, item.created_at, item.pinned, item.access_count, item.last_accessed, item.input_hash);
+    const chunks = chunkText(item.full_content);
+    const chunkStmt = db.prepare(`INSERT INTO content_chunks (output_id, chunk_index, content) VALUES (?, ?, ?)`);
+    for (let i = 0;i < chunks.length; i++) {
+      chunkStmt.run(item.id, i, chunks[i]);
+    }
+  });
+  for (const item of items) {
+    insertItem(item);
+  }
+  return result;
+}
+async function handleImportCommand(args) {
+  const overwrite = args.includes("--overwrite");
+  const keepProjectKey = args.includes("--keep-project-key");
+  const dryRun = args.includes("--dry-run");
+  const filePath = args.find((a) => !a.startsWith("--"));
+  let raw;
+  if (filePath) {
+    try {
+      raw = readFileSync9(filePath, "utf8");
+    } catch {
+      console.error(`Cannot read file: ${filePath}`);
+      process.exit(1);
+    }
+  } else {
+    try {
+      raw = readFileSync9("/dev/stdin", "utf8");
+    } catch {
+      console.error("No file specified and stdin is not readable.");
+      console.error("Usage: mcp-recall import <file.json> [--overwrite] [--keep-project-key] [--dry-run]");
+      process.exit(1);
+    }
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    console.error("Invalid JSON input.");
+    process.exit(1);
+  }
+  const validation = ExportSchema.safeParse(parsed);
+  if (!validation.success) {
+    console.error("Input does not look like a recall__export dump:");
+    for (const issue of validation.error.issues.slice(0, 5)) {
+      console.error(`  [${issue.path.join(".")}] ${issue.message}`);
+    }
+    process.exit(1);
+  }
+  const items = validation.data;
+  if (items.length === 0) {
+    console.log("Nothing to import (empty export).");
+    return;
+  }
+  const projectKey = getProjectKey(process.cwd());
+  const dbPath = process.env.RECALL_DB_PATH ?? defaultDbPath(projectKey);
+  const targetProjectKey = keepProjectKey ? null : projectKey;
+  console.log(`
+Importing ${items.length} item(s) into ${dbPath}`);
+  if (dryRun)
+    console.log(`(dry run \u2014 nothing will be written)
+`);
+  const result = importItems(dbPath, items, { overwrite, targetProjectKey, dryRun });
+  const parts = [];
+  if (result.imported > 0)
+    parts.push(`${result.imported} imported`);
+  if (result.overwritten > 0)
+    parts.push(`${result.overwritten} overwritten`);
+  if (result.skipped > 0)
+    parts.push(`${result.skipped} skipped (already exist \u2014 use --overwrite to replace)`);
+  console.log(parts.join(", ") + ".");
+  if (!dryRun && result.imported + result.overwritten > 0) {
+    console.log(`
+Next steps:`);
+    console.log("  recall__search <query>   \u2014 verify content is searchable");
+    console.log("  recall__list_stored      \u2014 browse imported items");
+  }
+}
+
 // src/install/index.ts
 import { existsSync } from "fs";
 import { mkdir, rename, readFile } from "fs/promises";
@@ -9783,6 +9910,7 @@ Commands:
     retrain            Suggest profile improvements from stored data
     test <tool>        Test a profile against real input
   learn                Generate profile suggestions from session data
+  import <file>        Restore items from a recall__export JSON dump
   completions <shell>  Print shell completion script (bash, zsh, fish)
 
 Options:
@@ -10018,6 +10146,10 @@ async function main() {
   }
   if (subcommand === "learn") {
     await handleLearnCommand(process.argv.slice(3));
+    process.exit(0);
+  }
+  if (subcommand === "import") {
+    await handleImportCommand(process.argv.slice(3));
     process.exit(0);
   }
   if (subcommand === "install") {
