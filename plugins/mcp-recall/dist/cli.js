@@ -6104,7 +6104,7 @@ ${fmt.body}`,
   };
 };
 
-// src/handlers/bash.ts
+// src/handlers/bash-shared.ts
 var MAX_LOG_COMMITS = 20;
 var MAX_TERRAFORM_RESOURCES = 10;
 var MAX_DOCKER_CONTAINERS = 20;
@@ -6146,6 +6146,8 @@ function extractCommand(input) {
   }
   return null;
 }
+
+// src/handlers/bash-git.ts
 function parseGitDiff(text) {
   const files = [];
   let current = null;
@@ -6307,6 +6309,140 @@ var gitStatusHandler = (toolName, output) => {
   return { summary: lines.join(`
 `), originalSize };
 };
+
+// src/handlers/bash-test.ts
+var testRunnerHandler = (toolName, output) => {
+  const stdout = extractStdout(output);
+  const stderr = extractStderr(output);
+  const combined = `${stdout}
+${stderr}`.trim();
+  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const failureLines = [];
+  for (const line of combined.split(`
+`)) {
+    const t = line.trim();
+    if (!t)
+      continue;
+    if (/^(FAILED|FAIL)\s+/.test(t) || /^[\u2715\u2717\u00D7\u25CF]\s/.test(t) || /^\(fail\)\s/.test(t) || /^--- FAIL:/.test(t)) {
+      failureLines.push(t.slice(0, 120));
+    }
+  }
+  let passed = 0, failed = 0, skipped = 0;
+  let foundSummary = false;
+  for (const line of combined.split(`
+`)) {
+    const t = line.trim();
+    const bunPass = t.match(/^(\d+)\s+pass$/);
+    const bunFail = t.match(/^(\d+)\s+fail$/);
+    if (bunPass) {
+      passed = parseInt(bunPass[1]);
+      foundSummary = true;
+    }
+    if (bunFail) {
+      failed = parseInt(bunFail[1]);
+      foundSummary = true;
+    }
+    const pytestMatch = t.match(/(\d+)\s+passed(?:,\s+(\d+)\s+failed)?(?:,\s+(\d+)\s+(?:skipped|warning))?/);
+    if (pytestMatch) {
+      passed = parseInt(pytestMatch[1]);
+      if (pytestMatch[2])
+        failed = parseInt(pytestMatch[2]);
+      if (pytestMatch[3])
+        skipped = parseInt(pytestMatch[3]);
+      foundSummary = true;
+    }
+    const jestMatch = t.match(/Tests:\s+(?:(\d+)\s+failed,\s+)?(\d+)\s+passed(?:,\s+(\d+)\s+skipped)?/);
+    if (jestMatch) {
+      if (jestMatch[1])
+        failed = parseInt(jestMatch[1]);
+      passed = parseInt(jestMatch[2]);
+      if (jestMatch[3])
+        skipped = parseInt(jestMatch[3]);
+      foundSummary = true;
+    }
+    const goOk = t.match(/^ok\s+\S+/);
+    const goFail = t.match(/^FAIL\s+\S+/);
+    if (goOk) {
+      passed++;
+      foundSummary = true;
+    }
+    if (goFail) {
+      failed++;
+      foundSummary = true;
+    }
+  }
+  if (!foundSummary && failureLines.length === 0) {
+    return shellHandler(toolName, output);
+  }
+  const total = passed + failed + skipped;
+  const status = failed > 0 ? "FAIL" : "pass";
+  const parts = [];
+  if (passed > 0)
+    parts.push(`${passed} passed`);
+  if (failed > 0)
+    parts.push(`${failed} failed`);
+  if (skipped > 0)
+    parts.push(`${skipped} skipped`);
+  const summaryStr = parts.length > 0 ? parts.join(", ") : "no results";
+  const lines = [`test runner \u2014 ${status}: ${summaryStr}${total > 0 ? ` (${total} total)` : ""}`];
+  if (failureLines.length > 0) {
+    lines.push(`  failures:`);
+    lines.push(...failureLines.slice(0, MAX_BUILD_ERRORS).map((l) => `    ${l}`));
+    if (failureLines.length > MAX_BUILD_ERRORS) {
+      lines.push(`    \u2026 (+${failureLines.length - MAX_BUILD_ERRORS} more)`);
+    }
+  }
+  return { summary: lines.join(`
+`), originalSize };
+};
+
+// src/handlers/bash-docker.ts
+var dockerPsHandler = (toolName, output) => {
+  const stdout = extractStdout(output);
+  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const lines = stdout.trim().split(`
+`).filter((l) => l.trim());
+  if (lines.length === 0) {
+    return { summary: "[docker ps \u2014 no containers]", originalSize };
+  }
+  const dataLines = lines[0]?.toUpperCase().includes("CONTAINER") ? lines.slice(1) : lines;
+  if (dataLines.length === 0) {
+    return { summary: "[docker ps \u2014 no containers running]", originalSize };
+  }
+  const containers = [];
+  for (const line of dataLines) {
+    const parts = line.trim().split(/\s{2,}/);
+    if (parts.length < 2)
+      continue;
+    const name = parts[parts.length - 1] ?? "";
+    const statusPart = parts.find((p) => /^(Up|Exited|Restarting|Created|Paused|Dead)/i.test(p)) ?? "";
+    const portsPart = parts.find((p) => p.includes("->") || p.includes("0.0.0.0:")) ?? "";
+    if (!name)
+      continue;
+    const statusShort = statusPart.slice(0, 20);
+    const portsShort = portsPart.slice(0, 40);
+    containers.push({ name, status: statusShort, ports: portsShort });
+  }
+  if (containers.length === 0) {
+    return shellHandler(toolName, output);
+  }
+  const shown = containers.slice(0, MAX_DOCKER_CONTAINERS);
+  const overflow = containers.length > MAX_DOCKER_CONTAINERS ? `
+  \u2026 (+${containers.length - MAX_DOCKER_CONTAINERS} more)` : "";
+  const rows = shown.map((c) => {
+    const name = c.name.padEnd(30);
+    const status = c.status.padEnd(22);
+    return `  ${name}  ${status}  ${c.ports}`;
+  });
+  const header = `docker ps \u2014 ${containers.length} container${containers.length === 1 ? "" : "s"}`;
+  return {
+    summary: [header, ...rows].join(`
+`) + overflow,
+    originalSize
+  };
+};
+
+// src/handlers/bash.ts
 var TERRAFORM_RESOURCE_RE = /^\s+#\s+(.+?)\s+will\s+be\s+(created|destroyed|updated in-place|replaced)/;
 var TERRAFORM_PLAN_SUMMARY_RE = /^Plan:\s+.+$/m;
 var TERRAFORM_SYMBOL = {
@@ -6392,134 +6528,6 @@ ${stderr}`.trim();
     lines.push(...errors2.slice(0, 5).map((e) => `  error: ${e}`));
   return { summary: lines.join(`
 `), originalSize };
-};
-var testRunnerHandler = (toolName, output) => {
-  const stdout = extractStdout(output);
-  const stderr = extractStderr(output);
-  const combined = `${stdout}
-${stderr}`.trim();
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
-  const failureLines = [];
-  for (const line of combined.split(`
-`)) {
-    const t = line.trim();
-    if (!t)
-      continue;
-    if (/^(FAILED|FAIL)\s+/.test(t) || /^[\u2715\u2717\u00D7\u25CF]\s/.test(t) || /^\(fail\)\s/.test(t) || /^--- FAIL:/.test(t)) {
-      failureLines.push(t.slice(0, 120));
-    }
-  }
-  let passed = 0, failed = 0, skipped = 0;
-  let foundSummary = false;
-  for (const line of combined.split(`
-`)) {
-    const t = line.trim();
-    const bunPass = t.match(/^(\d+)\s+pass$/);
-    const bunFail = t.match(/^(\d+)\s+fail$/);
-    if (bunPass) {
-      passed = parseInt(bunPass[1]);
-      foundSummary = true;
-    }
-    if (bunFail) {
-      failed = parseInt(bunFail[1]);
-      foundSummary = true;
-    }
-    const pytestMatch = t.match(/(\d+)\s+passed(?:,\s+(\d+)\s+failed)?(?:,\s+(\d+)\s+(?:skipped|warning))?/);
-    if (pytestMatch) {
-      passed = parseInt(pytestMatch[1]);
-      if (pytestMatch[2])
-        failed = parseInt(pytestMatch[2]);
-      if (pytestMatch[3])
-        skipped = parseInt(pytestMatch[3]);
-      foundSummary = true;
-    }
-    const jestMatch = t.match(/Tests:\s+(?:(\d+)\s+failed,\s+)?(\d+)\s+passed(?:,\s+(\d+)\s+skipped)?/);
-    if (jestMatch) {
-      if (jestMatch[1])
-        failed = parseInt(jestMatch[1]);
-      passed = parseInt(jestMatch[2]);
-      if (jestMatch[3])
-        skipped = parseInt(jestMatch[3]);
-      foundSummary = true;
-    }
-    const goOk = t.match(/^ok\s+\S+/);
-    const goFail = t.match(/^FAIL\s+\S+/);
-    if (goOk) {
-      passed++;
-      foundSummary = true;
-    }
-    if (goFail) {
-      failed++;
-      foundSummary = true;
-    }
-  }
-  if (!foundSummary && failureLines.length === 0) {
-    return shellHandler(toolName, output);
-  }
-  const total = passed + failed + skipped;
-  const status = failed > 0 ? "FAIL" : "pass";
-  const parts = [];
-  if (passed > 0)
-    parts.push(`${passed} passed`);
-  if (failed > 0)
-    parts.push(`${failed} failed`);
-  if (skipped > 0)
-    parts.push(`${skipped} skipped`);
-  const summaryStr = parts.length > 0 ? parts.join(", ") : "no results";
-  const lines = [`test runner \u2014 ${status}: ${summaryStr}${total > 0 ? ` (${total} total)` : ""}`];
-  if (failureLines.length > 0) {
-    lines.push(`  failures:`);
-    lines.push(...failureLines.slice(0, MAX_BUILD_ERRORS).map((l) => `    ${l}`));
-    if (failureLines.length > MAX_BUILD_ERRORS) {
-      lines.push(`    \u2026 (+${failureLines.length - MAX_BUILD_ERRORS} more)`);
-    }
-  }
-  return { summary: lines.join(`
-`), originalSize };
-};
-var dockerPsHandler = (toolName, output) => {
-  const stdout = extractStdout(output);
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
-  const lines = stdout.trim().split(`
-`).filter((l) => l.trim());
-  if (lines.length === 0) {
-    return { summary: "[docker ps \u2014 no containers]", originalSize };
-  }
-  const dataLines = lines[0]?.toUpperCase().includes("CONTAINER") ? lines.slice(1) : lines;
-  if (dataLines.length === 0) {
-    return { summary: "[docker ps \u2014 no containers running]", originalSize };
-  }
-  const containers = [];
-  for (const line of dataLines) {
-    const parts = line.trim().split(/\s{2,}/);
-    if (parts.length < 2)
-      continue;
-    const name = parts[parts.length - 1] ?? "";
-    const statusPart = parts.find((p) => /^(Up|Exited|Restarting|Created|Paused|Dead)/i.test(p)) ?? "";
-    const portsPart = parts.find((p) => p.includes("->") || p.includes("0.0.0.0:")) ?? "";
-    if (!name)
-      continue;
-    const statusShort = statusPart.slice(0, 20);
-    const portsShort = portsPart.slice(0, 40);
-    containers.push({ name, status: statusShort, ports: portsShort });
-  }
-  if (containers.length === 0) {
-    return shellHandler(toolName, output);
-  }
-  const shown = containers.slice(0, MAX_DOCKER_CONTAINERS);
-  const overflow = containers.length > MAX_DOCKER_CONTAINERS ? `
-  \u2026 (+${containers.length - MAX_DOCKER_CONTAINERS} more)` : "";
-  const rows = shown.map((c) => {
-    const name = c.name.padEnd(30);
-    const status = c.status.padEnd(22);
-    return `  ${name}  ${status}  ${c.ports}`;
-  });
-  const header = `docker ps \u2014 ${containers.length} container${containers.length === 1 ? "" : "s"}`;
-  return {
-    summary: [header, ...rows].join(`
-`) + overflow,
-    originalSize
-  };
 };
 var buildToolHandler = (toolName, output) => {
   const stdout = extractStdout(output);
