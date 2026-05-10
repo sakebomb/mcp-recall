@@ -9360,8 +9360,167 @@ Next steps:`);
   }
 }
 
+// src/import/index.ts
+import { readFileSync as readFileSync9, statSync as statSync2, existsSync } from "fs";
+import { resolve } from "path";
+import { Database as Database2 } from "bun:sqlite";
+var LARGE_FILE_BYTES = 50 * 1024 * 1024;
+var EMPTY_EXPORT_SENTINEL = "[recall: no items to export]";
+var StoredOutputSchema = exports_external.object({
+  id: exports_external.string().min(1),
+  project_key: exports_external.string().min(1),
+  session_id: exports_external.string().min(1),
+  tool_name: exports_external.string().min(1),
+  summary: exports_external.string(),
+  full_content: exports_external.string(),
+  original_size: exports_external.number().int().nonnegative(),
+  summary_size: exports_external.number().int().nonnegative(),
+  created_at: exports_external.number().int().positive(),
+  pinned: exports_external.number().int().min(0).max(1),
+  access_count: exports_external.number().int().nonnegative(),
+  last_accessed: exports_external.number().int().nullable(),
+  input_hash: exports_external.string().nullable()
+});
+var ExportSchema = exports_external.array(StoredOutputSchema);
+function dryRunCount(dbPath, items, overwrite) {
+  if (dbPath === ":memory:" || !existsSync(dbPath)) {
+    return { imported: items.length, skipped: 0, overwritten: 0 };
+  }
+  let db = null;
+  try {
+    db = new Database2(dbPath, { readonly: true });
+    const hasTable = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='stored_outputs' LIMIT 1`).get();
+    if (!hasTable)
+      return { imported: items.length, skipped: 0, overwritten: 0 };
+    const result = { imported: 0, skipped: 0, overwritten: 0 };
+    const check = db.prepare(`SELECT id FROM stored_outputs WHERE id = ? LIMIT 1`);
+    for (const item of items) {
+      const existing = check.get(item.id);
+      if (existing) {
+        if (overwrite)
+          result.overwritten++;
+        else
+          result.skipped++;
+      } else {
+        result.imported++;
+      }
+    }
+    return result;
+  } catch {
+    return { imported: items.length, skipped: 0, overwritten: 0 };
+  } finally {
+    db?.close();
+  }
+}
+function importItems(dbPath, items, opts) {
+  const db = getDb(dbPath);
+  const result = { imported: 0, skipped: 0, overwritten: 0 };
+  const chunkStmt = db.prepare(`INSERT INTO content_chunks (output_id, chunk_index, content) VALUES (?, ?, ?)`);
+  const insertItem = db.transaction((item) => {
+    const projectKey = opts.targetProjectKey ?? item.project_key;
+    const existing = db.prepare(`SELECT id FROM stored_outputs WHERE id = ? LIMIT 1`).get(item.id);
+    if (existing) {
+      if (!opts.overwrite)
+        return "skipped";
+      db.prepare(`DELETE FROM stored_outputs WHERE id = ?`).run(item.id);
+    }
+    db.prepare(`
+      INSERT INTO stored_outputs
+        (id, project_key, session_id, tool_name, summary, full_content,
+         original_size, summary_size, created_at, pinned, access_count,
+         last_accessed, input_hash)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(item.id, projectKey, item.session_id, item.tool_name, item.summary, item.full_content, item.original_size, item.summary_size, item.created_at, item.pinned, item.access_count, item.last_accessed, item.input_hash);
+    const chunks = chunkText(item.full_content);
+    for (let i = 0;i < chunks.length; i++) {
+      chunkStmt.run(item.id, i, chunks[i]);
+    }
+    return existing ? "overwritten" : "imported";
+  });
+  for (const item of items) {
+    const action = insertItem(item);
+    result[action]++;
+  }
+  return result;
+}
+async function handleImportCommand(args) {
+  const overwrite = args.includes("--overwrite");
+  const keepProjectKey = args.includes("--keep-project-key");
+  const dryRun = args.includes("--dry-run");
+  const rawPath = args.find((a) => !a.startsWith("--"));
+  const filePath = rawPath ? resolve(rawPath) : null;
+  let raw;
+  if (filePath) {
+    try {
+      const size = statSync2(filePath).size;
+      if (size > LARGE_FILE_BYTES) {
+        console.error(`Warning: file is ${Math.round(size / 1024 / 1024)} MB \u2014 this may take a while.`);
+      }
+      raw = readFileSync9(filePath, "utf8");
+    } catch {
+      console.error(`Cannot read file: ${filePath}`);
+      process.exit(1);
+    }
+  } else {
+    try {
+      raw = readFileSync9("/dev/stdin", "utf8");
+    } catch {
+      console.error("No file specified and stdin is not readable.");
+      console.error("Usage: mcp-recall import <file.json> [--overwrite] [--keep-project-key] [--dry-run]");
+      process.exit(1);
+    }
+  }
+  if (raw.trimStart().startsWith(EMPTY_EXPORT_SENTINEL)) {
+    console.log("Nothing to import (empty export).");
+    return;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    console.error("Invalid JSON input.");
+    process.exit(1);
+  }
+  const validation = ExportSchema.safeParse(parsed);
+  if (!validation.success) {
+    console.error("Input does not look like a recall__export dump:");
+    for (const issue of validation.error.issues.slice(0, 5)) {
+      console.error(`  [${issue.path.join(".")}] ${issue.message}`);
+    }
+    process.exit(1);
+  }
+  const items = validation.data;
+  if (items.length === 0) {
+    console.log("Nothing to import (empty export).");
+    return;
+  }
+  const projectKey = getProjectKey(process.cwd());
+  const dbPath = defaultDbPath(projectKey);
+  const targetProjectKey = keepProjectKey ? null : projectKey;
+  console.log(`
+Importing ${items.length} item(s) into ${dbPath}`);
+  if (dryRun)
+    console.log(`(dry run \u2014 nothing will be written)
+`);
+  const result = dryRun ? dryRunCount(dbPath, items, overwrite) : importItems(dbPath, items, { overwrite, targetProjectKey });
+  const parts = [];
+  if (result.imported > 0)
+    parts.push(`${result.imported} imported`);
+  if (result.overwritten > 0)
+    parts.push(`${result.overwritten} overwritten`);
+  if (result.skipped > 0)
+    parts.push(`${result.skipped} skipped (already exist \u2014 use --overwrite to replace)`);
+  console.log(parts.length > 0 ? parts.join(", ") + "." : "Nothing imported.");
+  if (!dryRun && result.imported + result.overwritten > 0) {
+    console.log(`
+Next steps:`);
+    console.log("  recall__search <query>   \u2014 verify content is searchable");
+    console.log("  recall__list_stored      \u2014 browse imported items");
+  }
+}
+
 // src/install/index.ts
-import { existsSync } from "fs";
+import { existsSync as existsSync2 } from "fs";
 import { mkdir, rename, readFile } from "fs/promises";
 import path from "path";
 import os from "os";
@@ -9530,7 +9689,7 @@ async function installCommand(opts = {}) {
     claudeMdPath = defaultClaudeMdPath()
   } = opts;
   const paths = detectPaths();
-  if (!existsSync(paths.serverJs) || !existsSync(paths.cliJs)) {
+  if (!existsSync2(paths.serverJs) || !existsSync2(paths.cliJs)) {
     console.error(`${RED}\u2717 Build artifacts not found.${RESET}`);
     console.error(`  Expected: ${DIM}${paths.serverJs}${RESET}`);
     console.error(`  Run ${BOLD}bun run build${RESET} first.`);
@@ -9715,8 +9874,8 @@ async function statusCommand(opts = {}) {
     claudeMdContent = await readFile(claudeMdPath, "utf8");
   } catch {}
   const claudeMdOk = isClaudeMdInjected(claudeMdContent);
-  const serverExists = existsSync(recallPaths.serverJs);
-  const cliExists = existsSync(recallPaths.cliJs);
+  const serverExists = existsSync2(recallPaths.serverJs);
+  const cliExists = existsSync2(recallPaths.cliJs);
   const fullyInstalled = serverRegistered && ssRegistered && ptuRegistered && claudeMdOk && serverExists && cliExists;
   const label = fullyInstalled ? `${GREEN}installed${RESET}` : serverRegistered || ssRegistered || ptuRegistered ? `${YELLOW}partial / stale${RESET}` : `${RED}not installed${RESET}`;
   console.log(`
@@ -9783,6 +9942,7 @@ Commands:
     retrain            Suggest profile improvements from stored data
     test <tool>        Test a profile against real input
   learn                Generate profile suggestions from session data
+  import <file>        Restore items from a recall__export JSON dump
   completions <shell>  Print shell completion script (bash, zsh, fish)
 
 Options:
@@ -10018,6 +10178,10 @@ async function main() {
   }
   if (subcommand === "learn") {
     await handleLearnCommand(process.argv.slice(3));
+    process.exit(0);
+  }
+  if (subcommand === "import") {
+    await handleImportCommand(process.argv.slice(3));
     process.exit(0);
   }
   if (subcommand === "install") {
