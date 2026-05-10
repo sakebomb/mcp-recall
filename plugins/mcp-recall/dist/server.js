@@ -21061,6 +21061,12 @@ function formatRelativeTime(ms) {
 
 // src/tools.ts
 var CONTEXT_EMPTY_RESPONSE = "[recall: no context available yet \u2014 use recall tools to build up your context store]";
+var SEARCH_EXCERPT_LEN = 120;
+var NOTE_EXCERPT_LEN = 200;
+var CONTEXT_EXCERPT_LEN = 100;
+var SNIPPET_MAX = 150;
+var LIST_TOOL_COL_WIDTH = 40;
+var LIST_ID_COL_WIDTH = 16;
 function formatDate(unixSecs) {
   return new Date(unixSecs * 1000).toISOString().slice(0, 10);
 }
@@ -21107,10 +21113,9 @@ function toolSearch(db, projectKey, args) {
   if (items.length === 0) {
     return `[recall: no results for "${args.query}"]`;
   }
-  const SNIPPET_MAX = 150;
   const lines = items.map((item, i) => {
-    const excerpt = item.summary.slice(0, 120).replace(/\n/g, " ");
-    const ellipsis = item.summary.length > 120 ? "\u2026" : "";
+    const excerpt = item.summary.slice(0, SEARCH_EXCERPT_LEN).replace(/\n/g, " ");
+    const ellipsis = item.summary.length > SEARCH_EXCERPT_LEN ? "\u2026" : "";
     const summaryLine = `${i + 1}. ${item.id} \xB7 ${item.tool_name} \xB7 ${formatDate(item.created_at)}
    ${excerpt}${ellipsis}`;
     const snippet = retrieveSnippet(db, item.id, args.query);
@@ -21138,8 +21143,8 @@ function toolPin(db, projectKey, args) {
 }
 function toolNote(db, projectKey, args) {
   const title = args.title ?? "(note)";
-  const excerpt = args.text.slice(0, 200);
-  const ellipsis = args.text.length > 200 ? "\u2026" : "";
+  const excerpt = args.text.slice(0, NOTE_EXCERPT_LEN);
+  const ellipsis = args.text.length > NOTE_EXCERPT_LEN ? "\u2026" : "";
   const summary = `${title}: ${excerpt}${ellipsis}`;
   const originalSize = Buffer.byteLength(args.text, "utf8");
   const sessionId = new Date().toISOString().slice(0, 10);
@@ -21203,9 +21208,9 @@ function toolListStored(db, projectKey, args) {
   const rows = items.map((item) => {
     const reduction = reductionPct(item.original_size, item.summary_size);
     const pin = item.pinned ? " \uD83D\uDCCC" : "";
-    return `${item.id}  ${item.tool_name.padEnd(40)}  ${formatDate(item.created_at)}  ${formatBytes(item.original_size).padStart(7)}\u2192${formatBytes(item.summary_size).padEnd(8)}  ${reduction}${pin}`;
+    return `${item.id}  ${item.tool_name.padEnd(LIST_TOOL_COL_WIDTH)}  ${formatDate(item.created_at)}  ${formatBytes(item.original_size).padStart(7)}\u2192${formatBytes(item.summary_size).padEnd(8)}  ${reduction}${pin}`;
   });
-  const header = `${"ID".padEnd(16)}  ${"Tool".padEnd(40)}  ${"Date".padEnd(10)}  ${"Size".padStart(7)} ${"\u2192".padEnd(9)}  Red.`;
+  const header = `${"ID".padEnd(LIST_ID_COL_WIDTH)}  ${"Tool".padEnd(LIST_TOOL_COL_WIDTH)}  ${"Date".padEnd(10)}  ${"Size".padStart(7)} ${"\u2192".padEnd(9)}  Red.`;
   const separator = "-".repeat(header.length);
   return [header, separator, ...rows].join(`
 `);
@@ -21226,9 +21231,9 @@ function toolContext(db, projectKey, args) {
   if (data.pinned.length > 0) {
     lines.push("", `Pinned (${data.pinned.length}):`);
     for (const item of data.pinned) {
-      const excerpt = item.summary.slice(0, 100).replace(/\n/g, " ");
-      const ellipsis = item.summary.length > 100 ? "\u2026" : "";
-      lines.push(`  \uD83D\uDCCC ${item.id}  ${item.tool_name.padEnd(40)}  ${formatDate(item.created_at)}`);
+      const excerpt = item.summary.slice(0, CONTEXT_EXCERPT_LEN).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > CONTEXT_EXCERPT_LEN ? "\u2026" : "";
+      lines.push(`  \uD83D\uDCCC ${item.id}  ${item.tool_name.padEnd(LIST_TOOL_COL_WIDTH)}  ${formatDate(item.created_at)}`);
       lines.push(`    ${excerpt}${ellipsis}`);
     }
   }
@@ -21245,9 +21250,9 @@ function toolContext(db, projectKey, args) {
     const days = args.days ?? 7;
     lines.push("", `Recently accessed (last ${days} day${days === 1 ? "" : "s"}, ${data.recent.length} item${data.recent.length === 1 ? "" : "s"}):`);
     for (const item of data.recent) {
-      const excerpt = item.summary.slice(0, 100).replace(/\n/g, " ");
-      const ellipsis = item.summary.length > 100 ? "\u2026" : "";
-      lines.push(`  ${item.id}  ${item.tool_name.padEnd(40)}  ${formatDate(item.created_at)}  \xD7${item.access_count}`);
+      const excerpt = item.summary.slice(0, CONTEXT_EXCERPT_LEN).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > CONTEXT_EXCERPT_LEN ? "\u2026" : "";
+      lines.push(`  ${item.id}  ${item.tool_name.padEnd(LIST_TOOL_COL_WIDTH)}  ${formatDate(item.created_at)}  \xD7${item.access_count}`);
       lines.push(`    ${excerpt}${ellipsis}`);
     }
   }
@@ -21255,9 +21260,9 @@ function toolContext(db, projectKey, args) {
     const date4 = data.last_session?.date ?? "";
     lines.push("", `Hot from last session (${date4}, ${data.hot.length} item${data.hot.length === 1 ? "" : "s"}):`);
     for (const item of data.hot) {
-      const excerpt = item.summary.slice(0, 100).replace(/\n/g, " ");
-      const ellipsis = item.summary.length > 100 ? "\u2026" : "";
-      lines.push(`  ${item.id}  ${item.tool_name.padEnd(40)}  ${formatDate(item.created_at)}  \xD7${item.access_count}`);
+      const excerpt = item.summary.slice(0, CONTEXT_EXCERPT_LEN).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > CONTEXT_EXCERPT_LEN ? "\u2026" : "";
+      lines.push(`  ${item.id}  ${item.tool_name.padEnd(LIST_TOOL_COL_WIDTH)}  ${formatDate(item.created_at)}  \xD7${item.access_count}`);
       lines.push(`    ${excerpt}${ellipsis}`);
     }
   }
@@ -21294,8 +21299,8 @@ function toolSessionSummary(db, projectKey, args) {
   if (data.top_accessed.length > 0) {
     lines.push("", "Most accessed:");
     for (const item of data.top_accessed) {
-      const excerpt = item.summary.slice(0, 100).replace(/\n/g, " ");
-      const ellipsis = item.summary.length > 100 ? "\u2026" : "";
+      const excerpt = item.summary.slice(0, CONTEXT_EXCERPT_LEN).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > CONTEXT_EXCERPT_LEN ? "\u2026" : "";
       lines.push(`  ${item.id} (\xD7${item.access_count}) ${item.tool_name}`);
       lines.push(`    ${excerpt}${ellipsis}`);
     }
@@ -21303,8 +21308,8 @@ function toolSessionSummary(db, projectKey, args) {
   if (data.pinned.length > 0) {
     lines.push("", `Pinned: ${data.pinned.length}`);
     for (const item of data.pinned) {
-      const excerpt = item.summary.slice(0, 100).replace(/\n/g, " ");
-      const ellipsis = item.summary.length > 100 ? "\u2026" : "";
+      const excerpt = item.summary.slice(0, CONTEXT_EXCERPT_LEN).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > CONTEXT_EXCERPT_LEN ? "\u2026" : "";
       lines.push(`  \uD83D\uDCCC ${item.id}  ${item.tool_name}`);
       lines.push(`    ${excerpt}${ellipsis}`);
     }
@@ -21357,7 +21362,7 @@ function toolStats(db, projectKey, args = {}) {
     if (suggestions.pin_candidates.length > 0) {
       lines.push("  \uD83D\uDCCC Consider pinning:");
       for (const item of suggestions.pin_candidates) {
-        lines.push(`     ${item.id}  ${item.tool_name.padEnd(40)}  accessed ${item.access_count}\xD7`);
+        lines.push(`     ${item.id}  ${item.tool_name.padEnd(LIST_TOOL_COL_WIDTH)}  accessed ${item.access_count}\xD7`);
       }
     }
     if (suggestions.stale_candidates.length > 0) {
@@ -21367,7 +21372,7 @@ function toolStats(db, projectKey, args = {}) {
       const now = Math.floor(Date.now() / 1000);
       for (const item of suggestions.stale_candidates) {
         const ageDays = Math.floor((now - item.created_at) / 86400);
-        lines.push(`     ${item.id}  ${item.tool_name.padEnd(40)}  created ${ageDays} day${ageDays === 1 ? "" : "s"} ago`);
+        lines.push(`     ${item.id}  ${item.tool_name.padEnd(LIST_TOOL_COL_WIDTH)}  created ${ageDays} day${ageDays === 1 ? "" : "s"} ago`);
       }
     }
   }

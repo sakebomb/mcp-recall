@@ -30,6 +30,17 @@ import { loadConfig } from "./config";
 import { formatBytes, formatRelativeTime } from "./format";
 
 // ---------------------------------------------------------------------------
+// Display constants
+// ---------------------------------------------------------------------------
+
+const SEARCH_EXCERPT_LEN  = 120; // chars shown per result in recall__search
+const NOTE_EXCERPT_LEN    = 200; // chars shown in recall__note store confirmation
+const CONTEXT_EXCERPT_LEN = 100; // chars shown per item in recall__context
+const SNIPPET_MAX         = 150; // max chars of FTS snippet shown in search results
+const LIST_TOOL_COL_WIDTH = 40;  // tool name column in recall__list_stored
+const LIST_ID_COL_WIDTH   = 16;  // id column in recall__list_stored header
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -121,11 +132,9 @@ export function toolSearch(
     return `[recall: no results for "${args.query}"]`;
   }
 
-  const SNIPPET_MAX = 150;
-
   const lines = items.map((item, i) => {
-    const excerpt = item.summary.slice(0, 120).replace(/\n/g, " ");
-    const ellipsis = item.summary.length > 120 ? "…" : "";
+    const excerpt = item.summary.slice(0, SEARCH_EXCERPT_LEN).replace(/\n/g, " ");
+    const ellipsis = item.summary.length > SEARCH_EXCERPT_LEN ? "…" : "";
     const summaryLine = `${i + 1}. ${item.id} · ${item.tool_name} · ${formatDate(item.created_at)}\n   ${excerpt}${ellipsis}`;
 
     const snippet = retrieveSnippet(db, item.id, args.query);
@@ -177,8 +186,8 @@ export function toolNote(
   args: NoteArgs
 ): string {
   const title = args.title ?? "(note)";
-  const excerpt = args.text.slice(0, 200);
-  const ellipsis = args.text.length > 200 ? "…" : "";
+  const excerpt = args.text.slice(0, NOTE_EXCERPT_LEN);
+  const ellipsis = args.text.length > NOTE_EXCERPT_LEN ? "…" : "";
   const summary = `${title}: ${excerpt}${ellipsis}`;
   const originalSize = Buffer.byteLength(args.text, "utf8");
   const sessionId = new Date().toISOString().slice(0, 10);
@@ -305,10 +314,10 @@ export function toolListStored(
   const rows = items.map((item) => {
     const reduction = reductionPct(item.original_size, item.summary_size);
     const pin = item.pinned ? " 📌" : "";
-    return `${item.id}  ${item.tool_name.padEnd(40)}  ${formatDate(item.created_at)}  ${formatBytes(item.original_size).padStart(7)}→${formatBytes(item.summary_size).padEnd(8)}  ${reduction}${pin}`;
+    return `${item.id}  ${item.tool_name.padEnd(LIST_TOOL_COL_WIDTH)}  ${formatDate(item.created_at)}  ${formatBytes(item.original_size).padStart(7)}→${formatBytes(item.summary_size).padEnd(8)}  ${reduction}${pin}`;
   });
 
-  const header = `${"ID".padEnd(16)}  ${"Tool".padEnd(40)}  ${"Date".padEnd(10)}  ${"Size".padStart(7)} ${"→".padEnd(9)}  Red.`;
+  const header = `${"ID".padEnd(LIST_ID_COL_WIDTH)}  ${"Tool".padEnd(LIST_TOOL_COL_WIDTH)}  ${"Date".padEnd(10)}  ${"Size".padStart(7)} ${"→".padEnd(9)}  Red.`;
   const separator = "-".repeat(header.length);
 
   return [header, separator, ...rows].join("\n");
@@ -352,9 +361,9 @@ export function toolContext(
   if (data.pinned.length > 0) {
     lines.push("", `Pinned (${data.pinned.length}):`);
     for (const item of data.pinned) {
-      const excerpt = item.summary.slice(0, 100).replace(/\n/g, " ");
-      const ellipsis = item.summary.length > 100 ? "…" : "";
-      lines.push(`  📌 ${item.id}  ${item.tool_name.padEnd(40)}  ${formatDate(item.created_at)}`);
+      const excerpt = item.summary.slice(0, CONTEXT_EXCERPT_LEN).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > CONTEXT_EXCERPT_LEN ? "…" : "";
+      lines.push(`  📌 ${item.id}  ${item.tool_name.padEnd(LIST_TOOL_COL_WIDTH)}  ${formatDate(item.created_at)}`);
       lines.push(`    ${excerpt}${ellipsis}`);
     }
   }
@@ -373,9 +382,9 @@ export function toolContext(
     const days = args.days ?? 7;
     lines.push("", `Recently accessed (last ${days} day${days === 1 ? "" : "s"}, ${data.recent.length} item${data.recent.length === 1 ? "" : "s"}):`);
     for (const item of data.recent) {
-      const excerpt = item.summary.slice(0, 100).replace(/\n/g, " ");
-      const ellipsis = item.summary.length > 100 ? "…" : "";
-      lines.push(`  ${item.id}  ${item.tool_name.padEnd(40)}  ${formatDate(item.created_at)}  ×${item.access_count}`);
+      const excerpt = item.summary.slice(0, CONTEXT_EXCERPT_LEN).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > CONTEXT_EXCERPT_LEN ? "…" : "";
+      lines.push(`  ${item.id}  ${item.tool_name.padEnd(LIST_TOOL_COL_WIDTH)}  ${formatDate(item.created_at)}  ×${item.access_count}`);
       lines.push(`    ${excerpt}${ellipsis}`);
     }
   }
@@ -384,9 +393,9 @@ export function toolContext(
     const date = data.last_session?.date ?? "";
     lines.push("", `Hot from last session (${date}, ${data.hot.length} item${data.hot.length === 1 ? "" : "s"}):`);
     for (const item of data.hot) {
-      const excerpt = item.summary.slice(0, 100).replace(/\n/g, " ");
-      const ellipsis = item.summary.length > 100 ? "…" : "";
-      lines.push(`  ${item.id}  ${item.tool_name.padEnd(40)}  ${formatDate(item.created_at)}  ×${item.access_count}`);
+      const excerpt = item.summary.slice(0, CONTEXT_EXCERPT_LEN).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > CONTEXT_EXCERPT_LEN ? "…" : "";
+      lines.push(`  ${item.id}  ${item.tool_name.padEnd(LIST_TOOL_COL_WIDTH)}  ${formatDate(item.created_at)}  ×${item.access_count}`);
       lines.push(`    ${excerpt}${ellipsis}`);
     }
   }
@@ -443,8 +452,8 @@ export function toolSessionSummary(
   if (data.top_accessed.length > 0) {
     lines.push("", "Most accessed:");
     for (const item of data.top_accessed) {
-      const excerpt = item.summary.slice(0, 100).replace(/\n/g, " ");
-      const ellipsis = item.summary.length > 100 ? "…" : "";
+      const excerpt = item.summary.slice(0, CONTEXT_EXCERPT_LEN).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > CONTEXT_EXCERPT_LEN ? "…" : "";
       lines.push(`  ${item.id} (×${item.access_count}) ${item.tool_name}`);
       lines.push(`    ${excerpt}${ellipsis}`);
     }
@@ -453,8 +462,8 @@ export function toolSessionSummary(
   if (data.pinned.length > 0) {
     lines.push("", `Pinned: ${data.pinned.length}`);
     for (const item of data.pinned) {
-      const excerpt = item.summary.slice(0, 100).replace(/\n/g, " ");
-      const ellipsis = item.summary.length > 100 ? "…" : "";
+      const excerpt = item.summary.slice(0, CONTEXT_EXCERPT_LEN).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > CONTEXT_EXCERPT_LEN ? "…" : "";
       lines.push(`  📌 ${item.id}  ${item.tool_name}`);
       lines.push(`    ${excerpt}${ellipsis}`);
     }
@@ -542,7 +551,7 @@ export function toolStats(
     if (suggestions.pin_candidates.length > 0) {
       lines.push("  📌 Consider pinning:");
       for (const item of suggestions.pin_candidates) {
-        lines.push(`     ${item.id}  ${item.tool_name.padEnd(40)}  accessed ${item.access_count}×`);
+        lines.push(`     ${item.id}  ${item.tool_name.padEnd(LIST_TOOL_COL_WIDTH)}  accessed ${item.access_count}×`);
       }
     }
 
@@ -552,7 +561,7 @@ export function toolStats(
       const now = Math.floor(Date.now() / 1000);
       for (const item of suggestions.stale_candidates) {
         const ageDays = Math.floor((now - item.created_at) / 86400);
-        lines.push(`     ${item.id}  ${item.tool_name.padEnd(40)}  created ${ageDays} day${ageDays === 1 ? "" : "s"} ago`);
+        lines.push(`     ${item.id}  ${item.tool_name.padEnd(LIST_TOOL_COL_WIDTH)}  created ${ageDays} day${ageDays === 1 ? "" : "s"} ago`);
       }
     }
   }
