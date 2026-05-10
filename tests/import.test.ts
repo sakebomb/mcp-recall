@@ -4,11 +4,12 @@ import { writeFileSync, unlinkSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { storeOutput, pinOutput } from "../src/db/index";
-import { initSchema } from "../src/db/schema";
-import { closeDb } from "../src/db/schema";
+import { initSchema, closeDb } from "../src/db/schema";
 import { toolExport } from "../src/tools";
 import { handleImportCommand } from "../src/import/index";
 import type { StoreInput } from "../src/db/types";
+
+const PROJECT_ROOT = import.meta.dir.replace(/\/tests$/, "");
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -242,6 +243,37 @@ describe("import conflict handling", () => {
       delete process.env.RECALL_DB_PATH;
     }
   });
+
+  test("chunk rows are replaced on --overwrite (no stale FTS entries)", async () => {
+    const item = storeOutput(sourceDb, makeInput({ full_content: "original content" }));
+    const dumpFile = makeTmpPath();
+    const targetDbPath = makeTmpPath(".db");
+    exportToFile(dumpFile);
+
+    process.env.RECALL_DB_PATH = targetDbPath;
+    try {
+      await handleImportCommand([dumpFile, "--keep-project-key"]);
+      closeDb();
+
+      // Update content in source and re-export
+      sourceDb.prepare(`UPDATE stored_outputs SET full_content = 'replacement content' WHERE id = ?`).run(item.id);
+      exportToFile(dumpFile);
+
+      await handleImportCommand([dumpFile, "--keep-project-key", "--overwrite"]);
+
+      const targetDb = new Database(targetDbPath);
+      const chunkRows = targetDb
+        .prepare(`SELECT content FROM content_chunks WHERE output_id = ?`)
+        .all(item.id) as Array<{ content: string }>;
+      targetDb.close();
+
+      // There should be exactly one chunk group and none should contain "original"
+      expect(chunkRows.length).toBeGreaterThan(0);
+      expect(chunkRows.every((r) => !r.content.includes("original"))).toBe(true);
+    } finally {
+      delete process.env.RECALL_DB_PATH;
+    }
+  });
 });
 
 // ── dry-run ───────────────────────────────────────────────────────────────────
@@ -261,6 +293,36 @@ describe("import --dry-run", () => {
       delete process.env.RECALL_DB_PATH;
     }
   });
+
+  test("accurately counts skips when items already exist", async () => {
+    storeOutput(sourceDb, makeInput());
+    storeOutput(sourceDb, makeInput({ tool_name: "mcp__github__get_issue", summary: "Issue #2" }));
+
+    const dumpFile = makeTmpPath();
+    const targetDbPath = makeTmpPath(".db");
+    exportToFile(dumpFile);
+
+    process.env.RECALL_DB_PATH = targetDbPath;
+    try {
+      // Real import first
+      await handleImportCommand([dumpFile, "--keep-project-key"]);
+      closeDb();
+
+      // Capture dry-run output
+      let output = "";
+      const originalLog = console.log;
+      console.log = (...a: unknown[]) => { output += a.join(" ") + "\n"; };
+      try {
+        await handleImportCommand([dumpFile, "--keep-project-key", "--dry-run"]);
+      } finally {
+        console.log = originalLog;
+      }
+
+      expect(output).toContain("2 skipped");
+    } finally {
+      delete process.env.RECALL_DB_PATH;
+    }
+  });
 });
 
 // ── validation ────────────────────────────────────────────────────────────────
@@ -272,7 +334,7 @@ describe("import validation", () => {
 
     const result = Bun.spawnSync(
       ["bun", "run", "src/cli.ts", "import", dumpFile],
-      { cwd: "/home/sakebomb/code/open-source/mcp-recall", stderr: "pipe" }
+      { cwd: PROJECT_ROOT, stderr: "pipe" }
     );
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain("Invalid JSON");
@@ -284,7 +346,7 @@ describe("import validation", () => {
 
     const result = Bun.spawnSync(
       ["bun", "run", "src/cli.ts", "import", dumpFile],
-      { cwd: "/home/sakebomb/code/open-source/mcp-recall", stderr: "pipe" }
+      { cwd: PROJECT_ROOT, stderr: "pipe" }
     );
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain("recall__export");
