@@ -5522,6 +5522,8 @@ function formatRelativeTime(ms) {
 
 // src/tools.ts
 var CONTEXT_EMPTY_RESPONSE = "[recall: no context available yet \u2014 use recall tools to build up your context store]";
+var CONTEXT_EXCERPT_LEN = 100;
+var LIST_TOOL_COL_WIDTH = 40;
 function formatDate(unixSecs) {
   return new Date(unixSecs * 1000).toISOString().slice(0, 10);
 }
@@ -5546,9 +5548,9 @@ function toolContext(db, projectKey, args) {
   if (data.pinned.length > 0) {
     lines.push("", `Pinned (${data.pinned.length}):`);
     for (const item of data.pinned) {
-      const excerpt = item.summary.slice(0, 100).replace(/\n/g, " ");
-      const ellipsis = item.summary.length > 100 ? "\u2026" : "";
-      lines.push(`  \uD83D\uDCCC ${item.id}  ${item.tool_name.padEnd(40)}  ${formatDate(item.created_at)}`);
+      const excerpt = item.summary.slice(0, CONTEXT_EXCERPT_LEN).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > CONTEXT_EXCERPT_LEN ? "\u2026" : "";
+      lines.push(`  \uD83D\uDCCC ${item.id}  ${item.tool_name.padEnd(LIST_TOOL_COL_WIDTH)}  ${formatDate(item.created_at)}`);
       lines.push(`    ${excerpt}${ellipsis}`);
     }
   }
@@ -5565,9 +5567,9 @@ function toolContext(db, projectKey, args) {
     const days = args.days ?? 7;
     lines.push("", `Recently accessed (last ${days} day${days === 1 ? "" : "s"}, ${data.recent.length} item${data.recent.length === 1 ? "" : "s"}):`);
     for (const item of data.recent) {
-      const excerpt = item.summary.slice(0, 100).replace(/\n/g, " ");
-      const ellipsis = item.summary.length > 100 ? "\u2026" : "";
-      lines.push(`  ${item.id}  ${item.tool_name.padEnd(40)}  ${formatDate(item.created_at)}  \xD7${item.access_count}`);
+      const excerpt = item.summary.slice(0, CONTEXT_EXCERPT_LEN).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > CONTEXT_EXCERPT_LEN ? "\u2026" : "";
+      lines.push(`  ${item.id}  ${item.tool_name.padEnd(LIST_TOOL_COL_WIDTH)}  ${formatDate(item.created_at)}  \xD7${item.access_count}`);
       lines.push(`    ${excerpt}${ellipsis}`);
     }
   }
@@ -5575,9 +5577,9 @@ function toolContext(db, projectKey, args) {
     const date = data.last_session?.date ?? "";
     lines.push("", `Hot from last session (${date}, ${data.hot.length} item${data.hot.length === 1 ? "" : "s"}):`);
     for (const item of data.hot) {
-      const excerpt = item.summary.slice(0, 100).replace(/\n/g, " ");
-      const ellipsis = item.summary.length > 100 ? "\u2026" : "";
-      lines.push(`  ${item.id}  ${item.tool_name.padEnd(40)}  ${formatDate(item.created_at)}  \xD7${item.access_count}`);
+      const excerpt = item.summary.slice(0, CONTEXT_EXCERPT_LEN).replace(/\n/g, " ");
+      const ellipsis = item.summary.length > CONTEXT_EXCERPT_LEN ? "\u2026" : "";
+      lines.push(`  ${item.id}  ${item.tool_name.padEnd(LIST_TOOL_COL_WIDTH)}  ${formatDate(item.created_at)}  \xD7${item.access_count}`);
       lines.push(`    ${excerpt}${ellipsis}`);
     }
   }
@@ -9524,6 +9526,9 @@ import { existsSync as existsSync2 } from "fs";
 import { mkdir, rename, readFile } from "fs/promises";
 import path from "path";
 import os from "os";
+function isEnoent(e) {
+  return typeof e === "object" && e !== null && e.code === "ENOENT";
+}
 var BOLD = "\x1B[1m";
 var GREEN = "\x1B[32m";
 var YELLOW = "\x1B[33m";
@@ -9596,7 +9601,7 @@ async function injectClaudeMd(filePath, dryRun = false) {
   try {
     existing = await readFile(filePath, "utf8");
   } catch (e) {
-    if (e.code !== "ENOENT")
+    if (!isEnoent(e))
       throw e;
   }
   const startIdx = existing.indexOf(CLAUDE_MD_MARKER_START);
@@ -9626,7 +9631,7 @@ async function removeClaudeMd(filePath) {
   try {
     existing = await readFile(filePath, "utf8");
   } catch (e) {
-    if (e.code === "ENOENT")
+    if (isEnoent(e))
       return false;
     throw e;
   }

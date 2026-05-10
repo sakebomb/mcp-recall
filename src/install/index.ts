@@ -15,6 +15,12 @@ import path from "path";
 import os from "os";
 import { loadProfiles } from "../profiles/loader";
 
+// ── Utilities ────────────────────────────────────────────────────────────────
+
+function isEnoent(e: unknown): boolean {
+  return typeof e === "object" && e !== null && (e as NodeJS.ErrnoException).code === "ENOENT";
+}
+
 // ── ANSI ─────────────────────────────────────────────────────────────────────
 
 const BOLD  = "\x1b[1m";
@@ -118,8 +124,8 @@ export async function injectClaudeMd(
   let existing = "";
   try {
     existing = await readFile(filePath, "utf8");
-  } catch (e: any) {
-    if (e.code !== "ENOENT") throw e;
+  } catch (e: unknown) {
+    if (!isEnoent(e)) throw e;
   }
 
   const startIdx = existing.indexOf(CLAUDE_MD_MARKER_START);
@@ -151,8 +157,8 @@ export async function removeClaudeMd(filePath: string): Promise<boolean> {
   let existing = "";
   try {
     existing = await readFile(filePath, "utf8");
-  } catch (e: any) {
-    if (e.code === "ENOENT") return false;
+  } catch (e: unknown) {
+    if (isEnoent(e)) return false;
     throw e;
   }
 
