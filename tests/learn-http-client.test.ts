@@ -249,4 +249,56 @@ describe("listMcpToolsHttp — error cases", () => {
       /streamable HTTP:.*legacy SSE:/
     );
   });
+
+  test("throws immediately on non-http/https scheme (S1)", async () => {
+    await expect(listMcpToolsHttp("file:///etc/passwd", 5_000)).rejects.toThrow(
+      /unsupported URL scheme/
+    );
+  });
+
+  test("throws when SSE endpoint event contains non-http URL (S2)", async () => {
+    // Server that accepts GET /sse and sends a file:// endpoint event
+    const s = Bun.serve({
+      port: 0,
+      fetch(req) {
+        if (req.method === "GET") {
+          const stream = new ReadableStream<Uint8Array>({
+            start(ctrl) {
+              ctrl.enqueue(new TextEncoder().encode(sseChunk("file:///etc/passwd", "endpoint")));
+            },
+          });
+          return new Response(stream, { headers: { "Content-Type": "text/event-stream" } });
+        }
+        return new Response(null, { status: 404 });
+      },
+    });
+    servers.push(s);
+
+    const sseUrl = s.url.href;
+    await expect(listMcpToolsHttp(sseUrl, 5_000)).rejects.toThrow(
+      /unsupported URL scheme/
+    );
+  });
+
+  test("throws when SSE stream closes without sending endpoint event (Q3)", async () => {
+    // Server that accepts GET /sse but closes the stream immediately
+    const s = Bun.serve({
+      port: 0,
+      fetch(req) {
+        if (req.method === "GET") {
+          const stream = new ReadableStream<Uint8Array>({
+            start(ctrl) { ctrl.close(); },
+          });
+          return new Response(stream, { headers: { "Content-Type": "text/event-stream" } });
+        }
+        return new Response(null, { status: 404 });
+      },
+    });
+    servers.push(s);
+
+    const sseUrl = s.url.href;
+    await expect(listMcpToolsHttp(sseUrl, 5_000)).rejects.toThrow(
+      /endpoint event/
+    );
+  });
 });

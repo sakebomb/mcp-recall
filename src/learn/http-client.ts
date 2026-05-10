@@ -113,7 +113,7 @@ async function awaitSseResult(
 // ── Streamable HTTP transport ─────────────────────────────────────────────────
 
 const INIT_PARAMS = {
-  protocolVersion: "2024-11-05",
+  protocolVersion: "2025-03-26",
   capabilities: {},
   clientInfo: { name: "mcp-recall-learn", version: "1.0.0" },
 };
@@ -209,31 +209,39 @@ async function tryLegacySse(url: string, timeoutMs: number): Promise<McpTool[]> 
     // Background reader — wires SSE events to pending promises
     const sseStream = parseSseStream(sseResp.body!, abort.signal);
     const readerDone = (async () => {
-      for await (const { event, data } of sseStream) {
-        if (event === "endpoint") {
-          // Resolve relative paths against the base URL
-          const resolved = new URL(data.trim(), url).href;
-          postUrlResolve.resolve(resolved);
-          postUrl = resolved;
-          continue;
+      try {
+        for await (const { event, data } of sseStream) {
+          if (event === "endpoint") {
+            const resolved = new URL(data.trim(), url).href;
+            assertHttpScheme(resolved, "endpoint URL from SSE event");
+            postUrlResolve.resolve(resolved);
+            postUrl = resolved;
+            continue;
+          }
+          // Default event = JSON-RPC message
+          let msg: JsonRpcMsg;
+          try {
+            msg = JSON.parse(data) as JsonRpcMsg;
+          } catch {
+            continue;
+          }
+          if (msg.id === undefined) continue;
+          const p = pending.get(msg.id);
+          if (!p) continue;
+          pending.delete(msg.id);
+          if (msg.error) p.reject(new McpProtocolError(`MCP error: ${msg.error.message}`));
+          else p.resolve(msg.result);
         }
-        // Default event = JSON-RPC message
-        let msg: JsonRpcMsg;
-        try {
-          msg = JSON.parse(data) as JsonRpcMsg;
-        } catch {
-          continue;
+        // Stream closed without an endpoint event — unblock the await below
+        postUrlResolve.reject(new Error("SSE stream closed before endpoint event received"));
+        for (const { reject } of pending.values()) {
+          reject(new Error("SSE stream closed before response received"));
         }
-        if (msg.id === undefined) continue;
-        const p = pending.get(msg.id);
-        if (!p) continue;
-        pending.delete(msg.id);
-        if (msg.error) p.reject(new Error(`MCP error: ${msg.error.message}`));
-        else p.resolve(msg.result);
-      }
-      // Stream closed — reject any still-pending requests
-      for (const { reject } of pending.values()) {
-        reject(new Error("SSE stream closed before response received"));
+      } catch (e) {
+        // Forward unexpected errors (e.g. scheme violations) to any awaiting callers
+        const err = e instanceof Error ? e : new Error(String(e));
+        postUrlResolve.reject(err);
+        for (const { reject } of pending.values()) reject(err);
       }
     })();
 
@@ -280,10 +288,18 @@ async function tryLegacySse(url: string, timeoutMs: number): Promise<McpTool[]> 
  * Returns both the tool list and the transport that succeeded so callers can
  * report it. Throws with both failure reasons if neither transport works.
  */
+function assertHttpScheme(rawUrl: string, label: string): void {
+  const { protocol } = new URL(rawUrl);
+  if (protocol !== "http:" && protocol !== "https:") {
+    throw new Error(`${label} has unsupported URL scheme: ${protocol}`);
+  }
+}
+
 export async function listMcpToolsHttp(
   url: string,
   timeoutMs = 10_000
 ): Promise<HttpListResult> {
+  assertHttpScheme(url, "MCP server URL");
   let streamableError: string | null = null;
 
   try {

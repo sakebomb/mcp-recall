@@ -8925,7 +8925,7 @@ async function listMcpTools(command, args, env, timeoutMs = 1e4) {
       id: 1,
       method: "initialize",
       params: {
-        protocolVersion: "2024-11-05",
+        protocolVersion: "2025-03-26",
         capabilities: {},
         clientInfo: { name: "mcp-recall-learn", version: "1.0.0" }
       }
@@ -9009,7 +9009,7 @@ async function awaitSseResult(stream, id) {
   throw new Error("SSE stream ended without a matching response");
 }
 var INIT_PARAMS = {
-  protocolVersion: "2024-11-05",
+  protocolVersion: "2025-03-26",
   capabilities: {},
   clientInfo: { name: "mcp-recall-learn", version: "1.0.0" }
 };
@@ -9066,32 +9066,41 @@ async function tryLegacySse(url, timeoutMs) {
     const postUrlResolve = Promise.withResolvers();
     const sseStream = parseSseStream(sseResp.body, abort.signal);
     const readerDone = (async () => {
-      for await (const { event, data } of sseStream) {
-        if (event === "endpoint") {
-          const resolved = new URL(data.trim(), url).href;
-          postUrlResolve.resolve(resolved);
-          postUrl = resolved;
-          continue;
+      try {
+        for await (const { event, data } of sseStream) {
+          if (event === "endpoint") {
+            const resolved = new URL(data.trim(), url).href;
+            assertHttpScheme(resolved, "endpoint URL from SSE event");
+            postUrlResolve.resolve(resolved);
+            postUrl = resolved;
+            continue;
+          }
+          let msg;
+          try {
+            msg = JSON.parse(data);
+          } catch {
+            continue;
+          }
+          if (msg.id === undefined)
+            continue;
+          const p = pending.get(msg.id);
+          if (!p)
+            continue;
+          pending.delete(msg.id);
+          if (msg.error)
+            p.reject(new McpProtocolError(`MCP error: ${msg.error.message}`));
+          else
+            p.resolve(msg.result);
         }
-        let msg;
-        try {
-          msg = JSON.parse(data);
-        } catch {
-          continue;
+        postUrlResolve.reject(new Error("SSE stream closed before endpoint event received"));
+        for (const { reject } of pending.values()) {
+          reject(new Error("SSE stream closed before response received"));
         }
-        if (msg.id === undefined)
-          continue;
-        const p = pending.get(msg.id);
-        if (!p)
-          continue;
-        pending.delete(msg.id);
-        if (msg.error)
-          p.reject(new Error(`MCP error: ${msg.error.message}`));
-        else
-          p.resolve(msg.result);
-      }
-      for (const { reject } of pending.values()) {
-        reject(new Error("SSE stream closed before response received"));
+      } catch (e) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        postUrlResolve.reject(err);
+        for (const { reject } of pending.values())
+          reject(err);
       }
     })();
     postUrl = await postUrlResolve.promise;
@@ -9122,7 +9131,14 @@ async function tryLegacySse(url, timeoutMs) {
     abort.abort();
   }
 }
+function assertHttpScheme(rawUrl, label) {
+  const { protocol } = new URL(rawUrl);
+  if (protocol !== "http:" && protocol !== "https:") {
+    throw new Error(`${label} has unsupported URL scheme: ${protocol}`);
+  }
+}
 async function listMcpToolsHttp(url, timeoutMs = 1e4) {
+  assertHttpScheme(url, "MCP server URL");
   let streamableError = null;
   try {
     const tools = await tryStreamableHttp(url, timeoutMs);
@@ -9303,7 +9319,7 @@ Learning from ${candidates.length} MCP server(s)\u2026
         tools = result.tools;
         if (result.streamableError) {
           process.stdout.write(`
-    streamable HTTP failed (${result.streamableError}), trying legacy SSE\u2026 `);
+    streamable HTTP failed (${result.streamableError}), used legacy SSE \u2014 `);
         }
         console.log(`${tools.length} tool(s) found (${result.transport})`);
       } else {
