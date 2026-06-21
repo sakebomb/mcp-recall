@@ -52,3 +52,4 @@ jobs:
           prompt: ${{ github.event_name == 'pull_request' && 'Review this PR for correctness, security, and adherence to the repo conventions in CLAUDE.md. Flag CRITICAL/HIGH issues clearly; keep notes concise.' || '' }}
           trigger_phrase: "@claude"
           track_progress: "true"
+          show_full_output: "true"   # TEMP: diagnostic — revert after capture
