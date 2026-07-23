@@ -61,6 +61,10 @@ export interface Stats {
   total_original_bytes: number;
   total_summary_bytes: number;
   compression_ratio: number;
+  /** Number of pinned items (exempt from eviction). */
+  pinned_items: number;
+  /** Sum of `original_size` across pinned items — bytes eviction cannot reclaim. */
+  pinned_bytes: number;
 }
 
 /** Options for the session-orientation context snapshot. */

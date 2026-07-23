@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { join } from "path";
+import { join, dirname } from "path";
 import { homedir } from "os";
 import { mkdirSync } from "fs";
 
@@ -54,6 +54,11 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS sessions (
     date TEXT PRIMARY KEY
   );
+
+  CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
 `;
 
 // Columns added after initial schema — applied once, idempotent via try/catch
@@ -92,6 +97,17 @@ export function defaultDbPath(projectKey: string): string {
     process.env.RECALL_DB_PATH ??
     join(homedir(), ".local", "share", "mcp-recall", `${projectKey}.db`)
   );
+}
+
+/**
+ * Returns the directory that holds per-project databases.
+ * When `RECALL_DB_PATH` overrides to a single file, returns its parent directory
+ * so callers that scan the store (e.g. `gc`) operate on the right location.
+ */
+export function dataDir(): string {
+  const override = process.env.RECALL_DB_PATH;
+  if (override) return dirname(override);
+  return join(homedir(), ".local", "share", "mcp-recall");
 }
 
 /**

@@ -5152,6 +5152,9 @@ function getProjectKey(cwd) {
   const resolved = resolveProjectPath(cwd);
   return hashPath(resolved);
 }
+function getProjectPath(cwd) {
+  return resolveProjectPath(cwd);
+}
 function resolveProjectPath(cwd) {
   const cached2 = pathCache.get(cwd);
   if (cached2 !== undefined)
@@ -5170,7 +5173,7 @@ function hashPath(path) {
 }
 // src/db/schema.ts
 import { Database } from "bun:sqlite";
-import { join as join2 } from "path";
+import { join as join2, dirname } from "path";
 import { homedir as homedir2 } from "os";
 import { mkdirSync } from "fs";
 var SCHEMA = `
@@ -5224,6 +5227,11 @@ var SCHEMA = `
   CREATE TABLE IF NOT EXISTS sessions (
     date TEXT PRIMARY KEY
   );
+
+  CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
 `;
 var MIGRATIONS = [
   "ALTER TABLE stored_outputs ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
@@ -5247,6 +5255,12 @@ function applyMigrations(db) {
 var instance = null;
 function defaultDbPath(projectKey) {
   return process.env.RECALL_DB_PATH ?? join2(homedir2(), ".local", "share", "mcp-recall", `${projectKey}.db`);
+}
+function dataDir() {
+  const override = process.env.RECALL_DB_PATH;
+  if (override)
+    return dirname(override);
+  return join2(homedir2(), ".local", "share", "mcp-recall");
 }
 function getDb(path) {
   if (instance)
@@ -5296,6 +5310,24 @@ function countAndDelete(db, where, params) {
     db.prepare(`DELETE FROM stored_outputs WHERE ${where}`).run(...params);
   }
   return count;
+}
+var VACUUM_THRESHOLD = 50;
+function reclaimPages(db, deleted) {
+  if (deleted < VACUUM_THRESHOLD)
+    return;
+  try {
+    db.run("PRAGMA incremental_vacuum");
+  } catch (e) {
+    log.warn(`incremental_vacuum failed \u2014 ${e instanceof Error ? e.message : e}`);
+  }
+}
+function setMeta(db, key, value) {
+  db.prepare(`INSERT INTO meta (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(key, value);
+}
+function getMeta(db, key) {
+  const row = db.prepare(`SELECT value FROM meta WHERE key = ?`).get(key);
+  return row?.value ?? null;
 }
 function storeOutput(db, input) {
   const id = generateId();
@@ -5380,11 +5412,14 @@ function evictIfNeeded(db, project_key, max_size_mb, half_life_days = DEFAULT_EV
   }
   const placeholders = toEvict.map(() => "?").join(",");
   db.prepare(`DELETE FROM stored_outputs WHERE id IN (${placeholders})`).run(...toEvict);
+  reclaimPages(db, toEvict.length);
   return toEvict.length;
 }
 function pruneExpired(db, project_key, calendar_days) {
   const cutoff = Math.floor(Date.now() / 1000) - calendar_days * 86400;
-  return countAndDelete(db, "created_at < ? AND project_key = ? AND pinned = 0", [cutoff, project_key]);
+  const deleted = countAndDelete(db, "created_at < ? AND project_key = ? AND pinned = 0", [cutoff, project_key]);
+  reclaimPages(db, deleted);
+  return deleted;
 }
 function recordSession(db, date) {
   db.prepare(`INSERT OR IGNORE INTO sessions (date) VALUES (?)`).run(date);
@@ -5638,6 +5673,7 @@ function handleSessionStart(raw) {
   const config = loadConfig();
   const projectKey = getProjectKey(input.cwd);
   const db = getDb(defaultDbPath(projectKey));
+  setMeta(db, "project_path", getProjectPath(input.cwd));
   const today = new Date().toISOString().slice(0, 10);
   recordSession(db, today);
   pruneExpired(db, projectKey, config.store.expire_after_session_days);
@@ -10076,6 +10112,168 @@ Installation: ${BOLD}${label}${RESET}
   console.log("");
 }
 
+// src/gc/index.ts
+import { Database as Database3 } from "bun:sqlite";
+import { readdirSync as readdirSync4, existsSync as existsSync3, statSync as statSync3, rmSync as rmSync2 } from "fs";
+import { join as join8, basename } from "path";
+var DEFAULT_STALE_DAYS = 90;
+function isDeletionCandidate(status) {
+  return status === "orphaned" || status === "legacy-stale";
+}
+function fileSizeSafe(path2) {
+  try {
+    return statSync3(path2).size;
+  } catch {
+    return 0;
+  }
+}
+function dbFootprint(file) {
+  return fileSizeSafe(file) + fileSizeSafe(`${file}-wal`) + fileSizeSafe(`${file}-shm`);
+}
+function scanDatabases(dir, currentFile, staleDays, nowMs = Date.now()) {
+  if (!existsSync3(dir))
+    return [];
+  const staleCutoffMs = nowMs - staleDays * 86400 * 1000;
+  const entries = [];
+  for (const name of readdirSync4(dir)) {
+    if (!name.endsWith(".db"))
+      continue;
+    const file = join8(dir, name);
+    let mtimeMs = 0;
+    try {
+      mtimeMs = statSync3(file).mtimeMs;
+    } catch {
+      continue;
+    }
+    const sizeBytes = dbFootprint(file);
+    if (file === currentFile) {
+      entries.push({ file, status: "current", projectPath: null, sizeBytes, mtimeMs, items: 0 });
+      continue;
+    }
+    let projectPath = null;
+    let items = 0;
+    let readable = true;
+    let db = null;
+    try {
+      db = new Database3(file, { readonly: true });
+      try {
+        projectPath = getMeta(db, "project_path");
+      } catch {
+        projectPath = null;
+      }
+      try {
+        items = db.prepare(`SELECT COUNT(*) AS n FROM stored_outputs`).get().n;
+      } catch {
+        items = 0;
+      }
+    } catch {
+      readable = false;
+    } finally {
+      db?.close();
+    }
+    let status;
+    if (!readable) {
+      status = "unreadable";
+    } else if (projectPath !== null) {
+      status = existsSync3(projectPath) ? "active" : "orphaned";
+    } else {
+      status = mtimeMs < staleCutoffMs ? "legacy-stale" : "legacy-fresh";
+    }
+    entries.push({ file, status, projectPath, sizeBytes, mtimeMs, items });
+  }
+  return entries.sort((a, b) => b.sizeBytes - a.sizeBytes);
+}
+var STATUS_LABEL = {
+  current: "current",
+  active: "active",
+  orphaned: "ORPHANED",
+  "legacy-fresh": "legacy",
+  "legacy-stale": "LEGACY-STALE",
+  unreadable: "unreadable"
+};
+function reportLine(e, nowMs) {
+  const flag = isDeletionCandidate(e.status) ? "\u2717" : " ";
+  const age = formatRelativeTime(nowMs - e.mtimeMs);
+  const where = e.projectPath ?? "(no recorded path)";
+  return `  ${flag} ${STATUS_LABEL[e.status].padEnd(13)} ${formatBytes(e.sizeBytes).padStart(9)}` + `  ${String(e.items).padStart(6)} items  ${age.padEnd(14)}  ${basename(e.file)}
+` + `      ${where}`;
+}
+function vacuumFile(file) {
+  const before = dbFootprint(file);
+  let db = null;
+  try {
+    db = new Database3(file);
+    db.run("PRAGMA busy_timeout=5000");
+    db.run("PRAGMA auto_vacuum=INCREMENTAL");
+    db.run("VACUUM");
+  } catch {
+    return null;
+  } finally {
+    db?.close();
+  }
+  return { before, after: dbFootprint(file) };
+}
+function deleteDbFiles(file) {
+  for (const f of [file, `${file}-wal`, `${file}-shm`]) {
+    rmSync2(f, { force: true });
+  }
+}
+function gcCommand(opts = {}) {
+  const dryRun = opts.dryRun ?? true;
+  const staleDays = opts.staleDays ?? DEFAULT_STALE_DAYS;
+  const nowMs = Date.now();
+  const dir = dataDir();
+  const currentFile = defaultDbPath(getProjectKey(process.cwd()));
+  const entries = scanDatabases(dir, currentFile, staleDays, nowMs);
+  if (entries.length === 0) {
+    console.log(`No databases found in ${dir}`);
+    return;
+  }
+  const candidates = entries.filter((e) => isDeletionCandidate(e.status));
+  const reclaimable = candidates.reduce((sum, e) => sum + e.sizeBytes, 0);
+  const totalBytes = entries.reduce((sum, e) => sum + e.sizeBytes, 0);
+  console.log(`Project databases in ${dir}:
+`);
+  for (const e of entries)
+    console.log(reportLine(e, nowMs));
+  console.log(`
+${entries.length} databases \xB7 ${formatBytes(totalBytes)} total \xB7 ` + `${candidates.length} reclaimable (${formatBytes(reclaimable)})`);
+  console.log(`  Orphaned = project path deleted \xB7 LEGACY-STALE = no recorded path, ` + `untouched > ${staleDays}d (raise/lower with --stale-days N)`);
+  if (dryRun) {
+    if (candidates.length > 0) {
+      console.log(`
+Dry run \u2014 pass --force to delete the ${candidates.length} marked database(s).`);
+    }
+  } else {
+    let freed = 0;
+    for (const e of candidates) {
+      deleteDbFiles(e.file);
+      freed += e.sizeBytes;
+    }
+    console.log(`
+Deleted ${candidates.length} database(s), freed ${formatBytes(freed)}.`);
+  }
+  if (opts.vacuum) {
+    const deleted = new Set(dryRun ? [] : candidates.map((e) => e.file));
+    const survivors = entries.filter((e) => e.status !== "current" && e.status !== "unreadable" && !deleted.has(e.file));
+    let reclaimed = 0;
+    let vacuumed = 0;
+    let skipped = 0;
+    for (const e of survivors) {
+      const result = vacuumFile(e.file);
+      if (result) {
+        reclaimed += Math.max(0, result.before - result.after);
+        vacuumed++;
+      } else {
+        skipped++;
+        console.log(`  skipped ${basename(e.file)} \u2014 locked by another session or unreadable`);
+      }
+    }
+    const skipNote = skipped > 0 ? ` (${skipped} skipped)` : "";
+    console.log(`Vacuumed ${vacuumed} database(s), reclaimed ${formatBytes(reclaimed)} of free pages.${skipNote}`);
+  }
+}
+
 // src/cli.ts
 async function getVersion() {
   const pkg = await Promise.resolve().then(() => __toESM(require_package(), 1));
@@ -10091,6 +10289,9 @@ Commands:
   install              Register hooks + MCP server in Claude Code
   uninstall            Remove hooks + MCP server
   status               Show current configuration and health
+  gc [--force]         Reclaim disk: list/delete orphaned project DBs
+    --stale-days N     Legacy DBs (no recorded path) older than N days are candidates (default 90)
+    --vacuum           Full-VACUUM surviving DBs to reclaim free pages
   profiles <cmd>       Manage compression profiles
     seed [--all]       Install profiles for detected MCPs (--all for entire catalog)
     list               Show installed profiles
@@ -10137,7 +10338,7 @@ _mcp_recall() {
   COMPREPLY=()
   cur="\${COMP_WORDS[COMP_CWORD]}"
 
-  local commands="install uninstall status profiles learn completions --help --version"
+  local commands="install uninstall status gc profiles learn completions --help --version"
   local profiles_cmds="list install update remove seed feed check retrain test"
 
   if [[ \${COMP_CWORD} -eq 1 ]]; then
@@ -10221,6 +10422,7 @@ _mcp_recall() {
         'install:register hooks and MCP server in Claude Code'
         'uninstall:remove hooks and MCP server'
         'status:show current configuration and health'
+        'gc:reclaim disk from orphaned project databases'
         'profiles:manage compression profiles'
         'learn:generate profile suggestions from session data'
         'completions:print shell completion script (bash, zsh, fish)'
@@ -10248,7 +10450,7 @@ function fishCompletion() {
   return `# mcp-recall fish completions
 # Save to: mcp-recall completions fish > ~/.config/fish/completions/mcp-recall.fish
 
-set -l commands install uninstall status profiles learn completions
+set -l commands install uninstall status gc profiles learn completions
 
 # Top-level commands
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
@@ -10257,6 +10459,8 @@ complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
   -a uninstall -d "Remove hooks and MCP server"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
   -a status -d "Show current configuration and health"
+complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
+  -a gc -d "Reclaim disk from orphaned project databases"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
   -a profiles -d "Manage compression profiles"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
@@ -10355,6 +10559,20 @@ async function main() {
   }
   if (subcommand === "status") {
     await statusCommand();
+    process.exit(0);
+  }
+  if (subcommand === "gc") {
+    const staleIdx = process.argv.indexOf("--stale-days");
+    const staleDays = staleIdx !== -1 && process.argv[staleIdx + 1] ? Number(process.argv[staleIdx + 1]) : undefined;
+    if (staleDays !== undefined && (!Number.isFinite(staleDays) || staleDays < 1)) {
+      console.error("--stale-days must be a positive number");
+      process.exit(1);
+    }
+    gcCommand({
+      dryRun: !process.argv.includes("--force"),
+      vacuum: process.argv.includes("--vacuum"),
+      staleDays
+    });
     process.exit(0);
   }
   const raw = await Bun.stdin.text();

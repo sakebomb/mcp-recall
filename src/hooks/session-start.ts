@@ -1,6 +1,6 @@
 import { loadConfig } from "../config";
-import { getProjectKey } from "../project-key";
-import { getDb, defaultDbPath, recordSession, pruneExpired } from "../db/index";
+import { getProjectKey, getProjectPath } from "../project-key";
+import { getDb, defaultDbPath, recordSession, pruneExpired, setMeta } from "../db/index";
 import { toolContext, CONTEXT_EMPTY_RESPONSE } from "../tools";
 import { log } from "../log";
 
@@ -29,6 +29,10 @@ export function handleSessionStart(raw: string): void {
   const config = loadConfig();
   const projectKey = getProjectKey(input.cwd);
   const db = getDb(defaultDbPath(projectKey));
+
+  // Record the resolved project path so `mcp-recall gc` can tell whether this
+  // project still exists on disk (orphan detection is path-existence based).
+  setMeta(db, "project_path", getProjectPath(input.cwd));
 
   const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
   recordSession(db, today);

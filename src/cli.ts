@@ -9,6 +9,7 @@
  *   install         — register hooks + MCP server in Claude Code
  *   uninstall       — remove hooks + MCP server
  *   status          — show configuration and health
+ *   gc              — reclaim disk from orphaned project databases
  *   profiles        — manage compression profiles
  *   learn           — generate profile suggestions from session data
  *   completions     — print shell completion script for bash, zsh, or fish
@@ -22,6 +23,7 @@ import { handleProfilesCommand } from "./profiles/commands";
 import { handleLearnCommand } from "./learn/index";
 import { handleImportCommand } from "./import/index";
 import { installCommand, uninstallCommand, statusCommand } from "./install/index";
+import { gcCommand } from "./gc/index";
 import { log } from "./log";
 
 export async function getVersion(): Promise<string> {
@@ -39,6 +41,9 @@ Commands:
   install              Register hooks + MCP server in Claude Code
   uninstall            Remove hooks + MCP server
   status               Show current configuration and health
+  gc [--force]         Reclaim disk: list/delete orphaned project DBs
+    --stale-days N     Legacy DBs (no recorded path) older than N days are candidates (default 90)
+    --vacuum           Full-VACUUM surviving DBs to reclaim free pages
   profiles <cmd>       Manage compression profiles
     seed [--all]       Install profiles for detected MCPs (--all for entire catalog)
     list               Show installed profiles
@@ -87,7 +92,7 @@ _mcp_recall() {
   COMPREPLY=()
   cur="\${COMP_WORDS[COMP_CWORD]}"
 
-  local commands="install uninstall status profiles learn completions --help --version"
+  local commands="install uninstall status gc profiles learn completions --help --version"
   local profiles_cmds="list install update remove seed feed check retrain test"
 
   if [[ \${COMP_CWORD} -eq 1 ]]; then
@@ -172,6 +177,7 @@ _mcp_recall() {
         'install:register hooks and MCP server in Claude Code'
         'uninstall:remove hooks and MCP server'
         'status:show current configuration and health'
+        'gc:reclaim disk from orphaned project databases'
         'profiles:manage compression profiles'
         'learn:generate profile suggestions from session data'
         'completions:print shell completion script (bash, zsh, fish)'
@@ -200,7 +206,7 @@ function fishCompletion(): string {
   return `# mcp-recall fish completions
 # Save to: mcp-recall completions fish > ~/.config/fish/completions/mcp-recall.fish
 
-set -l commands install uninstall status profiles learn completions
+set -l commands install uninstall status gc profiles learn completions
 
 # Top-level commands
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\
@@ -209,6 +215,8 @@ complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\
   -a uninstall -d "Remove hooks and MCP server"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\
   -a status -d "Show current configuration and health"
+complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\
+  -a gc -d "Reclaim disk from orphaned project databases"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\
   -a profiles -d "Manage compression profiles"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\
@@ -321,6 +329,24 @@ async function main(): Promise<void> {
 
   if (subcommand === "status") {
     await statusCommand();
+    process.exit(0);
+  }
+
+  if (subcommand === "gc") {
+    const staleIdx = process.argv.indexOf("--stale-days");
+    const staleDays =
+      staleIdx !== -1 && process.argv[staleIdx + 1]
+        ? Number(process.argv[staleIdx + 1])
+        : undefined;
+    if (staleDays !== undefined && (!Number.isFinite(staleDays) || staleDays < 1)) {
+      console.error("--stale-days must be a positive number");
+      process.exit(1);
+    }
+    gcCommand({
+      dryRun: !process.argv.includes("--force"),
+      vacuum: process.argv.includes("--vacuum"),
+      staleDays,
+    });
     process.exit(0);
   }
 
