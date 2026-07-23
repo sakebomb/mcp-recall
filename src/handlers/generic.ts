@@ -36,6 +36,8 @@ function summarizeBlock(raw: string): string {
   return `${head}\n…\n${tail}`;
 }
 
+const plural = (n: number): string => (n === 1 ? "" : "s");
+
 function summarizeLines(lines: string[]): string {
   const head = lines.slice(0, HEAD_LINES);
   const tail = lines.slice(lines.length - TAIL_LINES);
@@ -43,8 +45,8 @@ function summarizeLines(lines: string[]): string {
   const matches = middle.filter((l) => MATCH_RE.test(l)).slice(0, MAX_MATCH_LINES);
 
   const note = matches.length
-    ? `…(${middle.length} middle lines elided; ${matches.length} error/warn shown)…`
-    : `…(${middle.length} middle lines elided)…`;
+    ? `…(${middle.length} middle line${plural(middle.length)} elided; ${matches.length} error/warn shown)…`
+    : `…(${middle.length} middle line${plural(middle.length)} elided)…`;
 
   return [...head, note, ...matches, ...tail].join("\n");
 }
@@ -64,5 +66,10 @@ export const genericHandler: Handler = (
   const summary =
     lines.length >= LINE_MODE_MIN_LINES ? summarizeLines(lines) : summarizeBlock(raw);
 
+  // Note: for a small log whose few middle lines all match MATCH_RE, the
+  // line-mode summary can be no smaller than the input (nothing is truly
+  // elided). That's intentional — the PostToolUse hook skips storing when the
+  // summary doesn't shrink, so such small output simply passes through in full,
+  // which preserves the error lines we'd otherwise want to surface anyway.
   return { summary, originalSize };
 };

@@ -306,6 +306,33 @@ describe("genericHandler", () => {
     expect(summary).toContain("…");
     expect(summary.length).toBeLessThan(content.length);
   });
+
+  it("uses block-mode at 10 lines and line-mode at 11 lines (the mode boundary)", () => {
+    const mk = (n: number) => Array.from({ length: n }, (_, i) => `line ${i} ${"z".repeat(55)}`).join("\n");
+    const tenLines = genericHandler("mcp__x__t", mk(10)).summary;
+    const elevenLines = genericHandler("mcp__x__t", mk(11)).summary;
+    expect(tenLines).not.toContain("elided"); // block-mode char window
+    expect(tenLines).toContain("…");
+    expect(elevenLines).toContain("elided"); // line-mode
+  });
+
+  it("caps surfaced error/warn lines at 8", () => {
+    const lines = Array.from({ length: 30 }, (_, i) => `plain log line ${i} padded padded padded`);
+    for (let i = 10; i <= 25; i++) lines[i] = `error at step ${i} padded padded padded padded`;
+    const { summary } = genericHandler("mcp__x__logs", lines.join("\n"));
+    expect(summary).toContain("8 error/warn shown");
+  });
+
+  it("passes small error-dense logs through in full (summary does not shrink → hook skips)", () => {
+    // 11 lines, the single middle line is an error → nothing truly elided.
+    const lines = Array.from({ length: 11 }, (_, i) => `log line ${i} ${"y".repeat(45)}`);
+    lines[5] = `ERROR at ${"y".repeat(45)}`;
+    const input = lines.join("\n");
+    const { summary } = genericHandler("mcp__x__logs", input);
+    // Documents the intentional no-op: the hook's summary>=original guard then
+    // passes the full (small) output through, preserving the error line.
+    expect(Buffer.byteLength(summary, "utf8")).toBeGreaterThanOrEqual(Buffer.byteLength(input, "utf8"));
+  });
 });
 
 // ---------------------------------------------------------------------------
