@@ -1,8 +1,8 @@
 # Spec: Optional local hybrid FTS + embeddings retrieval (#189)
 
-> Status: **DRAFT — awaiting sign-off.** No code until approved.
-> Decision (2026-07-23): **spec first, decide the backend before building.**
-> Larger scope (L); directly touches the zero-dependency pitch.
+> Status: **DEFERRED (2026-07-23)** — build only once a real semantic-miss is
+> observed that FTS + shipped hints (#185) + peek (#186) don't cover. If built:
+> option C (brute-force cosine, no native extension), default-off. Larger scope (L).
 
 ## What
 

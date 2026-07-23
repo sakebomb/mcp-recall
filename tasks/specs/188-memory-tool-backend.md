@@ -1,7 +1,8 @@
 # Spec: Anthropic memory-tool backend (#188)
 
-> Status: **DRAFT — awaiting sign-off.** No code until approved.
-> Larger scope (L). This is an expansion of the addressable surface, not a fix.
+> Status: **DEFERRED (2026-07-23)** — not a no, a not-yet. Revisit when there's
+> real demand to use recall outside the Claude Code plugin. Larger scope (L);
+> an expansion of the addressable surface, not a fix.
 
 ## What
 

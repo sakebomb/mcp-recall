@@ -1,8 +1,8 @@
 # Spec: Deterministic fallback compression (#187)
 
-> Status: **DRAFT — awaiting sign-off.** No code until approved.
-> Decision (2026-07-23): **deterministic only, no LLM, no network.** Keeps the
-> zero-dependency, local-first, provider-agnostic guarantee intact.
+> Status: **APPROVED — build next (2026-07-23).** Deterministic-only, no LLM/network.
+> Fixed sensible window sizes (config deferred per YAGNI); scoped to the
+> auto-intercept fallback path. Keeps the zero-dependency, local-first guarantee.
 
 ## What
 
