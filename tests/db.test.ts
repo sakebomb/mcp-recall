@@ -578,6 +578,52 @@ describe("db", () => {
       expect(retrieveOutput(db, newer.id)).not.toBeNull();
       expect(retrieveOutput(db, older.id)).toBeNull();
     });
+
+    it("halves an item's weight at exactly one half-life", () => {
+      const now = 1_000_000_000;
+      const day = 86400;
+      const halfLife = 4;
+      const fresh = storeOutput(db, makeInput({ original_size: 300, summary: "fresh" }));
+      const aged = storeOutput(db, makeInput({ original_size: 300, summary: "aged" }));
+      // Both accessed once; 'aged' one half-life ago → recency 0.5 → score 1 vs fresh's 2.
+      db.prepare("UPDATE stored_outputs SET access_count = 1, last_accessed = ? WHERE id = ?").run(now, fresh.id);
+      db.prepare("UPDATE stored_outputs SET access_count = 1, last_accessed = ? WHERE id = ?").run(now - halfLife * day, aged.id);
+
+      evictIfNeeded(db, PROJECT_KEY, 0.0005, halfLife, now);
+
+      expect(retrieveOutput(db, fresh.id)).not.toBeNull();
+      expect(retrieveOutput(db, aged.id)).toBeNull();
+    });
+
+    it("breaks score + created_at ties deterministically by id", () => {
+      const now = 1_000_000_000;
+      const x = storeOutput(db, makeInput({ original_size: 300, summary: "x" }));
+      const y = storeOutput(db, makeInput({ original_size: 300, summary: "y" }));
+      // Identical score and created_at → only the id tiebreak decides.
+      for (const id of [x.id, y.id]) {
+        db.prepare("UPDATE stored_outputs SET access_count = 1, last_accessed = ?, created_at = ? WHERE id = ?").run(now - 10, now - 100, id);
+      }
+      const [smaller, larger] = [x.id, y.id].sort();
+
+      evictIfNeeded(db, PROJECT_KEY, 0.0005, 7, now); // sheds ~one item
+
+      expect(retrieveOutput(db, smaller)).toBeNull();
+      expect(retrieveOutput(db, larger)).not.toBeNull();
+    });
+
+    it("does not crash or NaN-rank when half_life_days is non-positive", () => {
+      const now = 1_000_000_000;
+      const a = storeOutput(db, makeInput({ original_size: 300, summary: "a" }));
+      const b = storeOutput(db, makeInput({ original_size: 300, summary: "b" }));
+      db.prepare("UPDATE stored_outputs SET access_count = 0, last_accessed = ? WHERE id = ?").run(now - 100, a.id);
+      db.prepare("UPDATE stored_outputs SET access_count = 5, last_accessed = ? WHERE id = ?").run(now - 100, b.id);
+
+      let evicted = 0;
+      expect(() => {
+        evicted = evictIfNeeded(db, PROJECT_KEY, 0.0005, 0, now);
+      }).not.toThrow();
+      expect(evicted).toBeGreaterThan(0);
+    });
   });
 
   // -------------------------------------------------------------------------

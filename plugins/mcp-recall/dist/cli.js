@@ -5347,14 +5347,14 @@ function evictIfNeeded(db, project_key, max_size_mb, half_life_days = DEFAULT_EV
   `).all(project_key);
   if (candidates.length === 0)
     return 0;
-  const halfLifeSecs = half_life_days * SECONDS_PER_DAY;
+  const halfLifeSecs = Math.max(1, half_life_days * SECONDS_PER_DAY);
   const scoreOf = (c) => {
     const lastActive = c.last_accessed ?? c.created_at;
     const ageSecs = Math.max(0, now_secs - lastActive);
     const recency = Math.pow(0.5, ageSecs / halfLifeSecs);
     return (c.access_count + 1) * recency;
   };
-  const ranked = candidates.map((c) => ({ id: c.id, original_size: c.original_size, score: scoreOf(c), created_at: c.created_at })).sort((a, b) => a.score - b.score || a.created_at - b.created_at);
+  const ranked = candidates.map((c) => ({ id: c.id, original_size: c.original_size, score: scoreOf(c), created_at: c.created_at })).sort((a, b) => a.score - b.score || a.created_at - b.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const toEvict = [];
   let shed = 0;
   for (const row of ranked) {

@@ -163,7 +163,9 @@ export function evictIfNeeded(
 
   if (candidates.length === 0) return 0; // all remaining items are pinned
 
-  const halfLifeSecs = half_life_days * SECONDS_PER_DAY;
+  // Math.max(1, …) guards against a non-positive half-life (NaN/Infinity) if a
+  // future direct caller bypasses the Zod-validated config.
+  const halfLifeSecs = Math.max(1, half_life_days * SECONDS_PER_DAY);
   const scoreOf = (c: (typeof candidates)[number]): number => {
     const lastActive = c.last_accessed ?? c.created_at;
     const ageSecs = Math.max(0, now_secs - lastActive);
@@ -171,10 +173,15 @@ export function evictIfNeeded(
     return (c.access_count + 1) * recency;
   };
 
-  // Evict lowest value first; stable tiebreak on oldest creation.
+  // Evict lowest value first; tiebreak oldest creation, then id for full determinism.
   const ranked = candidates
     .map((c) => ({ id: c.id, original_size: c.original_size, score: scoreOf(c), created_at: c.created_at }))
-    .sort((a, b) => a.score - b.score || a.created_at - b.created_at);
+    .sort(
+      (a, b) =>
+        a.score - b.score ||
+        a.created_at - b.created_at ||
+        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+    );
 
   const toEvict: string[] = [];
   let shed = 0;
