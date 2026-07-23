@@ -5060,7 +5060,8 @@ var RecallConfigSchema = exports_external.object({
     key: exports_external.enum(["git_root", "cwd"]),
     max_size_mb: exports_external.number().positive(),
     pin_recommendation_threshold: exports_external.number().int().positive(),
-    stale_item_days: exports_external.number().int().positive()
+    stale_item_days: exports_external.number().int().positive(),
+    eviction_half_life_days: exports_external.number().positive()
   }),
   retrieve: exports_external.object({
     default_max_bytes: exports_external.number().positive()
@@ -5084,7 +5085,8 @@ var DEFAULTS = {
     key: "git_root",
     max_size_mb: 500,
     pin_recommendation_threshold: 5,
-    stale_item_days: 3
+    stale_item_days: 3,
+    eviction_half_life_days: 7
   },
   retrieve: {
     default_max_bytes: 8192
@@ -5327,7 +5329,9 @@ function checkDedup(db, project_key, input_hash) {
     LIMIT 1
   `).get(project_key, input_hash);
 }
-function evictIfNeeded(db, project_key, max_size_mb) {
+var DEFAULT_EVICTION_HALF_LIFE_DAYS = 7;
+var SECONDS_PER_DAY = 86400;
+function evictIfNeeded(db, project_key, max_size_mb, half_life_days = DEFAULT_EVICTION_HALF_LIFE_DAYS, now_secs = Math.floor(Date.now() / 1000)) {
   const max_bytes = max_size_mb * 1024 * 1024;
   const { total } = db.prepare(`
     SELECT COALESCE(SUM(original_size), 0) as total
@@ -5337,15 +5341,23 @@ function evictIfNeeded(db, project_key, max_size_mb) {
     return 0;
   const bytesToShed = total - max_bytes;
   const candidates = db.prepare(`
-    SELECT id, original_size FROM stored_outputs
+    SELECT id, original_size, access_count, last_accessed, created_at
+    FROM stored_outputs
     WHERE project_key = ? AND pinned = 0
-    ORDER BY access_count ASC, last_accessed ASC NULLS FIRST, created_at ASC
   `).all(project_key);
   if (candidates.length === 0)
     return 0;
+  const halfLifeSecs = Math.max(1, half_life_days * SECONDS_PER_DAY);
+  const scoreOf = (c) => {
+    const lastActive = c.last_accessed ?? c.created_at;
+    const ageSecs = Math.max(0, now_secs - lastActive);
+    const recency = Math.pow(0.5, ageSecs / halfLifeSecs);
+    return (c.access_count + 1) * recency;
+  };
+  const ranked = candidates.map((c) => ({ id: c.id, original_size: c.original_size, score: scoreOf(c), created_at: c.created_at })).sort((a, b) => a.score - b.score || a.created_at - b.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const toEvict = [];
   let shed = 0;
-  for (const row of candidates) {
+  for (const row of ranked) {
     if (shed >= bytesToShed)
       break;
     toEvict.push(row.id);
@@ -7962,7 +7974,7 @@ ${cached2.summary}`,
     original_size: originalSize,
     input_hash: input_hash ?? undefined
   });
-  evictIfNeeded(db, projectKey, config.store.max_size_mb);
+  evictIfNeeded(db, projectKey, config.store.max_size_mb, config.store.eviction_half_life_days);
   const reduction = ((1 - summarySize / originalSize) * 100).toFixed(0);
   log.debug(`STORED \xB7 ${tool_name} \xB7 id=${stored.id} \xB7 ${formatBytes(originalSize)}\u2192${formatBytes(summarySize)} (${reduction}% reduction)`);
   const hints = extractHints(fullContent);

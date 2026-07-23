@@ -287,6 +287,12 @@ pin_recommendation_threshold = 5
 # in recall__stats. Helps identify stored output that was never retrieved.
 stale_item_days = 3
 
+# Half-life (in days) for eviction scoring when the store exceeds max_size_mb.
+# Eviction ranks items by a recency-weighted access frequency, so a steadily
+# used recent item outranks one accessed many times but long ago. Lower =
+# recency matters more; higher = frequency dominates. Pinned items are exempt.
+eviction_half_life_days = 7
+
 [retrieve]
 # Max bytes returned by recall__retrieve(mode: "full").
 # Claude can override this per-call via the max_bytes parameter.
