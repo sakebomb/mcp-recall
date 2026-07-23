@@ -213,6 +213,62 @@ export function retrieveSnippet(
   }
 }
 
+/** Chunks a "peek" returns — a bounded context window, not the full document. */
+const PEEK_MAX_CHUNKS = 3;
+const PEEK_CHUNK_JOINER = "\n […] \n";
+
+/**
+ * Peek: a bounded, multi-chunk context window into a stored item — the middle
+ * retrieval tier between `searchOutputs` (index) and full content. With a query,
+ * returns the top matching chunks (ranked); without one, the first chunks as a
+ * head preview. Returns null when the item has no stored chunks (e.g. rows
+ * created before chunking) so the caller can fall back.
+ */
+export function retrievePeek(
+  db: Database,
+  id: string,
+  query: string | undefined,
+  maxChunks = PEEK_MAX_CHUNKS
+): string | null {
+  const exists = db.prepare(`SELECT 1 FROM stored_outputs WHERE id = ?`).get(id);
+  if (!exists) return null;
+
+  if (query) {
+    const safeQuery = sanitizeFtsQuery(query);
+    try {
+      const rows = db
+        .prepare(
+          `SELECT content, chunk_index FROM content_chunks
+           WHERE content_chunks MATCH ? AND output_id = ?
+           ORDER BY rank
+           LIMIT ?`
+        )
+        .all(safeQuery, id, maxChunks) as { content: string; chunk_index: number }[];
+      if (rows.length > 0) {
+        // Select the top-K by relevance, then present them in document order so
+        // the […] joiner reflects real gaps, not a relevance reshuffle.
+        return [...rows]
+          .sort((a, b) => a.chunk_index - b.chunk_index)
+          .map((r) => r.content)
+          .join(PEEK_CHUNK_JOINER);
+      }
+    } catch {
+      // FTS parse error — signal fallback to the caller
+    }
+    return null;
+  }
+
+  const rows = db
+    .prepare(
+      `SELECT content FROM content_chunks
+       WHERE output_id = ?
+       ORDER BY chunk_index
+       LIMIT ?`
+    )
+    .all(id, maxChunks) as { content: string }[];
+  return rows.length > 0 ? rows.map((r) => r.content).join(PEEK_CHUNK_JOINER) : null;
+}
+
 /**
  * Full-text searches across stored outputs for a project.
  * Results are ordered by FTS rank (best match first), capped at `options.limit` (default 10).
