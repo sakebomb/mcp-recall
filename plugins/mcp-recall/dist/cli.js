@@ -10120,6 +10120,9 @@ var DEFAULT_STALE_DAYS = 90;
 function isDeletionCandidate(status) {
   return status === "orphaned" || status === "legacy-stale";
 }
+function vacuumTargets(entries) {
+  return entries.filter((e) => !isDeletionCandidate(e.status) && e.status !== "current" && e.status !== "unreadable");
+}
 function fileSizeSafe(path2) {
   try {
     return statSync3(path2).size;
@@ -10254,19 +10257,25 @@ Dry run \u2014 pass --force to delete the ${candidates.length} marked database(s
 Deleted ${candidates.length} database(s), freed ${formatBytes(freed)}.`);
   }
   if (opts.vacuum) {
-    const deleted = new Set(dryRun ? [] : candidates.map((e) => e.file));
-    const survivors = entries.filter((e) => e.status !== "current" && e.status !== "unreadable" && !deleted.has(e.file));
+    const survivors = vacuumTargets(entries);
+    const totalToVacuum = survivors.reduce((sum, e) => sum + e.sizeBytes, 0);
+    console.log(`
+Vacuuming ${survivors.length} database(s) to keep (${formatBytes(totalToVacuum)}) \u2014 ` + `rewrites each file, may take a while\u2026`);
     let reclaimed = 0;
     let vacuumed = 0;
     let skipped = 0;
-    for (const e of survivors) {
+    for (let i = 0;i < survivors.length; i++) {
+      const e = survivors[i];
+      process.stdout.write(`  [${i + 1}/${survivors.length}] ${basename(e.file)} (${formatBytes(e.sizeBytes)})\u2026 `);
       const result = vacuumFile(e.file);
       if (result) {
-        reclaimed += Math.max(0, result.before - result.after);
+        const freed = Math.max(0, result.before - result.after);
+        reclaimed += freed;
         vacuumed++;
+        console.log(`reclaimed ${formatBytes(freed)}`);
       } else {
         skipped++;
-        console.log(`  skipped ${basename(e.file)} \u2014 locked by another session or unreadable`);
+        console.log(`skipped \u2014 locked by another session or unreadable`);
       }
     }
     const skipNote = skipped > 0 ? ` (${skipped} skipped)` : "";

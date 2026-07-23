@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { initSchema, setMeta, storeOutput, forgetOutputs } from "../src/db/index";
-import { scanDatabases, isDeletionCandidate } from "../src/gc/index";
+import { scanDatabases, isDeletionCandidate, vacuumTargets, type DbEntry } from "../src/gc/index";
 
 const DAY_MS = 86400 * 1000;
 
@@ -111,6 +111,34 @@ describe("gc scanDatabases", () => {
     writeFileSync(join(workDir, "notes.txt"), "hi");
     const entries = scanDatabases(workDir, "/current.db", 90);
     expect(entries).toHaveLength(1);
+  });
+});
+
+describe("gc vacuumTargets", () => {
+  const entry = (status: DbEntry["status"]): DbEntry => ({
+    file: `/x/${status}.db`,
+    status,
+    projectPath: null,
+    sizeBytes: 100,
+    mtimeMs: 0,
+    items: 0,
+  });
+
+  it("vacuums only kept databases — never deletion candidates, current, or unreadable", () => {
+    const all: DbEntry[] = [
+      entry("active"),
+      entry("legacy-fresh"),
+      entry("orphaned"), // deletion candidate — must be excluded (was the 5GB bug)
+      entry("legacy-stale"), // deletion candidate — must be excluded
+      entry("current"), // live-locked
+      entry("unreadable"),
+    ];
+    const targets = vacuumTargets(all).map((e) => e.status);
+    expect(targets).toEqual(["active", "legacy-fresh"]);
+  });
+
+  it("returns nothing when every database is a deletion candidate", () => {
+    expect(vacuumTargets([entry("orphaned"), entry("legacy-stale")])).toEqual([]);
   });
 });
 

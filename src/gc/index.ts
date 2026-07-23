@@ -53,6 +53,18 @@ export function isDeletionCandidate(status: DbStatus): boolean {
   return status === "orphaned" || status === "legacy-stale";
 }
 
+/**
+ * Databases `--vacuum` should rewrite: the ones being kept. Excludes deletion
+ * candidates (pointless to rewrite a DB slated for removal — and in a dry run
+ * would otherwise VACUUM the entire store), the live-locked current DB, and
+ * anything unreadable.
+ */
+export function vacuumTargets(entries: DbEntry[]): DbEntry[] {
+  return entries.filter(
+    (e) => !isDeletionCandidate(e.status) && e.status !== "current" && e.status !== "unreadable"
+  );
+}
+
 function fileSizeSafe(path: string): number {
   try {
     return statSync(path).size;
@@ -223,23 +235,33 @@ export function gcCommand(opts: GcOptions = {}): void {
   }
 
   if (opts.vacuum) {
-    // Vacuum survivors only: never the current (live-locked) DB, and skip anything
-    // already deleted above.
-    const deleted = new Set(dryRun ? [] : candidates.map((e) => e.file));
-    const survivors = entries.filter(
-      (e) => e.status !== "current" && e.status !== "unreadable" && !deleted.has(e.file)
+    // Vacuum the databases we are KEEPING only. Deletion candidates are excluded
+    // regardless of dry-run — rewriting a DB that is slated for removal is pure
+    // waste (and, in a dry run, would otherwise VACUUM the entire store). The
+    // current (live-locked) and unreadable DBs are also skipped.
+    const survivors = vacuumTargets(entries);
+    const totalToVacuum = survivors.reduce((sum, e) => sum + e.sizeBytes, 0);
+    console.log(
+      `\nVacuuming ${survivors.length} database(s) to keep (${formatBytes(totalToVacuum)}) — ` +
+        `rewrites each file, may take a while…`
     );
     let reclaimed = 0;
     let vacuumed = 0;
     let skipped = 0;
-    for (const e of survivors) {
+    for (let i = 0; i < survivors.length; i++) {
+      const e = survivors[i]!;
+      process.stdout.write(
+        `  [${i + 1}/${survivors.length}] ${basename(e.file)} (${formatBytes(e.sizeBytes)})… `
+      );
       const result = vacuumFile(e.file);
       if (result) {
-        reclaimed += Math.max(0, result.before - result.after);
+        const freed = Math.max(0, result.before - result.after);
+        reclaimed += freed;
         vacuumed++;
+        console.log(`reclaimed ${formatBytes(freed)}`);
       } else {
         skipped++;
-        console.log(`  skipped ${basename(e.file)} — locked by another session or unreadable`);
+        console.log(`skipped — locked by another session or unreadable`);
       }
     }
     const skipNote = skipped > 0 ? ` (${skipped} skipped)` : "";
