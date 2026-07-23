@@ -11,7 +11,7 @@
 
 **Your context window is finite. MCP tool outputs aren't. mcp-recall bridges the gap.**
 
-MCP tool outputs — Playwright snapshots, GitHub issues, file reads — can consume tens of kilobytes of context per call. A 200K token context window fills up in ~30 minutes of active MCP use. mcp-recall intercepts those outputs, stores them in full locally, and delivers compressed summaries to Claude instead. When Claude needs more detail, it retrieves exactly what it needs via FTS search — without re-running the tool.
+MCP tool outputs — Playwright snapshots, GitHub API responses, Linear queries — can consume tens of kilobytes of context per call. A 200K token context window fills up in ~30 minutes of active MCP use. mcp-recall intercepts those outputs, stores them in full locally, and delivers compressed summaries to Claude instead. When Claude needs more detail, it retrieves exactly what it needs via FTS search — without re-running the tool.
 
 Sessions that used to hit context limits in 30 minutes routinely run for 3+ hours.
 
@@ -21,7 +21,7 @@ Sessions that used to hit context limits in 30 minutes routinely run for 3+ hour
 
 ## The full context stack
 
-Context pressure builds at four distinct layers. mcp-recall targets the two that nothing else handles.
+Context pressure builds at four distinct layers. Native Claude tooling now covers most of them for **built-in** tools — but leaves **MCP** tool output largely unhandled. That's the gap mcp-recall fills.
 
 ```mermaid
 flowchart TD
@@ -33,8 +33,8 @@ flowchart TD
     C["② Claude calls tools in sequence"]
     C -->|"Code Mode · FastMCP 3.1\nrun script in sandbox, no intermediate results"| D
 
-    D["③ Tool returns large output\n50–85 KB per call"]
-    D -->|"mcp-recall\ncompresses to ~300 B, stores in SQLite"| E
+    D["③ MCP tool returns large output\n50–85 KB per call"]
+    D -->|"mcp-recall\nintercepts pre-context · ~300 B summary · full copy in SQLite"| E
 
     E["④ Session ends"]
     E -->|"mcp-recall\npersists across sessions via FTS index"| F(["Next session: clean context"])
@@ -44,10 +44,12 @@ flowchart TD
 |---|---|---|
 | **① Tool definitions** | Every connected MCP loads its full schema upfront (~500 tokens/tool) | [Claude Code Tool Search](https://code.claude.com/docs/en/mcp#scale-with-mcp-tool-search) (built-in) · Switchboard |
 | **② Intermediate results** | Multi-step workflows pass each result back through context | [Code Mode](https://blog.cloudflare.com/code-mode/) · [FastMCP 3.1](https://www.jlowin.dev/blog/fastmcp-3-1-code-mode) |
-| **③ Single-tool outputs** | One snapshot or API response dumps 50–85 KB | **mcp-recall** |
-| **④ Cross-session memory** | Useful context disappears when the session ends | **mcp-recall** |
+| **③ MCP tool outputs** | Claude Code truncates MCP output at a 25k-token ceiling and discards the rest; native microcompaction only offloads *built-in* tools (Read/Bash/Grep/…) | **mcp-recall** |
+| **④ Cross-session memory** | Context vanishes when the session ends; the API memory tool is a model-managed summary, not a searchable verbatim archive | **mcp-recall** |
 
-Layers ① and ② have solid first-party and community solutions. mcp-recall focuses on ③ and ④ — the outputs that do land in context, and the knowledge that shouldn't vanish when the session ends. All four layers stack: run them together for maximum efficiency.
+Layers ① and ② have solid first-party and community solutions. For layer ③, Claude Code's [microcompaction](https://decodeclaude.com/compaction-deep-dive/) already offloads *built-in* tool output to disk — but **MCP** tool output is instead [truncated at a 25k-token ceiling](https://github.com/anthropics/claude-code/issues/2638) and discarded. mcp-recall fills exactly that gap: it intercepts MCP output *before* it reaches the window, stores the full payload locally, and keeps it retrievable.
+
+**How this compares to Claude's native context tools:** API-level [context editing](https://platform.claude.com/docs/en/build-with-claude/context-editing), [compaction](https://platform.claude.com/docs/en/build-with-claude/compaction), and the [memory tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool) all reduce context — but through lossy eviction or model-authored summaries, with no verbatim retrieval or full-text search of the original tool output. mcp-recall is complementary, not competing: it captures every MCP payload automatically, stores it verbatim with an FTS index, redacts secrets before writing, and sits *under* native compaction as the MCP-output layer. All layers stack — run them together for maximum efficiency.
 
 ---
 
