@@ -7438,13 +7438,39 @@ function looksLikeCsv(text) {
 
 // src/handlers/generic.ts
 var MAX_CHARS = 500;
+var HEAD_CHARS = 380;
+var TAIL_CHARS = 100;
+var HEAD_LINES2 = 5;
+var TAIL_LINES = 5;
+var LINE_MODE_MIN_LINES = HEAD_LINES2 + TAIL_LINES + 1;
+var MAX_MATCH_LINES = 8;
+var MATCH_RE = /\b(error|errors|warn|warning|fail|failed|failure|exception|fatal|panic|denied|refused|timeout)\b/i;
+function summarizeBlock(raw) {
+  const head = raw.slice(0, HEAD_CHARS).trimEnd();
+  const tail = raw.slice(-TAIL_CHARS).trimStart();
+  return `${head}
+\u2026
+${tail}`;
+}
+var plural = (n) => n === 1 ? "" : "s";
+function summarizeLines(lines) {
+  const head = lines.slice(0, HEAD_LINES2);
+  const tail = lines.slice(lines.length - TAIL_LINES);
+  const middle = lines.slice(HEAD_LINES2, lines.length - TAIL_LINES);
+  const matches = middle.filter((l) => MATCH_RE.test(l)).slice(0, MAX_MATCH_LINES);
+  const note = matches.length ? `\u2026(${middle.length} middle line${plural(middle.length)} elided; ${matches.length} error/warn shown)\u2026` : `\u2026(${middle.length} middle line${plural(middle.length)} elided)\u2026`;
+  return [...head, note, ...matches, ...tail].join(`
+`);
+}
 var genericHandler = (_toolName, output) => {
   const raw = extractText(output);
   const originalSize = Buffer.byteLength(raw, "utf8");
-  const excerpt = raw.slice(0, MAX_CHARS).trimEnd();
-  const truncated = raw.length > MAX_CHARS;
-  const summary = truncated ? `${excerpt}
-\u2026` : excerpt;
+  if (raw.length <= MAX_CHARS) {
+    return { summary: raw, originalSize };
+  }
+  const lines = raw.split(`
+`);
+  const summary = lines.length >= LINE_MODE_MIN_LINES ? summarizeLines(lines) : summarizeBlock(raw);
   return { summary, originalSize };
 };
 
