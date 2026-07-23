@@ -1,5 +1,7 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { extractHints } from "../src/hints";
+import { getDb, closeDb, storeOutput, searchOutputs } from "../src/db/index";
+import type { Database } from "bun:sqlite";
 
 // ── extractHints ────────────────────────────────────────────────────────────
 
@@ -75,5 +77,49 @@ describe("extractHints", () => {
   test("orders equal-score tokens alphabetically for stability", () => {
     // all distinct, frequency 1, plain words -> equal score -> alphabetical
     expect(extractHints("delta charlie bravo alpha", 2)).toEqual(["alpha", "bravo"]);
+  });
+
+  test("boosts a capitalized (proper-noun) token over a plain word of equal frequency", () => {
+    // "Github" is capitalized (+1) but not identifier-shaped; "orders" is plain
+    expect(extractHints("orders Github")[0]).toBe("Github");
+  });
+});
+
+// ── FTS round-trip: every emitted hint must actually retrieve its item ────────
+
+describe("extractHints — FTS round-trip", () => {
+  const PROJECT_KEY = "hintsroundtrip01";
+  let db: Database;
+
+  beforeEach(() => {
+    db = getDb(":memory:");
+  });
+  afterEach(() => {
+    closeDb();
+  });
+
+  test("each hint returns the stored item via searchOutputs (camelCase + snake_case)", () => {
+    const full =
+      "The checkout page posts sessionToken sessionToken to the orders endpoint " +
+      "with order_id order_id order_id and widgetName widgetName rendered.";
+    const stored = storeOutput(db, {
+      project_key: PROJECT_KEY,
+      session_id: "2026-03-01",
+      tool_name: "mcp__playwright__snapshot",
+      summary: "checkout snapshot",
+      full_content: full,
+      original_size: 4096,
+    });
+
+    const hints = extractHints(full);
+    expect(hints.length).toBeGreaterThan(0);
+    // Cover both tokenization shapes explicitly.
+    expect(hints).toContain("sessionToken");
+    expect(hints).toContain("order_id");
+
+    for (const hint of hints) {
+      const ids = searchOutputs(db, hint, { project_key: PROJECT_KEY }).map((r) => r.id);
+      expect(ids).toContain(stored.id);
+    }
   });
 });

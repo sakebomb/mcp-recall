@@ -108,7 +108,10 @@ export function handlePostToolUse(raw: string): HookOutput {
   // 9. Return compressed output to Claude
   const reduction = ((1 - summarySize / originalSize) * 100).toFixed(0);
   log.debug(`STORED · ${tool_name} · id=${stored.id} · ${formatBytes(originalSize)}→${formatBytes(summarySize)} (${reduction}% reduction)`);
-  // Retrieval hints: a few salient terms so Claude's first recall__search lands.
+  // Retrieval hints: a few salient terms from the full content so Claude's
+  // first recall__search lands. The content already passed the upstream secret
+  // scan (step 2), which matches known credential formats — hints are not a
+  // separate secret filter and are visible to Claude, same as the summary.
   const hints = extractHints(fullContent);
   const hintStr = hints.length ? ` · search: ${hints.map((h) => `"${h}"`).join(", ")}` : "";
   const header = `[recall:${stored.id} · ${formatBytes(originalSize)}→${formatBytes(summarySize)} (${reduction}% reduction)${hintStr}]`;

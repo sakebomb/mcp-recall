@@ -354,7 +354,7 @@ Ten `recall__*` tools are available to Claude in every session. The `recall__` p
 Handlers are selected by tool name, with content-based fallback. Every compressed result includes a header line, ending with a few `search:` hints — salient terms pulled from the stored content so Claude's first `recall__search` lands without guessing keywords:
 
 ```
-[recall:recall_abc12345 · 56.2KB→299B (99% reduction) · search: "checkout", "sessionToken", "402"]
+[recall:recall_abc12345 · 56.2KB→299B (99% reduction) · search: "checkout", "sessionToken", "orderId"]
 ```
 
 Repeated identical tool calls return a cached header instead of re-compressing:

@@ -55,11 +55,12 @@ function isIdentifier(token: string): boolean {
 export function extractHints(content: string, maxHints = DEFAULT_MAX_HINTS): string[] {
   if (maxHints <= 0) return [];
 
-  const matches = content.match(TOKEN_RE);
-  if (!matches) return [];
-
   const acc = new Map<string, TokenAcc>();
-  for (const raw of matches) {
+  // matchAll iterates lazily — it never materializes a full token array and
+  // does not mutate TOKEN_RE.lastIndex, so this is safe to call repeatedly on
+  // large content without a peak-memory spike.
+  for (const match of content.matchAll(TOKEN_RE)) {
+    const raw = match[0];
     if (raw.length < MIN_TOKEN_LEN || raw.length > MAX_TOKEN_LEN) continue;
     const key = raw.toLowerCase();
     if (STOPWORDS.has(key)) continue;

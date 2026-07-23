@@ -7875,11 +7875,9 @@ function isIdentifier(token) {
 function extractHints(content, maxHints = DEFAULT_MAX_HINTS) {
   if (maxHints <= 0)
     return [];
-  const matches = content.match(TOKEN_RE);
-  if (!matches)
-    return [];
   const acc = new Map;
-  for (const raw of matches) {
+  for (const match of content.matchAll(TOKEN_RE)) {
+    const raw = match[0];
     if (raw.length < MIN_TOKEN_LEN || raw.length > MAX_TOKEN_LEN)
       continue;
     const key = raw.toLowerCase();
