@@ -387,7 +387,7 @@ Repeated identical tool calls return a cached header instead of re-compressing:
 | Filesystem | `mcp__filesystem__*` or tool name contains `read_file` / `get_file` | Line count header + first 50 lines + truncation notice. |
 | CSV | tool name contains `csv`, or content-based detection | Column headers + first 5 data rows as key=value pairs + row/col count. Handles quoted fields. |
 | Generic JSON | Any unmatched tool with JSON output | 3-level depth limit, arrays capped at 3 items with overflow count. |
-| Generic text | Everything else | First 500 chars + ellipsis. |
+| Generic text | Everything else | Structure-aware: small output kept whole; long multi-line (logs/traces) → head + tail lines with error/warn lines surfaced from the elided middle; long single-block → head + tail window. Deterministic, no LLM. |
 
 The generic JSON handler is intentionally conservative — it keeps structure and marks what was dropped. Correctness matters more than compression ratio.
 

@@ -280,6 +280,32 @@ describe("genericHandler", () => {
     const { originalSize } = genericHandler("mcp__some__tool", content);
     expect(originalSize).toBe(Buffer.byteLength(content, "utf8"));
   });
+
+  it("line-mode: keeps head + tail lines and elides the middle for long multi-line output", () => {
+    const lines = Array.from({ length: 30 }, (_, i) => `line number ${i} with some filler text here`);
+    const { summary } = genericHandler("mcp__x__logs", lines.join("\n"));
+    expect(summary).toContain("line number 0 ");   // head
+    expect(summary).toContain("line number 29");   // tail
+    expect(summary).toContain("elided");           // elision note
+    expect(summary).not.toContain("line number 15"); // middle dropped
+    expect(summary.length).toBeLessThan(lines.join("\n").length); // actually compresses
+  });
+
+  it("surfaces error/warn lines from the elided middle", () => {
+    const lines = Array.from({ length: 30 }, (_, i) => `routine log line ${i} padded out a bit`);
+    lines[15] = "ERROR: database connection refused";
+    const { summary } = genericHandler("mcp__x__logs", lines.join("\n"));
+    expect(summary).toContain("ERROR: database connection refused");
+  });
+
+  it("block-mode: head + tail window for a long single-block string", () => {
+    const content = "START-MARKER " + "a".repeat(600) + " END-MARKER";
+    const { summary } = genericHandler("mcp__x__blob", content);
+    expect(summary.startsWith("START-MARKER")).toBe(true);
+    expect(summary.trimEnd().endsWith("END-MARKER")).toBe(true);
+    expect(summary).toContain("…");
+    expect(summary.length).toBeLessThan(content.length);
+  });
 });
 
 // ---------------------------------------------------------------------------
