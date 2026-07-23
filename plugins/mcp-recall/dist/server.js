@@ -20998,7 +20998,8 @@ var RecallConfigSchema = exports_external.object({
     max_size_mb: exports_external.number().positive(),
     pin_recommendation_threshold: exports_external.number().int().positive(),
     stale_item_days: exports_external.number().int().positive(),
-    eviction_half_life_days: exports_external.number().positive()
+    eviction_half_life_days: exports_external.number().positive(),
+    gc_reminder_mb: exports_external.number().nonnegative()
   }),
   retrieve: exports_external.object({
     default_max_bytes: exports_external.number().positive()
@@ -21023,7 +21024,8 @@ var DEFAULTS = {
     max_size_mb: 500,
     pin_recommendation_threshold: 5,
     stale_item_days: 3,
-    eviction_half_life_days: 7
+    eviction_half_life_days: 7,
+    gc_reminder_mb: 2048
   },
   retrieve: {
     default_max_bytes: 8192

@@ -4,7 +4,13 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { initSchema, setMeta, storeOutput, forgetOutputs } from "../src/db/index";
-import { scanDatabases, isDeletionCandidate, vacuumTargets, type DbEntry } from "../src/gc/index";
+import {
+  scanDatabases,
+  isDeletionCandidate,
+  vacuumTargets,
+  storeFootprint,
+  type DbEntry,
+} from "../src/gc/index";
 
 const DAY_MS = 86400 * 1000;
 
@@ -139,6 +145,28 @@ describe("gc vacuumTargets", () => {
 
   it("returns nothing when every database is a deletion candidate", () => {
     expect(vacuumTargets([entry("orphaned"), entry("legacy-stale")])).toEqual([]);
+  });
+});
+
+describe("gc storeFootprint", () => {
+  beforeEach(() => {
+    workDir = mkdtempSync(join(tmpdir(), "recall-fp-"));
+  });
+  afterEach(() => {
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  it("returns zero for a nonexistent directory", () => {
+    expect(storeFootprint(join(workDir, "nope"))).toEqual({ totalBytes: 0, dbCount: 0 });
+  });
+
+  it("counts .db files and sums their size (ignoring non-.db files)", () => {
+    makeDb("a", null, 5);
+    makeDb("b", null, 5);
+    writeFileSync(join(workDir, "readme.txt"), "x");
+    const fp = storeFootprint(workDir);
+    expect(fp.dbCount).toBe(2);
+    expect(fp.totalBytes).toBeGreaterThan(0);
   });
 });
 

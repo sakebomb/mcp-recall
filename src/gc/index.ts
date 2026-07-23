@@ -78,6 +78,29 @@ function dbFootprint(file: string): number {
   return fileSizeSafe(file) + fileSizeSafe(`${file}-wal`) + fileSizeSafe(`${file}-shm`);
 }
 
+export interface StoreFootprint {
+  totalBytes: number;
+  dbCount: number;
+}
+
+/**
+ * Cheap total size + count of the DB store — `stat` only, no database opens, so it
+ * is safe to call on every session start. Used to decide whether to nudge the user
+ * to run `gc`. Orphan classification (which requires opening each DB) is deferred to
+ * the `gc` command itself.
+ */
+export function storeFootprint(dir: string = dataDir()): StoreFootprint {
+  if (!existsSync(dir)) return { totalBytes: 0, dbCount: 0 };
+  let totalBytes = 0;
+  let dbCount = 0;
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".db")) continue;
+    dbCount++;
+    totalBytes += dbFootprint(join(dir, name));
+  }
+  return { totalBytes, dbCount };
+}
+
 /**
  * Inspects every `*.db` in `dir` and classifies it. Pure aside from reads:
  * no file is modified or deleted. `currentFile` is the active project's DB path

@@ -28,6 +28,7 @@ describe("loadConfig", () => {
     expect(config.store.pin_recommendation_threshold).toBe(5);
     expect(config.store.stale_item_days).toBe(3);
     expect(config.store.eviction_half_life_days).toBe(7);
+    expect(config.store.gc_reminder_mb).toBe(2048);
     expect(config.retrieve.default_max_bytes).toBe(8192);
     expect(config.denylist.additional).toEqual([]);
     expect(config.denylist.override_defaults).toEqual([]);

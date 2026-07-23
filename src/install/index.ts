@@ -14,6 +14,9 @@ import { mkdir, rename, readFile } from "fs/promises";
 import path from "path";
 import os from "os";
 import { loadProfiles } from "../profiles/loader";
+import { storeFootprint } from "../gc/index";
+import { loadConfig } from "../config";
+import { formatBytes } from "../format";
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 
@@ -520,6 +523,19 @@ export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
     }, {});
     const summary = Object.entries(counts).map(([t, n]) => `${n} ${t}`).join(", ");
     console.log(`  ${GREEN}✓${RESET} Profiles: ${profiles.length} installed (${summary})`);
+  }
+
+  // Store footprint — nudge toward `gc` when the on-disk store is large.
+  console.log("");
+  const { totalBytes, dbCount } = storeFootprint();
+  const reminderMb = loadConfig().store.gc_reminder_mb;
+  const large = reminderMb > 0 && totalBytes >= reminderMb * 1024 * 1024;
+  const storeIcon = large ? `${YELLOW}!${RESET}` : `${GREEN}✓${RESET}`;
+  console.log(
+    `  ${storeIcon} Store: ${formatBytes(totalBytes)} across ${dbCount} project database${dbCount === 1 ? "" : "s"}`
+  );
+  if (large) {
+    console.log(`    → Reclaim space: ${BOLD}mcp-recall gc${RESET} (review, then re-run with ${BOLD}--force${RESET})`);
   }
 
   console.log("");

@@ -5061,7 +5061,8 @@ var RecallConfigSchema = exports_external.object({
     max_size_mb: exports_external.number().positive(),
     pin_recommendation_threshold: exports_external.number().int().positive(),
     stale_item_days: exports_external.number().int().positive(),
-    eviction_half_life_days: exports_external.number().positive()
+    eviction_half_life_days: exports_external.number().positive(),
+    gc_reminder_mb: exports_external.number().nonnegative()
   }),
   retrieve: exports_external.object({
     default_max_bytes: exports_external.number().positive()
@@ -5086,7 +5087,8 @@ var DEFAULTS = {
     max_size_mb: 500,
     pin_recommendation_threshold: 5,
     stale_item_days: 3,
-    eviction_half_life_days: 7
+    eviction_half_life_days: 7,
+    gc_reminder_mb: 2048
   },
   retrieve: {
     default_max_bytes: 8192
@@ -5655,7 +5657,199 @@ function toolContext(db, projectKey, args) {
 `);
 }
 
+// src/gc/index.ts
+import { Database as Database2 } from "bun:sqlite";
+import { readdirSync, existsSync, statSync, rmSync } from "fs";
+import { join as join3, basename } from "path";
+var DEFAULT_STALE_DAYS = 90;
+function isDeletionCandidate(status) {
+  return status === "orphaned" || status === "legacy-stale";
+}
+function vacuumTargets(entries) {
+  return entries.filter((e) => !isDeletionCandidate(e.status) && e.status !== "current" && e.status !== "unreadable");
+}
+function fileSizeSafe(path) {
+  try {
+    return statSync(path).size;
+  } catch {
+    return 0;
+  }
+}
+function dbFootprint(file) {
+  return fileSizeSafe(file) + fileSizeSafe(`${file}-wal`) + fileSizeSafe(`${file}-shm`);
+}
+function storeFootprint(dir = dataDir()) {
+  if (!existsSync(dir))
+    return { totalBytes: 0, dbCount: 0 };
+  let totalBytes = 0;
+  let dbCount = 0;
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".db"))
+      continue;
+    dbCount++;
+    totalBytes += dbFootprint(join3(dir, name));
+  }
+  return { totalBytes, dbCount };
+}
+function scanDatabases(dir, currentFile, staleDays, nowMs = Date.now()) {
+  if (!existsSync(dir))
+    return [];
+  const staleCutoffMs = nowMs - staleDays * 86400 * 1000;
+  const entries = [];
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".db"))
+      continue;
+    const file = join3(dir, name);
+    let mtimeMs = 0;
+    try {
+      mtimeMs = statSync(file).mtimeMs;
+    } catch {
+      continue;
+    }
+    const sizeBytes = dbFootprint(file);
+    if (file === currentFile) {
+      entries.push({ file, status: "current", projectPath: null, sizeBytes, mtimeMs, items: 0 });
+      continue;
+    }
+    let projectPath = null;
+    let items = 0;
+    let readable = true;
+    let db = null;
+    try {
+      db = new Database2(file, { readonly: true });
+      try {
+        projectPath = getMeta(db, "project_path");
+      } catch {
+        projectPath = null;
+      }
+      try {
+        items = db.prepare(`SELECT COUNT(*) AS n FROM stored_outputs`).get().n;
+      } catch {
+        items = 0;
+      }
+    } catch {
+      readable = false;
+    } finally {
+      db?.close();
+    }
+    let status;
+    if (!readable) {
+      status = "unreadable";
+    } else if (projectPath !== null) {
+      status = existsSync(projectPath) ? "active" : "orphaned";
+    } else {
+      status = mtimeMs < staleCutoffMs ? "legacy-stale" : "legacy-fresh";
+    }
+    entries.push({ file, status, projectPath, sizeBytes, mtimeMs, items });
+  }
+  return entries.sort((a, b) => b.sizeBytes - a.sizeBytes);
+}
+var STATUS_LABEL = {
+  current: "current",
+  active: "active",
+  orphaned: "ORPHANED",
+  "legacy-fresh": "legacy",
+  "legacy-stale": "LEGACY-STALE",
+  unreadable: "unreadable"
+};
+function reportLine(e, nowMs) {
+  const flag = isDeletionCandidate(e.status) ? "\u2717" : " ";
+  const age = formatRelativeTime(nowMs - e.mtimeMs);
+  const where = e.projectPath ?? "(no recorded path)";
+  return `  ${flag} ${STATUS_LABEL[e.status].padEnd(13)} ${formatBytes(e.sizeBytes).padStart(9)}` + `  ${String(e.items).padStart(6)} items  ${age.padEnd(14)}  ${basename(e.file)}
+` + `      ${where}`;
+}
+function vacuumFile(file) {
+  const before = dbFootprint(file);
+  let db = null;
+  try {
+    db = new Database2(file);
+    db.run("PRAGMA busy_timeout=5000");
+    db.run("PRAGMA auto_vacuum=INCREMENTAL");
+    db.run("VACUUM");
+  } catch {
+    return null;
+  } finally {
+    db?.close();
+  }
+  return { before, after: dbFootprint(file) };
+}
+function deleteDbFiles(file) {
+  for (const f of [file, `${file}-wal`, `${file}-shm`]) {
+    rmSync(f, { force: true });
+  }
+}
+function gcCommand(opts = {}) {
+  const dryRun = opts.dryRun ?? true;
+  const staleDays = opts.staleDays ?? DEFAULT_STALE_DAYS;
+  const nowMs = Date.now();
+  const dir = dataDir();
+  const currentFile = defaultDbPath(getProjectKey(process.cwd()));
+  const entries = scanDatabases(dir, currentFile, staleDays, nowMs);
+  if (entries.length === 0) {
+    console.log(`No databases found in ${dir}`);
+    return;
+  }
+  const candidates = entries.filter((e) => isDeletionCandidate(e.status));
+  const reclaimable = candidates.reduce((sum, e) => sum + e.sizeBytes, 0);
+  const totalBytes = entries.reduce((sum, e) => sum + e.sizeBytes, 0);
+  console.log(`Project databases in ${dir}:
+`);
+  for (const e of entries)
+    console.log(reportLine(e, nowMs));
+  console.log(`
+${entries.length} databases \xB7 ${formatBytes(totalBytes)} total \xB7 ` + `${candidates.length} reclaimable (${formatBytes(reclaimable)})`);
+  console.log(`  Orphaned = project path deleted \xB7 LEGACY-STALE = no recorded path, ` + `untouched > ${staleDays}d (raise/lower with --stale-days N)`);
+  if (dryRun) {
+    if (candidates.length > 0) {
+      console.log(`
+Dry run \u2014 pass --force to delete the ${candidates.length} marked database(s).`);
+    }
+  } else {
+    let freed = 0;
+    for (const e of candidates) {
+      deleteDbFiles(e.file);
+      freed += e.sizeBytes;
+    }
+    console.log(`
+Deleted ${candidates.length} database(s), freed ${formatBytes(freed)}.`);
+  }
+  if (opts.vacuum) {
+    const survivors = vacuumTargets(entries);
+    const totalToVacuum = survivors.reduce((sum, e) => sum + e.sizeBytes, 0);
+    console.log(`
+Vacuuming ${survivors.length} database(s) to keep (${formatBytes(totalToVacuum)}) \u2014 ` + `rewrites each file, may take a while\u2026`);
+    let reclaimed = 0;
+    let vacuumed = 0;
+    let skipped = 0;
+    for (let i = 0;i < survivors.length; i++) {
+      const e = survivors[i];
+      process.stdout.write(`  [${i + 1}/${survivors.length}] ${basename(e.file)} (${formatBytes(e.sizeBytes)})\u2026 `);
+      const result = vacuumFile(e.file);
+      if (result) {
+        const freed = Math.max(0, result.before - result.after);
+        reclaimed += freed;
+        vacuumed++;
+        console.log(`reclaimed ${formatBytes(freed)}`);
+      } else {
+        skipped++;
+        console.log(`skipped \u2014 locked by another session or unreadable`);
+      }
+    }
+    const skipNote = skipped > 0 ? ` (${skipped} skipped)` : "";
+    console.log(`Vacuumed ${vacuumed} database(s), reclaimed ${formatBytes(reclaimed)} of free pages.${skipNote}`);
+  }
+}
+
 // src/hooks/session-start.ts
+function gcReminder(reminderMb) {
+  if (reminderMb <= 0)
+    return "";
+  const { totalBytes, dbCount } = storeFootprint();
+  if (totalBytes < reminderMb * 1024 * 1024)
+    return "";
+  return `\uD83D\uDCA1 recall store is ${formatBytes(totalBytes)} across ${dbCount} project ` + `databases \u2014 run \`mcp-recall gc\` to review and reclaim disk space.`;
+}
 var INJECT_MAX_CHARS = 2000;
 function handleSessionStart(raw) {
   let parsed;
@@ -5677,17 +5871,27 @@ function handleSessionStart(raw) {
   const today = new Date().toISOString().slice(0, 10);
   recordSession(db, today);
   pruneExpired(db, projectKey, config.store.expire_after_session_days);
+  const parts = [];
+  const reminder = gcReminder(config.store.gc_reminder_mb);
+  if (reminder)
+    parts.push(reminder);
   let snapshot = toolContext(db, projectKey, {});
-  if (snapshot === CONTEXT_EMPTY_RESPONSE) {
-    log.debug(`session-start \xB7 project=${projectKey.slice(0, 8)} \xB7 nothing to inject`);
-  } else {
+  if (snapshot !== CONTEXT_EMPTY_RESPONSE) {
     if (snapshot.length > INJECT_MAX_CHARS) {
       snapshot = snapshot.slice(0, INJECT_MAX_CHARS) + `
 \u2026 (truncated \u2014 call recall__context for the full view)`;
     }
-    process.stdout.write(snapshot + `
+    parts.push(snapshot);
+  }
+  if (parts.length === 0) {
+    log.debug(`session-start \xB7 project=${projectKey.slice(0, 8)} \xB7 nothing to inject`);
+  } else {
+    const out = parts.join(`
+
 `);
-    log.debug(`session-start \xB7 project=${projectKey.slice(0, 8)} \xB7 injected ${snapshot.length} chars`);
+    process.stdout.write(out + `
+`);
+    log.debug(`session-start \xB7 project=${projectKey.slice(0, 8)} \xB7 injected ${out.length} chars`);
   }
 }
 
@@ -7511,23 +7715,23 @@ var genericHandler = (_toolName, output) => {
 };
 
 // src/profiles/loader.ts
-import { readdirSync, readFileSync as readFileSync2, statSync } from "fs";
-import { join as join3 } from "path";
+import { readdirSync as readdirSync2, readFileSync as readFileSync2, statSync as statSync2 } from "fs";
+import { join as join4 } from "path";
 import { homedir as homedir3 } from "os";
 function getUserProfilesDir() {
-  return process.env.RECALL_USER_PROFILES_PATH ?? join3(homedir3(), ".config", "mcp-recall", "profiles");
+  return process.env.RECALL_USER_PROFILES_PATH ?? join4(homedir3(), ".config", "mcp-recall", "profiles");
 }
 function getCommunityProfilesDir() {
-  return process.env.RECALL_COMMUNITY_PROFILES_PATH ?? join3(homedir3(), ".local", "share", "mcp-recall", "profiles", "community");
+  return process.env.RECALL_COMMUNITY_PROFILES_PATH ?? join4(homedir3(), ".local", "share", "mcp-recall", "profiles", "community");
 }
 function getBundledProfilesDir() {
   if (process.env.RECALL_BUNDLED_PROFILES_PATH) {
     return process.env.RECALL_BUNDLED_PROFILES_PATH;
   }
-  const devPath = join3(import.meta.dir, "../../profiles");
-  const distPath = join3(import.meta.dir, "../profiles");
+  const devPath = join4(import.meta.dir, "../../profiles");
+  const distPath = join4(import.meta.dir, "../profiles");
   try {
-    statSync(devPath);
+    statSync2(devPath);
     return devPath;
   } catch (e) {
     if (e.code !== "ENOENT")
@@ -7539,7 +7743,7 @@ var fileCache = new Map;
 function loadSpec(filePath) {
   let mtime;
   try {
-    mtime = statSync(filePath).mtimeMs;
+    mtime = statSync2(filePath).mtimeMs;
   } catch {
     fileCache.delete(filePath);
     return null;
@@ -7613,16 +7817,16 @@ function validateSpec(raw, filePath) {
 function scanDir(dir, tier) {
   let entries;
   try {
-    entries = readdirSync(dir);
+    entries = readdirSync2(dir);
   } catch {
     return [];
   }
   const results = [];
   for (const entry of entries) {
-    const full = join3(dir, entry);
+    const full = join4(dir, entry);
     let stat;
     try {
-      stat = statSync(full);
+      stat = statSync2(full);
     } catch {
       continue;
     }
@@ -8340,12 +8544,12 @@ ${"\u2500".repeat(54)}`);
 }
 
 // src/profiles/cmd-local.ts
-import { readFileSync as readFileSync5, readdirSync as readdirSync3, rmSync } from "fs";
-import { join as join5 } from "path";
+import { readFileSync as readFileSync5, readdirSync as readdirSync4, rmSync as rmSync2 } from "fs";
+import { join as join6 } from "path";
 
 // src/profiles/shared.ts
-import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync2, unlinkSync } from "fs";
-import { join as join4 } from "path";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync3, unlinkSync } from "fs";
+import { join as join5 } from "path";
 import { homedir as homedir4, tmpdir } from "os";
 import { createHash as createHash4 } from "crypto";
 var MANIFEST_URL = "https://raw.githubusercontent.com/sakebomb/mcp-recall-profiles/main/manifest.json";
@@ -8367,10 +8571,10 @@ function sanitize(value) {
   return value.replace(/[\x00-\x1F\x7F]|\x9B|\x1B\[[0-9;]*[a-zA-Z]/g, "");
 }
 function communityDir() {
-  return process.env.RECALL_COMMUNITY_PROFILES_PATH ?? join4(homedir4(), ".local", "share", "mcp-recall", "profiles", "community");
+  return process.env.RECALL_COMMUNITY_PROFILES_PATH ?? join5(homedir4(), ".local", "share", "mcp-recall", "profiles", "community");
 }
 function userDir() {
-  return process.env.RECALL_USER_PROFILES_PATH ?? join4(homedir4(), ".config", "mcp-recall", "profiles");
+  return process.env.RECALL_USER_PROFILES_PATH ?? join5(homedir4(), ".config", "mcp-recall", "profiles");
 }
 function manifestShortName(e) {
   return e.short_name ?? e.id.replace(/^mcp__/, "");
@@ -8420,7 +8624,7 @@ async function fetchManifest(skipVerify = false) {
     throw new Error(`manifest fetch failed: ${res.status} ${res.statusText}`);
   const text = await res.text();
   if (!skipVerify) {
-    const tmpPath = join4(tmpdir(), `mcp-recall-manifest-${process.pid}.json`);
+    const tmpPath = join5(tmpdir(), `mcp-recall-manifest-${process.pid}.json`);
     try {
       writeFileSync2(tmpPath, text, "utf8");
       const config = loadConfig();
@@ -8435,9 +8639,9 @@ async function fetchManifest(skipVerify = false) {
   return data.profiles;
 }
 function saveToCommunityDir(profileId, content) {
-  const dir = join4(communityDir(), profileId);
+  const dir = join5(communityDir(), profileId);
   mkdirSync2(dir, { recursive: true });
-  const filePath = join4(dir, "default.toml");
+  const filePath = join5(dir, "default.toml");
   writeFileSync2(filePath, content);
   return filePath;
 }
@@ -8445,12 +8649,12 @@ function installedCommunityMap() {
   const map = new Map;
   let entries;
   try {
-    entries = readdirSync2(communityDir());
+    entries = readdirSync3(communityDir());
   } catch {
     return map;
   }
   for (const entry of entries) {
-    const toml = join4(communityDir(), entry, "default.toml");
+    const toml = join5(communityDir(), entry, "default.toml");
     try {
       const p = parse(readFileSync4(toml, "utf8"));
       const version = p["profile"]["version"];
@@ -8571,7 +8775,7 @@ function cmdRemove(args) {
   }
   const id = target.spec.profile.id;
   assertSafeId(id);
-  rmSync(join5(communityDir(), id), { recursive: true });
+  rmSync2(join6(communityDir(), id), { recursive: true });
   clearProfileCache();
   console.log(`\u2713 Removed ${id}`);
 }
@@ -8581,9 +8785,9 @@ function cmdFeed(args) {
     const dir = userDir();
     const files = [];
     try {
-      for (const entry of readdirSync3(dir)) {
+      for (const entry of readdirSync4(dir)) {
         if (entry.endsWith(".toml"))
-          files.push(join5(dir, entry));
+          files.push(join6(dir, entry));
       }
     } catch {}
     console.log("Usage: mcp-recall profiles feed <path-to-profile.toml>");
@@ -8686,7 +8890,7 @@ ${conflicts.length} conflict(s):
 
 // src/profiles/cmd-catalog.ts
 import { readFileSync as readFileSync6 } from "fs";
-import { join as join6 } from "path";
+import { join as join7 } from "path";
 import { homedir as homedir5 } from "os";
 async function cmdInstall(args) {
   const skipVerify = args.includes("--skip-verify");
@@ -8775,7 +8979,7 @@ ${installCount} profile(s) installed (${alreadyCount} already installed, ${entri
   }
   let serverKeys = [];
   try {
-    const raw = JSON.parse(readFileSync6(join6(homedir5(), ".claude.json"), "utf8"));
+    const raw = JSON.parse(readFileSync6(join7(homedir5(), ".claude.json"), "utf8"));
     const mcpServers = raw["mcpServers"];
     serverKeys = Object.keys(mcpServers ?? {}).filter((k) => k !== "recall");
   } catch {
@@ -9039,7 +9243,7 @@ async function handleProfilesCommand(args) {
 
 // src/learn/index.ts
 import { readFileSync as readFileSync8, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3 } from "fs";
-import { join as join7 } from "path";
+import { join as join8 } from "path";
 import { homedir as homedir6 } from "os";
 
 // src/learn/client.ts
@@ -9465,10 +9669,10 @@ function generateProfile(serverKey, tools) {
 
 // src/learn/index.ts
 function userProfilesDir() {
-  return process.env.RECALL_USER_PROFILES_PATH ?? join7(homedir6(), ".config", "mcp-recall", "profiles");
+  return process.env.RECALL_USER_PROFILES_PATH ?? join8(homedir6(), ".config", "mcp-recall", "profiles");
 }
 function readClaudeJson() {
-  const path = join7(homedir6(), ".claude.json");
+  const path = join8(homedir6(), ".claude.json");
   const raw = JSON.parse(readFileSync8(path, "utf8"));
   return raw["mcpServers"] ?? {};
 }
@@ -9531,9 +9735,9 @@ Learning from ${candidates.length} MCP server(s)\u2026
       console.log(toml);
       continue;
     }
-    const profileDir = join7(outputDir, `mcp__${key.replace(/-/g, "_")}`);
+    const profileDir = join8(outputDir, `mcp__${key.replace(/-/g, "_")}`);
     mkdirSync3(profileDir, { recursive: true });
-    const filePath = join7(profileDir, "default.toml");
+    const filePath = join8(profileDir, "default.toml");
     writeFileSync3(filePath, toml);
     console.log(`     \u2192 ${filePath}`);
     written++;
@@ -9554,9 +9758,9 @@ Next steps:`);
 }
 
 // src/import/index.ts
-import { readFileSync as readFileSync9, statSync as statSync2, existsSync } from "fs";
+import { readFileSync as readFileSync9, statSync as statSync3, existsSync as existsSync2 } from "fs";
 import { resolve } from "path";
-import { Database as Database2 } from "bun:sqlite";
+import { Database as Database3 } from "bun:sqlite";
 var LARGE_FILE_BYTES = 50 * 1024 * 1024;
 var EMPTY_EXPORT_SENTINEL = "[recall: no items to export]";
 var StoredOutputSchema = exports_external.object({
@@ -9576,12 +9780,12 @@ var StoredOutputSchema = exports_external.object({
 });
 var ExportSchema = exports_external.array(StoredOutputSchema);
 function dryRunCount(dbPath, items, overwrite) {
-  if (dbPath === ":memory:" || !existsSync(dbPath)) {
+  if (dbPath === ":memory:" || !existsSync2(dbPath)) {
     return { imported: items.length, skipped: 0, overwritten: 0 };
   }
   let db = null;
   try {
-    db = new Database2(dbPath, { readonly: true });
+    db = new Database3(dbPath, { readonly: true });
     const hasTable = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='stored_outputs' LIMIT 1`).get();
     if (!hasTable)
       return { imported: items.length, skipped: 0, overwritten: 0 };
@@ -9645,7 +9849,7 @@ async function handleImportCommand(args) {
   let raw;
   if (filePath) {
     try {
-      const size = statSync2(filePath).size;
+      const size = statSync3(filePath).size;
       if (size > LARGE_FILE_BYTES) {
         console.error(`Warning: file is ${Math.round(size / 1024 / 1024)} MB \u2014 this may take a while.`);
       }
@@ -9713,7 +9917,7 @@ Next steps:`);
 }
 
 // src/install/index.ts
-import { existsSync as existsSync2 } from "fs";
+import { existsSync as existsSync3 } from "fs";
 import { mkdir, rename, readFile } from "fs/promises";
 import path from "path";
 import os from "os";
@@ -9885,7 +10089,7 @@ async function installCommand(opts = {}) {
     claudeMdPath = defaultClaudeMdPath()
   } = opts;
   const paths = detectPaths();
-  if (!existsSync2(paths.serverJs) || !existsSync2(paths.cliJs)) {
+  if (!existsSync3(paths.serverJs) || !existsSync3(paths.cliJs)) {
     console.error(`${RED}\u2717 Build artifacts not found.${RESET}`);
     console.error(`  Expected: ${DIM}${paths.serverJs}${RESET}`);
     console.error(`  Run ${BOLD}bun run build${RESET} first.`);
@@ -10070,8 +10274,8 @@ async function statusCommand(opts = {}) {
     claudeMdContent = await readFile(claudeMdPath, "utf8");
   } catch {}
   const claudeMdOk = isClaudeMdInjected(claudeMdContent);
-  const serverExists = existsSync2(recallPaths.serverJs);
-  const cliExists = existsSync2(recallPaths.cliJs);
+  const serverExists = existsSync3(recallPaths.serverJs);
+  const cliExists = existsSync3(recallPaths.cliJs);
   const fullyInstalled = serverRegistered && ssRegistered && ptuRegistered && claudeMdOk && serverExists && cliExists;
   const label = fullyInstalled ? `${GREEN}installed${RESET}` : serverRegistered || ssRegistered || ptuRegistered ? `${YELLOW}partial / stale${RESET}` : `${RED}not installed${RESET}`;
   console.log(`
@@ -10110,177 +10314,15 @@ Installation: ${BOLD}${label}${RESET}
     console.log(`  ${GREEN}\u2713${RESET} Profiles: ${profiles.length} installed (${summary})`);
   }
   console.log("");
-}
-
-// src/gc/index.ts
-import { Database as Database3 } from "bun:sqlite";
-import { readdirSync as readdirSync4, existsSync as existsSync3, statSync as statSync3, rmSync as rmSync2 } from "fs";
-import { join as join8, basename } from "path";
-var DEFAULT_STALE_DAYS = 90;
-function isDeletionCandidate(status) {
-  return status === "orphaned" || status === "legacy-stale";
-}
-function vacuumTargets(entries) {
-  return entries.filter((e) => !isDeletionCandidate(e.status) && e.status !== "current" && e.status !== "unreadable");
-}
-function fileSizeSafe(path2) {
-  try {
-    return statSync3(path2).size;
-  } catch {
-    return 0;
+  const { totalBytes, dbCount } = storeFootprint();
+  const reminderMb = loadConfig().store.gc_reminder_mb;
+  const large = reminderMb > 0 && totalBytes >= reminderMb * 1024 * 1024;
+  const storeIcon = large ? `${YELLOW}!${RESET}` : `${GREEN}\u2713${RESET}`;
+  console.log(`  ${storeIcon} Store: ${formatBytes(totalBytes)} across ${dbCount} project database${dbCount === 1 ? "" : "s"}`);
+  if (large) {
+    console.log(`    \u2192 Reclaim space: ${BOLD}mcp-recall gc${RESET} (review, then re-run with ${BOLD}--force${RESET})`);
   }
-}
-function dbFootprint(file) {
-  return fileSizeSafe(file) + fileSizeSafe(`${file}-wal`) + fileSizeSafe(`${file}-shm`);
-}
-function scanDatabases(dir, currentFile, staleDays, nowMs = Date.now()) {
-  if (!existsSync3(dir))
-    return [];
-  const staleCutoffMs = nowMs - staleDays * 86400 * 1000;
-  const entries = [];
-  for (const name of readdirSync4(dir)) {
-    if (!name.endsWith(".db"))
-      continue;
-    const file = join8(dir, name);
-    let mtimeMs = 0;
-    try {
-      mtimeMs = statSync3(file).mtimeMs;
-    } catch {
-      continue;
-    }
-    const sizeBytes = dbFootprint(file);
-    if (file === currentFile) {
-      entries.push({ file, status: "current", projectPath: null, sizeBytes, mtimeMs, items: 0 });
-      continue;
-    }
-    let projectPath = null;
-    let items = 0;
-    let readable = true;
-    let db = null;
-    try {
-      db = new Database3(file, { readonly: true });
-      try {
-        projectPath = getMeta(db, "project_path");
-      } catch {
-        projectPath = null;
-      }
-      try {
-        items = db.prepare(`SELECT COUNT(*) AS n FROM stored_outputs`).get().n;
-      } catch {
-        items = 0;
-      }
-    } catch {
-      readable = false;
-    } finally {
-      db?.close();
-    }
-    let status;
-    if (!readable) {
-      status = "unreadable";
-    } else if (projectPath !== null) {
-      status = existsSync3(projectPath) ? "active" : "orphaned";
-    } else {
-      status = mtimeMs < staleCutoffMs ? "legacy-stale" : "legacy-fresh";
-    }
-    entries.push({ file, status, projectPath, sizeBytes, mtimeMs, items });
-  }
-  return entries.sort((a, b) => b.sizeBytes - a.sizeBytes);
-}
-var STATUS_LABEL = {
-  current: "current",
-  active: "active",
-  orphaned: "ORPHANED",
-  "legacy-fresh": "legacy",
-  "legacy-stale": "LEGACY-STALE",
-  unreadable: "unreadable"
-};
-function reportLine(e, nowMs) {
-  const flag = isDeletionCandidate(e.status) ? "\u2717" : " ";
-  const age = formatRelativeTime(nowMs - e.mtimeMs);
-  const where = e.projectPath ?? "(no recorded path)";
-  return `  ${flag} ${STATUS_LABEL[e.status].padEnd(13)} ${formatBytes(e.sizeBytes).padStart(9)}` + `  ${String(e.items).padStart(6)} items  ${age.padEnd(14)}  ${basename(e.file)}
-` + `      ${where}`;
-}
-function vacuumFile(file) {
-  const before = dbFootprint(file);
-  let db = null;
-  try {
-    db = new Database3(file);
-    db.run("PRAGMA busy_timeout=5000");
-    db.run("PRAGMA auto_vacuum=INCREMENTAL");
-    db.run("VACUUM");
-  } catch {
-    return null;
-  } finally {
-    db?.close();
-  }
-  return { before, after: dbFootprint(file) };
-}
-function deleteDbFiles(file) {
-  for (const f of [file, `${file}-wal`, `${file}-shm`]) {
-    rmSync2(f, { force: true });
-  }
-}
-function gcCommand(opts = {}) {
-  const dryRun = opts.dryRun ?? true;
-  const staleDays = opts.staleDays ?? DEFAULT_STALE_DAYS;
-  const nowMs = Date.now();
-  const dir = dataDir();
-  const currentFile = defaultDbPath(getProjectKey(process.cwd()));
-  const entries = scanDatabases(dir, currentFile, staleDays, nowMs);
-  if (entries.length === 0) {
-    console.log(`No databases found in ${dir}`);
-    return;
-  }
-  const candidates = entries.filter((e) => isDeletionCandidate(e.status));
-  const reclaimable = candidates.reduce((sum, e) => sum + e.sizeBytes, 0);
-  const totalBytes = entries.reduce((sum, e) => sum + e.sizeBytes, 0);
-  console.log(`Project databases in ${dir}:
-`);
-  for (const e of entries)
-    console.log(reportLine(e, nowMs));
-  console.log(`
-${entries.length} databases \xB7 ${formatBytes(totalBytes)} total \xB7 ` + `${candidates.length} reclaimable (${formatBytes(reclaimable)})`);
-  console.log(`  Orphaned = project path deleted \xB7 LEGACY-STALE = no recorded path, ` + `untouched > ${staleDays}d (raise/lower with --stale-days N)`);
-  if (dryRun) {
-    if (candidates.length > 0) {
-      console.log(`
-Dry run \u2014 pass --force to delete the ${candidates.length} marked database(s).`);
-    }
-  } else {
-    let freed = 0;
-    for (const e of candidates) {
-      deleteDbFiles(e.file);
-      freed += e.sizeBytes;
-    }
-    console.log(`
-Deleted ${candidates.length} database(s), freed ${formatBytes(freed)}.`);
-  }
-  if (opts.vacuum) {
-    const survivors = vacuumTargets(entries);
-    const totalToVacuum = survivors.reduce((sum, e) => sum + e.sizeBytes, 0);
-    console.log(`
-Vacuuming ${survivors.length} database(s) to keep (${formatBytes(totalToVacuum)}) \u2014 ` + `rewrites each file, may take a while\u2026`);
-    let reclaimed = 0;
-    let vacuumed = 0;
-    let skipped = 0;
-    for (let i = 0;i < survivors.length; i++) {
-      const e = survivors[i];
-      process.stdout.write(`  [${i + 1}/${survivors.length}] ${basename(e.file)} (${formatBytes(e.sizeBytes)})\u2026 `);
-      const result = vacuumFile(e.file);
-      if (result) {
-        const freed = Math.max(0, result.before - result.after);
-        reclaimed += freed;
-        vacuumed++;
-        console.log(`reclaimed ${formatBytes(freed)}`);
-      } else {
-        skipped++;
-        console.log(`skipped \u2014 locked by another session or unreadable`);
-      }
-    }
-    const skipNote = skipped > 0 ? ` (${skipped} skipped)` : "";
-    console.log(`Vacuumed ${vacuumed} database(s), reclaimed ${formatBytes(reclaimed)} of free pages.${skipNote}`);
-  }
+  console.log("");
 }
 
 // src/cli.ts
