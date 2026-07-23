@@ -84,7 +84,7 @@ export function recordAccess(db: Database, id: string): void {
 }
 
 /**
- * Pins or unpins an item. Pinned items are exempt from expiry and LFU eviction.
+ * Pins or unpins an item. Pinned items are exempt from expiry and eviction.
  * Returns `true` if the item was found and updated.
  */
 export function pinOutput(
@@ -116,15 +116,27 @@ export function checkDedup(
   `).get(project_key, input_hash) as StoredOutput | null;
 }
 
+const DEFAULT_EVICTION_HALF_LIFE_DAYS = 7;
+const SECONDS_PER_DAY = 86400;
+
 /**
- * Enforces the project store size cap by evicting least-frequently-accessed
- * non-pinned items until total `original_size` is within `max_size_mb`.
+ * Enforces the project store size cap by evicting the lowest-value non-pinned
+ * items until total `original_size` is within `max_size_mb`.
+ *
+ * Value is a recency-weighted frequency score: `(access_count + 1)` decayed by
+ * an exponential half-life on the time since last access (falling back to
+ * creation time for never-accessed items). This ranks a steadily-used recent
+ * item above one hit many times long ago — smarter than pure LFU, which would
+ * cling to a once-hammered-then-abandoned item. Pinned items are exempt.
+ * `now_secs` is injectable for deterministic tests.
  * Returns the number of items evicted (0 if already within limit).
  */
 export function evictIfNeeded(
   db: Database,
   project_key: string,
-  max_size_mb: number
+  max_size_mb: number,
+  half_life_days = DEFAULT_EVICTION_HALF_LIFE_DAYS,
+  now_secs = Math.floor(Date.now() / 1000)
 ): number {
   const max_bytes = max_size_mb * 1024 * 1024;
 
@@ -137,19 +149,36 @@ export function evictIfNeeded(
 
   const bytesToShed = total - max_bytes;
 
-  // Fetch all eviction candidates in LFU order — one query instead of one per item.
   const candidates = db.prepare(`
-    SELECT id, original_size FROM stored_outputs
+    SELECT id, original_size, access_count, last_accessed, created_at
+    FROM stored_outputs
     WHERE project_key = ? AND pinned = 0
-    ORDER BY access_count ASC, last_accessed ASC NULLS FIRST, created_at ASC
-  `).all(project_key) as { id: string; original_size: number }[];
+  `).all(project_key) as {
+    id: string;
+    original_size: number;
+    access_count: number;
+    last_accessed: number | null;
+    created_at: number;
+  }[];
 
   if (candidates.length === 0) return 0; // all remaining items are pinned
 
-  // Walk the candidate list, collecting IDs until we have shed enough bytes.
+  const halfLifeSecs = half_life_days * SECONDS_PER_DAY;
+  const scoreOf = (c: (typeof candidates)[number]): number => {
+    const lastActive = c.last_accessed ?? c.created_at;
+    const ageSecs = Math.max(0, now_secs - lastActive);
+    const recency = Math.pow(0.5, ageSecs / halfLifeSecs); // 1.0 when fresh, → 0 when old
+    return (c.access_count + 1) * recency;
+  };
+
+  // Evict lowest value first; stable tiebreak on oldest creation.
+  const ranked = candidates
+    .map((c) => ({ id: c.id, original_size: c.original_size, score: scoreOf(c), created_at: c.created_at }))
+    .sort((a, b) => a.score - b.score || a.created_at - b.created_at);
+
   const toEvict: string[] = [];
   let shed = 0;
-  for (const row of candidates) {
+  for (const row of ranked) {
     if (shed >= bytesToShed) break;
     toEvict.push(row.id);
     shed += row.original_size;

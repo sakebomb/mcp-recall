@@ -103,7 +103,7 @@ export function handlePostToolUse(raw: string): HookOutput {
   });
 
   // 8. Evict if store exceeds size limit
-  evictIfNeeded(db, projectKey, config.store.max_size_mb);
+  evictIfNeeded(db, projectKey, config.store.max_size_mb, config.store.eviction_half_life_days);
 
   // 9. Return compressed output to Claude
   const reduction = ((1 - summarySize / originalSize) * 100).toFixed(0);

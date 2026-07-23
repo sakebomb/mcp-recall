@@ -547,6 +547,37 @@ describe("db", () => {
       expect(retrieveOutput(db, a.id)).not.toBeNull();
       expect(retrieveOutput(db, b.id)).not.toBeNull();
     });
+
+    it("decay keeps a recently-accessed item over an older heavily-accessed one (unlike LFU)", () => {
+      const now = 1_000_000_000;
+      const day = 86400;
+      const old = storeOutput(db, makeInput({ original_size: 300, summary: "old heavy" }));
+      const fresh = storeOutput(db, makeInput({ original_size: 300, summary: "fresh light" }));
+      // 'old': hit 50 times but not for 60 days. 'fresh': hit twice, just now.
+      db.prepare("UPDATE stored_outputs SET access_count = 50, last_accessed = ? WHERE id = ?").run(now - 60 * day, old.id);
+      db.prepare("UPDATE stored_outputs SET access_count = 2, last_accessed = ? WHERE id = ?").run(now - 1, fresh.id);
+
+      const evicted = evictIfNeeded(db, PROJECT_KEY, 0.0005, 7, now);
+
+      expect(evicted).toBeGreaterThan(0);
+      // Pure LFU would evict 'fresh' (fewer accesses); decay evicts the stale 'old'.
+      expect(retrieveOutput(db, fresh.id)).not.toBeNull();
+      expect(retrieveOutput(db, old.id)).toBeNull();
+    });
+
+    it("uses creation time for recency when an item was never accessed", () => {
+      const now = 1_000_000_000;
+      const day = 86400;
+      const older = storeOutput(db, makeInput({ original_size: 300, summary: "older" }));
+      const newer = storeOutput(db, makeInput({ original_size: 300, summary: "newer" }));
+      db.prepare("UPDATE stored_outputs SET created_at = ?, last_accessed = NULL WHERE id = ?").run(now - 90 * day, older.id);
+      db.prepare("UPDATE stored_outputs SET created_at = ?, last_accessed = NULL WHERE id = ?").run(now - 1, newer.id);
+
+      evictIfNeeded(db, PROJECT_KEY, 0.0005, 7, now);
+
+      expect(retrieveOutput(db, newer.id)).not.toBeNull();
+      expect(retrieveOutput(db, older.id)).toBeNull();
+    });
   });
 
   // -------------------------------------------------------------------------
