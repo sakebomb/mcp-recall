@@ -58,14 +58,18 @@ const server = new McpServer({
 
 server.tool(
   "recall__retrieve",
-  "Fetch stored content from a previous tool call. Pass a query to return the most relevant excerpt via FTS. Use when you need more detail from a compressed result.",
+  "Fetch stored content from a previous tool call, in graduated tiers. mode='summary' (default without a query) returns the compressed summary; mode='peek' (default with a query) returns a bounded context window — top matching chunks for a query, or head chunks without — far cheaper than full; mode='full' returns the verbatim content (capped by max_bytes). Escalate summary → peek → full only as needed.",
   {
     id: z.string().describe("recall_* item ID"),
-    query: z.string().optional().describe("FTS query to return a focused excerpt"),
+    query: z.string().optional().describe("FTS query to focus a peek on matching chunks"),
+    mode: z
+      .enum(["summary", "peek", "full"])
+      .optional()
+      .describe("Retrieval tier. Defaults to 'peek' when a query is given, else 'summary'."),
     max_bytes: z
       .number()
       .optional()
-      .describe("Override default 8KB cap on returned bytes (used when FTS returns no match)"),
+      .describe("Override default 8KB cap on returned bytes (applies to mode='full')"),
   },
   safeTool((args) => ({
     content: [{ type: "text", text: toolRetrieve(db, args) }],

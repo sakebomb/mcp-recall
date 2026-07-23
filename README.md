@@ -288,7 +288,7 @@ pin_recommendation_threshold = 5
 stale_item_days = 3
 
 [retrieve]
-# Max bytes returned by recall__retrieve() when no query is provided.
+# Max bytes returned by recall__retrieve(mode: "full").
 # Claude can override this per-call via the max_bytes parameter.
 default_max_bytes = 8192
 
@@ -335,7 +335,7 @@ Ten `recall__*` tools are available to Claude in every session. The `recall__` p
 | Tool | Use when |
 |---|---|
 | `recall__context` | Start of session — get pinned items, notes, and recent activity |
-| `recall__retrieve(id, query?)` | Need detail from a prior tool call |
+| `recall__retrieve(id, query?, mode?)` | Need detail from a prior tool call — `summary` / `peek` / `full` tiers |
 | `recall__search(query, tool?)` | Find stored output by content, no ID needed |
 | `recall__pin(id)` | Protect an item from expiry and eviction |
 | `recall__note(text, title?)` | Store a conclusion or decision as project memory |

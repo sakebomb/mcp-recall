@@ -52,13 +52,21 @@ Last session (2026-03-01):
 Fetch stored content from a previous tool call.
 
 ```
-recall__retrieve(id, query?, max_bytes?)
+recall__retrieve(id, query?, mode?, max_bytes?)
 ```
 
-- Omit `query` to return the compressed summary
-- Pass `query` to return an FTS excerpt focused on the relevant section — falls back to full content (capped at `max_bytes`) if the query has no match
-- Override `max_bytes` when you need more than the default 8 KB on a full-content retrieval
-- Every call records an access, which informs `sort: "accessed"` and LFU eviction order
+Graduated retrieval across three tiers — escalate only as far as you need:
+
+| `mode` | Returns | Default when |
+|---|---|---|
+| `summary` | The compressed summary (cheapest) | no `query` given |
+| `peek` | A bounded context window — the top matching chunks for a `query`, or the head chunks without one — much smaller than the full document | a `query` is given |
+| `full` | The verbatim content, capped at `max_bytes` (default 8 KB) | — |
+
+- `mode` is optional and backward-compatible: with no `mode`, a `query` defaults to `peek` and its absence to `summary`.
+- `peek` with a `query` falls back to full content if the item has no matching chunks (e.g. rows stored before chunking).
+- Override `max_bytes` when you need more than the default 8 KB from `mode: "full"`.
+- Every call records an access, which informs `sort: "accessed"` and LFU eviction order.
 
 ---
 

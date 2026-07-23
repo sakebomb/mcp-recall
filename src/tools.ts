@@ -11,6 +11,7 @@ import type { Database } from "bun:sqlite";
 import {
   retrieveOutput,
   retrieveSnippet,
+  retrievePeek,
   recordAccess,
   pinOutput,
   searchOutputs,
@@ -61,16 +62,26 @@ function itemHeader(item: StoredOutput): string {
 // recall__retrieve
 // ---------------------------------------------------------------------------
 
+export type RetrieveMode = "summary" | "peek" | "full";
+
 export interface RetrieveArgs {
   id: string;
   query?: string;
   max_bytes?: number;
+  mode?: RetrieveMode;
 }
 
-export function toolRetrieve(
-  db: Database,
-  args: RetrieveArgs
-): string {
+/**
+ * Graduated retrieval across three tiers:
+ * - `summary` — the compressed summary (cheapest; the default when no query).
+ * - `peek`    — a bounded context window (top matching chunks with a query,
+ *               head chunks without) — the middle tier, far smaller than full.
+ * - `full`    — the verbatim content, capped at `max_bytes`.
+ *
+ * Backward-compatible: with no explicit `mode`, a query defaults to `peek` and
+ * its absence to `summary`, matching the prior focused-excerpt / summary split.
+ */
+export function toolRetrieve(db: Database, args: RetrieveArgs): string {
   const config = loadConfig();
   const cap = args.max_bytes ?? config.retrieve.default_max_bytes;
 
@@ -82,19 +93,28 @@ export function toolRetrieve(
   recordAccess(db, args.id);
   const header = itemHeader(item);
 
-  if (args.query) {
-    // Try FTS snippet first for a focused, relevant excerpt
-    const snippet = retrieveSnippet(db, args.id, args.query);
-    if (snippet) {
-      return `${header}\n${snippet}`;
-    }
-    // No FTS match: fall back to full content capped at max_bytes
-    const content = item.full_content.slice(0, cap);
-    const truncated = item.full_content.length > cap ? `\n…(truncated at ${formatBytes(cap)})` : "";
-    return `${header}\n${content}${truncated}`;
-  }
+  const mode: RetrieveMode = args.mode ?? (args.query ? "peek" : "summary");
 
-  return `${header}\n${item.summary}`;
+  const fullCapped = (): string => {
+    const content = item.full_content.slice(0, cap);
+    const truncated =
+      item.full_content.length > cap ? `\n…(truncated at ${formatBytes(cap)})` : "";
+    return `${header}\n${content}${truncated}`;
+  };
+
+  if (mode === "summary") return `${header}\n${item.summary}`;
+  if (mode === "full") return fullCapped();
+
+  // mode === "peek": bounded context window, with graceful fallbacks.
+  const peek = retrievePeek(db, args.id, args.query);
+  if (peek) return `${header}\n${peek}`;
+  // Pre-chunking items with a query: legacy single-snippet path.
+  if (args.query) {
+    const snippet = retrieveSnippet(db, args.id, args.query);
+    if (snippet) return `${header}\n${snippet}`;
+  }
+  // Nothing to peek at (no chunks / no match): fall back to full content.
+  return fullCapped();
 }
 
 // ---------------------------------------------------------------------------

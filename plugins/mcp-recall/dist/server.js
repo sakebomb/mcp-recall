@@ -19799,6 +19799,32 @@ function retrieveSnippet(db, id, query) {
     return null;
   }
 }
+var PEEK_MAX_CHUNKS = 3;
+var PEEK_CHUNK_JOINER = `
+ [\u2026] 
+`;
+function retrievePeek(db, id, query, maxChunks = PEEK_MAX_CHUNKS) {
+  const exists = db.prepare(`SELECT 1 FROM stored_outputs WHERE id = ?`).get(id);
+  if (!exists)
+    return null;
+  if (query) {
+    const safeQuery = sanitizeFtsQuery(query);
+    try {
+      const rows2 = db.prepare(`SELECT content FROM content_chunks
+           WHERE content_chunks MATCH ? AND output_id = ?
+           ORDER BY rank
+           LIMIT ?`).all(safeQuery, id, maxChunks);
+      if (rows2.length > 0)
+        return rows2.map((r) => r.content).join(PEEK_CHUNK_JOINER);
+    } catch {}
+    return null;
+  }
+  const rows = db.prepare(`SELECT content FROM content_chunks
+       WHERE output_id = ?
+       ORDER BY chunk_index
+       LIMIT ?`).all(id, maxChunks);
+  return rows.length > 0 ? rows.map((r) => r.content).join(PEEK_CHUNK_JOINER) : null;
+}
 function searchOutputs(db, query, options) {
   const limit = options.limit ?? 10;
   const safeQuery = sanitizeFtsQuery(query);
@@ -21087,20 +21113,30 @@ function toolRetrieve(db, args) {
   }
   recordAccess(db, args.id);
   const header = itemHeader(item);
-  if (args.query) {
-    const snippet = retrieveSnippet(db, args.id, args.query);
-    if (snippet) {
-      return `${header}
-${snippet}`;
-    }
+  const mode = args.mode ?? (args.query ? "peek" : "summary");
+  const fullCapped = () => {
     const content = item.full_content.slice(0, cap);
     const truncated = item.full_content.length > cap ? `
 \u2026(truncated at ${formatBytes(cap)})` : "";
     return `${header}
 ${content}${truncated}`;
-  }
-  return `${header}
+  };
+  if (mode === "summary")
+    return `${header}
 ${item.summary}`;
+  if (mode === "full")
+    return fullCapped();
+  const peek = retrievePeek(db, args.id, args.query);
+  if (peek)
+    return `${header}
+${peek}`;
+  if (args.query) {
+    const snippet = retrieveSnippet(db, args.id, args.query);
+    if (snippet)
+      return `${header}
+${snippet}`;
+  }
+  return fullCapped();
 }
 function toolSearch(db, projectKey, args) {
   const limit = args.limit ?? 5;
@@ -21436,10 +21472,11 @@ var server = new McpServer({
   name: "recall",
   version: version2
 });
-server.tool("recall__retrieve", "Fetch stored content from a previous tool call. Pass a query to return the most relevant excerpt via FTS. Use when you need more detail from a compressed result.", {
+server.tool("recall__retrieve", "Fetch stored content from a previous tool call, in graduated tiers. mode='summary' (default without a query) returns the compressed summary; mode='peek' (default with a query) returns a bounded context window \u2014 top matching chunks for a query, or head chunks without \u2014 far cheaper than full; mode='full' returns the verbatim content (capped by max_bytes). Escalate summary \u2192 peek \u2192 full only as needed.", {
   id: exports_external.string().describe("recall_* item ID"),
-  query: exports_external.string().optional().describe("FTS query to return a focused excerpt"),
-  max_bytes: exports_external.number().optional().describe("Override default 8KB cap on returned bytes (used when FTS returns no match)")
+  query: exports_external.string().optional().describe("FTS query to focus a peek on matching chunks"),
+  mode: exports_external.enum(["summary", "peek", "full"]).optional().describe("Retrieval tier. Defaults to 'peek' when a query is given, else 'summary'."),
+  max_bytes: exports_external.number().optional().describe("Override default 8KB cap on returned bytes (applies to mode='full')")
 }, safeTool((args) => ({
   content: [{ type: "text", text: toolRetrieve(db, args) }]
 })));

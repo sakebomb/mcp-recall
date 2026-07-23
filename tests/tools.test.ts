@@ -439,6 +439,56 @@ describe("MCP tool handlers", () => {
   });
 
   // -------------------------------------------------------------------------
+  // toolRetrieve — graduated modes (#186)
+  // -------------------------------------------------------------------------
+
+  describe("toolRetrieve — graduated modes", () => {
+    it("mode 'summary' returns the summary even when a query is given", () => {
+      const stored = storeOutput(db, makeInput());
+      const result = toolRetrieve(db, { id: stored.id, mode: "summary", query: "broken" });
+      expect(result).toContain("labels: bug"); // summary-only text
+      expect(result).not.toContain('"number":1'); // raw JSON lives only in full_content
+    });
+
+    it("mode 'full' returns verbatim content, not the summary", () => {
+      const stored = storeOutput(db, makeInput());
+      const result = toolRetrieve(db, { id: stored.id, mode: "full" });
+      expect(result).toContain('"number":1');
+    });
+
+    it("mode 'full' applies the max_bytes cap", () => {
+      const stored = storeOutput(db, makeInput({ full_content: "y".repeat(2000) }));
+      const result = toolRetrieve(db, { id: stored.id, mode: "full", max_bytes: 100 });
+      expect(result).toContain("truncated");
+    });
+
+    it("mode 'peek' with a query returns matching chunk content", () => {
+      const stored = storeOutput(
+        db,
+        makeInput({ full_content: "deployment uses kubernetes and helm across services" })
+      );
+      const result = toolRetrieve(db, { id: stored.id, mode: "peek", query: "kubernetes" });
+      expect(result).toContain("kubernetes");
+    });
+
+    it("mode 'peek' without a query returns a head preview", () => {
+      const stored = storeOutput(db, makeInput({ full_content: "alpha beta gamma delta epsilon" }));
+      const result = toolRetrieve(db, { id: stored.id, mode: "peek" });
+      expect(result).toContain("alpha");
+    });
+
+    it("peek returns a bounded multi-chunk window smaller than full", () => {
+      // > 10 chunks (CHUNK_SIZE=512), "needle" recurring across them
+      const full = Array.from({ length: 60 }, (_, i) => `segment${i} needle ${"z".repeat(100)}`).join("\n");
+      const stored = storeOutput(db, makeInput({ full_content: full }));
+      const peek = toolRetrieve(db, { id: stored.id, mode: "peek", query: "needle" });
+      const whole = toolRetrieve(db, { id: stored.id, mode: "full" });
+      expect(peek).toContain("[…]"); // multiple chunks joined
+      expect(peek.length).toBeLessThan(whole.length);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // toolPin
   // -------------------------------------------------------------------------
 
