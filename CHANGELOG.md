@@ -6,11 +6,37 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+---
+
+## [1.9.0] — 2026-07-23
+
+### Added
+
+- **Retrieval hints in the recall header** — each compressed result's header now ends with a few salient `search:` terms extracted from the stored content, so Claude's first `recall__search` lands instead of guessing keywords. Deterministic, no LLM (#193)
+- **Graduated retrieval** — `recall__retrieve` gains a `mode` parameter (`summary` | `peek` | `full`). `peek` returns a bounded context window (top matching chunks, or head chunks without a query) — a middle tier between the search index and full content. Backward-compatible: with no `mode`, a query still defaults to a focused excerpt (#194)
+- **Content-hash output dedup** — a `sha256(content)` (`output_hash`) is stored and checked alongside the input hash, so identical output from a different call — or a call with no `tool_input` to hash — reuses the stored item instead of duplicating (#196)
+- **`store.eviction_half_life_days`** config option (default 7) controlling decay-based eviction (#195)
+- **`recall__suggest` tool** — surfaces pin candidates (frequently accessed) and stale items (never accessed) with actionable commands (#174)
+- **HTTP/SSE transport support** in `mcp-recall learn` (#175)
+- **`mcp-recall import` command** — restore from a `recall__export` dump; flags `--overwrite`, `--keep-project-key`, `--dry-run` (#176)
+- **Claude Code GitHub Action** (keyless WIF auth) for automated PR review (#180)
+
 ### Changed
 
-- `src/db/index.ts` (899 lines) split into five focused modules: `types.ts`, `schema.ts`, `chunking.ts`, `queries.ts`, `analytics.ts` — `db/index.ts` is now a 5-line re-export barrel; all callers unchanged
-- `src/profiles/commands.ts` (901 lines) split into `shared.ts` (manifest utilities), `cmd-local.ts` (list/remove/feed/check), `cmd-catalog.ts` (install/update/seed/info/available), `cmd-test.ts` (test/testProfile) — `commands.ts` is now a 67-line dispatcher; all callers unchanged
-- `CLAUDE.md` updated to reflect current architecture: `log.ts`, `format.ts`, `tools.ts`, `install/`, `learn/`, `profiles/` modules documented; CLI commands section added; phase table extended through phase 9
+- **Eviction is now recency-weighted (decay)** instead of pure LFU: items are scored by `(access_count + 1)` decayed on an exponential half-life over time since last access, so a steadily-used recent item outranks one hit many times long ago. Pinned items remain exempt (#195)
+- **Structure-aware fallback compression** — the generic (last-resort) handler now summarizes long multi-line output as head + tail lines with error/warn lines surfaced from the elided middle, and long single-block output as a head + tail window, instead of a blind first-500-chars truncation. Deterministic, no LLM. Small error-dense logs pass through in full (#198, closes #187)
+- **Compact generic-JSON summaries** — the JSON fallback emits its truncated summary without pretty-print indentation (smaller payload, still fully readable; keys kept verbatim) (#196)
+- **README repositioned** around mcp-recall's MCP-specific niche, with accurate framing against Claude's native context tooling (Claude Code microcompaction; API context editing, compaction, memory tool) (#192)
+- `src/db/index.ts` (899 lines) split into five focused modules (`types`, `schema`, `chunking`, `queries`, `analytics`); barrel re-export, callers unchanged (#170)
+- `src/profiles/commands.ts` (901 lines) split into `shared` / `cmd-local` / `cmd-catalog` / `cmd-test` with a thin dispatcher; callers unchanged
+- `src/handlers/bash.ts` (699 lines) split into focused per-tool modules (#177, #179)
+- Replaced magic numbers and weak error types across the codebase (#178)
+- `CLAUDE.md` updated to reflect current architecture (`log.ts`, `format.ts`, `tools.ts`, `install/`, `learn/`, `profiles/`) and CLI commands
+- CI pins Bun to 1.3.14 for reproducibility (#181)
+
+### Docs
+
+- Design specs recorded for the deferred/decided roadmap items: #187 (shipped as the fallback change above), #188 (Anthropic memory-tool backend — deferred), #189 (hybrid FTS + embeddings — deferred) (#197)
 
 ---
 
