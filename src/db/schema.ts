@@ -62,6 +62,8 @@ const MIGRATIONS = [
   "ALTER TABLE stored_outputs ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE stored_outputs ADD COLUMN last_accessed INTEGER",
   "ALTER TABLE stored_outputs ADD COLUMN input_hash TEXT",
+  "ALTER TABLE stored_outputs ADD COLUMN output_hash TEXT",
+  "CREATE INDEX IF NOT EXISTS idx_so_output_hash ON stored_outputs(project_key, output_hash)",
 ];
 
 function applyMigrations(db: Database): void {

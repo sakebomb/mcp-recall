@@ -5229,7 +5229,9 @@ var MIGRATIONS = [
   "ALTER TABLE stored_outputs ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE stored_outputs ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE stored_outputs ADD COLUMN last_accessed INTEGER",
-  "ALTER TABLE stored_outputs ADD COLUMN input_hash TEXT"
+  "ALTER TABLE stored_outputs ADD COLUMN input_hash TEXT",
+  "ALTER TABLE stored_outputs ADD COLUMN output_hash TEXT",
+  "CREATE INDEX IF NOT EXISTS idx_so_output_hash ON stored_outputs(project_key, output_hash)"
 ];
 function applyMigrations(db) {
   for (const sql of MIGRATIONS) {
@@ -5277,7 +5279,7 @@ function chunkText(text) {
   return chunks;
 }
 // src/db/queries.ts
-import { randomBytes } from "crypto";
+import { randomBytes, createHash as createHash2 } from "crypto";
 function generateId() {
   return `recall_${randomBytes(8).toString("hex")}`;
 }
@@ -5300,13 +5302,14 @@ function storeOutput(db, input) {
   const summary_size = Buffer.byteLength(input.summary, "utf8");
   const created_at = Math.floor(Date.now() / 1000);
   const input_hash = input.input_hash ?? null;
+  const output_hash = input.output_hash ?? hashContent(input.full_content);
   const insertAndChunk = db.transaction(() => {
     db.prepare(`
       INSERT INTO stored_outputs
         (id, project_key, session_id, tool_name, summary, full_content,
-         original_size, summary_size, created_at, input_hash)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, input.project_key, input.session_id, input.tool_name, input.summary, input.full_content, input.original_size, summary_size, created_at, input_hash);
+         original_size, summary_size, created_at, input_hash, output_hash)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, input.project_key, input.session_id, input.tool_name, input.summary, input.full_content, input.original_size, summary_size, created_at, input_hash, output_hash);
     storeChunks(db, id, input.full_content);
   });
   insertAndChunk();
@@ -5318,8 +5321,12 @@ function storeOutput(db, input) {
     pinned: 0,
     access_count: 0,
     last_accessed: null,
-    input_hash
+    input_hash,
+    output_hash
   };
+}
+function hashContent(content) {
+  return createHash2("sha256").update(content).digest("hex");
 }
 function checkDedup(db, project_key, input_hash) {
   return db.prepare(`
@@ -5328,6 +5335,14 @@ function checkDedup(db, project_key, input_hash) {
     ORDER BY created_at DESC
     LIMIT 1
   `).get(project_key, input_hash);
+}
+function checkOutputDedup(db, project_key, output_hash) {
+  return db.prepare(`
+    SELECT * FROM stored_outputs
+    WHERE project_key = ? AND output_hash = ?
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(project_key, output_hash);
 }
 var DEFAULT_EVICTION_HALF_LIFE_DAYS = 7;
 var SECONDS_PER_DAY = 86400;
@@ -5641,7 +5656,7 @@ function handleSessionStart(raw) {
 }
 
 // src/hooks/post-tool-use.ts
-import { createHash as createHash2 } from "crypto";
+import { createHash as createHash3 } from "crypto";
 
 // src/denylist.ts
 var BUILTIN_PATTERNS = [
@@ -6008,7 +6023,7 @@ var jsonHandler = (_toolName, output) => {
     };
   }
   const truncated = truncate(parsed, 0);
-  const summary = JSON.stringify(truncated, null, 2);
+  const summary = JSON.stringify(truncated);
   return { summary, originalSize };
 };
 
@@ -7943,20 +7958,23 @@ function handlePostToolUse(raw) {
   }
   const projectKey = getProjectKey(cwd);
   const db = getDb(defaultDbPath(projectKey));
-  const input_hash = tool_input !== undefined ? createHash2("sha256").update(tool_name + JSON.stringify(tool_input)).digest("hex") : null;
-  if (input_hash) {
-    const cached2 = checkDedup(db, projectKey, input_hash);
-    if (cached2) {
-      const cachedDate = new Date(cached2.created_at * 1000).toISOString().slice(0, 10);
-      log.debug(`CACHE HIT \xB7 ${tool_name} \xB7 id=${cached2.id} \xB7 cached ${cachedDate}`);
-      const header2 = `[recall:${cached2.id} \xB7 cached \xB7 ${cachedDate}]`;
-      return {
-        updatedMCPToolOutput: `${header2}
+  const input_hash = tool_input !== undefined ? createHash3("sha256").update(tool_name + JSON.stringify(tool_input)).digest("hex") : null;
+  const output_hash = hashContent(fullContent);
+  const cachedResponse = (cached2) => {
+    const cachedDate = new Date(cached2.created_at * 1000).toISOString().slice(0, 10);
+    log.debug(`CACHE HIT \xB7 ${tool_name} \xB7 id=${cached2.id} \xB7 cached ${cachedDate}`);
+    return {
+      updatedMCPToolOutput: `[recall:${cached2.id} \xB7 cached \xB7 ${cachedDate}]
 ${cached2.summary}`,
-        suppressOutput: true
-      };
-    }
-  }
+      suppressOutput: true
+    };
+  };
+  const byInput = input_hash ? checkDedup(db, projectKey, input_hash) : null;
+  if (byInput)
+    return cachedResponse(byInput);
+  const byOutput = checkOutputDedup(db, projectKey, output_hash);
+  if (byOutput)
+    return cachedResponse(byOutput);
   const handler = getHandler(tool_name, tool_response, tool_input);
   log.debug(`handler: ${handler.name} \xB7 ${tool_name}`);
   const { summary, originalSize } = handler(tool_name, tool_response);
@@ -7972,7 +7990,8 @@ ${cached2.summary}`,
     summary,
     full_content: fullContent,
     original_size: originalSize,
-    input_hash: input_hash ?? undefined
+    input_hash: input_hash ?? undefined,
+    output_hash
   });
   evictIfNeeded(db, projectKey, config.store.max_size_mb, config.store.eviction_half_life_days);
   const reduction = ((1 - summarySize / originalSize) * 100).toFixed(0);
@@ -8266,7 +8285,7 @@ import { join as join5 } from "path";
 import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync2, unlinkSync } from "fs";
 import { join as join4 } from "path";
 import { homedir as homedir4, tmpdir } from "os";
-import { createHash as createHash3 } from "crypto";
+import { createHash as createHash4 } from "crypto";
 var MANIFEST_URL = "https://raw.githubusercontent.com/sakebomb/mcp-recall-profiles/main/manifest.json";
 var PROFILE_BASE_URL = "https://raw.githubusercontent.com/sakebomb/mcp-recall-profiles/main/";
 var COMMUNITY_REPO = "sakebomb/mcp-recall-profiles";
@@ -8304,7 +8323,7 @@ function verifyHash(content, expected, id) {
   if (!expected) {
     return;
   }
-  const actual = createHash3("sha256").update(content).digest("hex");
+  const actual = createHash4("sha256").update(content).digest("hex");
   if (actual !== expected) {
     throw new Error(`Profile ${id}: hash mismatch (expected ${expected.slice(0, 8)}\u2026, got ${actual.slice(0, 8)}\u2026)`);
   }

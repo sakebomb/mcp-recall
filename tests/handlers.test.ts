@@ -213,12 +213,21 @@ describe("filesystemHandler", () => {
 // ---------------------------------------------------------------------------
 
 describe("jsonHandler", () => {
-  it("pretty-prints JSON at depth limit", () => {
+  it("truncates JSON at the depth limit", () => {
     // MAX_DEPTH=3: values at depth 4 are replaced, so a.b.c is visible but a.b.c.d is "…"
     const obj = { a: { b: { c: { d: "deep" } } } };
     const { summary } = jsonHandler("mcp__some__tool", JSON.stringify(obj));
     const parsed = JSON.parse(summary);
     expect(parsed.a.b.c.d).toBe("…");
+  });
+
+  it("emits a compact summary (no pretty-print indentation)", () => {
+    const obj = { a: { b: { c: 1 } }, items: [1, 2, 3, 4, 5] };
+    const { summary } = jsonHandler("mcp__some__tool", JSON.stringify(obj));
+    // Compact JSON has no newline + indentation runs; keys remain verbatim.
+    expect(summary).not.toContain("\n  ");
+    expect(summary).toContain('"items"');
+    expect(JSON.parse(summary)).toBeDefined(); // still valid JSON
   });
 
   it("truncates arrays to 3 items with count", () => {

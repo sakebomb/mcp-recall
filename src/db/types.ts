@@ -13,6 +13,7 @@ export interface StoredOutput {
   access_count: number;
   last_accessed: number | null;
   input_hash: string | null;
+  output_hash: string | null;
 }
 
 /** Input required to persist a new compressed tool output. */
@@ -24,6 +25,8 @@ export interface StoreInput {
   full_content: string;
   original_size: number;
   input_hash?: string;
+  /** Precomputed sha256 of full_content; storeOutput derives it when omitted. */
+  output_hash?: string;
 }
 
 /** Options for full-text search across stored outputs. */

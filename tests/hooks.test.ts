@@ -349,6 +349,23 @@ describe("handlePostToolUse", () => {
     expect(count).toBe(1);
   });
 
+  it("dedups on identical output content even when tool_input differs", () => {
+    const response = { content: [{ type: "text", text: LARGE_GITHUB_RESPONSE }] };
+    // Same output, DIFFERENT input → input-hash misses, content-hash catches it.
+    const first = handlePostToolUse(
+      makePostToolUseInput("mcp__github__list_issues", response, { tool_input: { page: 1 } })
+    );
+    expect(first.updatedMCPToolOutput).toBeDefined();
+    const second = handlePostToolUse(
+      makePostToolUseInput("mcp__github__list_issues", response, { tool_input: { page: 2 } })
+    );
+
+    expect(second.updatedMCPToolOutput).toMatch(/· cached · /);
+    const db = getDb(":memory:");
+    const count = (db.prepare("SELECT COUNT(*) as n FROM stored_outputs").get() as { n: number }).n;
+    expect(count).toBe(1); // second call reused the first item
+  });
+
   // -------------------------------------------------------------------------
   // Eviction
   // -------------------------------------------------------------------------
