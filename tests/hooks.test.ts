@@ -251,6 +251,15 @@ describe("handlePostToolUse", () => {
     expect(result.updatedMCPToolOutput).toMatch(/→\d+(\.\d+)?(B|KB|MB)/);
   });
 
+  it("updatedMCPToolOutput includes retrieval hints", () => {
+    const result = handlePostToolUse(
+      makePostToolUseInput("mcp__github__list_issues", {
+        content: [{ type: "text", text: LARGE_GITHUB_RESPONSE }],
+      })
+    );
+    expect(result.updatedMCPToolOutput).toMatch(/· search: "[^"]+"/);
+  });
+
   it("stores the output in the DB", () => {
     handlePostToolUse(
       makePostToolUseInput("mcp__github__list_issues", {

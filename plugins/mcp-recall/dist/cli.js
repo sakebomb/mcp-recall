@@ -7814,6 +7814,96 @@ function getHandler(toolName, output, input) {
   return genericHandler;
 }
 
+// src/hints.ts
+var DEFAULT_MAX_HINTS = 5;
+var MIN_TOKEN_LEN = 3;
+var MAX_TOKEN_LEN = 40;
+var IDENTIFIER_BOOST = 2;
+var PROPER_NOUN_BOOST = 1;
+var TOKEN_RE = /[A-Za-z][A-Za-z0-9_]*/g;
+var CAMEL_RE = /[a-z][A-Z]/;
+var STOPWORDS = new Set([
+  "the",
+  "and",
+  "for",
+  "are",
+  "with",
+  "this",
+  "that",
+  "from",
+  "into",
+  "over",
+  "has",
+  "have",
+  "had",
+  "was",
+  "were",
+  "will",
+  "would",
+  "should",
+  "could",
+  "not",
+  "but",
+  "you",
+  "your",
+  "yours",
+  "all",
+  "any",
+  "can",
+  "use",
+  "used",
+  "using",
+  "its",
+  "out",
+  "per",
+  "via",
+  "one",
+  "two",
+  "get",
+  "set",
+  "new",
+  "null",
+  "true",
+  "false",
+  "none",
+  "nan",
+  "undefined"
+]);
+function isIdentifier(token) {
+  return token.includes("_") || CAMEL_RE.test(token);
+}
+function extractHints(content, maxHints = DEFAULT_MAX_HINTS) {
+  if (maxHints <= 0)
+    return [];
+  const matches = content.match(TOKEN_RE);
+  if (!matches)
+    return [];
+  const acc = new Map;
+  for (const raw of matches) {
+    if (raw.length < MIN_TOKEN_LEN || raw.length > MAX_TOKEN_LEN)
+      continue;
+    const key = raw.toLowerCase();
+    if (STOPWORDS.has(key))
+      continue;
+    const existing = acc.get(key);
+    if (existing) {
+      existing.count++;
+    } else {
+      acc.set(key, {
+        display: raw,
+        count: 1,
+        identifier: isIdentifier(raw),
+        proper: raw[0] >= "A" && raw[0] <= "Z"
+      });
+    }
+  }
+  return [...acc.values()].map((t) => ({
+    display: t.display,
+    key: t.display.toLowerCase(),
+    score: t.count + (t.identifier ? IDENTIFIER_BOOST : 0) + (t.proper ? PROPER_NOUN_BOOST : 0)
+  })).sort((a, b) => b.score - a.score || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)).slice(0, maxHints).map((t) => t.display);
+}
+
 // src/hooks/post-tool-use.ts
 function handlePostToolUse(raw) {
   let parsed;
@@ -7877,7 +7967,9 @@ ${cached2.summary}`,
   evictIfNeeded(db, projectKey, config.store.max_size_mb);
   const reduction = ((1 - summarySize / originalSize) * 100).toFixed(0);
   log.debug(`STORED \xB7 ${tool_name} \xB7 id=${stored.id} \xB7 ${formatBytes(originalSize)}\u2192${formatBytes(summarySize)} (${reduction}% reduction)`);
-  const header = `[recall:${stored.id} \xB7 ${formatBytes(originalSize)}\u2192${formatBytes(summarySize)} (${reduction}% reduction)]`;
+  const hints = extractHints(fullContent);
+  const hintStr = hints.length ? ` \xB7 search: ${hints.map((h) => `"${h}"`).join(", ")}` : "";
+  const header = `[recall:${stored.id} \xB7 ${formatBytes(originalSize)}\u2192${formatBytes(summarySize)} (${reduction}% reduction)${hintStr}]`;
   return {
     updatedMCPToolOutput: `${header}
 ${summary}`,

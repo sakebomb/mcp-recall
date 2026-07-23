@@ -4,6 +4,7 @@ import { getProjectKey } from "../project-key";
 import { isDenied } from "../denylist";
 import { findSecrets } from "../secrets";
 import { getHandler, extractText } from "../handlers/index";
+import { extractHints } from "../hints";
 import { getDb, defaultDbPath, storeOutput, checkDedup, evictIfNeeded } from "../db/index";
 import { formatBytes } from "../format";
 import { log } from "../log";
@@ -107,7 +108,10 @@ export function handlePostToolUse(raw: string): HookOutput {
   // 9. Return compressed output to Claude
   const reduction = ((1 - summarySize / originalSize) * 100).toFixed(0);
   log.debug(`STORED · ${tool_name} · id=${stored.id} · ${formatBytes(originalSize)}→${formatBytes(summarySize)} (${reduction}% reduction)`);
-  const header = `[recall:${stored.id} · ${formatBytes(originalSize)}→${formatBytes(summarySize)} (${reduction}% reduction)]`;
+  // Retrieval hints: a few salient terms so Claude's first recall__search lands.
+  const hints = extractHints(fullContent);
+  const hintStr = hints.length ? ` · search: ${hints.map((h) => `"${h}"`).join(", ")}` : "";
+  const header = `[recall:${stored.id} · ${formatBytes(originalSize)}→${formatBytes(summarySize)} (${reduction}% reduction)${hintStr}]`;
   return {
     updatedMCPToolOutput: `${header}\n${summary}`,
     suppressOutput: true,
