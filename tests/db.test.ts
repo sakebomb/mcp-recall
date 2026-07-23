@@ -7,6 +7,8 @@ import {
   recordAccess,
   pinOutput,
   checkDedup,
+  checkOutputDedup,
+  hashContent,
   evictIfNeeded,
   retrieveSnippet,
   searchOutputs,
@@ -503,6 +505,35 @@ describe("db", () => {
     it("does not match hash from a different project", () => {
       storeOutput(db, makeInput({ project_key: "otherproject567", input_hash: "hash1234" }));
       expect(checkDedup(db, PROJECT_KEY, "hash1234")).toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // checkOutputDedup / hashContent
+  // -------------------------------------------------------------------------
+
+  describe("content-hash dedup", () => {
+    it("storeOutput records output_hash = hashContent(full_content)", () => {
+      const stored = storeOutput(db, makeInput({ full_content: "abc123 content body" }));
+      expect(stored.output_hash).toBe(hashContent("abc123 content body"));
+    });
+
+    it("finds an item with identical content stored under a different call", () => {
+      const a = storeOutput(db, makeInput({ tool_name: "mcp__x__alpha", full_content: "same body text" }));
+      // Different tool name / input hash, identical content:
+      storeOutput(db, makeInput({ tool_name: "mcp__y__beta", full_content: "unrelated body" }));
+      const found = checkOutputDedup(db, PROJECT_KEY, hashContent("same body text"));
+      expect(found?.id).toBe(a.id);
+    });
+
+    it("returns null when no content matches", () => {
+      storeOutput(db, makeInput({ full_content: "one thing" }));
+      expect(checkOutputDedup(db, PROJECT_KEY, hashContent("another thing"))).toBeNull();
+    });
+
+    it("is scoped to the project", () => {
+      storeOutput(db, makeInput({ project_key: "otherproject567", full_content: "shared body" }));
+      expect(checkOutputDedup(db, PROJECT_KEY, hashContent("shared body"))).toBeNull();
     });
   });
 

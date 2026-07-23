@@ -5,7 +5,7 @@ import { isDenied } from "../denylist";
 import { findSecrets } from "../secrets";
 import { getHandler, extractText } from "../handlers/index";
 import { extractHints } from "../hints";
-import { getDb, defaultDbPath, storeOutput, checkDedup, evictIfNeeded } from "../db/index";
+import { getDb, defaultDbPath, storeOutput, checkDedup, checkOutputDedup, hashContent, evictIfNeeded } from "../db/index";
 import { formatBytes } from "../format";
 import { log } from "../log";
 
@@ -58,26 +58,30 @@ export function handlePostToolUse(raw: string): HookOutput {
   const projectKey = getProjectKey(cwd);
   const db = getDb(defaultDbPath(projectKey));
 
-  // 4. Dedup check — skip when tool_input is absent
+  // 4. Dedup check. input_hash catches an identical call (skipped when
+  //    tool_input is absent); output_hash catches identical *content* from any
+  //    call, so re-runs and different calls yielding the same output store once.
   const input_hash =
     tool_input !== undefined
       ? createHash("sha256")
           .update(tool_name + JSON.stringify(tool_input))
           .digest("hex")
       : null;
+  const output_hash = hashContent(fullContent);
 
-  if (input_hash) {
-    const cached = checkDedup(db, projectKey, input_hash);
-    if (cached) {
-      const cachedDate = new Date(cached.created_at * 1000).toISOString().slice(0, 10);
-      log.debug(`CACHE HIT · ${tool_name} · id=${cached.id} · cached ${cachedDate}`);
-      const header = `[recall:${cached.id} · cached · ${cachedDate}]`;
-      return {
-        updatedMCPToolOutput: `${header}\n${cached.summary}`,
-        suppressOutput: true,
-      };
-    }
-  }
+  const cachedResponse = (cached: { id: string; created_at: number; summary: string }): HookOutput => {
+    const cachedDate = new Date(cached.created_at * 1000).toISOString().slice(0, 10);
+    log.debug(`CACHE HIT · ${tool_name} · id=${cached.id} · cached ${cachedDate}`);
+    return {
+      updatedMCPToolOutput: `[recall:${cached.id} · cached · ${cachedDate}]\n${cached.summary}`,
+      suppressOutput: true,
+    };
+  };
+
+  const byInput = input_hash ? checkDedup(db, projectKey, input_hash) : null;
+  if (byInput) return cachedResponse(byInput);
+  const byOutput = checkOutputDedup(db, projectKey, output_hash);
+  if (byOutput) return cachedResponse(byOutput);
 
   // 5. Compress
   const handler = getHandler(tool_name, tool_response, tool_input);

@@ -49,6 +49,9 @@ export const jsonHandler: Handler = (
   }
 
   const truncated = truncate(parsed, 0);
-  const summary = JSON.stringify(truncated, null, 2);
+  // Compact (no indentation) — smaller inline summary, still fully readable by
+  // the model. Keys are kept verbatim rather than abbreviated, so no decode
+  // dictionary is needed.
+  const summary = JSON.stringify(truncated);
   return { summary, originalSize };
 };

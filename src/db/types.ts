@@ -13,6 +13,7 @@ export interface StoredOutput {
   access_count: number;
   last_accessed: number | null;
   input_hash: string | null;
+  output_hash: string | null;
 }
 
 /** Input required to persist a new compressed tool output. */

@@ -19621,7 +19621,9 @@ var MIGRATIONS = [
   "ALTER TABLE stored_outputs ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE stored_outputs ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE stored_outputs ADD COLUMN last_accessed INTEGER",
-  "ALTER TABLE stored_outputs ADD COLUMN input_hash TEXT"
+  "ALTER TABLE stored_outputs ADD COLUMN input_hash TEXT",
+  "ALTER TABLE stored_outputs ADD COLUMN output_hash TEXT",
+  "CREATE INDEX IF NOT EXISTS idx_so_output_hash ON stored_outputs(project_key, output_hash)"
 ];
 function applyMigrations(db) {
   for (const sql of MIGRATIONS) {
@@ -19682,7 +19684,7 @@ function sanitizeFtsQuery(query) {
   return trimmed.split(/\s+/).map((term) => `"${term.replace(/"/g, '""')}"`).join(" ");
 }
 // src/db/queries.ts
-import { randomBytes } from "crypto";
+import { randomBytes, createHash as createHash2 } from "crypto";
 
 // src/log.ts
 var _configDebugEnabled = false;
@@ -19734,13 +19736,14 @@ function storeOutput(db, input) {
   const summary_size = Buffer.byteLength(input.summary, "utf8");
   const created_at = Math.floor(Date.now() / 1000);
   const input_hash = input.input_hash ?? null;
+  const output_hash = hashContent(input.full_content);
   const insertAndChunk = db.transaction(() => {
     db.prepare(`
       INSERT INTO stored_outputs
         (id, project_key, session_id, tool_name, summary, full_content,
-         original_size, summary_size, created_at, input_hash)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, input.project_key, input.session_id, input.tool_name, input.summary, input.full_content, input.original_size, summary_size, created_at, input_hash);
+         original_size, summary_size, created_at, input_hash, output_hash)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, input.project_key, input.session_id, input.tool_name, input.summary, input.full_content, input.original_size, summary_size, created_at, input_hash, output_hash);
     storeChunks(db, id, input.full_content);
   });
   insertAndChunk();
@@ -19752,8 +19755,12 @@ function storeOutput(db, input) {
     pinned: 0,
     access_count: 0,
     last_accessed: null,
-    input_hash
+    input_hash,
+    output_hash
   };
+}
+function hashContent(content) {
+  return createHash2("sha256").update(content).digest("hex");
 }
 function retrieveOutput(db, id) {
   return db.prepare(`SELECT * FROM stored_outputs WHERE id = ?`).get(id);

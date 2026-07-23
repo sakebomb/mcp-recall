@@ -80,7 +80,7 @@ flowchart TD
     SCRT -- no --> DEDUP_N
 
     subgraph DEDUP["Dedup check"]
-        DEDUP_N["sha256(name+input)"]
+        DEDUP_N["sha256(name+input)<br/>or sha256(content)"]
     end
 
     DEDUP_N -- "cache hit" --> CACHED(["[cached] header"])
@@ -105,7 +105,7 @@ flowchart TD
 **Two hooks, one MCP server.**
 
 - `SessionStart` hook — records each active day, prunes expired items, and injects a compact context snapshot before the first message
-- `PostToolUse` hook — intercepts MCP tool outputs and native Bash commands; deduplicates identical calls; compresses, stores, and returns summary
+- `PostToolUse` hook — intercepts MCP tool outputs and native Bash commands; deduplicates identical calls (by input) and identical output (by content hash); compresses, stores, and returns summary
 - `recall` MCP server — exposes ten tools for retrieval, search, memory, and management
 
 > **Scope**: Compression applies to MCP tools and the native `Bash` built-in. The remaining built-ins (Read, Grep, Glob) pass through unchanged. See [Scope](#scope) for details.

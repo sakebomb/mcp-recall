@@ -1,5 +1,5 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
-import { randomBytes } from "crypto";
+import { randomBytes, createHash } from "crypto";
 import { log } from "../log";
 import type { StoredOutput, StoreInput, SearchOptions, ListOptions, ForgetOptions } from "./types";
 import { chunkText, sanitizeFtsQuery } from "./chunking";
@@ -41,17 +41,20 @@ export function storeOutput(db: Database, input: StoreInput): StoredOutput {
   const summary_size = Buffer.byteLength(input.summary, "utf8");
   const created_at = Math.floor(Date.now() / 1000);
   const input_hash = input.input_hash ?? null;
+  // Content hash enables dedup of identical output across different calls,
+  // independent of the input-based hash. Source of truth is the full content.
+  const output_hash = hashContent(input.full_content);
 
   const insertAndChunk = db.transaction(() => {
     db.prepare(`
       INSERT INTO stored_outputs
         (id, project_key, session_id, tool_name, summary, full_content,
-         original_size, summary_size, created_at, input_hash)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         original_size, summary_size, created_at, input_hash, output_hash)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, input.project_key, input.session_id, input.tool_name,
       input.summary, input.full_content, input.original_size,
-      summary_size, created_at, input_hash
+      summary_size, created_at, input_hash, output_hash
     );
 
     storeChunks(db, id, input.full_content);
@@ -63,7 +66,13 @@ export function storeOutput(db: Database, input: StoreInput): StoredOutput {
     id, ...input, summary_size, created_at,
     pinned: 0, access_count: 0, last_accessed: null,
     input_hash: input_hash,
+    output_hash,
   };
+}
+
+/** SHA-256 of tool output content, used as a path-independent dedup key. */
+export function hashContent(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
 }
 
 /** Fetches a single stored output by its ID, or `null` if not found. */
@@ -114,6 +123,24 @@ export function checkDedup(
     ORDER BY created_at DESC
     LIMIT 1
   `).get(project_key, input_hash) as StoredOutput | null;
+}
+
+/**
+ * Looks up the most recent stored output whose *content* matches `output_hash`.
+ * Catches the case the input-hash dedup misses: identical output produced by a
+ * different call (or a call with no `tool_input` to hash). Returns `null` on a miss.
+ */
+export function checkOutputDedup(
+  db: Database,
+  project_key: string,
+  output_hash: string
+): StoredOutput | null {
+  return db.prepare(`
+    SELECT * FROM stored_outputs
+    WHERE project_key = ? AND output_hash = ?
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(project_key, output_hash) as StoredOutput | null;
 }
 
 const DEFAULT_EVICTION_HALF_LIFE_DAYS = 7;
