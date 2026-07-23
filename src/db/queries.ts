@@ -42,8 +42,9 @@ export function storeOutput(db: Database, input: StoreInput): StoredOutput {
   const created_at = Math.floor(Date.now() / 1000);
   const input_hash = input.input_hash ?? null;
   // Content hash enables dedup of identical output across different calls,
-  // independent of the input-based hash. Source of truth is the full content.
-  const output_hash = hashContent(input.full_content);
+  // independent of the input-based hash. Reuse the caller's hash when provided
+  // (the hook already computed it for the dedup check) to avoid re-hashing.
+  const output_hash = input.output_hash ?? hashContent(input.full_content);
 
   const insertAndChunk = db.transaction(() => {
     db.prepare(`

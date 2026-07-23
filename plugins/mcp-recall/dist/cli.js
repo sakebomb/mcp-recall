@@ -5302,7 +5302,7 @@ function storeOutput(db, input) {
   const summary_size = Buffer.byteLength(input.summary, "utf8");
   const created_at = Math.floor(Date.now() / 1000);
   const input_hash = input.input_hash ?? null;
-  const output_hash = hashContent(input.full_content);
+  const output_hash = input.output_hash ?? hashContent(input.full_content);
   const insertAndChunk = db.transaction(() => {
     db.prepare(`
       INSERT INTO stored_outputs
@@ -7990,7 +7990,8 @@ ${cached2.summary}`,
     summary,
     full_content: fullContent,
     original_size: originalSize,
-    input_hash: input_hash ?? undefined
+    input_hash: input_hash ?? undefined,
+    output_hash
   });
   evictIfNeeded(db, projectKey, config.store.max_size_mb, config.store.eviction_half_life_days);
   const reduction = ((1 - summarySize / originalSize) * 100).toFixed(0);

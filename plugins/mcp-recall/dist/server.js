@@ -19736,7 +19736,7 @@ function storeOutput(db, input) {
   const summary_size = Buffer.byteLength(input.summary, "utf8");
   const created_at = Math.floor(Date.now() / 1000);
   const input_hash = input.input_hash ?? null;
-  const output_hash = hashContent(input.full_content);
+  const output_hash = input.output_hash ?? hashContent(input.full_content);
   const insertAndChunk = db.transaction(() => {
     db.prepare(`
       INSERT INTO stored_outputs

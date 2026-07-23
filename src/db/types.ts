@@ -25,6 +25,8 @@ export interface StoreInput {
   full_content: string;
   original_size: number;
   input_hash?: string;
+  /** Precomputed sha256 of full_content; storeOutput derives it when omitted. */
+  output_hash?: string;
 }
 
 /** Options for full-text search across stored outputs. */

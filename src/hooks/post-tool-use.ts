@@ -80,6 +80,9 @@ export function handlePostToolUse(raw: string): HookOutput {
 
   const byInput = input_hash ? checkDedup(db, projectKey, input_hash) : null;
   if (byInput) return cachedResponse(byInput);
+  // A content match may have been stored by a *different* tool; the cached
+  // response then carries that tool's id/summary. Attribution follows the first
+  // storer — acceptable since the full content is byte-identical.
   const byOutput = checkOutputDedup(db, projectKey, output_hash);
   if (byOutput) return cachedResponse(byOutput);
 
@@ -104,6 +107,7 @@ export function handlePostToolUse(raw: string): HookOutput {
     full_content: fullContent,
     original_size: originalSize,
     input_hash: input_hash ?? undefined,
+    output_hash, // reuse the hash computed above for the dedup check
   });
 
   // 8. Evict if store exceeds size limit

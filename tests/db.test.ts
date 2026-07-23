@@ -23,9 +23,10 @@ import {
   CHUNK_SIZE,
   CHUNK_OVERLAP,
   sanitizeFtsQuery,
+  initSchema,
   type StoreInput,
 } from "../src/db/index";
-import type { Database } from "bun:sqlite";
+import { Database } from "bun:sqlite";
 
 const PROJECT_KEY = "testproject1234";
 
@@ -511,6 +512,19 @@ describe("db", () => {
   // -------------------------------------------------------------------------
   // checkOutputDedup / hashContent
   // -------------------------------------------------------------------------
+
+  describe("schema migrations", () => {
+    it("applies migrations idempotently and adds the output_hash column", () => {
+      const raw = new Database(":memory:");
+      initSchema(raw);
+      // Second init: duplicate-column ALTERs are swallowed, CREATE INDEX IF NOT
+      // EXISTS is a no-op — must not throw.
+      expect(() => initSchema(raw)).not.toThrow();
+      const cols = (raw.prepare("PRAGMA table_info(stored_outputs)").all() as { name: string }[]).map((c) => c.name);
+      expect(cols).toContain("output_hash");
+      raw.close();
+    });
+  });
 
   describe("content-hash dedup", () => {
     it("storeOutput records output_hash = hashContent(full_content)", () => {
