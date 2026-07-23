@@ -486,6 +486,28 @@ describe("MCP tool handlers", () => {
       expect(peek).toContain("[…]"); // multiple chunks joined
       expect(peek.length).toBeLessThan(whole.length);
     });
+
+    it("mode 'peek' falls back to full content when the query matches no chunk", () => {
+      const stored = storeOutput(db, makeInput({ full_content: "hello world content here" }));
+      const result = toolRetrieve(db, { id: stored.id, mode: "peek", query: "zzznomatchxyz" });
+      expect(result).toContain("hello world content here");
+    });
+
+    it("mode 'peek' returns the full context window regardless of max_bytes", () => {
+      const full = Array.from({ length: 40 }, (_, i) => `needle${i} ${"z".repeat(100)}`).join("\n");
+      const stored = storeOutput(db, makeInput({ full_content: full }));
+      // max_bytes applies only to 'full'; a peek must not be truncated by it.
+      const result = toolRetrieve(db, { id: stored.id, mode: "peek", query: "needle5", max_bytes: 10 });
+      expect(result).not.toContain("truncated");
+      expect(result.length).toBeGreaterThan(10);
+    });
+
+    it("mode 'peek' tolerates FTS operator characters in the query", () => {
+      const stored = storeOutput(db, makeInput({ full_content: "alpha beta gamma delta" }));
+      expect(() =>
+        toolRetrieve(db, { id: stored.id, mode: "peek", query: 'alpha AND "beta' })
+      ).not.toThrow();
+    });
   });
 
   // -------------------------------------------------------------------------

@@ -19810,12 +19810,13 @@ function retrievePeek(db, id, query, maxChunks = PEEK_MAX_CHUNKS) {
   if (query) {
     const safeQuery = sanitizeFtsQuery(query);
     try {
-      const rows2 = db.prepare(`SELECT content FROM content_chunks
+      const rows2 = db.prepare(`SELECT content, chunk_index FROM content_chunks
            WHERE content_chunks MATCH ? AND output_id = ?
            ORDER BY rank
            LIMIT ?`).all(safeQuery, id, maxChunks);
-      if (rows2.length > 0)
-        return rows2.map((r) => r.content).join(PEEK_CHUNK_JOINER);
+      if (rows2.length > 0) {
+        return [...rows2].sort((a, b) => a.chunk_index - b.chunk_index).map((r) => r.content).join(PEEK_CHUNK_JOINER);
+      }
     } catch {}
     return null;
   }

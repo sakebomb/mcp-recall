@@ -238,13 +238,20 @@ export function retrievePeek(
     try {
       const rows = db
         .prepare(
-          `SELECT content FROM content_chunks
+          `SELECT content, chunk_index FROM content_chunks
            WHERE content_chunks MATCH ? AND output_id = ?
            ORDER BY rank
            LIMIT ?`
         )
-        .all(safeQuery, id, maxChunks) as { content: string }[];
-      if (rows.length > 0) return rows.map((r) => r.content).join(PEEK_CHUNK_JOINER);
+        .all(safeQuery, id, maxChunks) as { content: string; chunk_index: number }[];
+      if (rows.length > 0) {
+        // Select the top-K by relevance, then present them in document order so
+        // the […] joiner reflects real gaps, not a relevance reshuffle.
+        return [...rows]
+          .sort((a, b) => a.chunk_index - b.chunk_index)
+          .map((r) => r.content)
+          .join(PEEK_CHUNK_JOINER);
+      }
     } catch {
       // FTS parse error — signal fallback to the caller
     }
