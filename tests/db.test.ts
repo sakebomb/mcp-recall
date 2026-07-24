@@ -15,6 +15,8 @@ import {
   listOutputs,
   forgetOutputs,
   getStats,
+  setMeta,
+  getMeta,
   pruneExpired,
   recordSession,
   getSessionDays,
@@ -332,6 +334,43 @@ describe("db", () => {
       storeOutput(db, makeInput({ project_key: "otherproject567", original_size: 9999 }));
       const stats = getStats(db, PROJECT_KEY);
       expect(stats.total_items).toBe(0);
+    });
+
+    it("reports pinned item count and pinned bytes", () => {
+      const a = storeOutput(db, makeInput({ original_size: 1000 }));
+      storeOutput(db, makeInput({ original_size: 2000 }));
+      pinOutput(db, a.id, PROJECT_KEY, true);
+      const stats = getStats(db, PROJECT_KEY);
+      expect(stats.pinned_items).toBe(1);
+      expect(stats.pinned_bytes).toBe(1000);
+    });
+
+    it("reports zero pinned bytes when nothing is pinned", () => {
+      storeOutput(db, makeInput({ original_size: 500 }));
+      const stats = getStats(db, PROJECT_KEY);
+      expect(stats.pinned_items).toBe(0);
+      expect(stats.pinned_bytes).toBe(0);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // meta table
+  // -------------------------------------------------------------------------
+
+  describe("setMeta / getMeta", () => {
+    it("returns null for an unset key", () => {
+      expect(getMeta(db, "project_path")).toBeNull();
+    });
+
+    it("stores and reads back a value", () => {
+      setMeta(db, "project_path", "/home/u/proj");
+      expect(getMeta(db, "project_path")).toBe("/home/u/proj");
+    });
+
+    it("upserts an existing key rather than duplicating it", () => {
+      setMeta(db, "project_path", "/old");
+      setMeta(db, "project_path", "/new");
+      expect(getMeta(db, "project_path")).toBe("/new");
     });
   });
 

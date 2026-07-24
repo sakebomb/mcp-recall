@@ -232,6 +232,32 @@ mcp-recall profiles update
 
 ---
 
+## Maintenance
+
+mcp-recall keeps a separate SQLite database per project under `~/.local/share/mcp-recall/`. Over time, projects you delete leave their databases behind, and databases accumulate free pages. `mcp-recall gc` reclaims both:
+
+```bash
+# Review what would be reclaimed — dry run, deletes nothing
+mcp-recall gc
+
+# Actually delete orphaned + stale databases
+mcp-recall gc --force
+
+# Also compact the databases you keep (reclaims free pages;
+# rewrites each file, so it can take a moment on a large store)
+mcp-recall gc --force --vacuum
+```
+
+Each database is classified by whether its recorded project path still exists on disk:
+
+- **orphaned** — the project directory is gone; safe to delete.
+- **legacy** — created before path tracking; only a deletion candidate once untouched longer than `--stale-days N` (default 90).
+- **active** / **current** — kept; the current project's database is never deleted.
+
+The active project's database is always protected. When the store grows past `store.gc_reminder_mb` (default 2 GB), session start injects a one-line reminder to run `gc`, and `mcp-recall status` shows the store's size. There's no automatic deletion — reclaiming is always an explicit command.
+
+---
+
 ## Profiles
 
 Profiles teach mcp-recall how to compress output from specific MCPs. Four profiles ship built in (Jira, Gmail, Context7, Docker). **[18 community profiles](https://github.com/sakebomb/mcp-recall-profiles)** cover Grafana, Shopify, Notion, and more.
@@ -294,6 +320,11 @@ stale_item_days = 3
 # used recent item outranks one accessed many times but long ago. Lower =
 # recency matters more; higher = frequency dominates. Pinned items are exempt.
 eviction_half_life_days = 7
+
+# When the on-disk store (all project databases combined) grows past this many
+# megabytes, session start injects a one-line reminder to run `mcp-recall gc`.
+# Set to 0 to disable the reminder. Detection is cheap (no databases are opened).
+gc_reminder_mb = 2048
 
 [retrieve]
 # Max bytes returned by recall__retrieve(mode: "full").

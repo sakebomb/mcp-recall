@@ -18,13 +18,17 @@ export function getStats(db: Database, project_key: string): Stats {
     SELECT
       COUNT(*) as total_items,
       COALESCE(SUM(original_size), 0) as total_original_bytes,
-      COALESCE(SUM(summary_size), 0) as total_summary_bytes
+      COALESCE(SUM(summary_size), 0) as total_summary_bytes,
+      COALESCE(SUM(pinned), 0) as pinned_items,
+      COALESCE(SUM(CASE WHEN pinned = 1 THEN original_size ELSE 0 END), 0) as pinned_bytes
     FROM stored_outputs
     WHERE project_key = ?
   `).get(project_key) as {
     total_items: number;
     total_original_bytes: number;
     total_summary_bytes: number;
+    pinned_items: number;
+    pinned_bytes: number;
   };
 
   const compression_ratio =

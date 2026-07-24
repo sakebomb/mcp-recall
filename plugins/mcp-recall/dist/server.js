@@ -19562,7 +19562,7 @@ function hashPath(path) {
 }
 // src/db/schema.ts
 import { Database } from "bun:sqlite";
-import { join } from "path";
+import { join, dirname } from "path";
 import { homedir } from "os";
 import { mkdirSync } from "fs";
 var SCHEMA = `
@@ -19615,6 +19615,11 @@ var SCHEMA = `
 
   CREATE TABLE IF NOT EXISTS sessions (
     date TEXT PRIMARY KEY
+  );
+
+  CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
   );
 `;
 var MIGRATIONS = [
@@ -19731,6 +19736,15 @@ function countAndDelete(db, where, params) {
   return count;
 }
 var VACUUM_THRESHOLD = 50;
+function reclaimPages(db, deleted) {
+  if (deleted < VACUUM_THRESHOLD)
+    return;
+  try {
+    db.run("PRAGMA incremental_vacuum");
+  } catch (e) {
+    log.warn(`incremental_vacuum failed \u2014 ${e instanceof Error ? e.message : e}`);
+  }
+}
 function storeOutput(db, input) {
   const id = generateId();
   const summary_size = Buffer.byteLength(input.summary, "utf8");
@@ -19870,13 +19884,7 @@ function forgetOutputs(db, project_key, options) {
     const cutoff = Math.floor(Date.now() / 1000) - options.older_than_days * 86400;
     deleted = countAndDelete(db, `created_at < ? AND project_key = ? ${pinGuard}`, [cutoff, project_key]);
   }
-  if (deleted >= VACUUM_THRESHOLD) {
-    try {
-      db.run("PRAGMA incremental_vacuum");
-    } catch (e) {
-      log.warn(`incremental_vacuum failed \u2014 ${e instanceof Error ? e.message : e}`);
-    }
-  }
+  reclaimPages(db, deleted);
   return deleted;
 }
 function getSessionDays(db) {
@@ -19888,7 +19896,9 @@ function getStats(db, project_key) {
     SELECT
       COUNT(*) as total_items,
       COALESCE(SUM(original_size), 0) as total_original_bytes,
-      COALESCE(SUM(summary_size), 0) as total_summary_bytes
+      COALESCE(SUM(summary_size), 0) as total_summary_bytes,
+      COALESCE(SUM(pinned), 0) as pinned_items,
+      COALESCE(SUM(CASE WHEN pinned = 1 THEN original_size ELSE 0 END), 0) as pinned_bytes
     FROM stored_outputs
     WHERE project_key = ?
   `).get(project_key);
@@ -20988,7 +20998,8 @@ var RecallConfigSchema = exports_external.object({
     max_size_mb: exports_external.number().positive(),
     pin_recommendation_threshold: exports_external.number().int().positive(),
     stale_item_days: exports_external.number().int().positive(),
-    eviction_half_life_days: exports_external.number().positive()
+    eviction_half_life_days: exports_external.number().positive(),
+    gc_reminder_mb: exports_external.number().nonnegative()
   }),
   retrieve: exports_external.object({
     default_max_bytes: exports_external.number().positive()
@@ -21013,7 +21024,8 @@ var DEFAULTS = {
     max_size_mb: 500,
     pin_recommendation_threshold: 5,
     stale_item_days: 3,
-    eviction_half_life_days: 7
+    eviction_half_life_days: 7,
+    gc_reminder_mb: 2048
   },
   retrieve: {
     default_max_bytes: 8192
@@ -21097,6 +21109,7 @@ function formatRelativeTime(ms) {
 
 // src/tools.ts
 var CONTEXT_EMPTY_RESPONSE = "[recall: no context available yet \u2014 use recall tools to build up your context store]";
+var PIN_BUDGET_WARN_PCT = 80;
 var SEARCH_EXCERPT_LEN = 120;
 var NOTE_EXCERPT_LEN = 200;
 var CONTEXT_EXCERPT_LEN = 100;
@@ -21389,6 +21402,15 @@ function toolStats(db, projectKey, args = {}) {
     `  ~Tokens saved:     ~${tokensSaved.toLocaleString()}`,
     `  Session days:      ${sessionDays.length}`
   ];
+  if (stats.pinned_items > 0) {
+    const maxSizeMb = loadConfig().store.max_size_mb;
+    const maxBytes = maxSizeMb * 1024 * 1024;
+    const capPct = maxBytes > 0 ? stats.pinned_bytes / maxBytes * 100 : 0;
+    lines.push(`  Pinned:            ${stats.pinned_items} item${stats.pinned_items === 1 ? "" : "s"}` + ` (${formatBytes(stats.pinned_bytes)}, ${capPct.toFixed(0)}% of cap)`);
+    if (capPct >= PIN_BUDGET_WARN_PCT) {
+      lines.push(`  \u26A0 Pinned data is ${capPct.toFixed(0)}% of the ${maxSizeMb} MB cap and is exempt` + ` from eviction \u2014 unpin or raise store.max_size_mb to reclaim space.`);
+    }
+  }
   const breakdown = getToolBreakdown(db, projectKey);
   if (breakdown.length > 0) {
     lines.push("", "By tool (sorted by original size):");

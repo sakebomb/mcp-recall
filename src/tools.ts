@@ -34,6 +34,7 @@ import { formatBytes, formatRelativeTime } from "./format";
 // Display constants
 // ---------------------------------------------------------------------------
 
+const PIN_BUDGET_WARN_PCT = 80;  // warn in recall__stats when pinned bytes reach this % of max_size_mb
 const SEARCH_EXCERPT_LEN  = 120; // chars shown per result in recall__search
 const NOTE_EXCERPT_LEN    = 200; // chars shown in recall__note store confirmation
 const CONTEXT_EXCERPT_LEN = 100; // chars shown per item in recall__context
@@ -539,6 +540,24 @@ export function toolStats(
     `  ~Tokens saved:     ~${tokensSaved.toLocaleString()}`,
     `  Session days:      ${sessionDays.length}`,
   ];
+
+  // Pin-budget awareness: pinned items are exempt from eviction, so a store that
+  // is mostly pinned can silently defeat the max_size_mb cap. Surface it.
+  if (stats.pinned_items > 0) {
+    const maxSizeMb = loadConfig().store.max_size_mb;
+    const maxBytes = maxSizeMb * 1024 * 1024;
+    const capPct = maxBytes > 0 ? (stats.pinned_bytes / maxBytes) * 100 : 0;
+    lines.push(
+      `  Pinned:            ${stats.pinned_items} item${stats.pinned_items === 1 ? "" : "s"}` +
+        ` (${formatBytes(stats.pinned_bytes)}, ${capPct.toFixed(0)}% of cap)`
+    );
+    if (capPct >= PIN_BUDGET_WARN_PCT) {
+      lines.push(
+        `  ⚠ Pinned data is ${capPct.toFixed(0)}% of the ${maxSizeMb} MB cap and is exempt` +
+          ` from eviction — unpin or raise store.max_size_mb to reclaim space.`
+      );
+    }
+  }
 
   // Per-tool breakdown
   const breakdown = getToolBreakdown(db, projectKey);

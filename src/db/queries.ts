@@ -33,6 +33,37 @@ function countAndDelete(db: Database, where: string, params: SQLQueryBindings[])
 const VACUUM_THRESHOLD = 50;
 
 /**
+ * Returns free pages to the OS after a bulk delete, when enough rows were removed
+ * to be worth the work. A no-op on databases created without
+ * `auto_vacuum=INCREMENTAL` (e.g. legacy stores) — those must be reclaimed with a
+ * full `VACUUM`, which `mcp-recall gc --vacuum` performs. Never throws.
+ */
+export function reclaimPages(db: Database, deleted: number): void {
+  if (deleted < VACUUM_THRESHOLD) return;
+  try {
+    db.run("PRAGMA incremental_vacuum");
+  } catch (e) {
+    log.warn(`incremental_vacuum failed — ${e instanceof Error ? e.message : e}`);
+  }
+}
+
+/** Upserts a key/value pair into the per-project `meta` table. */
+export function setMeta(db: Database, key: string, value: string): void {
+  db.prepare(
+    `INSERT INTO meta (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+  ).run(key, value);
+}
+
+/** Reads a value from the `meta` table, or `null` if the key is absent. */
+export function getMeta(db: Database, key: string): string | null {
+  const row = db.prepare(`SELECT value FROM meta WHERE key = ?`).get(key) as
+    | { value: string }
+    | undefined;
+  return row?.value ?? null;
+}
+
+/**
  * Persists a compressed tool output and populates the FTS index and chunk table.
  * Returns the fully-hydrated row including the generated `id`.
  */
@@ -225,6 +256,8 @@ export function evictIfNeeded(
     ...(toEvict as unknown as SQLQueryBindings[])
   );
 
+  reclaimPages(db, toEvict.length);
+
   return toEvict.length;
 }
 
@@ -411,15 +444,7 @@ export function forgetOutputs(
     deleted = countAndDelete(db, `created_at < ? AND project_key = ? ${pinGuard}`, [cutoff, project_key]);
   }
 
-  if (deleted >= VACUUM_THRESHOLD) {
-    try {
-      // Non-blocking incremental reclamation; no-op on databases that were
-      // created without auto_vacuum=INCREMENTAL.
-      db.run("PRAGMA incremental_vacuum");
-    } catch (e) {
-      log.warn(`incremental_vacuum failed — ${e instanceof Error ? e.message : e}`);
-    }
-  }
+  reclaimPages(db, deleted);
 
   return deleted;
 }
@@ -435,7 +460,9 @@ export function pruneExpired(
   calendar_days: number
 ): number {
   const cutoff = Math.floor(Date.now() / 1000) - calendar_days * 86400;
-  return countAndDelete(db, "created_at < ? AND project_key = ? AND pinned = 0", [cutoff, project_key]);
+  const deleted = countAndDelete(db, "created_at < ? AND project_key = ? AND pinned = 0", [cutoff, project_key]);
+  reclaimPages(db, deleted);
+  return deleted;
 }
 
 /** Records a session date (YYYY-MM-DD) in the sessions table. No-op if already present. */

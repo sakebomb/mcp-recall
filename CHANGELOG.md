@@ -6,6 +6,17 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Added
+
+- **`mcp-recall gc` command** — reclaims disk from the per-project database store. Lists every project DB with a status (active / orphaned / legacy) and its reclaimable size; deletes orphaned DBs (recorded project path no longer exists on disk) and stale legacy DBs on `--force`. Defaults to a dry run. Flags: `--force`, `--stale-days N` (default 90), `--vacuum` (full-VACUUM survivors to reclaim free pages and upgrade legacy `auto_vacuum=NONE` databases). The active project's DB is never a deletion candidate (#200)
+- **Project-path metadata** — session start records the resolved project path in a per-DB `meta` table, enabling orphan detection in `gc` (#200)
+- **Pin-budget awareness in `recall__stats`** — reports pinned item count and pinned bytes, and warns when pinned data (which is exempt from eviction) reaches a high fraction of the `store.max_size_mb` cap (#200)
+- **Store-maintenance reminder** — when the on-disk store grows past `store.gc_reminder_mb` (default 2048; 0 disables), session start injects a one-line hint to run `mcp-recall gc`, and `mcp-recall status` shows the store's total size and database count. Detection is a cheap `stat` (no databases opened); nothing is ever deleted automatically (#200)
+
+### Fixed
+
+- **Free pages are now reclaimed after automatic deletes** — `evictIfNeeded` and the session-start prune invoke `incremental_vacuum` (previously only manual `recall__forget` did), so routine eviction returns disk to the OS on `auto_vacuum=INCREMENTAL` databases (#200)
+
 ---
 
 ## [1.9.0] — 2026-07-23

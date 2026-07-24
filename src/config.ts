@@ -13,6 +13,7 @@ const RecallConfigSchema = z.object({
     pin_recommendation_threshold: z.number().int().positive(),
     stale_item_days: z.number().int().positive(),
     eviction_half_life_days: z.number().positive(),
+    gc_reminder_mb: z.number().nonnegative(),
   }),
   retrieve: z.object({
     default_max_bytes: z.number().positive(),
@@ -42,6 +43,7 @@ const DEFAULTS: RecallConfig = {
     pin_recommendation_threshold: 5,
     stale_item_days: 3,
     eviction_half_life_days: 7,
+    gc_reminder_mb: 2048,
   },
   retrieve: {
     default_max_bytes: 8192,
