@@ -5660,14 +5660,24 @@ function toolContext(db, projectKey, args) {
 // src/gc/index.ts
 import { Database as Database2 } from "bun:sqlite";
 import { readdirSync, existsSync, statSync, rmSync } from "fs";
-import { join as join3, basename } from "path";
+import { join as join3, basename, dirname as dirname2, resolve } from "path";
 var DEFAULT_STALE_DAYS = 90;
+var STATUS_POLICY = {
+  current: { deletable: false, vacuumable: false },
+  active: { deletable: false, vacuumable: true },
+  orphaned: { deletable: true, vacuumable: false },
+  unverifiable: { deletable: false, vacuumable: false },
+  "legacy-fresh": { deletable: false, vacuumable: true },
+  "legacy-stale": { deletable: true, vacuumable: false },
+  unreadable: { deletable: false, vacuumable: false }
+};
 function isDeletionCandidate(status) {
-  return status === "orphaned" || status === "legacy-stale";
+  return STATUS_POLICY[status].deletable;
 }
 function vacuumTargets(entries) {
-  return entries.filter((e) => !isDeletionCandidate(e.status) && e.status !== "current" && e.status !== "unreadable");
+  return entries.filter((e) => STATUS_POLICY[e.status].vacuumable);
 }
+var sumBytes = (entries) => entries.reduce((sum, e) => sum + e.sizeBytes, 0);
 function fileSizeSafe(path) {
   try {
     return statSync(path).size;
@@ -5691,10 +5701,49 @@ function storeFootprint(dir = dataDir()) {
   }
   return { totalBytes, dbCount };
 }
+function gcReminderText(footprint, reminderMb) {
+  if (reminderMb <= 0)
+    return "";
+  if (footprint.totalBytes < reminderMb * 1024 * 1024)
+    return "";
+  return `\uD83D\uDCA1 recall store is ${formatBytes(footprint.totalBytes)} across ${footprint.dbCount} ` + `project databases \u2014 run \`mcp-recall gc\` to review and reclaim disk space.`;
+}
+function probeDb(file) {
+  let db = null;
+  try {
+    db = new Database2(file, { readonly: true });
+    const isRecallDb = db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='stored_outputs'`).get();
+    if (!isRecallDb)
+      return { readable: false, projectPath: null, items: 0 };
+    let projectPath = null;
+    try {
+      projectPath = getMeta(db, "project_path");
+    } catch {
+      projectPath = null;
+    }
+    const items = db.prepare(`SELECT COUNT(*) AS n FROM stored_outputs`).get().n;
+    return { readable: true, projectPath, items };
+  } catch {
+    return { readable: false, projectPath: null, items: 0 };
+  } finally {
+    db?.close();
+  }
+}
+function classify(probe, mtimeMs, staleCutoffMs) {
+  if (!probe.readable)
+    return "unreadable";
+  if (probe.projectPath !== null) {
+    if (existsSync(probe.projectPath))
+      return "active";
+    return existsSync(dirname2(probe.projectPath)) ? "orphaned" : "unverifiable";
+  }
+  return mtimeMs < staleCutoffMs ? "legacy-stale" : "legacy-fresh";
+}
 function scanDatabases(dir, currentFile, staleDays, nowMs = Date.now()) {
   if (!existsSync(dir))
     return [];
   const staleCutoffMs = nowMs - staleDays * 86400 * 1000;
+  const currentResolved = resolve(currentFile);
   const entries = [];
   for (const name of readdirSync(dir)) {
     if (!name.endsWith(".db"))
@@ -5707,40 +5756,13 @@ function scanDatabases(dir, currentFile, staleDays, nowMs = Date.now()) {
       continue;
     }
     const sizeBytes = dbFootprint(file);
-    if (file === currentFile) {
+    if (resolve(file) === currentResolved) {
       entries.push({ file, status: "current", projectPath: null, sizeBytes, mtimeMs, items: 0 });
       continue;
     }
-    let projectPath = null;
-    let items = 0;
-    let readable = true;
-    let db = null;
-    try {
-      db = new Database2(file, { readonly: true });
-      try {
-        projectPath = getMeta(db, "project_path");
-      } catch {
-        projectPath = null;
-      }
-      try {
-        items = db.prepare(`SELECT COUNT(*) AS n FROM stored_outputs`).get().n;
-      } catch {
-        items = 0;
-      }
-    } catch {
-      readable = false;
-    } finally {
-      db?.close();
-    }
-    let status;
-    if (!readable) {
-      status = "unreadable";
-    } else if (projectPath !== null) {
-      status = existsSync(projectPath) ? "active" : "orphaned";
-    } else {
-      status = mtimeMs < staleCutoffMs ? "legacy-stale" : "legacy-fresh";
-    }
-    entries.push({ file, status, projectPath, sizeBytes, mtimeMs, items });
+    const probe = probeDb(file);
+    const status = classify(probe, mtimeMs, staleCutoffMs);
+    entries.push({ file, status, projectPath: probe.projectPath, sizeBytes, mtimeMs, items: probe.items });
   }
   return entries.sort((a, b) => b.sizeBytes - a.sizeBytes);
 }
@@ -5748,6 +5770,7 @@ var STATUS_LABEL = {
   current: "current",
   active: "active",
   orphaned: "ORPHANED",
+  unverifiable: "unverifiable",
   "legacy-fresh": "legacy",
   "legacy-stale": "LEGACY-STALE",
   unreadable: "unreadable"
@@ -5767,17 +5790,31 @@ function vacuumFile(file) {
     db.run("PRAGMA busy_timeout=5000");
     db.run("PRAGMA auto_vacuum=INCREMENTAL");
     db.run("VACUUM");
-  } catch {
-    return null;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    log.warn(`vacuum failed for ${basename(file)} \u2014 ${message}`);
+    return { error: message };
   } finally {
     db?.close();
   }
   return { before, after: dbFootprint(file) };
 }
+function vacuumSkipReason(error) {
+  if (/lock|busy/i.test(error))
+    return "locked by another session";
+  if (/disk|full|space/i.test(error))
+    return "disk full";
+  return "unreadable or errored (see RECALL_DEBUG logs)";
+}
 function deleteDbFiles(file) {
   for (const f of [file, `${file}-wal`, `${file}-shm`]) {
     rmSync(f, { force: true });
   }
+}
+function executeDeletions(candidates) {
+  for (const e of candidates)
+    deleteDbFiles(e.file);
+  return sumBytes(candidates);
 }
 function gcCommand(opts = {}) {
   const dryRun = opts.dryRun ?? true;
@@ -5791,34 +5828,27 @@ function gcCommand(opts = {}) {
     return;
   }
   const candidates = entries.filter((e) => isDeletionCandidate(e.status));
-  const reclaimable = candidates.reduce((sum, e) => sum + e.sizeBytes, 0);
-  const totalBytes = entries.reduce((sum, e) => sum + e.sizeBytes, 0);
   console.log(`Project databases in ${dir}:
 `);
   for (const e of entries)
     console.log(reportLine(e, nowMs));
   console.log(`
-${entries.length} databases \xB7 ${formatBytes(totalBytes)} total \xB7 ` + `${candidates.length} reclaimable (${formatBytes(reclaimable)})`);
-  console.log(`  Orphaned = project path deleted \xB7 LEGACY-STALE = no recorded path, ` + `untouched > ${staleDays}d (raise/lower with --stale-days N)`);
+${entries.length} databases \xB7 ${formatBytes(sumBytes(entries))} total \xB7 ` + `${candidates.length} reclaimable (${formatBytes(sumBytes(candidates))})`);
+  console.log(`  ORPHANED = project path deleted \xB7 LEGACY-STALE = no recorded path, untouched > ${staleDays}d ` + `(--stale-days N) \xB7 unverifiable/unreadable are never deleted`);
   if (dryRun) {
     if (candidates.length > 0) {
       console.log(`
 Dry run \u2014 pass --force to delete the ${candidates.length} marked database(s).`);
     }
   } else {
-    let freed = 0;
-    for (const e of candidates) {
-      deleteDbFiles(e.file);
-      freed += e.sizeBytes;
-    }
+    const freed = executeDeletions(candidates);
     console.log(`
 Deleted ${candidates.length} database(s), freed ${formatBytes(freed)}.`);
   }
   if (opts.vacuum) {
     const survivors = vacuumTargets(entries);
-    const totalToVacuum = survivors.reduce((sum, e) => sum + e.sizeBytes, 0);
     console.log(`
-Vacuuming ${survivors.length} database(s) to keep (${formatBytes(totalToVacuum)}) \u2014 ` + `rewrites each file, may take a while\u2026`);
+Vacuuming ${survivors.length} database(s) to keep (${formatBytes(sumBytes(survivors))}) \u2014 ` + `rewrites each file, may take a while\u2026`);
     let reclaimed = 0;
     let vacuumed = 0;
     let skipped = 0;
@@ -5826,14 +5856,14 @@ Vacuuming ${survivors.length} database(s) to keep (${formatBytes(totalToVacuum)}
       const e = survivors[i];
       process.stdout.write(`  [${i + 1}/${survivors.length}] ${basename(e.file)} (${formatBytes(e.sizeBytes)})\u2026 `);
       const result = vacuumFile(e.file);
-      if (result) {
+      if ("after" in result) {
         const freed = Math.max(0, result.before - result.after);
         reclaimed += freed;
         vacuumed++;
         console.log(`reclaimed ${formatBytes(freed)}`);
       } else {
         skipped++;
-        console.log(`skipped \u2014 locked by another session or unreadable`);
+        console.log(`skipped \u2014 ${vacuumSkipReason(result.error)}`);
       }
     }
     const skipNote = skipped > 0 ? ` (${skipped} skipped)` : "";
@@ -5842,14 +5872,6 @@ Vacuuming ${survivors.length} database(s) to keep (${formatBytes(totalToVacuum)}
 }
 
 // src/hooks/session-start.ts
-function gcReminder(reminderMb) {
-  if (reminderMb <= 0)
-    return "";
-  const { totalBytes, dbCount } = storeFootprint();
-  if (totalBytes < reminderMb * 1024 * 1024)
-    return "";
-  return `\uD83D\uDCA1 recall store is ${formatBytes(totalBytes)} across ${dbCount} project ` + `databases \u2014 run \`mcp-recall gc\` to review and reclaim disk space.`;
-}
 var INJECT_MAX_CHARS = 2000;
 function handleSessionStart(raw) {
   let parsed;
@@ -5872,7 +5894,7 @@ function handleSessionStart(raw) {
   recordSession(db, today);
   pruneExpired(db, projectKey, config.store.expire_after_session_days);
   const parts = [];
-  const reminder = gcReminder(config.store.gc_reminder_mb);
+  const reminder = gcReminderText(storeFootprint(), config.store.gc_reminder_mb);
   if (reminder)
     parts.push(reminder);
   let snapshot = toolContext(db, projectKey, {});
@@ -8666,9 +8688,9 @@ function installedCommunityMap() {
 async function promptNumber(msg, min, max) {
   for (let attempt = 0;attempt < 3; attempt++) {
     process.stdout.write(msg);
-    const line = await new Promise((resolve) => {
+    const line = await new Promise((resolve2) => {
       process.stdin.setEncoding("utf8");
-      process.stdin.once("data", (d) => resolve(String(d).trim()));
+      process.stdin.once("data", (d) => resolve2(String(d).trim()));
     });
     const n = parseInt(line);
     if (!isNaN(n) && n >= min && n <= max)
@@ -9255,7 +9277,7 @@ class LineReader {
     this.reader = stream.getReader();
   }
   async readLine(timeoutMs) {
-    const timer = new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs));
+    const timer = new Promise((resolve2) => setTimeout(() => resolve2(null), timeoutMs));
     const read = this._nextLine();
     return Promise.race([read, timer]);
   }
@@ -9512,8 +9534,8 @@ async function tryLegacySse(url, timeoutMs) {
         return req.then(() => {
           return;
         });
-      return new Promise((resolve, reject) => {
-        pending.set(body.id, { resolve, reject });
+      return new Promise((resolve2, reject) => {
+        pending.set(body.id, { resolve: resolve2, reject });
         req.catch(reject);
       });
     };
@@ -9759,7 +9781,7 @@ Next steps:`);
 
 // src/import/index.ts
 import { readFileSync as readFileSync9, statSync as statSync3, existsSync as existsSync2 } from "fs";
-import { resolve } from "path";
+import { resolve as resolve2 } from "path";
 import { Database as Database3 } from "bun:sqlite";
 var LARGE_FILE_BYTES = 50 * 1024 * 1024;
 var EMPTY_EXPORT_SENTINEL = "[recall: no items to export]";
@@ -9845,7 +9867,7 @@ async function handleImportCommand(args) {
   const keepProjectKey = args.includes("--keep-project-key");
   const dryRun = args.includes("--dry-run");
   const rawPath = args.find((a) => !a.startsWith("--"));
-  const filePath = rawPath ? resolve(rawPath) : null;
+  const filePath = rawPath ? resolve2(rawPath) : null;
   let raw;
   if (filePath) {
     try {

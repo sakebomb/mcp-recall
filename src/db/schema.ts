@@ -61,7 +61,9 @@ const SCHEMA = `
   );
 `;
 
-// Columns added after initial schema — applied once, idempotent via try/catch
+// Schema changes applied after initial creation, each idempotent: columns rely on
+// the duplicate-column catch below (SQLite has no ADD COLUMN IF NOT EXISTS),
+// indexes use IF NOT EXISTS directly.
 const MIGRATIONS = [
   "ALTER TABLE stored_outputs ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE stored_outputs ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0",
