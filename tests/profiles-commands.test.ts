@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { patternsOverlap, testProfile, cmdList, cmdInstall, cmdRemove, cmdAvailable, verifyManifest } from "../src/profiles/commands";
+import { SIGNER_WORKFLOW } from "../src/profiles/shared";
 import { clearProfileCache, getShortName } from "../src/profiles/loader";
 
 // ── patternsOverlap ───────────────────────────────────────────────────────────
@@ -852,6 +853,28 @@ describe("verifyManifest", () => {
       process.stderr.write = origWrite;
       spy.mockRestore();
     }
+  });
+
+  test("pins the signer workflow, not just the repo", () => {
+    let verifyArgs: string[] = [];
+    const spy = spyOn(Bun, "spawnSync").mockImplementation((cmd: unknown, ..._rest: unknown[]) => {
+      const args = cmd as string[];
+      if (args[1] !== "--version") verifyArgs = args;
+      return { exitCode: 0, stderr: new Uint8Array(), stdout: new Uint8Array(), success: true } as ReturnType<typeof Bun.spawnSync>;
+    });
+
+    try {
+      verifyManifest(tmpFile, "warn");
+    } finally {
+      spy.mockRestore();
+    }
+
+    // Repo scope alone accepts an attestation from any workflow in the repo.
+    const flagIdx = verifyArgs.indexOf("--signer-workflow");
+    expect(flagIdx).toBeGreaterThan(-1);
+    expect(verifyArgs[flagIdx + 1]).toBe(SIGNER_WORKFLOW);
+    // gh requires `<owner>/<repo>/<path>` and silently rejects a bare workflow path.
+    expect(SIGNER_WORKFLOW).toBe("sakebomb/mcp-recall-profiles/.github/workflows/manifest.yml");
   });
 
   test("warn mode succeeds silently when gh exits zero", () => {

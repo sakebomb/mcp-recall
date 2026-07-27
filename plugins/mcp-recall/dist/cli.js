@@ -8577,6 +8577,7 @@ import { createHash as createHash4 } from "crypto";
 var MANIFEST_URL = "https://raw.githubusercontent.com/sakebomb/mcp-recall-profiles/main/manifest.json";
 var PROFILE_BASE_URL = "https://raw.githubusercontent.com/sakebomb/mcp-recall-profiles/main/";
 var COMMUNITY_REPO = "sakebomb/mcp-recall-profiles";
+var SIGNER_WORKFLOW = `${COMMUNITY_REPO}/.github/workflows/manifest.yml`;
 var SAFE_ID_RE = /^[a-z0-9_-]+$/;
 var SAFE_FILE_RE = /^profiles\/[a-z0-9_-]+\/[a-z0-9_.-]+\.toml$/;
 function assertSafeId(id) {
@@ -8629,7 +8630,16 @@ function verifyManifest(manifestPath, mode) {
 `);
     return;
   }
-  const result = Bun.spawnSync(["gh", "attestation", "verify", manifestPath, "--repo", COMMUNITY_REPO], { stderr: "pipe", stdout: "ignore" });
+  const result = Bun.spawnSync([
+    "gh",
+    "attestation",
+    "verify",
+    manifestPath,
+    "--repo",
+    COMMUNITY_REPO,
+    "--signer-workflow",
+    SIGNER_WORKFLOW
+  ], { stderr: "pipe", stdout: "ignore" });
   if (result.exitCode !== 0) {
     const errText = result.stderr ? new TextDecoder().decode(result.stderr).trim() : "";
     const msg = `[recall] manifest signature verification failed${errText ? `: ${errText}` : ""}

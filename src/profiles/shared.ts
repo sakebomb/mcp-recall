@@ -11,6 +11,18 @@ export const PROFILE_BASE_URL =
   "https://raw.githubusercontent.com/sakebomb/mcp-recall-profiles/main/";
 export const COMMUNITY_REPO = "sakebomb/mcp-recall-profiles";
 
+/**
+ * The only workflow whose attestations we accept for the manifest.
+ *
+ * Repo scope alone is too weak: it accepts an attestation from *any* workflow in
+ * COMMUNITY_REPO, so any workflow there that can obtain an OIDC token could mint
+ * a trust root we would honour. Derived from COMMUNITY_REPO so the two cannot drift.
+ *
+ * Format is `[host/]<owner>/<repo>/<path>/<to>/<workflow>` — a bare workflow path
+ * is silently rejected by `gh`, so the repo prefix is required, not decorative.
+ */
+export const SIGNER_WORKFLOW = `${COMMUNITY_REPO}/.github/workflows/manifest.yml`;
+
 // ── input validation ──────────────────────────────────────────────────────────
 
 const SAFE_ID_RE = /^[a-z0-9_-]+$/;
@@ -115,7 +127,11 @@ export function verifyManifest(manifestPath: string, mode: "warn" | "error" | "s
   }
 
   const result = Bun.spawnSync(
-    ["gh", "attestation", "verify", manifestPath, "--repo", COMMUNITY_REPO],
+    [
+      "gh", "attestation", "verify", manifestPath,
+      "--repo", COMMUNITY_REPO,
+      "--signer-workflow", SIGNER_WORKFLOW,
+    ],
     { stderr: "pipe", stdout: "ignore" }
   );
 

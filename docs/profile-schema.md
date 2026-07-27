@@ -191,6 +191,12 @@ verify_signature = "warn"   # default — logs a warning if verification fails o
 # verify_signature = "skip"   # disable verification entirely
 ```
 
+Verification enforces **which workflow signed the manifest**, not merely that it came from
+the profiles repo. The accepted signer is
+`sakebomb/mcp-recall-profiles/.github/workflows/manifest.yml` — the workflow that
+regenerates, commits, and attests the manifest in a single job. Repo scope alone would
+accept an attestation from any workflow in that repository.
+
 To skip verification for a single command (e.g. in CI without `gh` installed):
 
 ```bash

@@ -17,6 +17,10 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 - **Free pages are now reclaimed after automatic deletes** — `evictIfNeeded` and the session-start prune invoke `incremental_vacuum` (previously only manual `recall__forget` did), so routine eviction returns disk to the OS on `auto_vacuum=INCREMENTAL` databases (#200)
 
+### Security
+
+- **Manifest verification now pins the signing workflow.** Previously the attestation was verified with repo scope only, so an attestation from *any* workflow in the profiles repository was accepted as a valid trust root. Verification now also enforces `--signer-workflow`, requiring the specific workflow that regenerates and attests the manifest (#202)
+
 ---
 
 ## [1.9.0] — 2026-07-23
