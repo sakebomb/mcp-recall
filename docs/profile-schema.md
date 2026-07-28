@@ -186,9 +186,8 @@ When `install`, `update`, or `seed` download the community manifest, mcp-recall 
 
 ```toml
 [profiles]
-verify_signature = "warn"   # default — logs a warning if verification fails or gh is absent
-# verify_signature = "error"  # hard-fail if the signature does not verify (still skipped
-                             # when gh is unavailable — see below)
+verify_signature = "warn"   # default — logs a warning if verification fails
+# verify_signature = "error"  # hard-fail if the signature does not verify — but see below: still skipped when gh is unavailable
 # verify_signature = "skip"   # disable verification entirely
 ```
 

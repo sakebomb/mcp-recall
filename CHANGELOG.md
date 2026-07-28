@@ -13,6 +13,10 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 - **Pin-budget awareness in `recall__stats`** — reports pinned item count and pinned bytes, and warns when pinned data (which is exempt from eviction) reaches a high fraction of the `store.max_size_mb` cap (#200)
 - **Store-maintenance reminder** — when the on-disk store grows past `store.gc_reminder_mb` (default 2048; 0 disables), session start injects a one-line hint to run `mcp-recall gc`, and `mcp-recall status` shows the store's total size and database count. Detection is a cheap `stat` (no databases opened); nothing is ever deleted automatically (#200)
 
+### Changed
+
+- **An outdated `gh` no longer looks like a tampered manifest.** A `gh` too old to support the flags we verify with — or, older still, with no `attestation` subcommand at all — exits non-zero exactly as a bad signature does; that case is now reported as a skipped verification telling you to upgrade `gh`, instead of a signature failure (which in `error` mode would have hard-failed `profiles install/seed/update`) (#202)
+
 ### Fixed
 
 - **Free pages are now reclaimed after automatic deletes** — `evictIfNeeded` and the session-start prune invoke `incremental_vacuum` (previously only manual `recall__forget` did), so routine eviction returns disk to the OS on `auto_vacuum=INCREMENTAL` databases (#200)
@@ -20,10 +24,6 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 ### Security
 
 - **Manifest verification now pins the exact signing identity.** Previously the attestation was verified with repo scope only, so an attestation from *any* workflow in the profiles repository was accepted as a valid trust root. Verification now enforces `--cert-identity`, requiring the specific workflow *and* ref that regenerates and attests the manifest. (`--signer-workflow` alone was insufficient: it compiles to a prefix-anchored match that stops short of the `@ref` suffix, so an attestation signed from any branch would still have matched.) (#202)
-
-### Changed
-
-- **An outdated `gh` no longer looks like a tampered manifest.** A `gh` too old to support `--cert-identity` exits non-zero exactly as a bad signature does; that case is now reported as a skipped verification telling you to upgrade `gh`, instead of a signature failure (which in `error` mode would have hard-failed `profiles install/seed/update`) (#202)
 
 ---
 
