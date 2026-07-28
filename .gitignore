@@ -18,3 +18,8 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Agent scratch output. tasks/ itself is tracked (todo, lessons, specs); this
+# subdirectory is working notes whose durable conclusions get written elsewhere,
+# so it should never be committed.
+tasks/scratch/
