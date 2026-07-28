@@ -4,7 +4,52 @@ Active work and upcoming tasks.
 
 ## In Progress
 
-_nothing in progress_
+**Phase 13 — stabilize + document.** No new features until it lands. Plan and phase table
+are in `CLAUDE.md`; #208 and #205 stay open deliberately.
+
+| Step | State |
+|------|-------|
+| A — CLAUDE.md accuracy | ✓ DONE, PR [#220](https://github.com/sakebomb/mcp-recall/pull/220) @ `709c780` |
+| B — full docs re-read | **pass 2 done, pass 1 NOT started** ← resume here |
+| C — `docs/architecture.md` for contributors | not started |
+| D — `ROADMAP.md` with explicit non-goals | not started |
+
+### Step B needs TWO passes — they find disjoint classes of problem
+
+1. **Self-consistency** (does the doc contradict itself or a sibling doc?) — cheap, high
+   yield, but *structurally blind* to anything never written down. Run it **while writing**,
+   per document, not as a final proofread: in Phase A, three of the four contradictions were
+   introduced by the very commit that fixed another one.
+2. **Inventory vs code** (is every real surface documented at all?) — the only pass that
+   finds silence, which is what shipped a broken `npx` for two releases (#216).
+
+### Pass 2 findings — the work-list for pass 1's fixes
+
+- `recall__suggest` — missing from **both** `docs/tools.md` and `README.md` (shipped tool)
+- `mcp-recall import` — missing from `README.md`
+- `mcp-recall completions` — missing from `README.md`
+- `debug.enabled` config key — documented nowhere user-facing (only `RECALL_DEBUG` is, in
+  `docs/troubleshooting.md`)
+- **No environment-variable reference exists anywhere in user docs.** `RECALL_CONFIG_PATH`
+  and `RECALL_DB_PATH` appear only in `CLAUDE.md` (agent-facing); `RECALL_USER_PROFILES_PATH`,
+  `RECALL_COMMUNITY_PROFILES_PATH`, `RECALL_BUNDLED_PROFILES_PATH` appear nowhere. Verified
+  these are production overrides in `src/`, not test seams — `src/db/schema.ts:94` documents
+  `RECALL_DB_PATH` as supported in a code comment.
+
+Verified correctly documented, NOT gaps: all three `gc` flags; all three `recall__retrieve`
+modes in `docs/tools.md`.
+
+### Pass 1 scope when resuming
+
+2,244 lines across 12 surfaces: `README.md` 520, `CONTRIBUTING.md` 259, `docs/profile-schema.md`
+289, `docs/ai-profile-guide.md` 229, `docs/tools.md` 238, `docs/troubleshooting.md` 176,
+`docs/profiles-quickstart.md` 141, `docs/retrain.md` 99, `docs/quickstart.md` 85,
+`SECURITY.md` 66, plus `CODE_OF_CONDUCT.md` and `demo/README.md`. Verify claims empirically —
+the README asserts things like "88–97% context savings" that are testable.
+
+GOTCHA from Phase A: my own audit loops produced false results twice (a `grep -q "$d"` without
+a trailing slash matched prose and hid `src/import/`; a `grep -c` aggregation wrongly reported
+two env vars as undocumented everywhere). Re-verify per-file before believing loop output.
 
 ## Up Next
 
