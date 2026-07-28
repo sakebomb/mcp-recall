@@ -3,8 +3,43 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { patternsOverlap, testProfile, cmdList, cmdInstall, cmdRemove, cmdAvailable, verifyManifest } from "../src/profiles/commands";
-import { SIGNER_IDENTITY, COMMUNITY_REPO } from "../src/profiles/shared";
+import { SIGNER_IDENTITY, COMMUNITY_REPO, fetchManifest } from "../src/profiles/shared";
 import { clearProfileCache, getShortName } from "../src/profiles/loader";
+import { resetConfig } from "../src/config";
+
+let configDir: string | null = null;
+
+/**
+ * Pins `profiles.verify_signature` for a block, so no test's outcome depends on
+ * the ambient `~/.config/mcp-recall/config.toml` of whoever runs the suite.
+ *
+ * `"skip"` is for blocks that stub `fetch` with a fixture manifest: such a
+ * manifest is unattested by construction, so leaving verification on made
+ * `verifyManifest` shell out to a real `gh attestation verify` — a live network
+ * call per case whose result depended on the real profiles repo's attestation
+ * state. Verification itself is covered by the `verifyManifest` block, and that
+ * `fetchManifest` invokes it at all by `describe("fetchManifest")`, which pins
+ * `"warn"` for the same don't-trust-ambient-config reason.
+ *
+ * Also resets the module-level config cache in `src/config.ts`, which is shared
+ * across test files in Bun's single process.
+ */
+function writeConfig(mode: "warn" | "error" | "skip"): void {
+  configDir = mkdtempSync(join(tmpdir(), "recall-cfg-"));
+  const path = join(configDir, "config.toml");
+  writeFileSync(path, `[profiles]\nverify_signature = "${mode}"\n`, "utf8");
+  process.env.RECALL_CONFIG_PATH = path;
+  resetConfig();
+}
+
+function restoreConfig(): void {
+  delete process.env.RECALL_CONFIG_PATH;
+  resetConfig();
+  if (configDir) {
+    rmSync(configDir, { recursive: true, force: true });
+    configDir = null;
+  }
+}
 
 // ── patternsOverlap ───────────────────────────────────────────────────────────
 
@@ -339,6 +374,7 @@ type = "text_truncate"`;
     communityDir = mkdtempSync(join(tmpdir(), "recall-seed-"));
     clearProfileCache();
     process.env.RECALL_COMMUNITY_PROFILES_PATH = communityDir;
+    writeConfig("skip");
     originalFetch = globalThis.fetch;
     globalThis.fetch = (async (url: string | URL | Request) => {
       const u = url.toString();
@@ -360,6 +396,7 @@ type = "text_truncate"`;
     delete process.env.RECALL_COMMUNITY_PROFILES_PATH;
     clearProfileCache();
     globalThis.fetch = originalFetch;
+    restoreConfig();
   });
 
   test("installs all profiles from manifest when --all is passed", async () => {
@@ -554,6 +591,7 @@ type = "text_truncate"`;
     communityDir = mkdtempSync(join(tmpdir(), "recall-install-sn-"));
     clearProfileCache();
     process.env.RECALL_COMMUNITY_PROFILES_PATH = communityDir;
+    writeConfig("skip");
     originalFetch = globalThis.fetch;
     globalThis.fetch = (async (url: string | URL | Request) => {
       const u = url.toString();
@@ -568,6 +606,7 @@ type = "text_truncate"`;
     delete process.env.RECALL_COMMUNITY_PROFILES_PATH;
     clearProfileCache();
     globalThis.fetch = originalFetch;
+    restoreConfig();
   });
 
   test("installs profile by short name", async () => {
@@ -670,6 +709,7 @@ type = "text_truncate"`;
     communityDir = mkdtempSync(join(tmpdir(), "recall-avail-"));
     clearProfileCache();
     process.env.RECALL_COMMUNITY_PROFILES_PATH = communityDir;
+    writeConfig("skip");
     originalFetch = globalThis.fetch;
     globalThis.fetch = (async (url: string | URL | Request) => {
       const u = url.toString();
@@ -683,6 +723,7 @@ type = "text_truncate"`;
     delete process.env.RECALL_COMMUNITY_PROFILES_PATH;
     clearProfileCache();
     globalThis.fetch = originalFetch;
+    restoreConfig();
   });
 
   test("lists all profiles with short names", async () => {
@@ -734,6 +775,69 @@ type = "text_truncate"`;
     const output = lines.join("\n");
     expect(output).toContain("https://github.com/grafana/mcp-grafana");
     expect(output).toContain("MCP URL");
+  });
+});
+
+// ── fetchManifest → verifyManifest wiring ─────────────────────────────────────
+
+describe("fetchManifest", () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    // Pinned, not ambient: without this the block reads the runner's real
+    // ~/.config/mcp-recall/config.toml, and anyone who set verify_signature =
+    // "skip" — the documented escape hatch — would see this test fail.
+    writeConfig("warn");
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string | URL | Request) =>
+      new Response(JSON.stringify({ profiles: [] }), { status: 200 })) as typeof globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    restoreConfig();
+  });
+
+  // The blocks above deliberately configure verify_signature = "skip" so they stay
+  // hermetic. This is what stops that from silently becoming "verification is never
+  // exercised from the real call path": if fetchManifest stopped calling
+  // verifyManifest, nothing else in the suite would notice.
+  test("verifies the manifest by default", async () => {
+    const commands: string[][] = [];
+    const spy = spyOn(Bun, "spawnSync").mockImplementation((cmd: unknown, ..._rest: unknown[]) => {
+      commands.push(cmd as string[]);
+      return { exitCode: 0, stderr: new Uint8Array(), stdout: new Uint8Array(), success: true } as ReturnType<typeof Bun.spawnSync>;
+    });
+
+    try {
+      await fetchManifest();
+    } finally {
+      spy.mockRestore();
+    }
+
+    const verify = commands.find((c) => c[1] === "attestation");
+    expect(verify).toBeDefined();
+    expect(verify!.slice(0, 3)).toEqual(["gh", "attestation", "verify"]);
+    expect(verify).toContain("--cert-identity");
+  });
+
+  test("skips verification when skipVerify is passed", async () => {
+    let calls = 0;
+    const spy = spyOn(Bun, "spawnSync").mockImplementation((..._args: unknown[]) => {
+      calls++;
+      return { exitCode: 0, stderr: new Uint8Array(), stdout: new Uint8Array(), success: true } as ReturnType<typeof Bun.spawnSync>;
+    });
+
+    try {
+      await fetchManifest(true);
+    } finally {
+      spy.mockRestore();
+    }
+
+    // Counted into a local rather than asserted via `expect(spy)`: mockRestore()
+    // clears the spy's own call record, so asserting on it after the finally
+    // block passes whether or not gh was ever invoked.
+    expect(calls).toBe(0);
   });
 });
 
