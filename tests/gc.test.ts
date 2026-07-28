@@ -114,6 +114,24 @@ describe("gc scanDatabases", () => {
     expect(isDeletionCandidate(entry!.status)).toBe(false);
   });
 
+  // `dirname("")` and `dirname("bare-name")` are both ".", which always exists, so
+  // the parent-survived orphan test would read these as "project deleted" and
+  // destroy the DB. A relative path cannot be rooted, so it is un-verifiable.
+  it.each([
+    ["an empty recorded path", ""],
+    ["a bare relative name", "myproject"],
+    ["a relative path with segments", "some/relative/path"],
+    // Exists relative to whatever cwd gc runs from. Must not become "active":
+    // a DB's status cannot depend on the directory the command was invoked in.
+    ["a relative path that resolves against cwd", "."],
+  ])("classifies %s as unverifiable (never deleted)", (_label, recorded) => {
+    makeDb("relpath", recorded);
+    const [entry] = scanDatabases(workDir, "/current.db", 90);
+    expect(entry!.projectPath).toBe(recorded);
+    expect(entry!.status).toBe("unverifiable");
+    expect(isDeletionCandidate(entry!.status)).toBe(false);
+  });
+
   it("classifies a non-mcp-recall .db as unreadable (never deleted)", () => {
     makeForeignDb("stranger");
     const [entry] = scanDatabases(workDir, "/current.db", 90, Date.now() + 200 * DAY_MS);

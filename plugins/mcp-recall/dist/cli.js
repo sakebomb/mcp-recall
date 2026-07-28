@@ -5660,7 +5660,7 @@ function toolContext(db, projectKey, args) {
 // src/gc/index.ts
 import { Database as Database2 } from "bun:sqlite";
 import { readdirSync, existsSync, statSync, rmSync } from "fs";
-import { join as join3, basename, dirname as dirname2, resolve } from "path";
+import { join as join3, basename, dirname as dirname2, resolve, isAbsolute } from "path";
 var DEFAULT_STALE_DAYS = 90;
 var STATUS_POLICY = {
   current: { deletable: false, vacuumable: false },
@@ -5733,6 +5733,8 @@ function classify(probe, mtimeMs, staleCutoffMs) {
   if (!probe.readable)
     return "unreadable";
   if (probe.projectPath !== null) {
+    if (!isAbsolute(probe.projectPath))
+      return "unverifiable";
     if (existsSync(probe.projectPath))
       return "active";
     return existsSync(dirname2(probe.projectPath)) ? "orphaned" : "unverifiable";

@@ -13,12 +13,13 @@
  * conservative: only DBs whose project was *definitively* removed (the recorded
  * path is gone but its parent still exists) or pathless DBs untouched past the
  * stale window are candidates. A path missing because its whole volume is
- * unmounted, a non-mcp-recall `.db`, or a corrupt DB is never a candidate.
+ * unmounted, a recorded path we cannot reason about (relative, so un-rootable), a
+ * non-mcp-recall `.db`, or a corrupt DB is never a candidate.
  */
 
 import { Database } from "bun:sqlite";
 import { readdirSync, existsSync, statSync, rmSync } from "fs";
-import { join, basename, dirname, resolve } from "path";
+import { join, basename, dirname, resolve, isAbsolute } from "path";
 import { dataDir, defaultDbPath } from "../db/schema";
 import { getMeta } from "../db/queries";
 import { getProjectKey } from "../project-key";
@@ -40,7 +41,7 @@ export type DbStatus =
   | "current" // the active project's DB — never touched
   | "active" // recorded path still exists on disk
   | "orphaned" // recorded path gone but its parent exists — project deleted, safe to remove
-  | "unverifiable" // recorded path AND its parent gone — likely an unmounted volume; never deleted
+  | "unverifiable" // can't be reasoned about: path AND parent gone (likely an unmounted volume), or a relative path with no knowable root; never deleted
   | "legacy-fresh" // no recorded path, recently modified — kept
   | "legacy-stale" // no recorded path, untouched past the stale window — candidate
   | "unreadable"; // not an mcp-recall DB, or could not be read — reported, never deleted
@@ -183,6 +184,12 @@ function classify(
 ): DbStatus {
   if (!probe.readable) return "unreadable";
   if (probe.projectPath !== null) {
+    // Checked before any existsSync: a relative path is resolved against the cwd
+    // gc happens to run from, so it would otherwise classify differently per
+    // invocation — and "." or a bare name would read as "parent survived, project
+    // deleted" (dirname is ".", which always exists) and be destroyed. We cannot
+    // know where a relative path was rooted, so it is the can't-verify case.
+    if (!isAbsolute(probe.projectPath)) return "unverifiable";
     if (existsSync(probe.projectPath)) return "active";
     // Path gone: only call it orphaned if the PARENT still exists (the project
     // dir was really deleted). If the parent is also gone, the volume is likely
