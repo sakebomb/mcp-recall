@@ -132,7 +132,8 @@ mcp-recall profiles available # list community profiles available to install
 | 9 | `mcp-recall learn` — auto-generate profiles from live MCP servers | Complete |
 | 10 | Retrieval quality — search hints, graduated retrieval, decay eviction, output dedup, structure-aware fallback | Complete (v1.9.0) |
 | 11 | Store lifecycle — `gc`, free-page reclamation, pin-budget reporting | Complete (v1.10.0) |
-| 12 | Supply chain — manifest attestation restored, exact signer-identity pinning, packaged-CLI CI | Complete (v1.10.1) |
+| 12 | Supply chain — manifest attestation restored (profiles repo), exact signer-identity pinning via `--cert-identity`, old-`gh` diagnosis | Complete (v1.10.0) |
+| 12b | Packaging integrity — symlink-safe `bin/recall`, publish-time tag/version guard, packaged-CLI CI job | Complete (v1.10.1) |
 | 13 | **Current: stabilize + document.** Docs accuracy, contributor architecture doc, `ROADMAP.md`. No new features | In progress |
 
 Phases 1–9 were planned up front. Everything after was reactive — ported ideas from a
