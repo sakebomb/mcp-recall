@@ -5149,6 +5149,7 @@ function loadConfig() {
 // src/project-key.ts
 import { createHash } from "crypto";
 import { spawnSync } from "child_process";
+import { resolve } from "path";
 var pathCache = new Map;
 function getProjectKey(cwd) {
   const resolved = resolveProjectPath(cwd);
@@ -5166,7 +5167,7 @@ function resolveProjectPath(cwd) {
     encoding: "utf8",
     stdio: ["pipe", "pipe", "pipe"]
   });
-  const resolved = result.status === 0 && result.stdout ? result.stdout.trim() : cwd;
+  const resolved = result.status === 0 && result.stdout ? result.stdout.trim() : resolve(cwd);
   pathCache.set(cwd, resolved);
   return resolved;
 }
@@ -5660,7 +5661,7 @@ function toolContext(db, projectKey, args) {
 // src/gc/index.ts
 import { Database as Database2 } from "bun:sqlite";
 import { readdirSync, existsSync, statSync, rmSync } from "fs";
-import { join as join3, basename, dirname as dirname2, resolve, isAbsolute } from "path";
+import { join as join3, basename, dirname as dirname2, resolve as resolve2, isAbsolute } from "path";
 var DEFAULT_STALE_DAYS = 90;
 var STATUS_POLICY = {
   current: { deletable: false, vacuumable: false },
@@ -5745,7 +5746,7 @@ function scanDatabases(dir, currentFile, staleDays, nowMs = Date.now()) {
   if (!existsSync(dir))
     return [];
   const staleCutoffMs = nowMs - staleDays * 86400 * 1000;
-  const currentResolved = resolve(currentFile);
+  const currentResolved = resolve2(currentFile);
   const entries = [];
   for (const name of readdirSync(dir)) {
     if (!name.endsWith(".db"))
@@ -5758,7 +5759,7 @@ function scanDatabases(dir, currentFile, staleDays, nowMs = Date.now()) {
       continue;
     }
     const sizeBytes = dbFootprint(file);
-    if (resolve(file) === currentResolved) {
+    if (resolve2(file) === currentResolved) {
       entries.push({ file, status: "current", projectPath: null, sizeBytes, mtimeMs, items: 0 });
       continue;
     }
@@ -8708,9 +8709,9 @@ function installedCommunityMap() {
 async function promptNumber(msg, min, max) {
   for (let attempt = 0;attempt < 3; attempt++) {
     process.stdout.write(msg);
-    const line = await new Promise((resolve2) => {
+    const line = await new Promise((resolve3) => {
       process.stdin.setEncoding("utf8");
-      process.stdin.once("data", (d) => resolve2(String(d).trim()));
+      process.stdin.once("data", (d) => resolve3(String(d).trim()));
     });
     const n = parseInt(line);
     if (!isNaN(n) && n >= min && n <= max)
@@ -9297,7 +9298,7 @@ class LineReader {
     this.reader = stream.getReader();
   }
   async readLine(timeoutMs) {
-    const timer = new Promise((resolve2) => setTimeout(() => resolve2(null), timeoutMs));
+    const timer = new Promise((resolve3) => setTimeout(() => resolve3(null), timeoutMs));
     const read = this._nextLine();
     return Promise.race([read, timer]);
   }
@@ -9554,8 +9555,8 @@ async function tryLegacySse(url, timeoutMs) {
         return req.then(() => {
           return;
         });
-      return new Promise((resolve2, reject) => {
-        pending.set(body.id, { resolve: resolve2, reject });
+      return new Promise((resolve3, reject) => {
+        pending.set(body.id, { resolve: resolve3, reject });
         req.catch(reject);
       });
     };
@@ -9801,7 +9802,7 @@ Next steps:`);
 
 // src/import/index.ts
 import { readFileSync as readFileSync9, statSync as statSync3, existsSync as existsSync2 } from "fs";
-import { resolve as resolve2 } from "path";
+import { resolve as resolve3 } from "path";
 import { Database as Database3 } from "bun:sqlite";
 var LARGE_FILE_BYTES = 50 * 1024 * 1024;
 var EMPTY_EXPORT_SENTINEL = "[recall: no items to export]";
@@ -9887,7 +9888,7 @@ async function handleImportCommand(args) {
   const keepProjectKey = args.includes("--keep-project-key");
   const dryRun = args.includes("--dry-run");
   const rawPath = args.find((a) => !a.startsWith("--"));
-  const filePath = rawPath ? resolve2(rawPath) : null;
+  const filePath = rawPath ? resolve3(rawPath) : null;
   let raw;
   if (filePath) {
     try {

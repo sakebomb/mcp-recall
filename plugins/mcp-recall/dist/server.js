@@ -19539,6 +19539,7 @@ class StdioServerTransport {
 // src/project-key.ts
 import { createHash } from "crypto";
 import { spawnSync } from "child_process";
+import { resolve } from "path";
 var pathCache = new Map;
 function getProjectKey(cwd) {
   const resolved = resolveProjectPath(cwd);
@@ -19553,7 +19554,7 @@ function resolveProjectPath(cwd) {
     encoding: "utf8",
     stdio: ["pipe", "pipe", "pipe"]
   });
-  const resolved = result.status === 0 && result.stdout ? result.stdout.trim() : cwd;
+  const resolved = result.status === 0 && result.stdout ? result.stdout.trim() : resolve(cwd);
   pathCache.set(cwd, resolved);
   return resolved;
 }
