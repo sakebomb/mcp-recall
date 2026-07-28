@@ -11,6 +11,31 @@ export const PROFILE_BASE_URL =
   "https://raw.githubusercontent.com/sakebomb/mcp-recall-profiles/main/";
 export const COMMUNITY_REPO = "sakebomb/mcp-recall-profiles";
 
+const SIGNER_WORKFLOW_PATH = ".github/workflows/manifest.yml";
+const SIGNER_REF = "refs/heads/main";
+
+/**
+ * The exact signing identity we accept for the manifest, matched against the
+ * certificate's SubjectAlternativeName.
+ *
+ * Repo scope alone is too weak: it accepts an attestation from *any* workflow in
+ * COMMUNITY_REPO, so any workflow there able to obtain an OIDC token could mint a
+ * trust root we would honour.
+ *
+ * `--signer-workflow` is not sufficient either. It compiles to a *prefix-anchored*
+ * SAN match with no terminator — verified empirically: a truncated `…/workflows/man`
+ * also passes. Since the real SAN is `…/manifest.yml@refs/heads/<ref>`, the prefix
+ * stops short of the ref, so an attestation signed from any branch still matches.
+ * `--cert-identity` matches the whole SAN exactly, which pins the ref too, and so
+ * does not rely on the attest-step `github.ref` guard living in the profiles repo.
+ *
+ * Deliberately strict: if that workflow ever attests from a tag or a renamed default
+ * branch, verification fails loudly rather than silently widening what we trust.
+ * Derived from COMMUNITY_REPO so the repo and its accepted signer cannot drift.
+ */
+export const SIGNER_IDENTITY =
+  `https://github.com/${COMMUNITY_REPO}/${SIGNER_WORKFLOW_PATH}@${SIGNER_REF}`;
+
 // ── input validation ──────────────────────────────────────────────────────────
 
 const SAFE_ID_RE = /^[a-z0-9_-]+$/;
@@ -92,9 +117,13 @@ export function verifyHash(content: string, expected: string | undefined, id: st
   }
 }
 
+/** stderr shapes gh uses when it doesn't recognise a flag we pass. */
+const UNSUPPORTED_FLAG_RE = /unknown (flag|command|shorthand flag)/i;
+
 /**
  * Verify the manifest file has a valid GitHub Artifact Attestation.
- * Shells out to `gh attestation verify`. Degrades gracefully if gh is absent.
+ * Shells out to `gh attestation verify`. Degrades gracefully if gh is absent
+ * or too old to support the flags we pin with.
  */
 export function verifyManifest(manifestPath: string, mode: "warn" | "error" | "skip"): void {
   if (mode === "skip") return;
@@ -115,12 +144,29 @@ export function verifyManifest(manifestPath: string, mode: "warn" | "error" | "s
   }
 
   const result = Bun.spawnSync(
-    ["gh", "attestation", "verify", manifestPath, "--repo", COMMUNITY_REPO],
+    [
+      "gh", "attestation", "verify", manifestPath,
+      "--repo", COMMUNITY_REPO,
+      "--cert-identity", SIGNER_IDENTITY,
+    ],
     { stderr: "pipe", stdout: "ignore" }
   );
 
   if (result.exitCode !== 0) {
     const errText = result.stderr ? new TextDecoder().decode(result.stderr).trim() : "";
+
+    // A gh too old for these flags exits non-zero just like a bad signature does.
+    // Reporting that as "verification failed" would read as a tampered manifest, so
+    // treat it as the tooling gap it is — same graceful path as gh being absent.
+    // Covers both an unknown --cert-identity and, on older still, no `attestation`
+    // subcommand at all; the remedy is the same either way.
+    if (UNSUPPORTED_FLAG_RE.test(errText)) {
+      process.stderr.write(
+        "[recall] manifest signature verification skipped: this gh CLI does not support the flags we verify with (upgrade gh)\n"
+      );
+      return;
+    }
+
     const msg = `[recall] manifest signature verification failed${errText ? `: ${errText}` : ""}\n`;
     if (mode === "error") {
       throw new Error(msg.trim());

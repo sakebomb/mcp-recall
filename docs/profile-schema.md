@@ -186,10 +186,29 @@ When `install`, `update`, or `seed` download the community manifest, mcp-recall 
 
 ```toml
 [profiles]
-verify_signature = "warn"   # default — logs a warning if verification fails or gh is absent
-# verify_signature = "error"  # hard-fail on any verification problem
+verify_signature = "warn"   # default — logs a warning if verification fails
+# verify_signature = "error"  # hard-fail if the signature does not verify — but see below: still skipped when gh is unavailable
 # verify_signature = "skip"   # disable verification entirely
 ```
+
+Verification enforces **exactly which identity signed the manifest**, not merely that it
+came from the profiles repo. The accepted signer is:
+
+```
+https://github.com/sakebomb/mcp-recall-profiles/.github/workflows/manifest.yml@refs/heads/main
+```
+
+That is the workflow which regenerates, commits, and attests the manifest in a single
+job. Repo scope alone would accept an attestation from any workflow in that repository,
+and pinning only the workflow path would still accept one signed from any branch — the
+full identity pins the ref as well.
+
+If `gh` is absent, or too old to support the flags used above, verification is skipped
+with a distinct message rather than reported as a signature failure — an unusable tool is
+not evidence of tampering. Note the consequence: `error` strengthens how a *failed*
+signature is handled, not whether verification is *available*. In an environment without
+a usable `gh` (a container image, for instance), `error` still proceeds with an unverified
+manifest and only a line on stderr.
 
 To skip verification for a single command (e.g. in CI without `gh` installed):
 
