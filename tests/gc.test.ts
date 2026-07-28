@@ -228,16 +228,21 @@ describe("incremental_vacuum reclamation (on-disk)", () => {
     initSchema(db);
 
     const big = "z".repeat(4096);
-    for (let i = 0; i < 80; i++) {
-      storeOutput(db, {
-        project_key: "p",
-        session_id: "2026-01-01",
-        tool_name: "mcp__tool",
-        summary: "s",
-        full_content: big,
-        original_size: big.length,
-      });
-    }
+    // storeOutput opens its own transaction per call, so an unbatched loop is one
+    // fsyncing commit per row on this non-WAL file DB. Outer transaction nests as
+    // a savepoint and collapses them into a single commit.
+    db.transaction(() => {
+      for (let i = 0; i < 80; i++) {
+        storeOutput(db, {
+          project_key: "p",
+          session_id: "2026-01-01",
+          tool_name: "mcp__tool",
+          summary: "s",
+          full_content: big,
+          original_size: big.length,
+        });
+      }
+    })();
     const before = (db.query("PRAGMA page_count").get() as { page_count: number }).page_count;
 
     // forgetOutputs deletes >= VACUUM_THRESHOLD rows and calls reclaimPages internally.
@@ -298,16 +303,18 @@ describe("gc vacuumFile (full VACUUM)", () => {
     expect((db.query("PRAGMA auto_vacuum").get() as { auto_vacuum: number }).auto_vacuum).toBe(0);
 
     const big = "z".repeat(4096);
-    for (let i = 0; i < 120; i++) {
-      storeOutput(db, {
-        project_key: "p",
-        session_id: "2026-01-01",
-        tool_name: "t",
-        summary: "s",
-        full_content: big,
-        original_size: big.length,
-      });
-    }
+    db.transaction(() => {
+      for (let i = 0; i < 120; i++) {
+        storeOutput(db, {
+          project_key: "p",
+          session_id: "2026-01-01",
+          tool_name: "t",
+          summary: "s",
+          full_content: big,
+          original_size: big.length,
+        });
+      }
+    })();
     // Raw delete (no reclaimPages) — on a NONE database the pages become freelist.
     db.prepare("DELETE FROM stored_outputs").run();
     const freelistBefore = (db.query("PRAGMA freelist_count").get() as { freelist_count: number }).freelist_count;
