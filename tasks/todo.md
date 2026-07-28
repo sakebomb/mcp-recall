@@ -57,6 +57,28 @@ rebase-retry. VERIFIED: live manifest exits 0, signed by `manifest.yml@refs/head
 | ~~[#207](https://github.com/sakebomb/mcp-recall/issues/207)~~ | ~~`gc scanDatabases` test flakes on its 5s timeout~~ | test, P2, S | ✓ **DONE** — merged PR [#209](https://github.com/sakebomb/mcp-recall/pull/209), main @ `3eea1b8`. Measured: 200 implicit transactions = **4119ms** vs **22ms** batched — 18% headroom under a 5s timeout, hence load-sensitive. File 12.83s → 5.15s. Three loops, not one: grepping `.prepare(` missed loops calling `storeOutput` (its transaction is one layer down). |
 | [#208](https://github.com/sakebomb/mcp-recall/issues/208) | `verify_signature = "error"` still proceeds unverified when `gh` is unavailable | security, P2, S, needs-info | **Blocked on a design call.** `error` strengthens *failure* handling, not *availability*. Pre-existing since #134; #206 documented it rather than changing it. Options: new `require` mode / redefine `error` (breaking) / keep. Lean is redefining `error`. |
 
+### From the pre-tag review of 1.10.0 (2026-07-28)
+
+Reviewed the release surface before tagging. Found and fixed one **data-loss defect** in
+`gc`, merged as PR [#212](https://github.com/sakebomb/mcp-recall/pull/212) (main @ `c12ce9c`):
+`classify` inferred "orphaned, safe to delete" from *path gone but parent exists*, which is
+only valid for an absolute path — `dirname("")` and `dirname("bare-name")` are both `"."`,
+which always exists, so `gc --force` deleted those databases. Reachable via a hook payload
+with `cwd: ""`, since `resolveProjectPath` falls back to `cwd` verbatim and `cwd` is never
+validated. Review round 2 also caught that the guard sat *after* `existsSync`, so a relative
+path resolving against the invocation cwd classified as `active` — status depended on where
+`gc` ran. No changelog entry: `gc` ships for the first time in 1.10.0, so it never reached users.
+
+Also verified clean, no changes needed: the real v1.9.0 → v1.10.0 upgrade path (built a DB
+with the tagged code in a worktree — `meta` is created, data intact), and that `gc` never
+deletes the current DB, a foreign sqlite file, a corrupt file, an empty file, a directory
+named `*.db`, or a symlink's out-of-store target.
+
+| # | Title | Labels | Notes |
+|---|-------|--------|-------|
+| [#213](https://github.com/sakebomb/mcp-recall/issues/213) | Make the recorded project path absolute at the source | bug, P2, S | `resolve(cwd)` in `resolveProjectPath` is the single chokepoint — fixes the class; `post-tool-use.ts` inherits it. Keep #212's guard as defence in depth. |
+| [#214](https://github.com/sakebomb/mcp-recall/issues/214) | `unverifiable` DBs are never reclaimable | enhancement, P3, S | Fall through to the pathless staleness rule so reclamation rests on "untouched > stale-days", never on a deleted-project inference. Bounded population once #213 lands. |
+
 Unfiled minor nits in the **profiles** repo (low value, no issue opened): README documents
 no attestation-verification steps; `checkout@v4` in `manifest.yml`/`ci.yml` vs `@v5` in
 `claude.yml`.
