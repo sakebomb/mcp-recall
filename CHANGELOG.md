@@ -6,6 +6,8 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+## [1.10.0] — 2026-07-28
+
 ### Added
 
 - **`mcp-recall gc` command** — reclaims disk from the per-project database store. Lists every project DB with a status (active / orphaned / legacy) and its reclaimable size; deletes orphaned DBs (recorded project path no longer exists on disk) and stale legacy DBs on `--force`. Defaults to a dry run. Flags: `--force`, `--stale-days N` (default 90), `--vacuum` (full-VACUUM survivors to reclaim free pages and upgrade legacy `auto_vacuum=NONE` databases). The active project's DB is never a deletion candidate (#200)
@@ -24,6 +26,7 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 ### Security
 
 - **Manifest verification now pins the exact signing identity.** Previously the attestation was verified with repo scope only, so an attestation from *any* workflow in the profiles repository was accepted as a valid trust root. Verification now enforces `--cert-identity`, requiring the specific workflow *and* ref that regenerates and attests the manifest. (`--signer-workflow` alone was insufficient: it compiles to a prefix-anchored match that stops short of the `@ref` suffix, so an attestation signed from any branch would still have matched.) (#202)
+- **Manifest attestation is signed again.** Between 2026-04-08 and 2026-07-27 the published community manifest carried **no attestation at all**, so `profiles install / seed / update / available` printed `signature verification failed` and then proceeded against an unverified trust root. The signing workflow ran on the human commit and attested the manifest *before* a bot regenerated it — and pushes made with the default `GITHUB_TOKEN` cannot trigger workflows, so the regenerated file was never signed. Fixed in the profiles repository by attesting inside the job that regenerates and commits the manifest ([profiles#10](https://github.com/sakebomb/mcp-recall-profiles/pull/10)). No client upgrade is needed for this part — verification of the live manifest works again on 1.9.0 too. Per-profile SHA256 checks were unaffected throughout, but they validate *against* the manifest, which was the unverified root.
 
 ---
 
@@ -339,7 +342,10 @@ Ten `recall__*` tools available in every Claude session:
 
 ---
 
-[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.10.0...HEAD
+[1.10.0]: https://github.com/sakebomb/mcp-recall/compare/v1.9.0...v1.10.0
+[1.9.0]: https://github.com/sakebomb/mcp-recall/compare/v1.8.0...v1.9.0
+[1.8.0]: https://github.com/sakebomb/mcp-recall/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/sakebomb/mcp-recall/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/sakebomb/mcp-recall/compare/v1.5.1...v1.6.0
 [1.5.1]: https://github.com/sakebomb/mcp-recall/compare/v1.5.0...v1.5.1

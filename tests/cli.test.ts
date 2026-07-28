@@ -1,4 +1,5 @@
 import { describe, test, expect } from "bun:test";
+import { join } from "path";
 import { getVersion, printHelp, completionScript } from "../src/cli";
 
 // ── getVersion ────────────────────────────────────────────────────────────────
@@ -7,6 +8,19 @@ describe("getVersion", () => {
   test("returns a semver string matching package.json", async () => {
     const version = await getVersion();
     expect(version).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+
+  // #199 shipped with package.json at 1.7.0 and both plugin manifests at 1.0.0,
+  // and 1.10.0 reconciled them by hand. Asserting agreement makes that class of
+  // drift a test failure instead of something noticed at release time.
+  test("all three manifests declare the same version", async () => {
+    const read = async (p: string) =>
+      (JSON.parse(await Bun.file(join(import.meta.dir, "..", p)).text()) as { version: string }).version;
+
+    const pkg = await read("package.json");
+    expect(await read(".claude-plugin/plugin.json")).toBe(pkg);
+    expect(await read("plugins/mcp-recall/.claude-plugin/plugin.json")).toBe(pkg);
+    expect(await getVersion()).toBe(pkg);
   });
 });
 
