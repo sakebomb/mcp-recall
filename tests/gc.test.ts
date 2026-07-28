@@ -25,13 +25,19 @@ function makeDb(name: string, projectPath: string | null, items = 0): string {
   const db = new Database(file);
   initSchema(db);
   if (projectPath !== null) setMeta(db, "project_path", projectPath);
-  for (let i = 0; i < items; i++) {
-    db.prepare(
-      `INSERT INTO stored_outputs
-        (id, project_key, session_id, tool_name, summary, full_content, original_size, summary_size, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(`id_${name}_${i}`, name, "2026-01-01", "t", "s", "c", 10, 2, 1000);
-  }
+  // Prepare once, and commit once: a bare .run() per row is its own implicit
+  // transaction, so 200 rows meant ~200 fsyncs and ~4.1s against this file's 5s
+  // timeout — enough headroom on an idle machine to pass, not enough under load.
+  const insert = db.prepare(
+    `INSERT INTO stored_outputs
+      (id, project_key, session_id, tool_name, summary, full_content, original_size, summary_size, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  db.transaction(() => {
+    for (let i = 0; i < items; i++) {
+      insert.run(`id_${name}_${i}`, name, "2026-01-01", "t", "s", "c", 10, 2, 1000);
+    }
+  })();
   db.close();
   return file;
 }
