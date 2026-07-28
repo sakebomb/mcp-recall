@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import { spawnSync } from "child_process";
+import { resolve } from "path";
 
 const pathCache = new Map<string, string>();
 
@@ -33,9 +34,21 @@ function resolveProjectPath(cwd: string): string {
     stdio: ["pipe", "pipe", "pipe"],
   });
 
+  // The fallback is absolutised rather than used verbatim. `cwd` arrives from a
+  // hook payload that is only cast, never validated, so it can be relative or "" —
+  // and this value is recorded as `project_path`, which `mcp-recall gc` uses to
+  // decide whether a project still exists. A relative path there is un-rootable:
+  // it read as "parent survived, project deleted" and got the database removed
+  // (#212 guards the deletion site; this removes the cause). `resolve("")` yields
+  // the process cwd — plausible rather than certain, but absolute and therefore
+  // reasoned about honestly downstream.
+  //
+  // git's --show-toplevel output is already absolute and normalised, and is left
+  // untouched: passing it through resolve() could alter the string for some paths
+  // and re-key every existing git project's database.
   const resolved = result.status === 0 && result.stdout
     ? result.stdout.trim()
-    : cwd;
+    : typeof cwd === "string" && cwd ? resolve(cwd) : process.cwd();
 
   pathCache.set(cwd, resolved);
   return resolved;

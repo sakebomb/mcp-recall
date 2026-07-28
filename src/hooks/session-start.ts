@@ -1,3 +1,4 @@
+import { statSync } from "fs";
 import { loadConfig } from "../config";
 import { getProjectKey, getProjectPath } from "../project-key";
 import { getDb, defaultDbPath, recordSession, pruneExpired, setMeta } from "../db/index";
@@ -13,6 +14,15 @@ interface SessionStartInput {
 
 /** Maximum characters written to stdout for the context snapshot injection. */
 const INJECT_MAX_CHARS = 2000;
+
+/** True only for a path that exists AND is a directory — a project path is never a file. */
+function isExistingDir(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
 
 export function handleSessionStart(raw: string): void {
   let parsed: unknown;
@@ -33,7 +43,25 @@ export function handleSessionStart(raw: string): void {
 
   // Record the resolved project path so `mcp-recall gc` can tell whether this
   // project still exists on disk (orphan detection is path-existence based).
-  setMeta(db, "project_path", getProjectPath(input.cwd));
+  //
+  // Only recorded when it resolves to a real directory. The path is absolute by
+  // construction, but absolute is not the same as true: a relative payload `cwd`
+  // gets rooted against this process's cwd, which may not be where it was meant to
+  // be rooted. This hook runs *inside* the project, so a resolved path that does
+  // not exist means the guess was wrong — and recording it would let gc read a live
+  // project as "path gone, parent present" and delete its database.
+  //
+  // Skipping is not the same as clearing: setMeta upserts, so a database that
+  // already holds a verified path keeps it. That is the better evidence — a path
+  // that once resolved beats a guess that just failed. Only a database that never
+  // recorded one stays pathless, which gc keeps as legacy-fresh and reclaims solely
+  // on the untouched-for-N-days rule, never on a deleted-project inference.
+  const projectPath = getProjectPath(input.cwd);
+  if (isExistingDir(projectPath)) {
+    setMeta(db, "project_path", projectPath);
+  } else {
+    log.debug(`session-start · resolved project path is not a directory, leaving meta as-is: ${projectPath}`);
+  }
 
   const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
   recordSession(db, today);

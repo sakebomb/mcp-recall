@@ -108,6 +108,9 @@ var require_package = __commonJS((exports, module) => {
   };
 });
 
+// src/hooks/session-start.ts
+import { statSync as statSync2 } from "fs";
+
 // node_modules/smol-toml/dist/error.js
 /*!
  * Copyright (c) Squirrel Chat et al., All rights reserved.
@@ -5149,6 +5152,7 @@ function loadConfig() {
 // src/project-key.ts
 import { createHash } from "crypto";
 import { spawnSync } from "child_process";
+import { resolve } from "path";
 var pathCache = new Map;
 function getProjectKey(cwd) {
   const resolved = resolveProjectPath(cwd);
@@ -5166,7 +5170,7 @@ function resolveProjectPath(cwd) {
     encoding: "utf8",
     stdio: ["pipe", "pipe", "pipe"]
   });
-  const resolved = result.status === 0 && result.stdout ? result.stdout.trim() : cwd;
+  const resolved = result.status === 0 && result.stdout ? result.stdout.trim() : typeof cwd === "string" && cwd ? resolve(cwd) : process.cwd();
   pathCache.set(cwd, resolved);
   return resolved;
 }
@@ -5660,7 +5664,7 @@ function toolContext(db, projectKey, args) {
 // src/gc/index.ts
 import { Database as Database2 } from "bun:sqlite";
 import { readdirSync, existsSync, statSync, rmSync } from "fs";
-import { join as join3, basename, dirname as dirname2, resolve, isAbsolute } from "path";
+import { join as join3, basename, dirname as dirname2, resolve as resolve2, isAbsolute } from "path";
 var DEFAULT_STALE_DAYS = 90;
 var STATUS_POLICY = {
   current: { deletable: false, vacuumable: false },
@@ -5745,7 +5749,7 @@ function scanDatabases(dir, currentFile, staleDays, nowMs = Date.now()) {
   if (!existsSync(dir))
     return [];
   const staleCutoffMs = nowMs - staleDays * 86400 * 1000;
-  const currentResolved = resolve(currentFile);
+  const currentResolved = resolve2(currentFile);
   const entries = [];
   for (const name of readdirSync(dir)) {
     if (!name.endsWith(".db"))
@@ -5758,7 +5762,7 @@ function scanDatabases(dir, currentFile, staleDays, nowMs = Date.now()) {
       continue;
     }
     const sizeBytes = dbFootprint(file);
-    if (resolve(file) === currentResolved) {
+    if (resolve2(file) === currentResolved) {
       entries.push({ file, status: "current", projectPath: null, sizeBytes, mtimeMs, items: 0 });
       continue;
     }
@@ -5875,6 +5879,13 @@ Vacuuming ${survivors.length} database(s) to keep (${formatBytes(sumBytes(surviv
 
 // src/hooks/session-start.ts
 var INJECT_MAX_CHARS = 2000;
+function isExistingDir(path) {
+  try {
+    return statSync2(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
 function handleSessionStart(raw) {
   let parsed;
   try {
@@ -5891,7 +5902,12 @@ function handleSessionStart(raw) {
   const config = loadConfig();
   const projectKey = getProjectKey(input.cwd);
   const db = getDb(defaultDbPath(projectKey));
-  setMeta(db, "project_path", getProjectPath(input.cwd));
+  const projectPath = getProjectPath(input.cwd);
+  if (isExistingDir(projectPath)) {
+    setMeta(db, "project_path", projectPath);
+  } else {
+    log.debug(`session-start \xB7 resolved project path is not a directory, leaving meta as-is: ${projectPath}`);
+  }
   const today = new Date().toISOString().slice(0, 10);
   recordSession(db, today);
   pruneExpired(db, projectKey, config.store.expire_after_session_days);
@@ -7739,7 +7755,7 @@ var genericHandler = (_toolName, output) => {
 };
 
 // src/profiles/loader.ts
-import { readdirSync as readdirSync2, readFileSync as readFileSync2, statSync as statSync2 } from "fs";
+import { readdirSync as readdirSync2, readFileSync as readFileSync2, statSync as statSync3 } from "fs";
 import { join as join4 } from "path";
 import { homedir as homedir3 } from "os";
 function getUserProfilesDir() {
@@ -7755,7 +7771,7 @@ function getBundledProfilesDir() {
   const devPath = join4(import.meta.dir, "../../profiles");
   const distPath = join4(import.meta.dir, "../profiles");
   try {
-    statSync2(devPath);
+    statSync3(devPath);
     return devPath;
   } catch (e) {
     if (e.code !== "ENOENT")
@@ -7767,7 +7783,7 @@ var fileCache = new Map;
 function loadSpec(filePath) {
   let mtime;
   try {
-    mtime = statSync2(filePath).mtimeMs;
+    mtime = statSync3(filePath).mtimeMs;
   } catch {
     fileCache.delete(filePath);
     return null;
@@ -7850,7 +7866,7 @@ function scanDir(dir, tier) {
     const full = join4(dir, entry);
     let stat;
     try {
-      stat = statSync2(full);
+      stat = statSync3(full);
     } catch {
       continue;
     }
@@ -8708,9 +8724,9 @@ function installedCommunityMap() {
 async function promptNumber(msg, min, max) {
   for (let attempt = 0;attempt < 3; attempt++) {
     process.stdout.write(msg);
-    const line = await new Promise((resolve2) => {
+    const line = await new Promise((resolve3) => {
       process.stdin.setEncoding("utf8");
-      process.stdin.once("data", (d) => resolve2(String(d).trim()));
+      process.stdin.once("data", (d) => resolve3(String(d).trim()));
     });
     const n = parseInt(line);
     if (!isNaN(n) && n >= min && n <= max)
@@ -9297,7 +9313,7 @@ class LineReader {
     this.reader = stream.getReader();
   }
   async readLine(timeoutMs) {
-    const timer = new Promise((resolve2) => setTimeout(() => resolve2(null), timeoutMs));
+    const timer = new Promise((resolve3) => setTimeout(() => resolve3(null), timeoutMs));
     const read = this._nextLine();
     return Promise.race([read, timer]);
   }
@@ -9554,8 +9570,8 @@ async function tryLegacySse(url, timeoutMs) {
         return req.then(() => {
           return;
         });
-      return new Promise((resolve2, reject) => {
-        pending.set(body.id, { resolve: resolve2, reject });
+      return new Promise((resolve3, reject) => {
+        pending.set(body.id, { resolve: resolve3, reject });
         req.catch(reject);
       });
     };
@@ -9800,8 +9816,8 @@ Next steps:`);
 }
 
 // src/import/index.ts
-import { readFileSync as readFileSync9, statSync as statSync3, existsSync as existsSync2 } from "fs";
-import { resolve as resolve2 } from "path";
+import { readFileSync as readFileSync9, statSync as statSync4, existsSync as existsSync2 } from "fs";
+import { resolve as resolve3 } from "path";
 import { Database as Database3 } from "bun:sqlite";
 var LARGE_FILE_BYTES = 50 * 1024 * 1024;
 var EMPTY_EXPORT_SENTINEL = "[recall: no items to export]";
@@ -9887,11 +9903,11 @@ async function handleImportCommand(args) {
   const keepProjectKey = args.includes("--keep-project-key");
   const dryRun = args.includes("--dry-run");
   const rawPath = args.find((a) => !a.startsWith("--"));
-  const filePath = rawPath ? resolve2(rawPath) : null;
+  const filePath = rawPath ? resolve3(rawPath) : null;
   let raw;
   if (filePath) {
     try {
-      const size = statSync3(filePath).size;
+      const size = statSync4(filePath).size;
       if (size > LARGE_FILE_BYTES) {
         console.error(`Warning: file is ${Math.round(size / 1024 / 1024)} MB \u2014 this may take a while.`);
       }
