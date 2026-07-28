@@ -87,6 +87,26 @@ describe("handleSessionStart", () => {
     expect(recorded).toBeNull();
   });
 
+  // A project path is a directory. An existing *file* would satisfy existsSync and
+  // then be classified "active" by gc, which is wrong about what it is.
+  it("does not record project_path when the resolved path is a file", () => {
+    const f = join(mkdtempSync(join(tmpdir(), "recall-file-")), "not-a-dir");
+    writeFileSync(f, "x");
+    handleSessionStart(makeSessionStartInput({ cwd: f }));
+    expect(getMeta(getDb(":memory:"), "project_path")).toBeNull();
+  });
+
+  // setMeta upserts, so skipping leaves a previously-verified path in place rather
+  // than clearing it — better evidence than a guess that just failed.
+  it("keeps an already-recorded path when a later session cannot verify one", () => {
+    handleSessionStart(makeSessionStartInput());
+    const first = getMeta(getDb(":memory:"), "project_path");
+    expect(first).toBe(getProjectPath(TEST_CWD));
+
+    handleSessionStart(makeSessionStartInput({ cwd: "definitely-not-a-real-dir-xyz" }));
+    expect(getMeta(getDb(":memory:"), "project_path")).toBe(first);
+  });
+
   it("is idempotent — running twice records only one session entry", () => {
     handleSessionStart(makeSessionStartInput());
     handleSessionStart(makeSessionStartInput());

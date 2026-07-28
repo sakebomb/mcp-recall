@@ -109,7 +109,7 @@ var require_package = __commonJS((exports, module) => {
 });
 
 // src/hooks/session-start.ts
-import { existsSync as existsSync2 } from "fs";
+import { statSync as statSync2 } from "fs";
 
 // node_modules/smol-toml/dist/error.js
 /*!
@@ -5879,6 +5879,13 @@ Vacuuming ${survivors.length} database(s) to keep (${formatBytes(sumBytes(surviv
 
 // src/hooks/session-start.ts
 var INJECT_MAX_CHARS = 2000;
+function isExistingDir(path) {
+  try {
+    return statSync2(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
 function handleSessionStart(raw) {
   let parsed;
   try {
@@ -5896,10 +5903,10 @@ function handleSessionStart(raw) {
   const projectKey = getProjectKey(input.cwd);
   const db = getDb(defaultDbPath(projectKey));
   const projectPath = getProjectPath(input.cwd);
-  if (existsSync2(projectPath)) {
+  if (isExistingDir(projectPath)) {
     setMeta(db, "project_path", projectPath);
   } else {
-    log.debug(`session-start \xB7 resolved project path does not exist, not recording: ${projectPath}`);
+    log.debug(`session-start \xB7 resolved project path is not a directory, leaving meta as-is: ${projectPath}`);
   }
   const today = new Date().toISOString().slice(0, 10);
   recordSession(db, today);
@@ -7748,7 +7755,7 @@ var genericHandler = (_toolName, output) => {
 };
 
 // src/profiles/loader.ts
-import { readdirSync as readdirSync2, readFileSync as readFileSync2, statSync as statSync2 } from "fs";
+import { readdirSync as readdirSync2, readFileSync as readFileSync2, statSync as statSync3 } from "fs";
 import { join as join4 } from "path";
 import { homedir as homedir3 } from "os";
 function getUserProfilesDir() {
@@ -7764,7 +7771,7 @@ function getBundledProfilesDir() {
   const devPath = join4(import.meta.dir, "../../profiles");
   const distPath = join4(import.meta.dir, "../profiles");
   try {
-    statSync2(devPath);
+    statSync3(devPath);
     return devPath;
   } catch (e) {
     if (e.code !== "ENOENT")
@@ -7776,7 +7783,7 @@ var fileCache = new Map;
 function loadSpec(filePath) {
   let mtime;
   try {
-    mtime = statSync2(filePath).mtimeMs;
+    mtime = statSync3(filePath).mtimeMs;
   } catch {
     fileCache.delete(filePath);
     return null;
@@ -7859,7 +7866,7 @@ function scanDir(dir, tier) {
     const full = join4(dir, entry);
     let stat;
     try {
-      stat = statSync2(full);
+      stat = statSync3(full);
     } catch {
       continue;
     }
@@ -9809,7 +9816,7 @@ Next steps:`);
 }
 
 // src/import/index.ts
-import { readFileSync as readFileSync9, statSync as statSync3, existsSync as existsSync3 } from "fs";
+import { readFileSync as readFileSync9, statSync as statSync4, existsSync as existsSync2 } from "fs";
 import { resolve as resolve3 } from "path";
 import { Database as Database3 } from "bun:sqlite";
 var LARGE_FILE_BYTES = 50 * 1024 * 1024;
@@ -9831,7 +9838,7 @@ var StoredOutputSchema = exports_external.object({
 });
 var ExportSchema = exports_external.array(StoredOutputSchema);
 function dryRunCount(dbPath, items, overwrite) {
-  if (dbPath === ":memory:" || !existsSync3(dbPath)) {
+  if (dbPath === ":memory:" || !existsSync2(dbPath)) {
     return { imported: items.length, skipped: 0, overwritten: 0 };
   }
   let db = null;
@@ -9900,7 +9907,7 @@ async function handleImportCommand(args) {
   let raw;
   if (filePath) {
     try {
-      const size = statSync3(filePath).size;
+      const size = statSync4(filePath).size;
       if (size > LARGE_FILE_BYTES) {
         console.error(`Warning: file is ${Math.round(size / 1024 / 1024)} MB \u2014 this may take a while.`);
       }
@@ -9968,7 +9975,7 @@ Next steps:`);
 }
 
 // src/install/index.ts
-import { existsSync as existsSync4 } from "fs";
+import { existsSync as existsSync3 } from "fs";
 import { mkdir, rename, readFile } from "fs/promises";
 import path from "path";
 import os from "os";
@@ -10140,7 +10147,7 @@ async function installCommand(opts = {}) {
     claudeMdPath = defaultClaudeMdPath()
   } = opts;
   const paths = detectPaths();
-  if (!existsSync4(paths.serverJs) || !existsSync4(paths.cliJs)) {
+  if (!existsSync3(paths.serverJs) || !existsSync3(paths.cliJs)) {
     console.error(`${RED}\u2717 Build artifacts not found.${RESET}`);
     console.error(`  Expected: ${DIM}${paths.serverJs}${RESET}`);
     console.error(`  Run ${BOLD}bun run build${RESET} first.`);
@@ -10325,8 +10332,8 @@ async function statusCommand(opts = {}) {
     claudeMdContent = await readFile(claudeMdPath, "utf8");
   } catch {}
   const claudeMdOk = isClaudeMdInjected(claudeMdContent);
-  const serverExists = existsSync4(recallPaths.serverJs);
-  const cliExists = existsSync4(recallPaths.cliJs);
+  const serverExists = existsSync3(recallPaths.serverJs);
+  const cliExists = existsSync3(recallPaths.cliJs);
   const fullyInstalled = serverRegistered && ssRegistered && ptuRegistered && claudeMdOk && serverExists && cliExists;
   const label = fullyInstalled ? `${GREEN}installed${RESET}` : serverRegistered || ssRegistered || ptuRegistered ? `${YELLOW}partial / stale${RESET}` : `${RED}not installed${RESET}`;
   console.log(`
