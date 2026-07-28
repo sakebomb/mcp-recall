@@ -1,2 +1,17 @@
 #!/usr/bin/env bash
-exec bun "$(dirname "$0")/../dist/cli.js" "$@"
+# Same symlink resolution as ../../bin/recall — see the comment there and #216.
+# Invoked today as ${CLAUDE_PLUGIN_ROOT}/bin/recall (absolute, unsymlinked) and not
+# shipped to npm, so it is not broken; kept identical so the two cannot diverge.
+set -euo pipefail
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  if [[ $SOURCE != /* ]]; then
+    SOURCE="$DIR/$SOURCE"
+  fi
+done
+DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+exec bun "$DIR/../dist/cli.js" "$@"
