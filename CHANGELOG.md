@@ -19,7 +19,11 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ### Security
 
-- **Manifest verification now pins the signing workflow.** Previously the attestation was verified with repo scope only, so an attestation from *any* workflow in the profiles repository was accepted as a valid trust root. Verification now also enforces `--signer-workflow`, requiring the specific workflow that regenerates and attests the manifest (#202)
+- **Manifest verification now pins the exact signing identity.** Previously the attestation was verified with repo scope only, so an attestation from *any* workflow in the profiles repository was accepted as a valid trust root. Verification now enforces `--cert-identity`, requiring the specific workflow *and* ref that regenerates and attests the manifest. (`--signer-workflow` alone was insufficient: it compiles to a prefix-anchored match that stops short of the `@ref` suffix, so an attestation signed from any branch would still have matched.) (#202)
+
+### Changed
+
+- **An outdated `gh` no longer looks like a tampered manifest.** A `gh` too old to support `--cert-identity` exits non-zero exactly as a bad signature does; that case is now reported as a skipped verification telling you to upgrade `gh`, instead of a signature failure (which in `error` mode would have hard-failed `profiles install/seed/update`) (#202)
 
 ---
 

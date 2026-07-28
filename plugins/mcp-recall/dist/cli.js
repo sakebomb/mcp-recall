@@ -8577,7 +8577,9 @@ import { createHash as createHash4 } from "crypto";
 var MANIFEST_URL = "https://raw.githubusercontent.com/sakebomb/mcp-recall-profiles/main/manifest.json";
 var PROFILE_BASE_URL = "https://raw.githubusercontent.com/sakebomb/mcp-recall-profiles/main/";
 var COMMUNITY_REPO = "sakebomb/mcp-recall-profiles";
-var SIGNER_WORKFLOW = `${COMMUNITY_REPO}/.github/workflows/manifest.yml`;
+var SIGNER_WORKFLOW_PATH = ".github/workflows/manifest.yml";
+var SIGNER_REF = "refs/heads/main";
+var SIGNER_IDENTITY = `https://github.com/${COMMUNITY_REPO}/${SIGNER_WORKFLOW_PATH}@${SIGNER_REF}`;
 var SAFE_ID_RE = /^[a-z0-9_-]+$/;
 var SAFE_FILE_RE = /^profiles\/[a-z0-9_-]+\/[a-z0-9_.-]+\.toml$/;
 function assertSafeId(id) {
@@ -8617,6 +8619,7 @@ function verifyHash(content, expected, id) {
     throw new Error(`Profile ${id}: hash mismatch (expected ${expected.slice(0, 8)}\u2026, got ${actual.slice(0, 8)}\u2026)`);
   }
 }
+var UNSUPPORTED_FLAG_RE = /unknown (flag|command|shorthand flag)/i;
 function verifyManifest(manifestPath, mode) {
   if (mode === "skip")
     return;
@@ -8637,11 +8640,16 @@ function verifyManifest(manifestPath, mode) {
     manifestPath,
     "--repo",
     COMMUNITY_REPO,
-    "--signer-workflow",
-    SIGNER_WORKFLOW
+    "--cert-identity",
+    SIGNER_IDENTITY
   ], { stderr: "pipe", stdout: "ignore" });
   if (result.exitCode !== 0) {
     const errText = result.stderr ? new TextDecoder().decode(result.stderr).trim() : "";
+    if (UNSUPPORTED_FLAG_RE.test(errText)) {
+      process.stderr.write(`[recall] manifest signature verification skipped: this gh CLI does not support --cert-identity (upgrade gh)
+`);
+      return;
+    }
     const msg = `[recall] manifest signature verification failed${errText ? `: ${errText}` : ""}
 `;
     if (mode === "error") {

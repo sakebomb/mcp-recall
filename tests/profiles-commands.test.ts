@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { patternsOverlap, testProfile, cmdList, cmdInstall, cmdRemove, cmdAvailable, verifyManifest } from "../src/profiles/commands";
-import { SIGNER_WORKFLOW } from "../src/profiles/shared";
+import { SIGNER_IDENTITY, COMMUNITY_REPO } from "../src/profiles/shared";
 import { clearProfileCache, getShortName } from "../src/profiles/loader";
 
 // ── patternsOverlap ───────────────────────────────────────────────────────────
@@ -855,7 +855,7 @@ describe("verifyManifest", () => {
     }
   });
 
-  test("pins the signer workflow, not just the repo", () => {
+  test("pins the exact signer identity, not just the repo", () => {
     let verifyArgs: string[] = [];
     const spy = spyOn(Bun, "spawnSync").mockImplementation((cmd: unknown, ..._rest: unknown[]) => {
       const args = cmd as string[];
@@ -870,11 +870,44 @@ describe("verifyManifest", () => {
     }
 
     // Repo scope alone accepts an attestation from any workflow in the repo.
-    const flagIdx = verifyArgs.indexOf("--signer-workflow");
+    const flagIdx = verifyArgs.indexOf("--cert-identity");
     expect(flagIdx).toBeGreaterThan(-1);
-    expect(verifyArgs[flagIdx + 1]).toBe(SIGNER_WORKFLOW);
-    // gh requires `<owner>/<repo>/<path>` and silently rejects a bare workflow path.
-    expect(SIGNER_WORKFLOW).toBe("sakebomb/mcp-recall-profiles/.github/workflows/manifest.yml");
+    expect(verifyArgs[flagIdx + 1]).toBe(SIGNER_IDENTITY);
+
+    // Shape, not a second copy of the literal, so renaming COMMUNITY_REPO doesn't
+    // break a test that is really asserting format. `--cert-identity` matches the
+    // whole SAN exactly, so a bare path or a missing @ref would never match.
+    expect(SIGNER_IDENTITY).toStartWith(`https://github.com/${COMMUNITY_REPO}/`);
+    expect(SIGNER_IDENTITY).toMatch(
+      /^https:\/\/github\.com\/[^/]+\/[^/]+\/\.github\/workflows\/[\w.-]+\.ya?ml@refs\/heads\/[\w.-]+$/
+    );
+  });
+
+  test("reports an old gh as a tooling gap, not a failed signature", () => {
+    const spy = spyOn(Bun, "spawnSync").mockImplementation((cmd: unknown, ..._rest: unknown[]) => {
+      const args = cmd as string[];
+      if (args[1] === "--version") return { exitCode: 0, stderr: new Uint8Array(), stdout: new Uint8Array(), success: true } as ReturnType<typeof Bun.spawnSync>;
+      return { exitCode: 1, stderr: new TextEncoder().encode("unknown flag: --cert-identity"), stdout: new Uint8Array(), success: false } as ReturnType<typeof Bun.spawnSync>;
+    });
+
+    const stderrLines: string[] = [];
+    const origWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (msg: string | Uint8Array, ..._rest: unknown[]) => {
+      stderrLines.push(typeof msg === "string" ? msg : new TextDecoder().decode(msg));
+      return true;
+    };
+
+    try {
+      // error mode must not throw: gh being too old is not evidence of tampering.
+      expect(() => verifyManifest(tmpFile, "error")).not.toThrow();
+    } finally {
+      process.stderr.write = origWrite;
+      spy.mockRestore();
+    }
+
+    const out = stderrLines.join("");
+    expect(out).toContain("upgrade gh");
+    expect(out).not.toContain("verification failed");
   });
 
   test("warn mode succeeds silently when gh exits zero", () => {
