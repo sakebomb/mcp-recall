@@ -90,10 +90,15 @@ describe("handleSessionStart", () => {
   // A project path is a directory. An existing *file* would satisfy existsSync and
   // then be classified "active" by gc, which is wrong about what it is.
   it("does not record project_path when the resolved path is a file", () => {
-    const f = join(mkdtempSync(join(tmpdir(), "recall-file-")), "not-a-dir");
-    writeFileSync(f, "x");
-    handleSessionStart(makeSessionStartInput({ cwd: f }));
-    expect(getMeta(getDb(":memory:"), "project_path")).toBeNull();
+    const dir = mkdtempSync(join(tmpdir(), "recall-file-"));
+    try {
+      const f = join(dir, "not-a-dir");
+      writeFileSync(f, "x");
+      handleSessionStart(makeSessionStartInput({ cwd: f }));
+      expect(getMeta(getDb(":memory:"), "project_path")).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   // setMeta upserts, so skipping leaves a previously-verified path in place rather
