@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, unlinkSync } from "fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { patternsOverlap, testProfile, cmdList, cmdInstall, cmdRemove, cmdAvailable, verifyManifest } from "../src/profiles/commands";
@@ -7,27 +7,38 @@ import { SIGNER_IDENTITY, COMMUNITY_REPO, fetchManifest } from "../src/profiles/
 import { clearProfileCache, getShortName } from "../src/profiles/loader";
 import { resetConfig } from "../src/config";
 
-/**
- * Disables signature verification for tests that stub `fetch` with a fixture
- * manifest. Such a manifest is unattested by construction, so leaving
- * verification on made `verifyManifest` shell out to a real `gh attestation
- * verify` — a live network call per case, whose result depended on the actual
- * attestation state of the real profiles repo. Verification itself is covered by
- * the `verifyManifest` describe block, and that `fetchManifest` invokes it at all
- * is covered by "fetchManifest verifies the manifest by default".
- */
-const SKIP_VERIFY_CONFIG = join(tmpdir(), `recall-skipverify-${process.pid}.toml`);
+let configDir: string | null = null;
 
-function useSkipVerifyConfig(): void {
-  writeFileSync(SKIP_VERIFY_CONFIG, '[profiles]\nverify_signature = "skip"\n', "utf8");
-  process.env.RECALL_CONFIG_PATH = SKIP_VERIFY_CONFIG;
+/**
+ * Pins `profiles.verify_signature` for a block, so no test's outcome depends on
+ * the ambient `~/.config/mcp-recall/config.toml` of whoever runs the suite.
+ *
+ * `"skip"` is for blocks that stub `fetch` with a fixture manifest: such a
+ * manifest is unattested by construction, so leaving verification on made
+ * `verifyManifest` shell out to a real `gh attestation verify` — a live network
+ * call per case whose result depended on the real profiles repo's attestation
+ * state. Verification itself is covered by the `verifyManifest` block, and that
+ * `fetchManifest` invokes it at all by `describe("fetchManifest")`, which pins
+ * `"warn"` for the same don't-trust-ambient-config reason.
+ *
+ * Also resets the module-level config cache in `src/config.ts`, which is shared
+ * across test files in Bun's single process.
+ */
+function writeConfig(mode: "warn" | "error" | "skip"): void {
+  configDir = mkdtempSync(join(tmpdir(), "recall-cfg-"));
+  const path = join(configDir, "config.toml");
+  writeFileSync(path, `[profiles]\nverify_signature = "${mode}"\n`, "utf8");
+  process.env.RECALL_CONFIG_PATH = path;
   resetConfig();
 }
 
 function restoreConfig(): void {
   delete process.env.RECALL_CONFIG_PATH;
   resetConfig();
-  try { unlinkSync(SKIP_VERIFY_CONFIG); } catch { /* already gone */ }
+  if (configDir) {
+    rmSync(configDir, { recursive: true, force: true });
+    configDir = null;
+  }
 }
 
 // ── patternsOverlap ───────────────────────────────────────────────────────────
@@ -363,7 +374,7 @@ type = "text_truncate"`;
     communityDir = mkdtempSync(join(tmpdir(), "recall-seed-"));
     clearProfileCache();
     process.env.RECALL_COMMUNITY_PROFILES_PATH = communityDir;
-    useSkipVerifyConfig();
+    writeConfig("skip");
     originalFetch = globalThis.fetch;
     globalThis.fetch = (async (url: string | URL | Request) => {
       const u = url.toString();
@@ -580,7 +591,7 @@ type = "text_truncate"`;
     communityDir = mkdtempSync(join(tmpdir(), "recall-install-sn-"));
     clearProfileCache();
     process.env.RECALL_COMMUNITY_PROFILES_PATH = communityDir;
-    useSkipVerifyConfig();
+    writeConfig("skip");
     originalFetch = globalThis.fetch;
     globalThis.fetch = (async (url: string | URL | Request) => {
       const u = url.toString();
@@ -698,7 +709,7 @@ type = "text_truncate"`;
     communityDir = mkdtempSync(join(tmpdir(), "recall-avail-"));
     clearProfileCache();
     process.env.RECALL_COMMUNITY_PROFILES_PATH = communityDir;
-    useSkipVerifyConfig();
+    writeConfig("skip");
     originalFetch = globalThis.fetch;
     globalThis.fetch = (async (url: string | URL | Request) => {
       const u = url.toString();
@@ -773,6 +784,10 @@ describe("fetchManifest", () => {
   let originalFetch: typeof globalThis.fetch;
 
   beforeEach(() => {
+    // Pinned, not ambient: without this the block reads the runner's real
+    // ~/.config/mcp-recall/config.toml, and anyone who set verify_signature =
+    // "skip" — the documented escape hatch — would see this test fail.
+    writeConfig("warn");
     originalFetch = globalThis.fetch;
     globalThis.fetch = (async (_url: string | URL | Request) =>
       new Response(JSON.stringify({ profiles: [] }), { status: 200 })) as typeof globalThis.fetch;
