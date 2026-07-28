@@ -883,11 +883,16 @@ describe("verifyManifest", () => {
     );
   });
 
-  test("reports an old gh as a tooling gap, not a failed signature", () => {
+  // "unknown flag" is gh too old for --cert-identity; "unknown command" is gh < 2.49,
+  // which has no `attestation` subcommand at all. Same remedy, so same branch.
+  test.each([
+    ["unknown flag: --cert-identity"],
+    ['unknown command "attestation" for "gh"'],
+  ])("reports an old gh (%s) as a tooling gap, not a failed signature", (ghStderr) => {
     const spy = spyOn(Bun, "spawnSync").mockImplementation((cmd: unknown, ..._rest: unknown[]) => {
       const args = cmd as string[];
       if (args[1] === "--version") return { exitCode: 0, stderr: new Uint8Array(), stdout: new Uint8Array(), success: true } as ReturnType<typeof Bun.spawnSync>;
-      return { exitCode: 1, stderr: new TextEncoder().encode("unknown flag: --cert-identity"), stdout: new Uint8Array(), success: false } as ReturnType<typeof Bun.spawnSync>;
+      return { exitCode: 1, stderr: new TextEncoder().encode(ghStderr), stdout: new Uint8Array(), success: false } as ReturnType<typeof Bun.spawnSync>;
     });
 
     const stderrLines: string[] = [];

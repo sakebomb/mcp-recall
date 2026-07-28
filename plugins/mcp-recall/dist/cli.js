@@ -8646,7 +8646,7 @@ function verifyManifest(manifestPath, mode) {
   if (result.exitCode !== 0) {
     const errText = result.stderr ? new TextDecoder().decode(result.stderr).trim() : "";
     if (UNSUPPORTED_FLAG_RE.test(errText)) {
-      process.stderr.write(`[recall] manifest signature verification skipped: this gh CLI does not support --cert-identity (upgrade gh)
+      process.stderr.write(`[recall] manifest signature verification skipped: this gh CLI does not support the flags we verify with (upgrade gh)
 `);
       return;
     }

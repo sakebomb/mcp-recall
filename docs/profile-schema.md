@@ -187,7 +187,8 @@ When `install`, `update`, or `seed` download the community manifest, mcp-recall 
 ```toml
 [profiles]
 verify_signature = "warn"   # default — logs a warning if verification fails or gh is absent
-# verify_signature = "error"  # hard-fail on any verification problem
+# verify_signature = "error"  # hard-fail if the signature does not verify (still skipped
+                             # when gh is unavailable — see below)
 # verify_signature = "skip"   # disable verification entirely
 ```
 
@@ -203,8 +204,12 @@ job. Repo scope alone would accept an attestation from any workflow in that repo
 and pinning only the workflow path would still accept one signed from any branch — the
 full identity pins the ref as well.
 
-If `gh` is absent, or too old to support `--cert-identity`, verification is skipped with
-a distinct message rather than reported as a signature failure.
+If `gh` is absent, or too old to support the flags used above, verification is skipped
+with a distinct message rather than reported as a signature failure — an unusable tool is
+not evidence of tampering. Note the consequence: `error` strengthens how a *failed*
+signature is handled, not whether verification is *available*. In an environment without
+a usable `gh` (a container image, for instance), `error` still proceeds with an unverified
+manifest and only a line on stderr.
 
 To skip verification for a single command (e.g. in CI without `gh` installed):
 

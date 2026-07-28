@@ -155,12 +155,14 @@ export function verifyManifest(manifestPath: string, mode: "warn" | "error" | "s
   if (result.exitCode !== 0) {
     const errText = result.stderr ? new TextDecoder().decode(result.stderr).trim() : "";
 
-    // A gh too old to know --cert-identity exits non-zero just like a bad signature.
+    // A gh too old for these flags exits non-zero just like a bad signature does.
     // Reporting that as "verification failed" would read as a tampered manifest, so
     // treat it as the tooling gap it is — same graceful path as gh being absent.
+    // Covers both an unknown --cert-identity and, on older still, no `attestation`
+    // subcommand at all; the remedy is the same either way.
     if (UNSUPPORTED_FLAG_RE.test(errText)) {
       process.stderr.write(
-        "[recall] manifest signature verification skipped: this gh CLI does not support --cert-identity (upgrade gh)\n"
+        "[recall] manifest signature verification skipped: this gh CLI does not support the flags we verify with (upgrade gh)\n"
       );
       return;
     }
