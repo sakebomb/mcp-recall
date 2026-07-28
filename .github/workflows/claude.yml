@@ -49,6 +49,25 @@ jobs:
           # -------------------------------------------------------------------
 
           # Auto PR review supplies a review prompt; mentions use the comment body.
-          prompt: ${{ github.event_name == 'pull_request' && 'Review this PR for correctness, security, and adherence to the repo conventions in CLAUDE.md. Flag CRITICAL/HIGH issues clearly; keep notes concise.' || '' }}
+          #
+          # The CI-verification clause is deliberate. Reviews were inconsistently
+          # disclaiming "could not reproduce the test count" even though this job
+          # holds `actions: read` for exactly that — some reviews read the CI run and
+          # settled claims from it, others assumed they could not. Nothing in the old
+          # prompt asked them to look. See #221; this needs no extra permission.
+          #
+          # Folded scalar (>-) so the prompt stays readable; YAML folds the newlines
+          # to spaces before Actions evaluates the expression. Avoid apostrophes in
+          # the text — it lives inside a single-quoted GitHub expression string.
+          prompt: >-
+            ${{ github.event_name == 'pull_request' && 'Review this PR for
+            correctness, security, and adherence to the repo conventions in
+            CLAUDE.md. Flag CRITICAL/HIGH issues clearly and keep notes concise.
+            Treat every factual claim in the PR body as unverified until you have
+            checked it against the code. For claims about test counts, coverage, or
+            CI status, read the CI run for the head commit and settle them from it
+            rather than disclaiming that you could not verify them. Say plainly
+            which claims you verified and how, and which you could not — never
+            present reasoning as verification.' || '' }}
           trigger_phrase: "@claude"
           track_progress: "true"
