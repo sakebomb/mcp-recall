@@ -30,14 +30,16 @@ No `just` / `make` in this project. Use `bun test` directly (not `just test`).
 ## Architecture
 
 ```
-bin/recall              Shell entrypoint for hooks (session-start, post-tool-use)
+bin/recall              Entrypoint used by hooks/hooks.json (session-start, post-tool-use)
+                        and as the npm `bin`. Resolves symlinks before locating src/.
 src/
-  server.ts             MCP server — exposes 10 recall__* tools
+  server.ts             MCP server — exposes the recall__* tools listed below
   cli.ts                Hook CLI dispatcher (mcp-recall install / learn / profiles / …)
   config.ts             TOML config loader (Zod-validated, cached)
   project-key.ts        Git root detection + SHA256 path hash
   log.ts                Unified stderr logging — info/warn/error/debug, gated on RECALL_DEBUG=1
   format.ts             Shared byte-size and relative-time formatting utilities
+  hints.ts              Extracts salient search terms for the summary header (deterministic)
   tools.ts              Tool handler logic for all recall__* tools (pure functions; server.ts wires to MCP SDK)
   denylist.ts           Built-in + configurable denylist
   secrets.ts            Secret pattern detection before any write
@@ -48,8 +50,14 @@ src/
     queries.ts          Core CRUD — storeOutput, retrieveOutput, evictIfNeeded, forgetOutputs, …
     analytics.ts        Aggregation queries — getStats, getContext, getSessionSummary, getSuggestions, …
     index.ts            Re-export barrel (all db/* in one import surface)
-  handlers/             Compression handlers per tool type (15 handlers)
+  handlers/             Compression handlers. index.ts holds the pattern→handler table;
+                        dispatch also consults profiles, then falls back to a bash
+                        family and finally json → csv → generic. Counting them is
+                        ambiguous, so the registry in index.ts is the source of truth.
   hooks/                Hook implementations (SessionStart, PostToolUse)
+  gc/                   mcp-recall gc — classifies every project DB and reclaims disk.
+                        Deletion policy lives in STATUS_POLICY; see the safety note below.
+  import/               mcp-recall import — restores a recall__export dump into a store
   install/              mcp-recall install / uninstall / status — writes to ~/.claude.json, settings.json, CLAUDE.md
   learn/                mcp-recall learn — reads ~/.claude.json, spawns MCP servers via stdio, generates TOML profiles
   profiles/             mcp-recall profiles subcommands (list, install, update, remove, seed, feed, check, test, info, available, retrain)
@@ -60,15 +68,22 @@ plugins/mcp-recall/     Marketplace-installable plugin bundle
   dist/                 Bundled server.js + cli.js (bun build --target bun)
 ```
 
-**Hook flow**: `PostToolUse` intercepts all `mcp__*` tools (except `mcp__recall__*`) → denylist check → secret scan → dedup check → compress → store in SQLite → return summary to Claude.
+**Hook flow** (`src/hooks/post-tool-use.ts`, whose numbered steps are the source of truth): `PostToolUse` intercepts `mcp__*` (except `mcp__recall__*`) and `Bash` → denylist check → secret scan → dedup check (by `input_hash`, then `output_hash`) → compress → **skip unless the summary is actually smaller than the original** → store in SQLite → evict if over `store.max_size_mb` → return summary to Claude.
+
+That skip guard matters when reasoning about behaviour: output which does not compress usefully — a short, error-dense log, for instance — passes through untouched rather than being stored.
+
+**Deletion safety**: `gc --force` is the only thing in the project that deletes user data. Its rule is "recorded `project_path` gone but its parent present ⇒ project deleted", which is valid *only* for an absolute path — `dirname("")` and `dirname("bare-name")` are both `"."`, which always exists. Non-absolute paths are therefore `unverifiable` and never deleted, and `session-start` only records a path that resolves to a real directory. When changing `src/gc/`, build a store containing the dangerous shapes and assert what survives; do not reason about it.
 
 **MCP server tools** (all `recall__` prefixed):
-- `recall__retrieve` — fetch stored content by ID, with optional FTS snippet
+- `recall__retrieve` — fetch stored content by ID. `mode` = `summary` | `peek` | `full`;
+  `peek` returns a bounded window of the best-matching chunks. With no `mode`, a query
+  still yields a focused excerpt
 - `recall__search` — FTS across stored outputs with tool filter
 - `recall__forget` — delete by id / tool / session / age / all
 - `recall__list_stored` — paginated browse, sortable, with tool filter
 - `recall__stats` — session efficiency report (counts, sizes, token savings)
-- `recall__pin` — pin/unpin items; protected from expiry and LFU eviction
+- `recall__pin` — pin/unpin items; exempt from expiry and from decay-scored eviction
+  (which means pinned data can silently outgrow `store.max_size_mb` — see #205)
 - `recall__note` — store arbitrary text as project memory
 - `recall__export` — JSON dump of all items, oldest-first
 - `recall__session_summary` — per-session digest (tool breakdown, top accessed, pinned, notes)
@@ -80,7 +95,10 @@ plugins/mcp-recall/     Marketplace-installable plugin bundle
 ```bash
 mcp-recall install            # write MCP entry, hooks, and CLAUDE.md instructions into Claude Code config
 mcp-recall uninstall          # reverse of install
-mcp-recall status             # report install health (MCP entry, hooks, CLAUDE.md block)
+mcp-recall status             # report install health (MCP entry, hooks, CLAUDE.md block, store size)
+mcp-recall gc [--force]       # list/reclaim orphaned project DBs (--stale-days N, --vacuum). Dry run by default
+mcp-recall import <file>      # restore from a recall__export dump (--overwrite, --keep-project-key, --dry-run)
+mcp-recall completions <shell> # emit a zsh/bash/fish completion script
 mcp-recall learn [server…]    # auto-generate TOML profiles by inspecting installed MCP servers
 mcp-recall profiles list      # list all installed profiles (user + community + built-in)
 mcp-recall profiles install <id>   # download a community profile by ID
@@ -104,10 +122,19 @@ mcp-recall profiles available # list community profiles available to install
 | 3 | Compression handlers (15 types) | Complete |
 | 4 | SQLite + FTS5 + chunking DB layer | Complete |
 | 5 | Hook pipeline (dedup, eviction) | Complete |
-| 6 | MCP server tools (10 tools) | Complete |
+| 6 | MCP server tools | Complete |
 | 7 | Install / uninstall / status CLI | Complete |
 | 8 | Profile system (community + user + built-in tiers) | Complete |
 | 9 | `mcp-recall learn` — auto-generate profiles from live MCP servers | Complete |
+| 10 | Retrieval quality — search hints, graduated retrieval, decay eviction, output dedup, structure-aware fallback | Complete (v1.9.0) |
+| 11 | Store lifecycle — `gc`, free-page reclamation, pin-budget reporting | Complete (v1.10.0) |
+| 12 | Supply chain — manifest attestation restored, exact signer-identity pinning, packaged-CLI CI | Complete (v1.10.1) |
+| 13 | **Current: stabilize + document.** Docs accuracy, contributor architecture doc, `ROADMAP.md`. No new features | In progress |
+
+Phases 1–9 were planned up front. Everything after was reactive — ported ideas from a
+competitive review, then a dogfooding pass, then findings from those. Phase 13 exists to
+stop and consolidate before adding more; see `ROADMAP.md` for what is deliberately out of
+scope.
 
 ## Testing Conventions
 
@@ -123,6 +150,12 @@ mcp-recall profiles available # list community profiles available to install
 - Override via: `RECALL_CONFIG_PATH` env var
 - SQLite DB: `~/.local/share/mcp-recall/<project-key>.db` (override via `RECALL_DB_PATH`)
 - SQLite DB excluded from git via `.gitignore` (`*.db*`)
+- Debug logging: `RECALL_DEBUG=1`, or `[debug] enabled = true` in config. The config key is
+  currently undocumented for users — only the env var appears in `docs/troubleshooting.md`
+
+When adding a config key, it must land in three places or it is undiscoverable: the Zod
+schema, `DEFAULTS`, and the user-facing docs. The audit for this is mechanical — compare
+`grep -oE "^\s{4}[a-z_]+:" src/config.ts` against `README.md` and `docs/`.
 
 ## Denylist Defaults (never store outputs from)
 
