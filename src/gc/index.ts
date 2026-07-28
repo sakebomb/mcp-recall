@@ -41,7 +41,7 @@ export type DbStatus =
   | "current" // the active project's DB — never touched
   | "active" // recorded path still exists on disk
   | "orphaned" // recorded path gone but its parent exists — project deleted, safe to remove
-  | "unverifiable" // recorded path AND its parent gone — likely an unmounted volume; never deleted
+  | "unverifiable" // can't be reasoned about: path AND parent gone (likely an unmounted volume), or a relative path with no knowable root; never deleted
   | "legacy-fresh" // no recorded path, recently modified — kept
   | "legacy-stale" // no recorded path, untouched past the stale window — candidate
   | "unreadable"; // not an mcp-recall DB, or could not be read — reported, never deleted
@@ -184,13 +184,13 @@ function classify(
 ): DbStatus {
   if (!probe.readable) return "unreadable";
   if (probe.projectPath !== null) {
-    if (existsSync(probe.projectPath)) return "active";
-    // The orphan test below reasons about the recorded path's PARENT, which is
-    // only meaningful for an absolute path. `dirname` of "" or of a bare name is
-    // ".", which always exists, so a relative path would read as "parent survived,
-    // project deleted" and be destroyed. We cannot tell where a relative path was
-    // rooted, so it is exactly the can't-verify case.
+    // Checked before any existsSync: a relative path is resolved against the cwd
+    // gc happens to run from, so it would otherwise classify differently per
+    // invocation — and "." or a bare name would read as "parent survived, project
+    // deleted" (dirname is ".", which always exists) and be destroyed. We cannot
+    // know where a relative path was rooted, so it is the can't-verify case.
     if (!isAbsolute(probe.projectPath)) return "unverifiable";
+    if (existsSync(probe.projectPath)) return "active";
     // Path gone: only call it orphaned if the PARENT still exists (the project
     // dir was really deleted). If the parent is also gone, the volume is likely
     // just unmounted — never delete on that basis.

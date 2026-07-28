@@ -121,6 +121,9 @@ describe("gc scanDatabases", () => {
     ["an empty recorded path", ""],
     ["a bare relative name", "myproject"],
     ["a relative path with segments", "some/relative/path"],
+    // Exists relative to whatever cwd gc runs from. Must not become "active":
+    // a DB's status cannot depend on the directory the command was invoked in.
+    ["a relative path that resolves against cwd", "."],
   ])("classifies %s as unverifiable (never deleted)", (_label, recorded) => {
     makeDb("relpath", recorded);
     const [entry] = scanDatabases(workDir, "/current.db", 90);
