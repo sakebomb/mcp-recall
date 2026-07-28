@@ -25,13 +25,19 @@ function makeDb(name: string, projectPath: string | null, items = 0): string {
   const db = new Database(file);
   initSchema(db);
   if (projectPath !== null) setMeta(db, "project_path", projectPath);
-  for (let i = 0; i < items; i++) {
-    db.prepare(
-      `INSERT INTO stored_outputs
-        (id, project_key, session_id, tool_name, summary, full_content, original_size, summary_size, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(`id_${name}_${i}`, name, "2026-01-01", "t", "s", "c", 10, 2, 1000);
-  }
+  // Prepare once, and commit once: a bare .run() per row is its own implicit
+  // transaction, so 200 rows meant ~200 fsyncs and ~4.1s against this file's 5s
+  // timeout — enough headroom on an idle machine to pass, not enough under load.
+  const insert = db.prepare(
+    `INSERT INTO stored_outputs
+      (id, project_key, session_id, tool_name, summary, full_content, original_size, summary_size, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  db.transaction(() => {
+    for (let i = 0; i < items; i++) {
+      insert.run(`id_${name}_${i}`, name, "2026-01-01", "t", "s", "c", 10, 2, 1000);
+    }
+  })();
   db.close();
   return file;
 }
@@ -222,16 +228,21 @@ describe("incremental_vacuum reclamation (on-disk)", () => {
     initSchema(db);
 
     const big = "z".repeat(4096);
-    for (let i = 0; i < 80; i++) {
-      storeOutput(db, {
-        project_key: "p",
-        session_id: "2026-01-01",
-        tool_name: "mcp__tool",
-        summary: "s",
-        full_content: big,
-        original_size: big.length,
-      });
-    }
+    // storeOutput opens its own transaction per call, so an unbatched loop is one
+    // fsyncing commit per row on this non-WAL file DB. Outer transaction nests as
+    // a savepoint and collapses them into a single commit.
+    db.transaction(() => {
+      for (let i = 0; i < 80; i++) {
+        storeOutput(db, {
+          project_key: "p",
+          session_id: "2026-01-01",
+          tool_name: "mcp__tool",
+          summary: "s",
+          full_content: big,
+          original_size: big.length,
+        });
+      }
+    })();
     const before = (db.query("PRAGMA page_count").get() as { page_count: number }).page_count;
 
     // forgetOutputs deletes >= VACUUM_THRESHOLD rows and calls reclaimPages internally.
@@ -292,16 +303,18 @@ describe("gc vacuumFile (full VACUUM)", () => {
     expect((db.query("PRAGMA auto_vacuum").get() as { auto_vacuum: number }).auto_vacuum).toBe(0);
 
     const big = "z".repeat(4096);
-    for (let i = 0; i < 120; i++) {
-      storeOutput(db, {
-        project_key: "p",
-        session_id: "2026-01-01",
-        tool_name: "t",
-        summary: "s",
-        full_content: big,
-        original_size: big.length,
-      });
-    }
+    db.transaction(() => {
+      for (let i = 0; i < 120; i++) {
+        storeOutput(db, {
+          project_key: "p",
+          session_id: "2026-01-01",
+          tool_name: "t",
+          summary: "s",
+          full_content: big,
+          original_size: big.length,
+        });
+      }
+    })();
     // Raw delete (no reclaimPages) — on a NONE database the pages become freelist.
     db.prepare("DELETE FROM stored_outputs").run();
     const freelistBefore = (db.query("PRAGMA freelist_count").get() as { freelist_count: number }).freelist_count;
