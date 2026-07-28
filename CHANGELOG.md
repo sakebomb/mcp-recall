@@ -6,6 +6,12 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+## [1.10.1] — 2026-07-28
+
+### Fixed
+
+- **The `mcp-recall` CLI works again when installed from npm.** `bin/recall` located `src/cli.ts` with `dirname "$0"`, which does not follow symlinks — and npm and bun install a `bin` entry as a symlink, so `npx mcp-recall`, `bunx mcp-recall`, and a global install all failed with `Module not found .../node_modules/.bin/../src/cli.ts` while a direct call to `bin/recall` worked. Since `mcp-recall install` is how hooks and the MCP server get registered, npm users could not complete setup. Present in 1.9.0 and 1.10.0 (#216)
+
 ## [1.10.0] — 2026-07-28
 
 ### Added
@@ -342,7 +348,8 @@ Ten `recall__*` tools available in every Claude session:
 
 ---
 
-[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.10.1...HEAD
+[1.10.1]: https://github.com/sakebomb/mcp-recall/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/sakebomb/mcp-recall/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/sakebomb/mcp-recall/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/sakebomb/mcp-recall/compare/v1.7.0...v1.8.0

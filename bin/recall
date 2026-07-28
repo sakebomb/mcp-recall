@@ -1,2 +1,22 @@
 #!/usr/bin/env bash
-exec bun run "$(dirname "$0")/../src/cli.ts" "$@"
+# Resolves its own location through any symlink chain before locating src/.
+# npm and bun install a `bin` entry as a symlink (node_modules/.bin/mcp-recall ->
+# ../mcp-recall/bin/recall), so `dirname "$0"` alone points at .bin/ and
+# ../src/cli.ts resolves to node_modules/src/cli.ts, which does not exist —
+# breaking npx, bunx, and global installs while a direct call still worked (#216).
+set -euo pipefail
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  # A relative link target is relative to the link's own directory. An `if` rather
+  # than `[[ … ]] && …`, which returns 1 for an absolute target — exempt from
+  # `set -e` only because it sits in an && list, and easy to break when edited.
+  if [[ $SOURCE != /* ]]; then
+    SOURCE="$DIR/$SOURCE"
+  fi
+done
+DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+exec bun run "$DIR/../src/cli.ts" "$@"
