@@ -50,10 +50,13 @@ src/
     queries.ts          Core CRUD — storeOutput, retrieveOutput, evictIfNeeded, forgetOutputs, …
     analytics.ts        Aggregation queries — getStats, getContext, getSessionSummary, getSuggestions, …
     index.ts            Re-export barrel (all db/* in one import surface)
-  handlers/             Compression handlers. index.ts holds the pattern→handler table;
-                        dispatch also consults profiles, then falls back to a bash
-                        family and finally json → csv → generic. Counting them is
-                        ambiguous, so the registry in index.ts is the source of truth.
+  handlers/             Compression handlers. The 7-step dispatch order is documented
+                        canonically above getHandler() in index.ts — read it there rather
+                        than trusting a paraphrase. The consequential part: user and
+                        community profiles BEAT the TypeScript registry, bundled profiles
+                        LOSE to it, and native Bash is routed first, before any of them.
+                        Counting handlers is ambiguous (registry entries vs files vs
+                        fallbacks), so HANDLER_REGISTRY is the source of truth.
   hooks/                Hook implementations (SessionStart, PostToolUse)
   gc/                   mcp-recall gc — classifies every project DB and reclaims disk.
                         Deletion policy lives in STATUS_POLICY; see the safety note below.
@@ -83,7 +86,8 @@ That skip guard matters when reasoning about behaviour: output which does not co
 - `recall__list_stored` — paginated browse, sortable, with tool filter
 - `recall__stats` — session efficiency report (counts, sizes, token savings)
 - `recall__pin` — pin/unpin items; exempt from expiry and from decay-scored eviction
-  (which means pinned data can silently outgrow `store.max_size_mb` — see #205)
+  (so pinned data can exceed `store.max_size_mb`: reported by `recall__stats`, not
+  enforced — see #205)
 - `recall__note` — store arbitrary text as project memory
 - `recall__export` — JSON dump of all items, oldest-first
 - `recall__session_summary` — per-session digest (tool breakdown, top accessed, pinned, notes)
@@ -119,7 +123,7 @@ mcp-recall profiles available # list community profiles available to install
 |-------|-------|--------|
 | 1 | Scaffold, config, project-key | Complete |
 | 2 | Denylist + secret detection | Complete |
-| 3 | Compression handlers (15 types) | Complete |
+| 3 | Compression handlers | Complete |
 | 4 | SQLite + FTS5 + chunking DB layer | Complete |
 | 5 | Hook pipeline (dedup, eviction) | Complete |
 | 6 | MCP server tools | Complete |
@@ -133,8 +137,8 @@ mcp-recall profiles available # list community profiles available to install
 
 Phases 1–9 were planned up front. Everything after was reactive — ported ideas from a
 competitive review, then a dogfooding pass, then findings from those. Phase 13 exists to
-stop and consolidate before adding more; see `ROADMAP.md` for what is deliberately out of
-scope.
+stop and consolidate before adding more. Its final step is a `ROADMAP.md` stating what is
+deliberately out of scope; until that lands, this table is the only statement of direction.
 
 ## Testing Conventions
 
@@ -155,7 +159,7 @@ scope.
 
 When adding a config key, it must land in three places or it is undiscoverable: the Zod
 schema, `DEFAULTS`, and the user-facing docs. The audit for this is mechanical — compare
-`grep -oE "^\s{4}[a-z_]+:" src/config.ts` against `README.md` and `docs/`.
+`grep -oE "^ {4}[a-z_]+:" src/config.ts` (portable; `\s` is GNU-only) against `README.md` and `docs/`.
 
 ## Denylist Defaults (never store outputs from)
 
