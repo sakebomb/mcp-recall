@@ -4,9 +4,9 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { handleSessionStart } from "../src/hooks/session-start";
 import { handlePostToolUse } from "../src/hooks/post-tool-use";
-import { getDb, closeDb, listOutputs, getSessionDays, retrieveOutput, storeOutput, pinOutput } from "../src/db/index";
+import { getDb, closeDb, listOutputs, getSessionDays, retrieveOutput, storeOutput, pinOutput, getMeta } from "../src/db/index";
 import { resetConfig } from "../src/config";
-import { getProjectKey } from "../src/project-key";
+import { getProjectKey, getProjectPath } from "../src/project-key";
 
 const TEST_CWD = process.cwd();
 const SESSION_ID = "test-session-abc123";
@@ -70,6 +70,21 @@ describe("handleSessionStart", () => {
     const days = getSessionDays(db);
     const today = new Date().toISOString().slice(0, 10);
     expect(days).toContain(today);
+  });
+
+  it("records project_path when the resolved path exists", () => {
+    handleSessionStart(makeSessionStartInput());
+    expect(getMeta(getDb(":memory:"), "project_path")).toBe(getProjectPath(TEST_CWD));
+  });
+
+  // The recorded path is absolute by construction (#213), but absolute is not true:
+  // a relative payload cwd gets rooted against this process's cwd. Recording a path
+  // that doesn't exist would let gc read "path gone, parent present" as orphaned and
+  // delete a live project's database. Pathless is kept as legacy-fresh instead.
+  it("does not record project_path when the resolved path does not exist", () => {
+    handleSessionStart(makeSessionStartInput({ cwd: "definitely-not-a-real-dir-xyz" }));
+    const recorded = getMeta(getDb(":memory:"), "project_path");
+    expect(recorded).toBeNull();
   });
 
   it("is idempotent — running twice records only one session entry", () => {

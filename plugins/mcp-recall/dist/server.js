@@ -19554,7 +19554,7 @@ function resolveProjectPath(cwd) {
     encoding: "utf8",
     stdio: ["pipe", "pipe", "pipe"]
   });
-  const resolved = result.status === 0 && result.stdout ? result.stdout.trim() : resolve(cwd);
+  const resolved = result.status === 0 && result.stdout ? result.stdout.trim() : typeof cwd === "string" && cwd ? resolve(cwd) : process.cwd();
   pathCache.set(cwd, resolved);
   return resolved;
 }

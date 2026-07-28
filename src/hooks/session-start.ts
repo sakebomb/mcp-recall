@@ -1,3 +1,4 @@
+import { existsSync } from "fs";
 import { loadConfig } from "../config";
 import { getProjectKey, getProjectPath } from "../project-key";
 import { getDb, defaultDbPath, recordSession, pruneExpired, setMeta } from "../db/index";
@@ -33,7 +34,21 @@ export function handleSessionStart(raw: string): void {
 
   // Record the resolved project path so `mcp-recall gc` can tell whether this
   // project still exists on disk (orphan detection is path-existence based).
-  setMeta(db, "project_path", getProjectPath(input.cwd));
+  //
+  // Only recorded when it actually exists. The path is absolute by construction,
+  // but absolute is not the same as true: a relative payload `cwd` gets rooted
+  // against this process's cwd, which may not be where it was meant to be rooted.
+  // This hook runs *inside* the project, so a resolved path that does not exist
+  // means the guess was wrong — and recording it would let gc read a live project
+  // as "path gone, parent present" and delete its database. Recording nothing
+  // leaves the DB pathless, which gc keeps as legacy-fresh and only ever reclaims
+  // on the untouched-for-N-days rule, never on a deleted-project inference.
+  const projectPath = getProjectPath(input.cwd);
+  if (existsSync(projectPath)) {
+    setMeta(db, "project_path", projectPath);
+  } else {
+    log.debug(`session-start · resolved project path does not exist, not recording: ${projectPath}`);
+  }
 
   const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
   recordSession(db, today);

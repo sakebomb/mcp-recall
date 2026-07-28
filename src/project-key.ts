@@ -48,7 +48,7 @@ function resolveProjectPath(cwd: string): string {
   // and re-key every existing git project's database.
   const resolved = result.status === 0 && result.stdout
     ? result.stdout.trim()
-    : resolve(cwd);
+    : typeof cwd === "string" && cwd ? resolve(cwd) : process.cwd();
 
   pathCache.set(cwd, resolved);
   return resolved;

@@ -108,6 +108,9 @@ var require_package = __commonJS((exports, module) => {
   };
 });
 
+// src/hooks/session-start.ts
+import { existsSync as existsSync2 } from "fs";
+
 // node_modules/smol-toml/dist/error.js
 /*!
  * Copyright (c) Squirrel Chat et al., All rights reserved.
@@ -5167,7 +5170,7 @@ function resolveProjectPath(cwd) {
     encoding: "utf8",
     stdio: ["pipe", "pipe", "pipe"]
   });
-  const resolved = result.status === 0 && result.stdout ? result.stdout.trim() : resolve(cwd);
+  const resolved = result.status === 0 && result.stdout ? result.stdout.trim() : typeof cwd === "string" && cwd ? resolve(cwd) : process.cwd();
   pathCache.set(cwd, resolved);
   return resolved;
 }
@@ -5892,7 +5895,12 @@ function handleSessionStart(raw) {
   const config = loadConfig();
   const projectKey = getProjectKey(input.cwd);
   const db = getDb(defaultDbPath(projectKey));
-  setMeta(db, "project_path", getProjectPath(input.cwd));
+  const projectPath = getProjectPath(input.cwd);
+  if (existsSync2(projectPath)) {
+    setMeta(db, "project_path", projectPath);
+  } else {
+    log.debug(`session-start \xB7 resolved project path does not exist, not recording: ${projectPath}`);
+  }
   const today = new Date().toISOString().slice(0, 10);
   recordSession(db, today);
   pruneExpired(db, projectKey, config.store.expire_after_session_days);
@@ -9801,7 +9809,7 @@ Next steps:`);
 }
 
 // src/import/index.ts
-import { readFileSync as readFileSync9, statSync as statSync3, existsSync as existsSync2 } from "fs";
+import { readFileSync as readFileSync9, statSync as statSync3, existsSync as existsSync3 } from "fs";
 import { resolve as resolve3 } from "path";
 import { Database as Database3 } from "bun:sqlite";
 var LARGE_FILE_BYTES = 50 * 1024 * 1024;
@@ -9823,7 +9831,7 @@ var StoredOutputSchema = exports_external.object({
 });
 var ExportSchema = exports_external.array(StoredOutputSchema);
 function dryRunCount(dbPath, items, overwrite) {
-  if (dbPath === ":memory:" || !existsSync2(dbPath)) {
+  if (dbPath === ":memory:" || !existsSync3(dbPath)) {
     return { imported: items.length, skipped: 0, overwritten: 0 };
   }
   let db = null;
@@ -9960,7 +9968,7 @@ Next steps:`);
 }
 
 // src/install/index.ts
-import { existsSync as existsSync3 } from "fs";
+import { existsSync as existsSync4 } from "fs";
 import { mkdir, rename, readFile } from "fs/promises";
 import path from "path";
 import os from "os";
@@ -10132,7 +10140,7 @@ async function installCommand(opts = {}) {
     claudeMdPath = defaultClaudeMdPath()
   } = opts;
   const paths = detectPaths();
-  if (!existsSync3(paths.serverJs) || !existsSync3(paths.cliJs)) {
+  if (!existsSync4(paths.serverJs) || !existsSync4(paths.cliJs)) {
     console.error(`${RED}\u2717 Build artifacts not found.${RESET}`);
     console.error(`  Expected: ${DIM}${paths.serverJs}${RESET}`);
     console.error(`  Run ${BOLD}bun run build${RESET} first.`);
@@ -10317,8 +10325,8 @@ async function statusCommand(opts = {}) {
     claudeMdContent = await readFile(claudeMdPath, "utf8");
   } catch {}
   const claudeMdOk = isClaudeMdInjected(claudeMdContent);
-  const serverExists = existsSync3(recallPaths.serverJs);
-  const cliExists = existsSync3(recallPaths.cliJs);
+  const serverExists = existsSync4(recallPaths.serverJs);
+  const cliExists = existsSync4(recallPaths.cliJs);
   const fullyInstalled = serverRegistered && ssRegistered && ptuRegistered && claudeMdOk && serverExists && cliExists;
   const label = fullyInstalled ? `${GREEN}installed${RESET}` : serverRegistered || ssRegistered || ptuRegistered ? `${YELLOW}partial / stale${RESET}` : `${RED}not installed${RESET}`;
   console.log(`

@@ -69,9 +69,10 @@ describe("getProjectPath", () => {
     expect(getProjectPath(messy)).toBe(join(tmpdir(), "b"));
   });
 
-  // Holds via the git branch rather than the fallback: spawnSync with cwd "" runs
-  // in the process cwd, so git answers. Asserted because the invariant callers
-  // depend on is "always absolute", regardless of which branch produced it.
+  // Which branch answers is runtime-specific: Bun's spawnSync with cwd "" runs in
+  // the process cwd so git answers, while Node would chdir("") -> ENOENT and take
+  // the fallback. Absolute either way, which is the invariant callers depend on —
+  // so this documents that invariant rather than guarding the fix on any runtime.
   it("returns an absolute path for an empty string", () => {
     expect(isAbsolute(getProjectPath(""))).toBe(true);
   });

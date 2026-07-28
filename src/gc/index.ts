@@ -184,6 +184,8 @@ function classify(
 ): DbStatus {
   if (!probe.readable) return "unreadable";
   if (probe.projectPath !== null) {
+    // Still required, not dead code: session-start absolutises the path it records
+    // (#213), but databases written by 1.10.0 and earlier can hold a relative one.
     // Checked before any existsSync: a relative path is resolved against the cwd
     // gc happens to run from, so it would otherwise classify differently per
     // invocation — and "." or a bare name would read as "parent survived, project
