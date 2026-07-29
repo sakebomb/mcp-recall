@@ -223,7 +223,7 @@ Left in place because the per-test rows still have orientation value; the totals
 | evictIfNeeded: evicts least-accessed item when over limit | fewer accesses evicted first (equal recency, so LFU and decay agree here) |
 | evictIfNeeded: does not evict pinned items | pin protection during eviction |
 | evictIfNeeded: returns 0 and evicts nothing when all items are pinned | pinned data can exceed max_size_mb (#205) |
-| evictIfNeeded: decay keeps a recently-accessed item over an older heavily-accessed one (unlike LFU) | the load-bearing decay test — pure LFU fails it on count alone, and it goes red if the 0.5 constant changes |
+| evictIfNeeded: decay keeps a recently-accessed item over an older heavily-accessed one (unlike LFU) | the load-bearing decay test — pure LFU fails it on count alone. Bounds the 0.5 constant **from above only** (red at ≈0.72 and slower); nothing in the suite bounds it from below, so base 0.01 keeps all 792 green |
 | evictIfNeeded: uses creation time for recency when an item was never accessed | last_accessed null fallback |
 | evictIfNeeded: evicts an item aged one half-life over an equally-accessed fresh one | ordering outcome only; does **not** measure the 0.5 factor (stays green at 0.9) |
 | evictIfNeeded: breaks score + created_at ties deterministically by id | the id tiebreak, i.e. the chain's last link; the created_at link has no test |
