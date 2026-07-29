@@ -293,7 +293,7 @@ mcp-recall import dump.json --dry-run        # report what would be imported
 
 Items are imported into the **current** project's store — run `import` from the project you want them in.
 
-> **`--keep-project-key` is currently not useful** ([#226](https://github.com/sakebomb/mcp-recall/issues/226)). It retains the dump's original project key on each row, but still writes them to the current project's database. Since every retrieval path filters by the current project's key, the imported items are then unreachable — from this project *and* from the one they came from, which uses a different database file. Import without the flag.
+> **Avoid `--keep-project-key`** ([#226](https://github.com/sakebomb/mcp-recall/issues/226)). It retains the dump's original project key on each row but still writes them to the *current* project's database, and almost everything else is scoped by project key. The imported rows are then invisible to `recall__search`, `list_stored`, `stats`, `context`, `session_summary` and `suggest`; **cannot be deleted** by `recall__forget` — not by id, tool, session, age, or even `all: true`; and are excluded from the `store.max_size_mb` accounting, so they are never evicted and the store under-reports its own size. They remain readable by `recall__retrieve` with an explicit id, since that looks up by id alone. Import without the flag; the items land in the current project and behave normally.
 
 **Shell completions.** Add to your shell profile once:
 
