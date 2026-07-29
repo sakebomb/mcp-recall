@@ -10,7 +10,7 @@ are in `CLAUDE.md`; #208 and #205 stay open deliberately.
 | Step | State |
 |------|-------|
 | A — CLAUDE.md accuracy | ✓ DONE, PR [#220](https://github.com/sakebomb/mcp-recall/pull/220) @ `709c780` |
-| B — full docs re-read | ✓ DONE — both passes complete |
+| B — full docs re-read | ✓ DONE — both passes, all 12 surfaces, review-hardened |
 | C — `docs/architecture.md` for contributors | not started ← resume here |
 | D — `ROADMAP.md` with explicit non-goals | not started |
 
@@ -54,6 +54,41 @@ described; every percentage in the Results table is arithmetically consistent. T
 "88–97% context savings" claim pass 2 flagged as testable is not in the current README.
 Stripe is both a built-in handler and a community profile — legitimate, since profiles
 outrank the registry — so the README mentioning both is not a contradiction.
+
+### The review round found more than the writing round (PR #225)
+
+The first commit claimed to close pass 1 while only 5 of the 12 scoped surfaces had been
+read in full; the other 7 had a targeted grep and nothing else. The review caught that, and
+reading the remaining 7 produced the most serious findings of the whole phase. **Do not
+count a grep as a read.**
+
+- **`SECURITY.md` overstated the protection the code provides** — the worst direction for
+  that file to be wrong in. It listed bare `*key*`, `*auth*`, `*env*` denylist patterns; the
+  real ones are specific (`*api_key*`, `*oauth*`, `*env_var*`, …), so `list_keys`,
+  `rotate_key`, `auth_config` and `get_env` are all stored. Proven by running `isDenied` on
+  each. It also claimed AWS `ASIA*` detection (only `AKIA` exists), listed 7 of 16 secret
+  patterns, and named 1 of 9 password managers.
+- **`docs/profile-schema.md` + `docs/ai-profile-guide.md` both mis-stated the loader's
+  validation rules** — the checklists that exist precisely to stop profiles being silently
+  skipped. `version` is *not* semver-validated and `id` is *not* regex-checked at load
+  (that guards install/remove paths); the guide also omitted `description` from the required
+  list, which is the easiest way to get a profile silently dropped. Verified by loading a
+  crafted profile: no `description` → skipped; `version = "not-semver-at-all"` → loads fine.
+- **README `max_size_mb` called a "hard cap"** — `evictIfNeeded` only considers `pinned = 0`
+  and returns early when all candidates are pinned (#205). And eviction was described as
+  least-frequently-used directly above a correct description of the decay formula.
+- **`legacy-fresh`/`legacy-stale` glossed as "created before path tracking"** — session-start
+  records a path only when it resolves, so a *current* DB whose path never resolved is also
+  pathless and deletable after 90 untouched days. That was my own new text.
+- **`profiles available` / `info` were missing from all three completion scripts, and
+  `import` from all three top-level lists** — same undiscoverable-surface defect as the help
+  text. The subcommand set now lives in one constant asserted against help output and every
+  completion script, guard-checked by removing each addition and confirming red.
+
+Method note for Step C: no CI job validates documentation — `ci.yml` is typecheck, tests,
+bundle freshness, packaged CLI. Green CI says nothing about doc accuracy, which is the
+entire substance of a docs PR. The three inventories (tools, config keys, env vars) are
+mechanically checkable and would make a cheap CI guard; worth filing before Phase 13 closes.
 
 ### Step B needs TWO passes — they find disjoint classes of problem
 

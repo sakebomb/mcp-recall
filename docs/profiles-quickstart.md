@@ -2,7 +2,7 @@
 
 Profiles tell mcp-recall how to compress output from specific MCPs — which fields to keep, how many items to show, and how to summarise responses. Without a profile, mcp-recall falls back to a generic text truncator that works but isn't as smart.
 
-The [community profiles repo](https://github.com/sakebomb/mcp-recall-profiles) has 18+ ready-made profiles. This guide walks through getting them installed for each install method.
+The [community profiles repo](https://github.com/sakebomb/mcp-recall-profiles) has 26+ ready-made profiles. This guide walks through getting them installed for each install method.
 
 ---
 

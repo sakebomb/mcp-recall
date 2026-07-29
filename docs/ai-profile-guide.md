@@ -162,16 +162,18 @@ Common variants to consider:
 
 ## Step 7 — Validation requirements
 
-The profile loader will silently skip invalid profiles. Check these:
+The profile loader will silently skip invalid profiles. A skipped profile is not an error — your MCP just quietly falls back to the generic handler. These are the checks it actually applies:
 
-1. `id`, `version`, `mcp_pattern`, `strategy.type` — all required
-2. `id` must match `[a-z0-9_-]+`
-3. `version` must be valid semver (e.g. `1.0.0`)
+1. Both a `[profile]` and a `[strategy]` table must be present
+2. `id`, `version`, `description`, and `mcp_pattern` are **all required** — `description` is easy to miss and its absence skips the profile just as surely as a missing `id`
+3. `mcp_pattern` must be a string or an array of strings
 4. `strategy.type` must be `json_extract`, `json_truncate`, or `text_truncate`
 5. `json_extract` must have at least one entry in `fields`
-6. All numeric limits must be positive integers
+6. Numeric limits must not exceed their ceilings: `max_depth` 20, `max_items` 1000, `max_array_items` 1000, `max_chars` 1000000, `max_chars_per_field` 100000, `fallback_chars` 100000
 
-Run `mcp-recall profiles check` to surface errors.
+Two things the loader does **not** check, so don't rely on them to catch a mistake: `version` is only required to be a string, not valid semver, and lower bounds on the numeric limits are not enforced. The `[a-z0-9_-]+` restriction on `id` is applied when installing or removing a profile by name, not when loading one from disk.
+
+Run `mcp-recall profiles check` to surface conflicts, and `RECALL_DEBUG=1` to see skip reasons — each one logs why.
 
 ---
 
