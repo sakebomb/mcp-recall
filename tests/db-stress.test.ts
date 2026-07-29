@@ -50,10 +50,10 @@ describe("stress tests (set RECALL_STRESS=1 to run)", () => {
   });
 
   // -------------------------------------------------------------------------
-  // 1,000 item insert — eviction fires, LFU order is correct
+  // 1,000 item insert — eviction fires and sheds roughly the right volume
   // -------------------------------------------------------------------------
 
-  stressIt("1,000 inserts — eviction fires and LFU ordering is respected", () => {
+  stressIt("1,000 inserts — eviction fires and sheds roughly half the store", () => {
     for (let i = 0; i < 1000; i++) {
       storeOutput(db, makeInput({ summary: `item ${i}`, original_size: 1024 }));
     }

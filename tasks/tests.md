@@ -213,7 +213,7 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 | checkDedup: returns the most recent match when multiple exist | ORDER BY created_at DESC |
 | checkDedup: does not match hash from a different project | project isolation |
 | evictIfNeeded: returns 0 when store is under the size limit | no eviction |
-| evictIfNeeded: evicts least-accessed item when over limit | LFU order respected |
+| evictIfNeeded: evicts lowest decay-scored item when over limit | decay order respected |
 | evictIfNeeded: does not evict pinned items | pin protection during eviction |
 | retrieveSnippet: returns null for unknown id | missing ID handled |
 | retrieveSnippet: returns a text excerpt when query matches full_content | FTS snippet |
@@ -302,7 +302,7 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 | toolExport: orders items oldest-first | created_at ASC |
 | toolForget (v2): skips pinned items by default | pin protection |
 | toolForget (v2): deletes pinned items when force: true | force override |
-| toolListStored (v2): sorts by access_count descending when sort=accessed | LFU order |
+| toolListStored (v2): sorts by access_count descending when sort=accessed | most-accessed first |
 | toolListStored (v2): shows pin indicator for pinned items | 📌 marker shown |
 | toolSessionSummary: returns no-data message when nothing stored for the date | empty state |
 | toolSessionSummary: shows stored count and compression stats | aggregate correct |

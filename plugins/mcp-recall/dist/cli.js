@@ -9921,7 +9921,7 @@ async function handleImportCommand(args) {
       raw = readFileSync9("/dev/stdin", "utf8");
     } catch {
       console.error("No file specified and stdin is not readable.");
-      console.error("Usage: mcp-recall import <file.json> [--overwrite] [--keep-project-key] [--dry-run]");
+      console.error("Usage: mcp-recall import <file.json> [--overwrite] [--dry-run]   (--keep-project-key is broken, see #226)");
       process.exit(1);
     }
   }
