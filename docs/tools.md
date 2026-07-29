@@ -1,6 +1,6 @@
 # recall__* tool reference
 
-Ten tools are available to Claude in every session. All are prefixed `recall__`.
+Eleven tools are available to Claude in every session. All are prefixed `recall__`.
 
 The `recall__` prefix is a naming convention for MCP tools — it namespaces them so Claude and users can tell at a glance which plugin owns them. You don't type these names yourself; Claude calls them automatically as part of normal tool use.
 
@@ -236,3 +236,40 @@ recall__export()
 
 - Returns a JSON array of all stored items for the current project, ordered oldest-first
 - Useful before `forget(all: true)` to preserve data
+- Restore a dump with the [`mcp-recall import`](../README.md#cli-reference) CLI command
+
+---
+
+## `recall__suggest`
+
+Surface actionable maintenance suggestions — what's worth pinning, and what's worth deleting.
+
+```
+recall__suggest(pin_threshold?, stale_days?, limit?)
+```
+
+- **Pin candidates** — frequently accessed but not yet pinned, so they're still exposed to expiry and eviction
+- **Stale items** — never accessed since being stored, and old enough to be worth forgetting
+- `pin_threshold` — min access count to qualify as a pin candidate (default: `store.pin_recommendation_threshold`, 5)
+- `stale_days` — zero-access items older than this many days are stale (default: `store.stale_item_days`, 3)
+- `limit` — max items per category (default 3)
+- Each suggestion includes the command to act on it
+- Returns `[recall: no suggestions …]` when nothing qualifies
+
+`recall__stats` reports the same two categories inline as part of its efficiency report; `recall__suggest` is the focused, tunable view.
+
+Example output:
+
+```
+Recall suggestions:
+
+Pin candidates (frequently accessed, not yet pinned):
+  recall_ab12cd  (accessed 7×)  mcp__playwright__browser_snapshot
+    Page: Dashboard · 12 interactive elements…
+    → recall__pin id="recall_ab12cd"
+
+Stale items (never accessed, consider forgetting):
+  recall_ef34gh  (9 days old)  mcp__github__list_issues
+    #42 "Add session summary" [open]…
+    → recall__forget id="recall_ef34gh"
+```

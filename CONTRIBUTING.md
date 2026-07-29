@@ -154,19 +154,23 @@ export const jiraHandler: Handler = (
 
 ### Step 2 — Register in the dispatcher
 
-Open `src/handlers/index.ts`. Add your import and a match condition in the dispatch function. Conditions are checked top-to-bottom — put more specific matches above generic ones.
+Open `src/handlers/index.ts`. Add your import, then add an entry to the `HANDLER_REGISTRY` array. Entries are matched top-to-bottom, first match wins — put more specific matches above generic ones.
 
 ```ts
 // import
 import { jiraHandler } from "./jira";
 
-// inside getHandler(), before the content-based fallbacks:
-if (toolName.includes("jira")) {
-  return jiraHandler;
-}
+// add to HANDLER_REGISTRY, ordered by specificity:
+const HANDLER_REGISTRY: HandlerMatcher[] = [
+  // ... existing entries ...
+  {
+    match: (t) => t.includes("jira"),
+    handler: jiraHandler,
+  },
+];
 ```
 
-Add a numbered comment to the dispatch table JSDoc to keep it in sync.
+`match` receives the tool name and returns a boolean. The registry is only one step of a 7-step dispatch order — user and community TOML profiles are checked *before* it, and bundled profiles *after* it. That order is documented canonically in the JSDoc above `getHandler()`; read it there and keep it in sync if you change the dispatch.
 
 ### Step 3 — Capture a real fixture
 
@@ -241,10 +245,10 @@ describe("jiraHandler", () => {
 
 ### Step 5 — Update the README
 
-Add a row to the Compression handlers table in `README.md`:
+Add a row to the Compression handlers table in `README.md` — a markdown table with three columns (handler name, what it matches, and the compression strategy):
 
-```
-│  Jira       → issues  │
+```markdown
+| Jira | tool name contains `jira` | Key, summary, status, assignee, priority. Lists: first 10 + overflow count. |
 ```
 
 ### PR checklist for handlers

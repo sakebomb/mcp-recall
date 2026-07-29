@@ -10,9 +10,50 @@ are in `CLAUDE.md`; #208 and #205 stay open deliberately.
 | Step | State |
 |------|-------|
 | A — CLAUDE.md accuracy | ✓ DONE, PR [#220](https://github.com/sakebomb/mcp-recall/pull/220) @ `709c780` |
-| B — full docs re-read | **pass 2 done, pass 1 NOT started** ← resume here |
-| C — `docs/architecture.md` for contributors | not started |
+| B — full docs re-read | ✓ DONE — both passes complete |
+| C — `docs/architecture.md` for contributors | not started ← resume here |
 | D — `ROADMAP.md` with explicit non-goals | not started |
+
+### Step B pass 1 — what was fixed (2026-07-28)
+
+Every claim below was verified against code before changing, and the three inventories
+(tools, config keys, env vars) now cross-check clean against `src/`.
+
+**Stale counts** — `recall__suggest` shipped but was absent from `README.md` *and*
+`docs/tools.md`, and both said "Ten tools"; `9 releases` → 13; `18 community profiles` → 26
+(counted from the live manifest, twice in README); "over 40 days" → "since March 2026".
+
+**Silence** — added a README CLI reference (`import` and `completions` were documented
+nowhere), an environment-variable table (all 6, none were user-facing), `[debug] enabled`
+in the config block, and a full `recall__suggest` section in `docs/tools.md`.
+
+**Wrong, not merely absent** — the README documented 4 `gc` statuses when `STATUS_POLICY`
+has 7, and called one "legacy" (really `legacy-fresh`/`legacy-stale`); `unverifiable` and
+`unreadable` were undocumented despite being the safety-critical never-delete cases. Now a
+table with the deletable flag per status. `CONTRIBUTING.md` Step 2 still told contributors
+to register handlers with inline `if` statements — the code has used a `HANDLER_REGISTRY`
+array for some time, so the instructions produced code that wouldn't dispatch. Step 5 told
+them to add ASCII art to a markdown table.
+
+**Code fix that belonged with the docs** — `profiles available` and `profiles info` are
+implemented (`src/profiles/commands.ts:41,44`) and documented in the README, but were
+missing from `mcp-recall --help`.
+
+GOTCHAS confirmed again, both predicted by Phase A:
+- A grep for `"ten tools"` missed `README.md:372` ("Ten `recall__*` tools"). Only the
+  per-file read caught it. Do not trust an aggregate grep to find a count claim.
+- Writing the env-var table, I asserted the community-profiles default from inference and
+  got it wrong (`…/profiles/` vs the real `…/profiles/community/`, `src/profiles/loader.ts:29`).
+  Caught only by verifying after writing — i.e. the fix pass introduced a fresh false claim,
+  exactly the Phase A pattern. Verify every default you write, including your own.
+
+Verified correct, NOT findings (checked, left alone): the `quickstart.md` CLAUDE.md block
+matches `install/index.ts:98` verbatim; `CONTRIBUTING.md`'s `Handler` type matches
+`types.ts:6`; `slack.ts`, the `LARGE_GITHUB_RESPONSE` fixture, and Bun `>=1.1.0` all exist as
+described; every percentage in the Results table is arithmetically consistent. The
+"88–97% context savings" claim pass 2 flagged as testable is not in the current README.
+Stripe is both a built-in handler and a community profile — legitimate, since profiles
+outrank the registry — so the README mentioning both is not a contradiction.
 
 ### Step B needs TWO passes — they find disjoint classes of problem
 

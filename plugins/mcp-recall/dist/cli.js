@@ -10407,6 +10407,8 @@ Commands:
     install <id>       Install a specific community profile
     update             Update all community profiles
     remove <id>        Remove a community profile
+    available          List community profiles available to install
+    info <id>          Show details for a profile (works offline)
     feed [path]        Contribute a profile to the community
     check              Detect pattern conflicts
     retrain            Suggest profile improvements from stored data
