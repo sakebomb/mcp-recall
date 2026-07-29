@@ -11,7 +11,7 @@
  *   status          — show configuration and health
  *   gc              — reclaim disk from orphaned project databases
  *   profiles        — manage compression profiles
- *   learn           — generate profile suggestions from session data
+ *   learn           — generate profiles from your installed MCP servers
  *   completions     — print shell completion script for bash, zsh, or fish
  *   --help, -h      — print this help
  *   --version, -v   — print installed version
@@ -51,12 +51,12 @@ Commands:
     update             Update all community profiles
     remove <id>        Remove a community profile
     available          List community profiles available to install
-    info <id>          Show details for a profile (works offline)
+    info <id>          Show details for a profile (falls back to local data offline)
     feed [path]        Contribute a profile to the community
     check              Detect pattern conflicts
     retrain            Suggest profile improvements from stored data
     test <tool>        Test a profile against real input
-  learn                Generate profile suggestions from session data
+  learn                Generate profiles from your installed MCP servers
   import <file>        Restore items from a recall__export JSON dump
   completions <shell>  Print shell completion script (bash, zsh, fish)
 
@@ -68,7 +68,7 @@ Examples:
   mcp-recall install              # first-time setup
   mcp-recall profiles seed        # install profiles for your MCPs
   mcp-recall status               # check everything is working
-  mcp-recall completions zsh >> ~/.zfunc/_mcp-recall
+  mcp-recall completions zsh > ~/.zfunc/_mcp-recall
 `);
 }
 
@@ -126,7 +126,7 @@ complete -F _mcp_recall mcp-recall
 function zshCompletion(): string {
   return `#compdef mcp-recall
 # mcp-recall zsh completions
-# Add to your fpath, e.g.: mcp-recall completions zsh >> ~/.zfunc/_mcp-recall
+# Add to your fpath, e.g.: mcp-recall completions zsh > ~/.zfunc/_mcp-recall
 # Then add to ~/.zshrc: fpath=(~/.zfunc \${fpath}); autoload -Uz compinit && compinit
 
 _mcp_recall_profiles() {
@@ -183,7 +183,7 @@ _mcp_recall() {
         'status:show current configuration and health'
         'gc:reclaim disk from orphaned project databases'
         'profiles:manage compression profiles'
-        'learn:generate profile suggestions from session data'
+        'learn:generate profiles from your installed MCP servers'
         'import:restore items from a recall__export JSON dump'
         'completions:print shell completion script (bash, zsh, fish)'
       )
@@ -225,7 +225,7 @@ complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\
   -a profiles -d "Manage compression profiles"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\
-  -a learn -d "Generate profile suggestions from session data"
+  -a learn -d "Generate profiles from your installed MCP servers"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\
   -a import -d "Restore items from a recall__export JSON dump"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\

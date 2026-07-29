@@ -298,7 +298,7 @@ Items are imported into the **current** project's store — run `import` from th
 **Shell completions.** Add to your shell profile once:
 
 ```bash
-mcp-recall completions zsh >> ~/.zfunc/_mcp-recall
+mcp-recall completions zsh > ~/.zfunc/_mcp-recall
 ```
 
 ---

@@ -178,7 +178,7 @@ The profile evaluator rejects profiles that fail these checks at load time (they
 
 Not enforced at load time, despite looking like it should be: `version` is only required to be a string, not valid semver, and the numeric limits have no lower bound. The `[a-z0-9_-]+` restriction on `id` guards the paths used when installing or removing a profile by name — it is not applied when loading one from disk.
 
-A validation CLI is available: `mcp-recall profiles check`. Run with `RECALL_DEBUG=1` to see why a profile was skipped — each rejection logs its reason.
+`mcp-recall profiles check` detects **pattern conflicts** between profiles that loaded successfully — it cannot report a validation failure, because an invalid profile was already dropped before `check` sees it. `RECALL_DEBUG=1` is the only way to see why a profile was skipped; each rejection logs its reason.
 
 ---
 
