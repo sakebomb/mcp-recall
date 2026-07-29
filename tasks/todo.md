@@ -106,7 +106,27 @@ documentation-only and this changes where data lands.
 Method note for Step C: no CI job validates documentation — `ci.yml` is typecheck, tests,
 bundle freshness, packaged CLI. Green CI says nothing about doc accuracy, which is the
 entire substance of a docs PR. The three inventories (tools, config keys, env vars) are
-mechanically checkable and would make a cheap CI guard; worth filing before Phase 13 closes.
+mechanically checkable and would make a cheap CI guard. **Filed as
+[#227](https://github.com/sakebomb/mcp-recall/issues/227)**, which also carries the
+design note that the guard must match structurally rather than by substring, and now owns
+regenerating `tasks/tests.md` — that file's totals were stale by 526 tests and its header
+is demoted to "not authoritative" rather than repaired in place.
+
+**What the review rounds on #225 actually established.** Nine rounds, and every substantive
+finding came from the reviewer rather than from my own checks. Three were defects I
+*introduced* while fixing others: an invented env-var default, propagating "`learn` reads
+session data" into a fourth location, and a registry row claiming "decay order respected"
+for a test that cannot distinguish decay from LFU — written one commit after fixing a test
+name for exactly that fault. The generalizable rule, which no sweep can enforce:
+
+> A sweep validates the wording you *retired*. It can never validate a claim you just
+> *wrote* — a new sentence has nothing to contradict yet and contains none of the strings
+> you were grepping for. New claims need what code claims get: read the thing they describe.
+
+Two corollaries worth carrying into Step C. Fix a claim in *every* file, not the one you
+have open — "align to the wording used elsewhere" is only safe if something checked that
+wording against code, and twice it hadn't. And paste the grep output into the commit with a
+verdict per line; summarising it from memory failed twice, in opposite directions.
 
 ### Step B needs TWO passes — they find disjoint classes of problem
 

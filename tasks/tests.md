@@ -223,8 +223,11 @@ Left in place because the per-test rows still have orientation value; the totals
 | evictIfNeeded: evicts least-accessed item when over limit | fewer accesses evicted first (equal recency, so LFU and decay agree here) |
 | evictIfNeeded: does not evict pinned items | pin protection during eviction |
 | evictIfNeeded: returns 0 and evicts nothing when all items are pinned | pinned data can exceed max_size_mb (#205) |
-| evictIfNeeded: decay keeps a recently-accessed item over an older heavily-accessed one (unlike LFU) | the only test that distinguishes decay from LFU |
+| evictIfNeeded: decay keeps a recently-accessed item over an older heavily-accessed one (unlike LFU) | shows the sign of the decay effect; pure LFU fails this |
 | evictIfNeeded: uses creation time for recency when an item was never accessed | last_accessed null fallback |
+| evictIfNeeded: halves an item's weight at exactly one half-life | pins the 0.5 factor eviction_half_life_days controls; pure LFU also fails this |
+| evictIfNeeded: breaks score + created_at ties deterministically by id | full tiebreak chain |
+| evictIfNeeded: does not crash or NaN-rank when half_life_days is non-positive | Math.max(1, …) guard |
 | retrieveSnippet: returns null for unknown id | missing ID handled |
 | retrieveSnippet: returns a text excerpt when query matches full_content | FTS snippet |
 | retrieveSnippet: returns null when query does not match | no false match |
