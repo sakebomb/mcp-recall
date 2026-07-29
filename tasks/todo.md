@@ -85,6 +85,16 @@ count a grep as a read.**
   text. The subcommand set now lives in one constant asserted against help output and every
   completion script, guard-checked by removing each addition and confirming red.
 
+The review also turned up a **code** bug, not a docs one:
+[#226](https://github.com/sakebomb/mcp-recall/issues/226) — `import --keep-project-key`
+stamps rows with the dump's original project key but still writes them to the *current*
+project's database, and every read path filters `WHERE project_key = ?` on the current key.
+The items are therefore unreachable from this project *and* from the origin project (different
+file). The CLI reports success and then suggests `recall__search`, which finds nothing. #225
+documents it as not-useful; the fix needs a decision (route by key / reject the flag) and
+must handle a dump holding several project keys. Not fixed in #225 — Phase 13 is
+documentation-only and this changes where data lands.
+
 Method note for Step C: no CI job validates documentation — `ci.yml` is typecheck, tests,
 bundle freshness, packaged CLI. Green CI says nothing about doc accuracy, which is the
 entire substance of a docs PR. The three inventories (tools, config keys, env vars) are
