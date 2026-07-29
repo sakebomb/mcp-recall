@@ -360,7 +360,7 @@ export async function installCommand(opts: InstallOptions = {}): Promise<void> {
     console.log(`  Install compression profiles for your MCPs:`);
     console.log(`    ${BOLD}mcp-recall profiles seed${RESET}`);
     console.log(`\n  Optional — enable shell completions:`);
-    console.log(`    ${BOLD}mcp-recall completions zsh >> ~/.zfunc/_mcp-recall${RESET}   ${DIM}# zsh${RESET}`);
+    console.log(`    ${BOLD}mcp-recall completions zsh > ~/.zfunc/_mcp-recall${RESET}   ${DIM}# zsh${RESET}`);
     console.log(`    ${BOLD}mcp-recall completions bash >> ~/.bash_completion${RESET}    ${DIM}# bash${RESET}`);
     console.log(`    ${BOLD}mcp-recall completions fish > ~/.config/fish/completions/mcp-recall.fish${RESET}  ${DIM}# fish${RESET}`);
   }

@@ -67,7 +67,7 @@ Graduated retrieval across three tiers — escalate only as far as you need:
 - `peek` with a `query` falls back to full content if the item has no matching chunks (e.g. rows stored before chunking).
 - `peek` is bounded independently of `max_bytes` (a few chunks); `max_bytes` caps only `mode: "full"`.
 - Override `max_bytes` when you need more than the default 8 KB from `mode: "full"`.
-- Every call records an access, which informs `sort: "accessed"` and LFU eviction order.
+- Every call records an access, which informs `sort: "accessed"` and eviction order (a recency-decayed access score — see `eviction_half_life_days`).
 
 ---
 
@@ -96,7 +96,7 @@ recall__pin(id, pinned?)
 ```
 
 - `pinned` defaults to `true`; pass `false` to unpin
-- Pinned items are excluded from `pruneExpired`, LFU eviction, and `forget(all: true)` (unless `force: true`)
+- Pinned items are excluded from `pruneExpired`, eviction, and `forget(all: true)` (unless `force: true`)
 
 ---
 

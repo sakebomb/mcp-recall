@@ -10246,7 +10246,7 @@ Next steps:`);
     console.log(`    ${BOLD}mcp-recall profiles seed${RESET}`);
     console.log(`
   Optional \u2014 enable shell completions:`);
-    console.log(`    ${BOLD}mcp-recall completions zsh >> ~/.zfunc/_mcp-recall${RESET}   ${DIM}# zsh${RESET}`);
+    console.log(`    ${BOLD}mcp-recall completions zsh > ~/.zfunc/_mcp-recall${RESET}   ${DIM}# zsh${RESET}`);
     console.log(`    ${BOLD}mcp-recall completions bash >> ~/.bash_completion${RESET}    ${DIM}# bash${RESET}`);
     console.log(`    ${BOLD}mcp-recall completions fish > ~/.config/fish/completions/mcp-recall.fish${RESET}  ${DIM}# fish${RESET}`);
   }

@@ -90,7 +90,7 @@ mcp-recall profiles list
 Common causes:
 - Pattern uses `mcp__myserver__*` but the tool is actually named `mcp__my-server__*` (hyphens vs underscores)
 - Profile file is in the wrong location — user profiles go in `~/.config/mcp-recall/profiles/<id>/default.toml`
-- TOML parse error at load time — run `mcp-recall profiles check` to surface validation failures
+- TOML parse error at load time — run with `RECALL_DEBUG=1` to see the reason. `mcp-recall profiles check` cannot help here: it only compares patterns between profiles that *loaded*, and an unparseable file is already gone by then
 
 To confirm a profile is loaded and which tier it came from:
 

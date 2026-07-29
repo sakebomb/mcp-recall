@@ -320,7 +320,7 @@ mcp-recall profiles available
 # See what's installed (accepts short names: "grafana" not "mcp__grafana")
 mcp-recall profiles list
 
-# Get full metadata for a profile (manifest-first, falls back to local data offline)
+# Get full metadata for a profile (installed data first, community catalog otherwise)
 mcp-recall profiles info grafana
 
 # Keep profiles up to date
@@ -543,7 +543,7 @@ Declarative TOML profiles extend compression to any MCP — no TypeScript requir
 mcp-recall learn                         # auto-generate profiles from your installed MCPs
 mcp-recall profiles seed                 # install community profiles for detected MCPs
 mcp-recall profiles available            # browse the community catalog with install status
-mcp-recall profiles info <name>          # full metadata (manifest-first, local data offline)
+mcp-recall profiles info <name>          # full metadata (installed first, else catalog)
 mcp-recall profiles install <name>       # install by short name, e.g. "grafana"
 mcp-recall profiles retrain              # suggest field additions using your stored data
 mcp-recall profiles test <tool>          # apply a profile and show compression result

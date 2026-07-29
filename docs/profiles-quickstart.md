@@ -26,7 +26,7 @@ mcp-recall profiles available --verbose   # also shows MCP server URLs
 # Verify what's installed
 mcp-recall profiles list
 
-# Get full metadata for a profile (manifest-first, falls back to local data offline)
+# Get full metadata for a profile (installed data first, community catalog otherwise)
 mcp-recall profiles info grafana
 
 # Keep profiles current
