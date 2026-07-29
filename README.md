@@ -293,7 +293,7 @@ mcp-recall import dump.json --dry-run        # report what would be imported
 
 Items are imported into the **current** project's store — run `import` from the project you want them in.
 
-> **Avoid `--keep-project-key`** ([#226](https://github.com/sakebomb/mcp-recall/issues/226)). It retains the dump's original project key on each row but still writes them to the *current* project's database, and almost everything else is scoped by project key. The imported rows are then invisible to `recall__search`, `list_stored`, `stats`, `context`, `session_summary`, `suggest` and `export`; **cannot be deleted** by `recall__forget` — not by id, tool, session, age, or even `all: true`; and are excluded from the `store.max_size_mb` accounting, so they are never evicted and `recall__stats` under-reports the store (`mcp-recall status`, which measures the file on disk, still sees the bytes). They remain readable by `recall__retrieve` given an explicit id — but since `export` skips them too, the dump you imported from is the only remaining record of those ids. Import without the flag; the items land in the current project and behave normally.
+> **Avoid `--keep-project-key`** ([#226](https://github.com/sakebomb/mcp-recall/issues/226)). It retains the dump's original project key on each row but still writes them to the *current* project's database, and almost everything else is scoped by project key. `recall__retrieve` is the only operation that looks an item up by id alone; **everything else is scoped by project key**. So the imported rows are readable if you still know their id, and otherwise inert: absent from `search`, `list_stored`, `stats`, `context`, `session_summary`, `suggest` and `export`; impossible to delete via `recall__forget`, even with `all: true`; not pinnable; never expired; and invisible to the `store.max_size_mb` accounting, so they are never evicted and `recall__stats` under-reports the store (`mcp-recall status` measures the file on disk and does see the bytes). Because `export` skips them too, the dump you imported from stays the only record of those ids. Import without the flag; the items land in the current project and behave normally.
 
 **Shell completions.** Add to your shell profile once:
 
@@ -543,7 +543,7 @@ Declarative TOML profiles extend compression to any MCP — no TypeScript requir
 mcp-recall learn                         # auto-generate profiles from your installed MCPs
 mcp-recall profiles seed                 # install community profiles for detected MCPs
 mcp-recall profiles available            # browse the community catalog with install status
-mcp-recall profiles info <name>          # full metadata for any profile (works offline)
+mcp-recall profiles info <name>          # full metadata (manifest-first, local data offline)
 mcp-recall profiles install <name>       # install by short name, e.g. "grafana"
 mcp-recall profiles retrain              # suggest field additions using your stored data
 mcp-recall profiles test <tool>          # apply a profile and show compression result
