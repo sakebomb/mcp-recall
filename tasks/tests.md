@@ -1,6 +1,10 @@
 # tests
 
-Living test registry. Update when adding or removing coverage.
+Partial notes on test coverage, kept for orientation. **Not authoritative and not
+maintained per-commit** — `bun test` is the only accurate count. The per-file numbers
+below were last true at 8 files and have not tracked the suite since; roughly two thirds
+of the test files have no section here at all. Treat a missing entry as "unknown", never
+as "uncovered", and don't trust a row without opening the test.
 
 ## Run Commands
 
@@ -12,7 +16,10 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 
 ## Summary
 
-**276 tests across 8 files, 0 failures.**
+**Stale — run `bun test` for the real figure.** The counts below no longer reconcile: the
+rows sum to 266 rather than the 276 once claimed, `handlers.test.ts` and `tools.test.ts`
+each disagree with their own section headings, and 15 of the suite's 23 files are absent.
+Left in place because the per-test rows still have orientation value; the totals do not.
 
 | File | Tests | Phase |
 |------|-------|-------|
@@ -213,8 +220,11 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 | checkDedup: returns the most recent match when multiple exist | ORDER BY created_at DESC |
 | checkDedup: does not match hash from a different project | project isolation |
 | evictIfNeeded: returns 0 when store is under the size limit | no eviction |
-| evictIfNeeded: evicts lowest decay-scored item when over limit | decay order respected |
+| evictIfNeeded: evicts least-accessed item when over limit | fewer accesses evicted first (equal recency, so LFU and decay agree here) |
 | evictIfNeeded: does not evict pinned items | pin protection during eviction |
+| evictIfNeeded: returns 0 and evicts nothing when all items are pinned | pinned data can exceed max_size_mb (#205) |
+| evictIfNeeded: decay keeps a recently-accessed item over an older heavily-accessed one (unlike LFU) | the only test that distinguishes decay from LFU |
+| evictIfNeeded: uses creation time for recency when an item was never accessed | last_accessed null fallback |
 | retrieveSnippet: returns null for unknown id | missing ID handled |
 | retrieveSnippet: returns a text excerpt when query matches full_content | FTS snippet |
 | retrieveSnippet: returns null when query does not match | no false match |
