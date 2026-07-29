@@ -223,11 +223,11 @@ Left in place because the per-test rows still have orientation value; the totals
 | evictIfNeeded: evicts least-accessed item when over limit | fewer accesses evicted first (equal recency, so LFU and decay agree here) |
 | evictIfNeeded: does not evict pinned items | pin protection during eviction |
 | evictIfNeeded: returns 0 and evicts nothing when all items are pinned | pinned data can exceed max_size_mb (#205) |
-| evictIfNeeded: decay keeps a recently-accessed item over an older heavily-accessed one (unlike LFU) | shows the sign of the decay effect; pure LFU fails this |
+| evictIfNeeded: decay keeps a recently-accessed item over an older heavily-accessed one (unlike LFU) | the load-bearing decay test — pure LFU fails it on count alone, and it goes red if the 0.5 constant changes |
 | evictIfNeeded: uses creation time for recency when an item was never accessed | last_accessed null fallback |
-| evictIfNeeded: halves an item's weight at exactly one half-life | pins the 0.5 factor eviction_half_life_days controls; pure LFU also fails this |
-| evictIfNeeded: breaks score + created_at ties deterministically by id | full tiebreak chain |
-| evictIfNeeded: does not crash or NaN-rank when half_life_days is non-positive | Math.max(1, …) guard |
+| evictIfNeeded: evicts an item aged one half-life over an equally-accessed fresh one | ordering outcome only; does **not** measure the 0.5 factor (stays green at 0.9) |
+| evictIfNeeded: breaks score + created_at ties deterministically by id | the id tiebreak, i.e. the chain's last link; the created_at link has no test |
+| evictIfNeeded: does not crash or NaN-rank when half_life_days is non-positive | covers the Math.max(1, …) guard; the name reaches — a NaN score would sort as 0 and still pass |
 | retrieveSnippet: returns null for unknown id | missing ID handled |
 | retrieveSnippet: returns a text excerpt when query matches full_content | FTS snippet |
 | retrieveSnippet: returns null when query does not match | no false match |
