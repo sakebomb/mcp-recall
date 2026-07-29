@@ -131,7 +131,7 @@ mcp-recall profiles list --machine-readable
 If you use an MCP that isn't covered, the easiest path is:
 
 ```bash
-# Generate a profile suggestion from your session data
+# Generate a profile suggestion from your installed MCP servers
 mcp-recall learn
 
 # Contribute it to the community repo

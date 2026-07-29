@@ -88,11 +88,19 @@ count a grep as a read.**
 The review also turned up a **code** bug, not a docs one:
 [#226](https://github.com/sakebomb/mcp-recall/issues/226) — `import --keep-project-key`
 stamps rows with the dump's original project key but still writes them to the *current*
-project's database, and every read path filters `WHERE project_key = ?` on the current key.
-The items are therefore unreachable from this project *and* from the origin project (different
-file). The CLI reports success and then suggests `recall__search`, which finds nothing. #225
-documents it as not-useful; the fix needs a decision (route by key / reject the flag) and
-must handle a dump holding several project keys. Not fixed in #225 — Phase 13 is
+project's database, while almost everything else is project-scoped. The CLI reports success
+and then suggests `recall__search`, which finds nothing.
+
+First wording of this entry said the rows are "unreachable" — **wrong, and it understated the
+damage.** `retrieveOutput` is `SELECT * … WHERE id = ?` (`queries.ts:111`) with no project
+filter, so they *are* readable by id. What is actually broken: `forgetOutputs` scopes every
+branch including `all` (`queries.ts:434-444`), so they cannot be deleted through the tool at
+all; and `evictIfNeeded` both totals and selects candidates project-scoped (`:202-216`), so
+they escape `max_size_mb` and are never evicted — permanent disk the accounting can't see.
+`export` is project-scoped too (`tools.ts:232-236`), so the original dump is the only
+remaining record of their ids. The fix needs a decision (route by key / reject the flag), must
+handle a dump holding several project keys, and now also needs a cleanup path for anyone who
+already used the flag. Not fixed in #225 — Phase 13 is
 documentation-only and this changes where data lands.
 
 Method note for Step C: no CI job validates documentation — `ci.yml` is typecheck, tests,

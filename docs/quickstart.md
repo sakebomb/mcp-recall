@@ -35,7 +35,7 @@ mcp-recall profiles seed        # installs profiles for MCPs detected in ~/.clau
 mcp-recall profiles seed --all  # or install the full community catalog
 ```
 
-If your MCP isn't in the community catalog, generate a profile from your session data:
+If your MCP isn't in the community catalog, generate a profile from your installed MCP servers:
 
 ```bash
 mcp-recall learn   # analyses your installed MCPs and generates TOML profiles automatically
