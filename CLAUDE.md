@@ -101,7 +101,7 @@ mcp-recall install            # write MCP entry, hooks, and CLAUDE.md instructio
 mcp-recall uninstall          # reverse of install
 mcp-recall status             # report install health (MCP entry, hooks, CLAUDE.md block, store size)
 mcp-recall gc [--force]       # list/reclaim orphaned project DBs (--stale-days N, --vacuum). Dry run by default
-mcp-recall import <file>      # restore from a recall__export dump (--overwrite, --keep-project-key, --dry-run)
+mcp-recall import <file>      # restore from a recall__export dump (--overwrite, --dry-run; --keep-project-key is broken, see #226)
 mcp-recall completions <shell> # emit a zsh/bash/fish completion script
 mcp-recall learn [server…]    # auto-generate TOML profiles by inspecting installed MCP servers
 mcp-recall profiles list      # list all installed profiles (user + community + built-in)

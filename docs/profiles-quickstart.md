@@ -2,7 +2,7 @@
 
 Profiles tell mcp-recall how to compress output from specific MCPs — which fields to keep, how many items to show, and how to summarise responses. Without a profile, mcp-recall falls back to a generic text truncator that works but isn't as smart.
 
-The [community profiles repo](https://github.com/sakebomb/mcp-recall-profiles) has 18+ ready-made profiles. This guide walks through getting them installed for each install method.
+The [community profiles repo](https://github.com/sakebomb/mcp-recall-profiles) has 26+ ready-made profiles. This guide walks through getting them installed for each install method.
 
 ---
 
@@ -26,7 +26,7 @@ mcp-recall profiles available --verbose   # also shows MCP server URLs
 # Verify what's installed
 mcp-recall profiles list
 
-# Get full metadata for a profile (manifest-first, falls back to local data offline)
+# Get full metadata for a profile (installed data first, community catalog otherwise)
 mcp-recall profiles info grafana
 
 # Keep profiles current
@@ -131,7 +131,7 @@ mcp-recall profiles list --machine-readable
 If you use an MCP that isn't covered, the easiest path is:
 
 ```bash
-# Generate a profile suggestion from your session data
+# Generate a profile suggestion from your installed MCP servers
 mcp-recall learn
 
 # Contribute it to the community repo

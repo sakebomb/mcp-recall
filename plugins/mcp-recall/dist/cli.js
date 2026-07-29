@@ -9921,7 +9921,7 @@ async function handleImportCommand(args) {
       raw = readFileSync9("/dev/stdin", "utf8");
     } catch {
       console.error("No file specified and stdin is not readable.");
-      console.error("Usage: mcp-recall import <file.json> [--overwrite] [--keep-project-key] [--dry-run]");
+      console.error("Usage: mcp-recall import <file.json> [--overwrite] [--dry-run]   (--keep-project-key is broken, see #226)");
       process.exit(1);
     }
   }
@@ -10246,7 +10246,7 @@ Next steps:`);
     console.log(`    ${BOLD}mcp-recall profiles seed${RESET}`);
     console.log(`
   Optional \u2014 enable shell completions:`);
-    console.log(`    ${BOLD}mcp-recall completions zsh >> ~/.zfunc/_mcp-recall${RESET}   ${DIM}# zsh${RESET}`);
+    console.log(`    ${BOLD}mcp-recall completions zsh > ~/.zfunc/_mcp-recall${RESET}   ${DIM}# zsh${RESET}`);
     console.log(`    ${BOLD}mcp-recall completions bash >> ~/.bash_completion${RESET}    ${DIM}# bash${RESET}`);
     console.log(`    ${BOLD}mcp-recall completions fish > ~/.config/fish/completions/mcp-recall.fish${RESET}  ${DIM}# fish${RESET}`);
   }
@@ -10407,11 +10407,13 @@ Commands:
     install <id>       Install a specific community profile
     update             Update all community profiles
     remove <id>        Remove a community profile
+    available          List community profiles available to install
+    info <id>          Show details for a profile (falls back to local data offline)
     feed [path]        Contribute a profile to the community
     check              Detect pattern conflicts
     retrain            Suggest profile improvements from stored data
     test <tool>        Test a profile against real input
-  learn                Generate profile suggestions from session data
+  learn                Generate profiles from your installed MCP servers
   import <file>        Restore items from a recall__export JSON dump
   completions <shell>  Print shell completion script (bash, zsh, fish)
 
@@ -10423,7 +10425,7 @@ Examples:
   mcp-recall install              # first-time setup
   mcp-recall profiles seed        # install profiles for your MCPs
   mcp-recall status               # check everything is working
-  mcp-recall completions zsh >> ~/.zfunc/_mcp-recall
+  mcp-recall completions zsh > ~/.zfunc/_mcp-recall
 `);
 }
 function completionScript(shell) {
@@ -10447,8 +10449,8 @@ _mcp_recall() {
   COMPREPLY=()
   cur="\${COMP_WORDS[COMP_CWORD]}"
 
-  local commands="install uninstall status gc profiles learn completions --help --version"
-  local profiles_cmds="list install update remove seed feed check retrain test"
+  local commands="install uninstall status gc profiles learn import completions --help --version"
+  local profiles_cmds="list install update remove available info seed feed check retrain test"
 
   if [[ \${COMP_CWORD} -eq 1 ]]; then
     COMPREPLY=( $(compgen -W "\${commands}" -- "\${cur}") )
@@ -10478,7 +10480,7 @@ complete -F _mcp_recall mcp-recall
 function zshCompletion() {
   return `#compdef mcp-recall
 # mcp-recall zsh completions
-# Add to your fpath, e.g.: mcp-recall completions zsh >> ~/.zfunc/_mcp-recall
+# Add to your fpath, e.g.: mcp-recall completions zsh > ~/.zfunc/_mcp-recall
 # Then add to ~/.zshrc: fpath=(~/.zfunc \${fpath}); autoload -Uz compinit && compinit
 
 _mcp_recall_profiles() {
@@ -10494,6 +10496,8 @@ _mcp_recall_profiles() {
         'install:install a community profile by ID'
         'update:update all installed community profiles'
         'remove:remove an installed community profile'
+        'available:list community profiles available to install'
+        'info:show details for a profile'
         'seed:install profiles for all detected MCPs'
         'feed:contribute a local profile to the community'
         'check:detect pattern conflicts between installed profiles'
@@ -10533,7 +10537,8 @@ _mcp_recall() {
         'status:show current configuration and health'
         'gc:reclaim disk from orphaned project databases'
         'profiles:manage compression profiles'
-        'learn:generate profile suggestions from session data'
+        'learn:generate profiles from your installed MCP servers'
+        'import:restore items from a recall__export JSON dump'
         'completions:print shell completion script (bash, zsh, fish)'
       )
       _describe 'command' commands
@@ -10559,7 +10564,7 @@ function fishCompletion() {
   return `# mcp-recall fish completions
 # Save to: mcp-recall completions fish > ~/.config/fish/completions/mcp-recall.fish
 
-set -l commands install uninstall status gc profiles learn completions
+set -l commands install uninstall status gc profiles learn import completions
 
 # Top-level commands
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
@@ -10573,7 +10578,9 @@ complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
   -a profiles -d "Manage compression profiles"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
-  -a learn -d "Generate profile suggestions from session data"
+  -a learn -d "Generate profiles from your installed MCP servers"
+complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
+  -a import -d "Restore items from a recall__export JSON dump"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
   -a completions -d "Print shell completion script"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
@@ -10586,7 +10593,7 @@ complete -c mcp-recall -f -n "__fish_seen_subcommand_from completions" \\
   -a "bash zsh fish"
 
 # profiles subcommands
-set -l profile_cmds list install update remove seed feed check retrain test
+set -l profile_cmds list install update remove available info seed feed check retrain test
 
 complete -c mcp-recall -f -n "__fish_seen_subcommand_from profiles; and not __fish_seen_subcommand_from $profile_cmds" \\
   -a list -d "Show installed profiles"
@@ -10596,6 +10603,10 @@ complete -c mcp-recall -f -n "__fish_seen_subcommand_from profiles; and not __fi
   -a update -d "Update all installed community profiles"
 complete -c mcp-recall -f -n "__fish_seen_subcommand_from profiles; and not __fish_seen_subcommand_from $profile_cmds" \\
   -a remove -d "Remove an installed community profile"
+complete -c mcp-recall -f -n "__fish_seen_subcommand_from profiles; and not __fish_seen_subcommand_from $profile_cmds" \\
+  -a available -d "List community profiles available to install"
+complete -c mcp-recall -f -n "__fish_seen_subcommand_from profiles; and not __fish_seen_subcommand_from $profile_cmds" \\
+  -a info -d "Show details for a profile"
 complete -c mcp-recall -f -n "__fish_seen_subcommand_from profiles; and not __fish_seen_subcommand_from $profile_cmds" \\
   -a seed -d "Install profiles for all detected MCPs"
 complete -c mcp-recall -f -n "__fish_seen_subcommand_from profiles; and not __fish_seen_subcommand_from $profile_cmds" \\

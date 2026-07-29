@@ -1,6 +1,10 @@
 # tests
 
-Living test registry. Update when adding or removing coverage.
+Partial notes on test coverage, kept for orientation. **Not authoritative and not
+maintained per-commit** — `bun test` is the only accurate count. The per-file numbers
+below were last true at 8 files and have not tracked the suite since; roughly two thirds
+of the test files have no section here at all. Treat a missing entry as "unknown", never
+as "uncovered", and don't trust a row without opening the test.
 
 ## Run Commands
 
@@ -12,7 +16,10 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 
 ## Summary
 
-**276 tests across 8 files, 0 failures.**
+**Stale — run `bun test` for the real figure.** The counts below no longer reconcile: the
+rows sum to 266 rather than the 276 once claimed, `handlers.test.ts` and `tools.test.ts`
+each disagree with their own section headings, and 15 of the suite's 23 files are absent.
+Left in place because the per-test rows still have orientation value; the totals do not.
 
 | File | Tests | Phase |
 |------|-------|-------|
@@ -213,8 +220,14 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 | checkDedup: returns the most recent match when multiple exist | ORDER BY created_at DESC |
 | checkDedup: does not match hash from a different project | project isolation |
 | evictIfNeeded: returns 0 when store is under the size limit | no eviction |
-| evictIfNeeded: evicts least-accessed item when over limit | LFU order respected |
+| evictIfNeeded: evicts least-accessed item when over limit | fewer accesses evicted first (equal recency, so LFU and decay agree here) |
 | evictIfNeeded: does not evict pinned items | pin protection during eviction |
+| evictIfNeeded: returns 0 and evicts nothing when all items are pinned | pinned data can exceed max_size_mb (#205) |
+| evictIfNeeded: decay keeps a recently-accessed item over an older heavily-accessed one (unlike LFU) | the load-bearing decay test — pure LFU fails it on count alone. Bounds the 0.5 constant **from above only** (red at ≈0.72 and slower); nothing in the suite bounds it from below, so base 0.01 keeps all 792 green |
+| evictIfNeeded: uses creation time for recency when an item was never accessed | last_accessed null fallback |
+| evictIfNeeded: evicts an item aged one half-life over an equally-accessed fresh one | ordering outcome only; does **not** measure the 0.5 factor (stays green at 0.9) |
+| evictIfNeeded: breaks score + created_at ties deterministically by id | the id tiebreak, i.e. the chain's last link; the created_at link has no test |
+| evictIfNeeded: does not crash or NaN-rank when half_life_days is non-positive | covers the Math.max(1, …) guard; the name reaches — a NaN score would sort as 0 and still pass |
 | retrieveSnippet: returns null for unknown id | missing ID handled |
 | retrieveSnippet: returns a text excerpt when query matches full_content | FTS snippet |
 | retrieveSnippet: returns null when query does not match | no false match |
@@ -302,7 +315,7 @@ bun run typecheck     # tsc --noEmit (no emit, type check only)
 | toolExport: orders items oldest-first | created_at ASC |
 | toolForget (v2): skips pinned items by default | pin protection |
 | toolForget (v2): deletes pinned items when force: true | force override |
-| toolListStored (v2): sorts by access_count descending when sort=accessed | LFU order |
+| toolListStored (v2): sorts by access_count descending when sort=accessed | most-accessed first |
 | toolListStored (v2): shows pin indicator for pinned items | 📌 marker shown |
 | toolSessionSummary: returns no-data message when nothing stored for the date | empty state |
 | toolSessionSummary: shows stored count and compression stats | aggregate correct |

@@ -89,7 +89,7 @@ flowchart TD
     DEDUP_N -- miss --> HAND_N
 
     subgraph HANDLER["Compression handler (TOML profile first)"]
-        HAND_N["Playwright · GitHub · GitLab · Shell<br/>Linear · Slack · Tavily · Database<br/>Sentry · Filesystem · CSV · JSON · Text"]
+        HAND_N["Bash · Playwright · GitHub · GitLab<br/>Stripe · Shell · Linear · Slack · Tavily<br/>Database · Sentry · Filesystem · CSV<br/>JSON · Text"]
     end
 
     HAND_N --> CTX["Context<br/>299 B summary + recall header"]
@@ -99,7 +99,7 @@ flowchart TD
         DB_N["full content (56 KB) · summary (299 B)<br/>FTS index · access tracking · session days"]
     end
 
-    DB_N --> TOOLS["recall__* tools<br/>retrieve · search · pin · note<br/>stats · session_summary · list · forget · export · context"]
+    DB_N --> TOOLS["recall__* tools<br/>retrieve · search · pin · note<br/>stats · session_summary · list · forget<br/>export · context · suggest"]
 ```
 
 </details>
@@ -108,7 +108,7 @@ flowchart TD
 
 - `SessionStart` hook — records each active day, prunes expired items, and injects a compact context snapshot before the first message
 - `PostToolUse` hook — intercepts MCP tool outputs and native Bash commands; deduplicates identical calls (by input) and identical output (by content hash); compresses, stores, and returns summary
-- `recall` MCP server — exposes ten tools for retrieval, search, memory, and management
+- `recall` MCP server — exposes eleven tools for retrieval, search, memory, and management
 
 > **Scope**: Compression applies to MCP tools and the native `Bash` built-in. The remaining built-ins (Read, Grep, Glob) pass through unchanged. See [Scope](#scope) for details.
 
@@ -128,7 +128,7 @@ Real numbers from actual tool calls:
 
 Across a full session: 315 KB of tool output → 5.4 KB delivered to context.
 
-Used daily in development of this project for over 40 days across 9 releases. No broken sessions, no data loss.
+Used daily in development of this project since the first release in March 2026, across 13 releases. No broken sessions, no data loss.
 
 ---
 
@@ -248,19 +248,64 @@ mcp-recall gc --force
 mcp-recall gc --force --vacuum
 ```
 
-Each database is classified by whether its recorded project path still exists on disk:
+Each database is classified by whether its recorded project path still exists on disk. Only two classifications are ever deleted:
 
-- **orphaned** — the project directory is gone; safe to delete.
-- **legacy** — created before path tracking; only a deletion candidate once untouched longer than `--stale-days N` (default 90).
-- **active** / **current** — kept; the current project's database is never deleted.
+| Status | Meaning | `--force` deletes? |
+|---|---|---|
+| **current** | The active project's database | never |
+| **active** | Recorded project path still exists | never |
+| **orphaned** | Project directory gone, but its parent survives — a real deletion | **yes** |
+| **legacy-fresh** | No recorded project path, touched within `--stale-days` | never |
+| **legacy-stale** | No recorded project path, untouched longer than `--stale-days N` (default 90) | **yes** |
+| **unverifiable** | Can't be judged safely — a relative recorded path, or a missing parent directory (usually an unmounted volume, not a deleted project) | never |
+| **unreadable** | Not a readable recall database | never |
+
+The `orphaned` rule requires the *parent* directory to survive, so an unmounted volume reads as `unverifiable` rather than as a deleted project. Databases with a relative recorded path are also `unverifiable`: there is no way to know what they were rooted against. Both are kept.
+
+A database has no recorded project path either because it predates path tracking, or because its path never resolved to a real directory when a session started — session start records a path only once it confirms one exists, so it never overwrites good evidence with a guess. Either way the `legacy-*` classifications rest solely on "untouched for `--stale-days`", never on inferring that a project was deleted.
 
 The active project's database is always protected. When the store grows past `store.gc_reminder_mb` (default 2 GB), session start injects a one-line reminder to run `gc`, and `mcp-recall status` shows the store's size. There's no automatic deletion — reclaiming is always an explicit command.
 
 ---
 
+## CLI reference
+
+```bash
+mcp-recall install              # register hooks + MCP server in Claude Code
+mcp-recall uninstall            # remove hooks + MCP server
+mcp-recall status               # report install health and store size
+mcp-recall gc [--force]         # reclaim disk (see Maintenance above)
+mcp-recall learn                # generate profiles from your installed MCPs
+mcp-recall profiles <cmd>       # manage compression profiles (see Profiles below)
+mcp-recall import <file>        # restore items from a recall__export dump
+mcp-recall completions <shell>  # print a bash / zsh / fish completion script
+```
+
+`mcp-recall --help` lists every subcommand.
+
+**Restoring an export.** `recall__export()` produces a JSON dump; `import` reads it back:
+
+```bash
+mcp-recall import dump.json                  # skips items whose IDs already exist
+mcp-recall import dump.json --overwrite      # replace existing items instead
+mcp-recall import dump.json --dry-run        # report what would be imported
+```
+
+Items are imported into the **current** project's store — run `import` from the project you want them in.
+
+> **Avoid `--keep-project-key`** ([#226](https://github.com/sakebomb/mcp-recall/issues/226)). It retains the dump's original project key on each row but still writes them to the *current* project's database, and almost everything else is scoped by project key. `recall__retrieve` is the only operation that looks an item up by id alone; **everything else is scoped by project key**. So the imported rows are readable if you still know their id, and otherwise inert: absent from `search`, `list_stored`, `stats`, `context`, `session_summary`, `suggest` and `export`; impossible to delete via `recall__forget`, even with `all: true`; not pinnable; never expired; and invisible to the `store.max_size_mb` accounting, so they are never evicted and `recall__stats` under-reports the store (`mcp-recall status` measures the file on disk and does see the bytes). Because `export` skips them too, the dump you imported from stays the only record of those ids. Import without the flag; the items land in the current project and behave normally.
+
+**Shell completions.** Add to your shell profile once:
+
+```bash
+mcp-recall completions zsh > ~/.zfunc/_mcp-recall
+```
+
+---
+
 ## Profiles
 
-Profiles teach mcp-recall how to compress output from specific MCPs. Four profiles ship built in (Jira, Gmail, Context7, Docker). **[18 community profiles](https://github.com/sakebomb/mcp-recall-profiles)** cover Grafana, Shopify, Notion, and more.
+Profiles teach mcp-recall how to compress output from specific MCPs. Four profiles ship built in (Jira, Gmail, Context7, Docker). **[26 community profiles](https://github.com/sakebomb/mcp-recall-profiles)** cover Grafana, Shopify, Notion, and more.
 
 ```bash
 # Install profiles for all your connected MCPs
@@ -275,7 +320,7 @@ mcp-recall profiles available
 # See what's installed (accepts short names: "grafana" not "mcp__grafana")
 mcp-recall profiles list
 
-# Get full metadata for a profile (manifest-first, falls back to local data offline)
+# Get full metadata for a profile (installed data first, community catalog otherwise)
 mcp-recall profiles info grafana
 
 # Keep profiles up to date
@@ -303,8 +348,10 @@ expire_after_session_days = 30
 # Falls back to "cwd" if not inside a git repo.
 key = "git_root"
 
-# Hard cap on store size in megabytes. Least-frequently-accessed
-# non-pinned items are evicted when this limit is exceeded.
+# Target store size in megabytes. When exceeded, non-pinned items are evicted
+# lowest-value-first by the decay score described under eviction_half_life_days.
+# This bounds unpinned content only — pinned items are never evicted, so a store
+# of mostly-pinned data can exceed it. recall__stats reports when it does.
 max_size_mb = 500
 
 # Access count threshold for pin suggestions in recall__stats.
@@ -357,7 +404,25 @@ override_defaults = [
 # Manifest signature verification mode when installing/updating community profiles.
 # Requires the gh CLI. Options: "warn" (default), "error", "skip".
 verify_signature = "warn"
+
+[debug]
+# Write diagnostic logging to stderr — handler dispatch, denylist skips, profile
+# load errors. Equivalent to setting RECALL_DEBUG=1, but persistent.
+enabled = false
 ```
+
+### Environment variables
+
+Every path below has a sensible default; override only when you need to relocate state (for example, to keep a project's store on a different volume).
+
+| Variable | Overrides | Default |
+|---|---|---|
+| `RECALL_CONFIG_PATH` | Config file location | `~/.config/mcp-recall/config.toml` |
+| `RECALL_DB_PATH` | SQLite store location | `~/.local/share/mcp-recall/<project-key>.db` |
+| `RECALL_DEBUG` | Set to `1` for stderr debug logging | off (same as `debug.enabled`) |
+| `RECALL_USER_PROFILES_PATH` | User profile directory | `~/.config/mcp-recall/profiles/` |
+| `RECALL_COMMUNITY_PROFILES_PATH` | Installed community profile directory | `~/.local/share/mcp-recall/profiles/community/` |
+| `RECALL_BUNDLED_PROFILES_PATH` | Built-in profile directory | the installed package's own `profiles/` directory |
 
 ### Session days
 
@@ -369,7 +434,7 @@ This means a 7-day setting gives you 7 working sessions of stored context, regar
 
 ## Tools
 
-Ten `recall__*` tools are available to Claude in every session. The `recall__` prefix is the MCP naming convention — it namespaces the tools so Claude knows which plugin owns them. You don't call these yourself; Claude uses them automatically.
+Eleven `recall__*` tools are available to Claude in every session. The `recall__` prefix is the MCP naming convention — it namespaces the tools so Claude knows which plugin owns them. You don't call these yourself; Claude uses them automatically.
 
 | Tool | Use when |
 |---|---|
@@ -383,6 +448,7 @@ Ten `recall__*` tools are available to Claude in every session. The `recall__` p
 | `recall__list_stored(sort?, tool?)` | Browse stored items |
 | `recall__forget(...)` | Delete by id, tool, session, age, or all |
 | `recall__export()` | JSON dump of all stored items |
+| `recall__suggest()` | Surface pin candidates and stale items, with the command to act on each |
 
 → [Full tool reference](docs/tools.md)
 
@@ -432,7 +498,7 @@ Credential tools are never stored. Password managers are blocked by explicit nam
 
 Claude Code's `PostToolUse` hook supports output replacement for MCP tools and the `Bash` tool. mcp-recall intercepts both:
 
-- **MCP tools** (`mcp__*`) — all compression handlers apply (Playwright, GitHub, GitLab, filesystem, shell/remote-exec, Linear, Slack, Tavily, database query results, Sentry events, CSV, JSON, generic text)
+- **MCP tools** (`mcp__*`) — all compression handlers apply (Playwright, GitHub, GitLab, Stripe, filesystem, shell/remote-exec, Linear, Slack, Tavily, database query results, Sentry events, CSV, JSON, generic text)
 - **Bash** — CLI-aware handlers: `git diff`/`git show` → file-level summary; `git log` → 20-commit cap; `terraform plan` → resource action summary; `git status` → staged/unstaged counts; package install (npm/bun/yarn/pip) → success/error summary; test runners (pytest/jest/bun test/vitest/go test) → pass/fail counts; `docker ps` → container list; `make`/`just` → target + outcome; everything else → 50-line shell cap with ANSI stripping
 
 The remaining built-in tools — `Read`, `Grep`, `Glob` — do not support output replacement. Their full output enters context directly. If large file reads are your biggest context consumer, consider the [filesystem MCP server](https://github.com/modelcontextprotocol/servers) instead of the built-in Read tool.
@@ -471,13 +537,13 @@ mcp-recall never breaks a tool call. Every failure mode — hook crash, SQLite e
 
 ## Profile system
 
-Declarative TOML profiles extend compression to any MCP — no TypeScript required. Four profiles ship built in (Jira, Gmail, Context7, Docker), and **[18 community profiles](https://github.com/sakebomb/mcp-recall-profiles)** cover Stripe, Grafana, Shopify, Datadog, Notion, Teams, and more.
+Declarative TOML profiles extend compression to any MCP — no TypeScript required. Four profiles ship built in (Jira, Gmail, Context7, Docker), and **[26 community profiles](https://github.com/sakebomb/mcp-recall-profiles)** cover Stripe, Grafana, Shopify, Datadog, Notion, Teams, and more.
 
 ```bash
 mcp-recall learn                         # auto-generate profiles from your installed MCPs
 mcp-recall profiles seed                 # install community profiles for detected MCPs
 mcp-recall profiles available            # browse the community catalog with install status
-mcp-recall profiles info <name>          # full metadata for any profile (works offline)
+mcp-recall profiles info <name>          # full metadata (installed first, else catalog)
 mcp-recall profiles install <name>       # install by short name, e.g. "grafana"
 mcp-recall profiles retrain              # suggest field additions using your stored data
 mcp-recall profiles test <tool>          # apply a profile and show compression result

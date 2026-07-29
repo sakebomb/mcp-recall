@@ -160,12 +160,12 @@ When two profiles in the **same tier** match the same tool name, the one with th
 
 The profile evaluator rejects profiles that fail these checks at load time (they are skipped, not fatal):
 
-1. `profile.id`, `profile.version`, `profile.description`, `profile.mcp_pattern`, and `strategy.type` are all required.
-2. `profile.id` must match `[a-z0-9_-]+`.
-3. `profile.version` must be valid semver.
+1. Both a `[profile]` and a `[strategy]` table must be present.
+2. `profile.id`, `profile.version`, `profile.description`, and `profile.mcp_pattern` are all required, as is `strategy.type`.
+3. `profile.mcp_pattern` must be a string or an array of strings.
 4. `strategy.type` must be one of `json_extract`, `json_truncate`, `text_truncate`.
 5. `json_extract` must define at least one entry in `fields`.
-6. All numeric limits must be positive integers and within ceilings:
+6. Numeric limits must not exceed these ceilings:
 
 | Field | Maximum |
 |-------|---------|
@@ -176,7 +176,9 @@ The profile evaluator rejects profiles that fail these checks at load time (they
 | `max_chars_per_field` | 100 000 |
 | `fallback_chars` | 100 000 |
 
-A validation CLI is available: `mcp-recall profiles check`.
+Not enforced at load time, despite looking like it should be: `version` is only required to be a string, not valid semver, and the numeric limits have no lower bound. The `[a-z0-9_-]+` restriction on `id` guards the paths used when installing or removing a profile by name — it is not applied when loading one from disk.
+
+`mcp-recall profiles check` detects **pattern conflicts** between profiles that loaded successfully — it cannot report a validation failure, because an invalid profile was already dropped before `check` sees it. `RECALL_DEBUG=1` is the only way to see why a profile was skipped; each rejection logs its reason.
 
 ---
 

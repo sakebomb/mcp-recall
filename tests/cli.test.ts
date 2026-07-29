@@ -2,6 +2,14 @@ import { describe, test, expect } from "bun:test";
 import { join } from "path";
 import { getVersion, printHelp, completionScript } from "../src/cli";
 
+// Every subcommand dispatched by src/profiles/commands.ts. A subcommand that
+// dispatches but is absent from the help text or a completion script is shipped
+// but undiscoverable — the defect this list exists to catch.
+const PROFILES_SUBCOMMANDS = [
+  "list", "install", "update", "remove", "available", "info",
+  "seed", "feed", "check", "retrain", "test",
+] as const;
+
 // ── getVersion ────────────────────────────────────────────────────────────────
 
 describe("getVersion", () => {
@@ -58,7 +66,7 @@ describe("printHelp", () => {
       console.log = orig;
     }
     const output = lines.join("\n");
-    for (const sub of ["seed", "list", "install", "update", "remove", "feed", "check", "retrain", "test"]) {
+    for (const sub of PROFILES_SUBCOMMANDS) {
       expect(output).toContain(sub);
     }
   });
@@ -75,8 +83,30 @@ describe("completionScript", () => {
 
   test("bash script includes all top-level commands", () => {
     const script = completionScript("bash");
-    for (const cmd of ["install", "uninstall", "status", "profiles", "learn", "completions"]) {
+    for (const cmd of ["install", "uninstall", "status", "gc", "profiles", "learn", "import", "completions"]) {
       expect(script).toContain(cmd);
+    }
+  });
+
+  test("bash script offers every profiles subcommand", () => {
+    const script = completionScript("bash");
+    const list = script.match(/profiles_cmds="([^"]+)"/)?.[1].split(" ") ?? [];
+    for (const sub of PROFILES_SUBCOMMANDS) {
+      expect(list).toContain(sub);
+    }
+  });
+
+  test("zsh script offers every profiles subcommand", () => {
+    const script = completionScript("zsh");
+    for (const sub of PROFILES_SUBCOMMANDS) {
+      expect(script).toContain(`'${sub}:`);
+    }
+  });
+
+  test("fish script offers every profiles subcommand", () => {
+    const script = completionScript("fish");
+    for (const sub of PROFILES_SUBCOMMANDS) {
+      expect(script).toContain(`-a ${sub} `);
     }
   });
 
@@ -92,7 +122,7 @@ describe("completionScript", () => {
 
   test("fish script includes all top-level commands", () => {
     const script = completionScript("fish");
-    for (const cmd of ["install", "uninstall", "status", "profiles", "learn", "completions"]) {
+    for (const cmd of ["install", "uninstall", "status", "gc", "profiles", "learn", "import", "completions"]) {
       expect(script).toContain(`-a ${cmd}`);
     }
   });

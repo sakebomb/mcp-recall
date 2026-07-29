@@ -10,9 +10,141 @@ are in `CLAUDE.md`; #208 and #205 stay open deliberately.
 | Step | State |
 |------|-------|
 | A — CLAUDE.md accuracy | ✓ DONE, PR [#220](https://github.com/sakebomb/mcp-recall/pull/220) @ `709c780` |
-| B — full docs re-read | **pass 2 done, pass 1 NOT started** ← resume here |
-| C — `docs/architecture.md` for contributors | not started |
+| B — full docs re-read | ✓ DONE — both passes, all 12 surfaces, review-hardened |
+| C — `docs/architecture.md` for contributors | not started ← resume here |
 | D — `ROADMAP.md` with explicit non-goals | not started |
+
+### Step B pass 1 — what was fixed (2026-07-28)
+
+Every claim below was verified against code before changing, and the three inventories
+(tools, config keys, env vars) now cross-check clean against `src/`.
+
+**Stale counts** — `recall__suggest` shipped but was absent from `README.md` *and*
+`docs/tools.md`, and both said "Ten tools"; `9 releases` → 13; `18 community profiles` → 26
+(counted from the live manifest, twice in README); "over 40 days" → "since March 2026".
+
+**Silence** — added a README CLI reference (`import` and `completions` were documented
+nowhere), an environment-variable table (all 6, none were user-facing), `[debug] enabled`
+in the config block, and a full `recall__suggest` section in `docs/tools.md`.
+
+**Wrong, not merely absent** — the README documented 4 `gc` statuses when `STATUS_POLICY`
+has 7, and called one "legacy" (really `legacy-fresh`/`legacy-stale`); `unverifiable` and
+`unreadable` were undocumented despite being the safety-critical never-delete cases. Now a
+table with the deletable flag per status. `CONTRIBUTING.md` Step 2 still told contributors
+to register handlers with inline `if` statements — the code has used a `HANDLER_REGISTRY`
+array for some time, so the instructions produced code that wouldn't dispatch. Step 5 told
+them to add ASCII art to a markdown table.
+
+**Code fix that belonged with the docs** — `profiles available` and `profiles info` are
+implemented (`src/profiles/commands.ts:41,44`) and documented in the README, but were
+missing from `mcp-recall --help`.
+
+GOTCHAS confirmed again, both predicted by Phase A:
+- A grep for `"ten tools"` missed `README.md:372` ("Ten `recall__*` tools"). Only the
+  per-file read caught it. Do not trust an aggregate grep to find a count claim.
+- Writing the env-var table, I asserted the community-profiles default from inference and
+  got it wrong (`…/profiles/` vs the real `…/profiles/community/`, `src/profiles/loader.ts:29`).
+  Caught only by verifying after writing — i.e. the fix pass introduced a fresh false claim,
+  exactly the Phase A pattern. Verify every default you write, including your own.
+
+Verified correct, NOT findings (checked, left alone): the `quickstart.md` CLAUDE.md block
+matches `install/index.ts:98` verbatim; `CONTRIBUTING.md`'s `Handler` type matches
+`types.ts:6`; `slack.ts`, the `LARGE_GITHUB_RESPONSE` fixture, and Bun `>=1.1.0` all exist as
+described; every percentage in the Results table is arithmetically consistent. The
+"88–97% context savings" claim pass 2 flagged as testable is not in the current README.
+Stripe is both a built-in handler and a community profile — legitimate, since profiles
+outrank the registry — so the README mentioning both is not a contradiction.
+
+### The review round found more than the writing round (PR #225)
+
+The first commit claimed to close pass 1 while only 5 of the 12 scoped surfaces had been
+read in full; the other 7 had a targeted grep and nothing else. The review caught that, and
+reading the remaining 7 produced the most serious findings of the whole phase. **Do not
+count a grep as a read.**
+
+- **`SECURITY.md` overstated the protection the code provides** — the worst direction for
+  that file to be wrong in. It listed bare `*key*`, `*auth*`, `*env*` denylist patterns; the
+  real ones are specific (`*api_key*`, `*oauth*`, `*env_var*`, …), so `list_keys`,
+  `rotate_key`, `auth_config` and `get_env` are all stored. Proven by running `isDenied` on
+  each. It also claimed AWS `ASIA*` detection (only `AKIA` exists), listed 7 of 16 secret
+  patterns, and named 1 of 9 password managers.
+- **`docs/profile-schema.md` + `docs/ai-profile-guide.md` both mis-stated the loader's
+  validation rules** — the checklists that exist precisely to stop profiles being silently
+  skipped. `version` is *not* semver-validated and `id` is *not* regex-checked at load
+  (that guards install/remove paths); the guide also omitted `description` from the required
+  list, which is the easiest way to get a profile silently dropped. Verified by loading a
+  crafted profile: no `description` → skipped; `version = "not-semver-at-all"` → loads fine.
+- **README `max_size_mb` called a "hard cap"** — `evictIfNeeded` only considers `pinned = 0`
+  and returns early when all candidates are pinned (#205). And eviction was described as
+  least-frequently-used directly above a correct description of the decay formula.
+- **`legacy-fresh`/`legacy-stale` glossed as "created before path tracking"** — session-start
+  records a path only when it resolves, so a *current* DB whose path never resolved is also
+  pathless and deletable after 90 untouched days. That was my own new text.
+- **`profiles available` / `info` were missing from all three completion scripts, and
+  `import` from all three top-level lists** — same undiscoverable-surface defect as the help
+  text. The subcommand set now lives in one constant asserted against help output and every
+  completion script, guard-checked by removing each addition and confirming red.
+
+The review also turned up a **code** bug, not a docs one:
+[#226](https://github.com/sakebomb/mcp-recall/issues/226) — `import --keep-project-key`
+stamps rows with the dump's original project key but still writes them to the *current*
+project's database, while almost everything else is project-scoped. The CLI reports success
+and then suggests `recall__search`, which finds nothing.
+
+First wording of this entry said the rows are "unreachable" — **wrong, and it understated the
+damage.** `retrieveOutput` is `SELECT * … WHERE id = ?` (`queries.ts:111`) with no project
+filter, so they *are* readable by id. What is actually broken: `forgetOutputs` scopes every
+branch including `all` (`queries.ts:434-444`), so they cannot be deleted through the tool at
+all; and `evictIfNeeded` both totals and selects candidates project-scoped (`:202-216`), so
+they escape `max_size_mb` and are never evicted — permanent disk the accounting can't see.
+`export` is project-scoped too (`tools.ts:232-236`), so the original dump is the only
+remaining record of their ids. The fix needs a decision (route by key / reject the flag), must
+handle a dump holding several project keys, and now also needs a cleanup path for anyone who
+already used the flag. Not fixed in #225 — Phase 13 is
+documentation-only and this changes where data lands.
+
+Method note for Step C: no CI job validates documentation — `ci.yml` is typecheck, tests,
+bundle freshness, packaged CLI. Green CI says nothing about doc accuracy, which is the
+entire substance of a docs PR. The three inventories (tools, config keys, env vars) are
+mechanically checkable and would make a cheap CI guard. **Filed as
+[#227](https://github.com/sakebomb/mcp-recall/issues/227)**, which also carries the
+design note that the guard must match structurally rather than by substring, and now owns
+regenerating `tasks/tests.md` — that file's totals were stale by 526 tests and its header
+is demoted to "not authoritative" rather than repaired in place.
+
+**Two robustness gaps found while reviewing #225, documented not fixed** (Phase 13 changes no
+runtime behaviour). Both filed as [#228](https://github.com/sakebomb/mcp-recall/issues/228):
+
+- **`eviction_half_life_days = inf` is reachable from user config and silently disables decay.**
+  `inf` is legal TOML and `z.number().positive()` accepts `Infinity`, so `loadConfig` returns it;
+  `Math.max(1, Infinity)` is `Infinity`, every recency factor becomes 1, and the score collapses
+  to `access_count + 1` — the pure LFU behaviour #195 replaced. Verified end to end. `NaN` is
+  worse in kind (every score `NaN`, comparator `NaN`, `sort` treats as 0, eviction unranked in
+  insertion order) but needs a direct caller, since Zod rejects `NaN`. I first recorded both as
+  direct-caller-only; that was wrong for `Infinity`.
+- **Nothing bounds the decay constant from below.** Verified by mutating the base and running
+  the *whole* suite, not by reasoning: at 0.9 exactly one of 792 tests reddens — `db.test.ts:635`
+  — so it is the only test anywhere sensitive to the constant, and its assertions reduce to
+  `51·base^(60/7) < 3`, i.e. it only catches decay that is too *slow* (red at ≈0.72 and up). At
+  0.01 — a two-day-old item worthless — everything stays green. Both figures come from running
+  it; the two previous attempts at this row were written from a single mutation's outcome and
+  were wrong in opposite directions.
+
+**What the review rounds on #225 actually established.** Nine rounds, and every substantive
+finding came from the reviewer rather than from my own checks. Three were defects I
+*introduced* while fixing others: an invented env-var default, propagating "`learn` reads
+session data" into a fourth location, and a registry row claiming "decay order respected"
+for a test that cannot distinguish decay from LFU — written one commit after fixing a test
+name for exactly that fault. The generalizable rule, which no sweep can enforce:
+
+> A sweep validates the wording you *retired*. It can never validate a claim you just
+> *wrote* — a new sentence has nothing to contradict yet and contains none of the strings
+> you were grepping for. New claims need what code claims get: read the thing they describe.
+
+Two corollaries worth carrying into Step C. Fix a claim in *every* file, not the one you
+have open — "align to the wording used elsewhere" is only safe if something checked that
+wording against code, and twice it hadn't. And paste the grep output into the commit with a
+verdict per line; summarising it from memory failed twice, in opposite directions.
 
 ### Step B needs TWO passes — they find disjoint classes of problem
 
