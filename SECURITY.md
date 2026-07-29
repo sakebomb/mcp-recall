@@ -24,13 +24,22 @@ Before writing any tool output to disk, mcp-recall scans the content for these p
 
 | Pattern | Catches |
 |---------|---------|
-| PEM headers | `-----BEGIN RSA PRIVATE KEY-----` etc. |
-| SSH private keys | OpenSSH private key blocks |
-| GitHub PATs | `ghp_*`, `github_pat_*` (classic and fine-grained) |
-| OpenAI API keys | `sk-*` |
-| Anthropic API keys | `sk-ant-*` |
-| AWS access key IDs | `AKIA*`, `ASIA*` |
-| Generic Bearer tokens | `Authorization: Bearer ...` |
+| PEM private key | `-----BEGIN … PRIVATE KEY-----` |
+| SSH private key | `-----BEGIN OPENSSH PRIVATE KEY-----` |
+| GitHub PAT (classic) | `ghp_…` |
+| GitHub PAT (fine-grained) | `github_pat_…` |
+| GitHub OAuth token | `gho_…` |
+| OpenAI API key | `sk-…` (32+ chars, excluding `sk-ant-`) |
+| Anthropic API key | `sk-ant-…` |
+| AWS access key ID | `AKIA…` |
+| AWS secret access key | an `aws`-adjacent 40-char secret |
+| GCP service account key | `"type": "service_account"` |
+| Azure storage connection string | account key connection strings |
+| Stripe secret / restricted key | `sk_live_…`, `sk_test_…`, `rk_live_…`, `rk_test_…` |
+| SendGrid API key | `SG.…` |
+| Twilio Account SID | `AC…` (+32 hex) |
+| npm publish token | `npm_…` |
+| Generic Bearer token | `Bearer …` (32+ chars) |
 
 On a match: the output is skipped, nothing is written to disk, a warning is logged to
 stderr, and the full uncompressed output passes through to Claude unchanged.
@@ -39,8 +48,28 @@ stderr, and the full uncompressed output passes through to Claude unchanged.
 
 These tool name patterns are **never stored**, regardless of content:
 
-`mcp__recall__*`, `mcp__1password__*`, `*secret*`, `*token*`, `*password*`,
-`*credential*`, `*key*`, `*auth*`, `*env*`
+```
+mcp__recall__*
+
+mcp__1password__*   mcp__bitwarden__*  mcp__lastpass__*
+mcp__dashlane__*    mcp__keeper__*     mcp__hashicorp_vault__*
+mcp__vault__*       mcp__doppler__*    mcp__infisical__*
+
+*secret*      *password*     *credential*   *token*
+*api_key*     *access_key*   *private_key*  *signing_key*  *encrypt*key*
+*oauth*       *auth_token*   *authenticate*
+*env_var*     *dotenv*
+```
+
+Password managers are listed by name because their tool names — `get_item`, `list_logins`,
+`vault read` — contain no credential keyword to match on.
+
+> **These are substring patterns, not category filters.** The key and auth patterns are
+> specific: `*api_key*` matches `get_api_key` but **not** `list_keys` or `rotate_key`;
+> `*authenticate*` and `*auth_token*` do **not** match `auth_config`; `*env_var*` and
+> `*dotenv*` do **not** match `get_env`. If a tool of yours handles credentials under a
+> name that does not contain one of the strings above, it is **not** blocked by default —
+> add it via `denylist.additional`.
 
 To add your own patterns:
 

@@ -255,12 +255,14 @@ Each database is classified by whether its recorded project path still exists on
 | **current** | The active project's database | never |
 | **active** | Recorded project path still exists | never |
 | **orphaned** | Project directory gone, but its parent survives — a real deletion | **yes** |
-| **legacy-fresh** | Created before path tracking, touched within `--stale-days` | never |
-| **legacy-stale** | Created before path tracking, untouched longer than `--stale-days N` (default 90) | **yes** |
+| **legacy-fresh** | No recorded project path, touched within `--stale-days` | never |
+| **legacy-stale** | No recorded project path, untouched longer than `--stale-days N` (default 90) | **yes** |
 | **unverifiable** | Can't be judged safely — a relative recorded path, or a missing parent directory (usually an unmounted volume, not a deleted project) | never |
 | **unreadable** | Not a readable recall database | never |
 
 The `orphaned` rule requires the *parent* directory to survive, so an unmounted volume reads as `unverifiable` rather than as a deleted project. Databases with a relative recorded path are also `unverifiable`: there is no way to know what they were rooted against. Both are kept.
+
+A database has no recorded project path either because it predates path tracking, or because its path never resolved to a real directory when a session started — session start records a path only once it confirms one exists, so it never overwrites good evidence with a guess. Either way the `legacy-*` classifications rest solely on "untouched for `--stale-days`", never on inferring that a project was deleted.
 
 The active project's database is always protected. When the store grows past `store.gc_reminder_mb` (default 2 GB), session start injects a one-line reminder to run `gc`, and `mcp-recall status` shows the store's size. There's no automatic deletion — reclaiming is always an explicit command.
 
@@ -345,8 +347,10 @@ expire_after_session_days = 30
 # Falls back to "cwd" if not inside a git repo.
 key = "git_root"
 
-# Hard cap on store size in megabytes. Least-frequently-accessed
-# non-pinned items are evicted when this limit is exceeded.
+# Target store size in megabytes. When exceeded, non-pinned items are evicted
+# lowest-value-first by the decay score described under eviction_half_life_days.
+# This bounds unpinned content only — pinned items are never evicted, so a store
+# of mostly-pinned data can exceed it. recall__stats reports when it does.
 max_size_mb = 500
 
 # Access count threshold for pin suggestions in recall__stats.
