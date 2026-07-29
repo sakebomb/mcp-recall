@@ -281,7 +281,7 @@ mcp-recall import <file>        # restore items from a recall__export dump
 mcp-recall completions <shell>  # print a bash / zsh / fish completion script
 ```
 
-`mcp-recall --help` lists every subcommand and flag.
+`mcp-recall --help` lists every subcommand.
 
 **Restoring an export.** `recall__export()` produces a JSON dump; `import` reads it back:
 
@@ -289,10 +289,11 @@ mcp-recall completions <shell>  # print a bash / zsh / fish completion script
 mcp-recall import dump.json                  # skips items whose IDs already exist
 mcp-recall import dump.json --overwrite      # replace existing items instead
 mcp-recall import dump.json --dry-run        # report what would be imported
-mcp-recall import dump.json --keep-project-key  # retain the dump's original project key
 ```
 
-By default items are imported into the *current* project's store. Use `--keep-project-key` to restore them against the project they were exported from.
+Items are imported into the **current** project's store — run `import` from the project you want them in.
+
+> **`--keep-project-key` is currently not useful** ([#226](https://github.com/sakebomb/mcp-recall/issues/226)). It retains the dump's original project key on each row, but still writes them to the current project's database. Since every retrieval path filters by the current project's key, the imported items are then unreachable — from this project *and* from the one they came from, which uses a different database file. Import without the flag.
 
 **Shell completions.** Add to your shell profile once:
 
