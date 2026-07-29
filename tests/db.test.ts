@@ -665,8 +665,8 @@ describe("db", () => {
 
     // Asserts the ordering outcome at one half-life, not the 0.5 factor itself: the
     // expects reduce to "recency < 1", so any decreasing decay passes (verified — this
-    // stays green with Math.pow(0.9, …)). The magnitude is constrained by the
-    // decay-vs-LFU test above, which does go red when the constant changes.
+    // stays green with Math.pow(0.9, …)). The decay-vs-LFU test above bounds the
+    // constant from above only; no test bounds it from below.
     it("evicts an item aged one half-life over an equally-accessed fresh one", () => {
       const now = 1_000_000_000;
       const day = 86400;

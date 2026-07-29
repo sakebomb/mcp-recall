@@ -222,16 +222,15 @@ export function evictIfNeeded(
 
   if (candidates.length === 0) return 0; // all remaining items are pinned
 
-  // Math.max(1, …) floors a zero or negative half-life (and -Infinity) at 1 second,
-  // for a future direct caller bypassing the Zod-validated config. It does NOT cover
-  // the two non-finite cases, despite what this comment used to claim:
-  //   NaN      — Math.max(1, NaN) is NaN, so every score becomes NaN, the comparator
-  //              returns NaN for every pair, sort treats that as 0, and eviction
-  //              silently proceeds in insertion order rather than by rank.
-  //   Infinity — passes through, making every recency factor 1, which degrades
-  //              eviction to plain LFU.
-  // Neither is reachable through loadConfig (Zod requires a positive number); a
-  // Number.isFinite check would close both if a caller ever needs it.
+  // Floors zero, negative and -Infinity at 1 second. It does NOT cover the two
+  // non-finite cases — Math.max(1, NaN) is NaN, and Infinity passes straight through:
+  //   NaN      -> every score NaN -> comparator NaN -> sort treats as 0 -> eviction
+  //               proceeds in insertion order, unranked. Needs a direct caller; Zod
+  //               rejects NaN.
+  //   Infinity -> every recency factor 1, so decay is off and eviction is plain LFU.
+  //               REACHABLE FROM USER CONFIG: `eviction_half_life_days = inf` is legal
+  //               TOML and z.number().positive() accepts Infinity. See #228.
+  // A Number.isFinite check would close both.
   const halfLifeSecs = Math.max(1, half_life_days * SECONDS_PER_DAY);
   const scoreOf = (c: (typeof candidates)[number]): number => {
     const lastActive = c.last_accessed ?? c.created_at;

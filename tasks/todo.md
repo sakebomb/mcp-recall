@@ -113,19 +113,22 @@ regenerating `tasks/tests.md` — that file's totals were stale by 526 tests and
 is demoted to "not authoritative" rather than repaired in place.
 
 **Two robustness gaps found while reviewing #225, documented not fixed** (Phase 13 changes no
-runtime behaviour). Both in `evictIfNeeded`, neither reachable via `loadConfig` since Zod
-requires a positive number, so both need a direct caller:
+runtime behaviour). Both filed as [#228](https://github.com/sakebomb/mcp-recall/issues/228):
 
-- `Math.max(1, half_life_days * SECONDS_PER_DAY)` does **not** guard `NaN` — `Math.max(1, NaN)`
-  is `NaN`, so every score becomes `NaN`, the comparator returns `NaN` for every pair, `sort`
-  treats it as 0, and eviction silently proceeds in insertion order. `Infinity` passes through
-  too, flattening every recency factor to 1 and degrading eviction to plain LFU. The comment at
-  `queries.ts:225` claimed to cover both; it now says what it really does. A `Number.isFinite`
-  check would close them.
-- **Nothing bounds the decay constant from below.** `db.test.ts:635` is the only test sensitive
-  to it and only catches decay that is too *slow* (red at ≈0.72 and up). Set the base to 0.01 —
-  a two-day-old item worthless — and all 792 tests stay green. A lower-bound test is cheap and
-  missing.
+- **`eviction_half_life_days = inf` is reachable from user config and silently disables decay.**
+  `inf` is legal TOML and `z.number().positive()` accepts `Infinity`, so `loadConfig` returns it;
+  `Math.max(1, Infinity)` is `Infinity`, every recency factor becomes 1, and the score collapses
+  to `access_count + 1` — the pure LFU behaviour #195 replaced. Verified end to end. `NaN` is
+  worse in kind (every score `NaN`, comparator `NaN`, `sort` treats as 0, eviction unranked in
+  insertion order) but needs a direct caller, since Zod rejects `NaN`. I first recorded both as
+  direct-caller-only; that was wrong for `Infinity`.
+- **Nothing bounds the decay constant from below.** Verified by mutating the base and running
+  the *whole* suite, not by reasoning: at 0.9 exactly one of 792 tests reddens — `db.test.ts:635`
+  — so it is the only test anywhere sensitive to the constant, and its assertions reduce to
+  `51·base^(60/7) < 3`, i.e. it only catches decay that is too *slow* (red at ≈0.72 and up). At
+  0.01 — a two-day-old item worthless — everything stays green. Both figures come from running
+  it; the two previous attempts at this row were written from a single mutation's outcome and
+  were wrong in opposite directions.
 
 **What the review rounds on #225 actually established.** Nine rounds, and every substantive
 finding came from the reviewer rather than from my own checks. Three were defects I
