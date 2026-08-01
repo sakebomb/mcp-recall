@@ -134,12 +134,13 @@ mcp-recall profiles available # list community profiles available to install
 | 11 | Store lifecycle — `gc`, free-page reclamation, pin-budget reporting | Complete (v1.10.0) |
 | 12 | Supply chain — manifest attestation restored (profiles repo), exact signer-identity pinning via `--cert-identity`, old-`gh` diagnosis | Complete (v1.10.0) |
 | 12b | Packaging integrity — symlink-safe `bin/recall`, publish-time tag/version guard, packaged-CLI CI job | Complete (v1.10.1) |
-| 13 | **Current: stabilize + document.** Docs accuracy, contributor architecture doc, `ROADMAP.md`. No new features | In progress |
+| 13 | Stabilize + document. Docs accuracy, contributor architecture doc (`docs/architecture.md`), `ROADMAP.md` with explicit non-goals. No new features | Complete |
 
 Phases 1–9 were planned up front. Everything after was reactive — ported ideas from a
-competitive review, then a dogfooding pass, then findings from those. Phase 13 exists to
-stop and consolidate before adding more. Its final step is a `ROADMAP.md` stating what is
-deliberately out of scope; until that lands, this table is the only statement of direction.
+competitive review, then a dogfooding pass, then findings from those. Phase 13 existed to
+stop and consolidate before adding more. Its final step, `ROADMAP.md`, states what is
+deliberately out of scope and is now the project's statement of direction;
+`docs/architecture.md` covers the system's shape for contributors.
 
 ## Testing Conventions
 
