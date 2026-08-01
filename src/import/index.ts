@@ -6,8 +6,11 @@
  *   mcp-recall import dump.json          # restore from file
  *   mcp-recall import < dump.json        # restore from stdin
  *   mcp-recall import dump.json --overwrite        # replace existing items
- *   mcp-recall import dump.json --keep-project-key # BROKEN, see #226 — rows become unfindable
  *   mcp-recall import dump.json --dry-run          # preview without writing
+ *
+ * Imported rows are always stamped with the current project's key so they are
+ * reachable through the project-scoped tool layer. The former
+ * `--keep-project-key` flag is rejected (#226) — see handleImportCommand.
  */
 
 import { readFileSync, statSync, existsSync } from "fs";
@@ -97,7 +100,7 @@ function dryRunCount(
 function importItems(
   dbPath: string,
   items: StoredOutputRow[],
-  opts: { overwrite: boolean; targetProjectKey: string | null }
+  opts: { overwrite: boolean; projectKey: string }
 ): ImportResult {
   const db = getDb(dbPath);
 
@@ -109,7 +112,9 @@ function importItems(
   );
 
   const insertItem = db.transaction((item: StoredOutputRow) => {
-    const projectKey = opts.targetProjectKey ?? item.project_key;
+    // Always stamp the current project's key (never the dump's) so the row is
+    // reachable and deletable through the project-scoped tool layer (#226).
+    const projectKey = opts.projectKey;
 
     const existing = db
       .prepare(`SELECT id FROM stored_outputs WHERE id = ? LIMIT 1`)
@@ -165,8 +170,26 @@ function importItems(
 
 export async function handleImportCommand(args: string[]): Promise<void> {
   const overwrite = args.includes("--overwrite");
-  const keepProjectKey = args.includes("--keep-project-key");
   const dryRun = args.includes("--dry-run");
+
+  // --keep-project-key was removed in #226. It stamped rows with the dump's
+  // original project key while still writing them to the *current* project's
+  // database — where every project-scoped path (search, list_stored, forget,
+  // size accounting) filters on the current key. The rows were therefore
+  // unreachable and undeletable through the tool layer. Reject the flag loudly
+  // rather than silently re-stamping, so a caller who relied on it learns why.
+  if (args.includes("--keep-project-key")) {
+    console.error(
+      "The --keep-project-key flag was removed (#226): it wrote rows into the current\n" +
+      "project's database while stamping them with the dump's original key, leaving them\n" +
+      "unreachable by search/list_stored/forget and invisible to the size cap.\n" +
+      "Run `mcp-recall import <file>` without it — items land in the current project and\n" +
+      "behave normally. To recover rows already stranded by the old flag, see\n" +
+      '"Recovering rows stranded by --keep-project-key" in docs/troubleshooting.md.'
+    );
+    process.exit(1);
+  }
+
   const rawPath = args.find((a) => !a.startsWith("--"));
   const filePath = rawPath ? resolve(rawPath) : null;
 
@@ -188,7 +211,7 @@ export async function handleImportCommand(args: string[]): Promise<void> {
       raw = readFileSync("/dev/stdin", "utf8");
     } catch {
       console.error("No file specified and stdin is not readable.");
-      console.error("Usage: mcp-recall import <file.json> [--overwrite] [--dry-run]   (--keep-project-key is broken, see #226)");
+      console.error("Usage: mcp-recall import <file.json> [--overwrite] [--dry-run]");
       process.exit(1);
     }
   }
@@ -228,14 +251,13 @@ export async function handleImportCommand(args: string[]): Promise<void> {
   // Resolve target DB
   const projectKey = getProjectKey(process.cwd());
   const dbPath = defaultDbPath(projectKey);
-  const targetProjectKey = keepProjectKey ? null : projectKey;
 
   console.log(`\nImporting ${items.length} item(s) into ${dbPath}`);
   if (dryRun) console.log("(dry run — nothing will be written)\n");
 
   const result = dryRun
     ? dryRunCount(dbPath, items, overwrite)
-    : importItems(dbPath, items, { overwrite, targetProjectKey });
+    : importItems(dbPath, items, { overwrite, projectKey });
 
   const parts: string[] = [];
   if (result.imported > 0) parts.push(`${result.imported} imported`);

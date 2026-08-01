@@ -5,8 +5,9 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { storeOutput, pinOutput } from "../src/db/index";
 import { initSchema, closeDb } from "../src/db/schema";
-import { toolExport } from "../src/tools";
+import { toolExport, toolListStored, toolSearch } from "../src/tools";
 import { handleImportCommand } from "../src/import/index";
+import { getProjectKey } from "../src/project-key";
 import type { StoreInput } from "../src/db/types";
 
 const PROJECT_ROOT = import.meta.dir.replace(/\/tests$/, "");
@@ -69,7 +70,7 @@ describe("import round-trip", () => {
 
     process.env.RECALL_DB_PATH = targetDbPath;
     try {
-      await handleImportCommand([dumpFile, "--keep-project-key"]);
+      await handleImportCommand([dumpFile]);
 
       const targetDb = new Database(targetDbPath);
       const rows = targetDb
@@ -108,26 +109,30 @@ describe("import round-trip", () => {
     }
   });
 
-  test("preserves original project key with --keep-project-key", async () => {
+  test("rejects --keep-project-key and writes nothing (#226)", async () => {
+    // The flag stranded rows: written to the current project's DB but stamped
+    // with the dump's key, unreachable and undeletable through the tool layer.
+    // It is now rejected before any DB is opened.
     storeOutput(sourceDb, makeInput());
     const dumpFile = makeTmpPath();
     const targetDbPath = makeTmpPath(".db");
     exportToFile(dumpFile);
 
-    process.env.RECALL_DB_PATH = targetDbPath;
-    try {
-      await handleImportCommand([dumpFile, "--keep-project-key"]);
+    const result = Bun.spawnSync(
+      ["bun", "run", "src/cli.ts", "import", dumpFile, "--keep-project-key"],
+      {
+        cwd: PROJECT_ROOT,
+        stderr: "pipe",
+        env: { ...process.env, RECALL_DB_PATH: targetDbPath },
+      }
+    );
 
-      const targetDb = new Database(targetDbPath);
-      const row = targetDb
-        .prepare(`SELECT project_key FROM stored_outputs LIMIT 1`)
-        .get() as { project_key: string } | null;
-      targetDb.close();
-
-      expect(row?.project_key).toBe(SOURCE_PROJECT);
-    } finally {
-      delete process.env.RECALL_DB_PATH;
-    }
+    expect(result.exitCode).toBe(1);
+    const stderr = result.stderr.toString();
+    expect(stderr).toContain("--keep-project-key");
+    expect(stderr).toContain("#226");
+    // Rejected before any DB file is created — nothing is written.
+    expect(existsSync(targetDbPath)).toBe(false);
   });
 
   test("preserves pin flag", async () => {
@@ -140,7 +145,7 @@ describe("import round-trip", () => {
 
     process.env.RECALL_DB_PATH = targetDbPath;
     try {
-      await handleImportCommand([dumpFile, "--keep-project-key"]);
+      await handleImportCommand([dumpFile]);
 
       const targetDb = new Database(targetDbPath);
       const row = targetDb
@@ -149,6 +154,36 @@ describe("import round-trip", () => {
       targetDb.close();
 
       expect(row?.pinned).toBe(1);
+    } finally {
+      delete process.env.RECALL_DB_PATH;
+    }
+  });
+
+  test("imported items are reachable through the project-scoped tool layer (#226)", async () => {
+    // The bug: rows landed under a foreign project key, so the tool layer (which
+    // filters WHERE project_key = current) could not see them. After the fix a
+    // default import stamps the current key, so search/list_stored find them.
+    storeOutput(sourceDb, makeInput({ full_content: "reachable content marker" }));
+    const dumpFile = makeTmpPath();
+    const targetDbPath = makeTmpPath(".db");
+    exportToFile(dumpFile);
+
+    process.env.RECALL_DB_PATH = targetDbPath;
+    try {
+      await handleImportCommand([dumpFile]);
+      closeDb(); // flush the singleton so a fresh handle sees committed rows
+
+      const currentKey = getProjectKey(process.cwd());
+      const targetDb = new Database(targetDbPath);
+      try {
+        const listed = toolListStored(targetDb, currentKey, {});
+        const searched = toolSearch(targetDb, currentKey, { query: "reachable" });
+        expect(listed).not.toContain("no stored items");
+        expect(listed).toContain("mcp__github__list_issues");
+        expect(searched).not.toContain("no results");
+      } finally {
+        targetDb.close();
+      }
     } finally {
       delete process.env.RECALL_DB_PATH;
     }
@@ -163,7 +198,7 @@ describe("import round-trip", () => {
 
     process.env.RECALL_DB_PATH = targetDbPath;
     try {
-      await handleImportCommand([dumpFile, "--keep-project-key"]);
+      await handleImportCommand([dumpFile]);
 
       const targetDb = new Database(targetDbPath);
       const rows = targetDb
@@ -194,7 +229,7 @@ describe("import conflict handling", () => {
     process.env.RECALL_DB_PATH = targetDbPath;
     try {
       // First import
-      await handleImportCommand([dumpFile, "--keep-project-key"]);
+      await handleImportCommand([dumpFile]);
       closeDb(); // reset singleton so next import opens the same file fresh
 
       // Mutate summary in source, re-export
@@ -202,7 +237,7 @@ describe("import conflict handling", () => {
       exportToFile(dumpFile);
 
       // Second import — should skip
-      await handleImportCommand([dumpFile, "--keep-project-key"]);
+      await handleImportCommand([dumpFile]);
 
       const targetDb = new Database(targetDbPath);
       const row = targetDb
@@ -224,13 +259,13 @@ describe("import conflict handling", () => {
 
     process.env.RECALL_DB_PATH = targetDbPath;
     try {
-      await handleImportCommand([dumpFile, "--keep-project-key"]);
+      await handleImportCommand([dumpFile]);
       closeDb();
 
       sourceDb.prepare(`UPDATE stored_outputs SET summary = 'OVERWRITTEN' WHERE id = ?`).run(item.id);
       exportToFile(dumpFile);
 
-      await handleImportCommand([dumpFile, "--keep-project-key", "--overwrite"]);
+      await handleImportCommand([dumpFile, "--overwrite"]);
 
       const targetDb = new Database(targetDbPath);
       const row = targetDb
@@ -252,14 +287,14 @@ describe("import conflict handling", () => {
 
     process.env.RECALL_DB_PATH = targetDbPath;
     try {
-      await handleImportCommand([dumpFile, "--keep-project-key"]);
+      await handleImportCommand([dumpFile]);
       closeDb();
 
       // Update content in source and re-export
       sourceDb.prepare(`UPDATE stored_outputs SET full_content = 'replacement content' WHERE id = ?`).run(item.id);
       exportToFile(dumpFile);
 
-      await handleImportCommand([dumpFile, "--keep-project-key", "--overwrite"]);
+      await handleImportCommand([dumpFile, "--overwrite"]);
 
       const targetDb = new Database(targetDbPath);
       const chunkRows = targetDb
@@ -305,7 +340,7 @@ describe("import --dry-run", () => {
     process.env.RECALL_DB_PATH = targetDbPath;
     try {
       // Real import first
-      await handleImportCommand([dumpFile, "--keep-project-key"]);
+      await handleImportCommand([dumpFile]);
       closeDb();
 
       // Capture dry-run output
@@ -313,7 +348,7 @@ describe("import --dry-run", () => {
       const originalLog = console.log;
       console.log = (...a: unknown[]) => { output += a.join(" ") + "\n"; };
       try {
-        await handleImportCommand([dumpFile, "--keep-project-key", "--dry-run"]);
+        await handleImportCommand([dumpFile, "--dry-run"]);
       } finally {
         console.log = originalLog;
       }

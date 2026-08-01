@@ -9886,7 +9886,7 @@ function importItems(dbPath, items, opts) {
   const result = { imported: 0, skipped: 0, overwritten: 0 };
   const chunkStmt = db.prepare(`INSERT INTO content_chunks (output_id, chunk_index, content) VALUES (?, ?, ?)`);
   const insertItem = db.transaction((item) => {
-    const projectKey = opts.targetProjectKey ?? item.project_key;
+    const projectKey = opts.projectKey;
     const existing = db.prepare(`SELECT id FROM stored_outputs WHERE id = ? LIMIT 1`).get(item.id);
     if (existing) {
       if (!opts.overwrite)
@@ -9914,8 +9914,15 @@ function importItems(dbPath, items, opts) {
 }
 async function handleImportCommand(args) {
   const overwrite = args.includes("--overwrite");
-  const keepProjectKey = args.includes("--keep-project-key");
   const dryRun = args.includes("--dry-run");
+  if (args.includes("--keep-project-key")) {
+    console.error(`The --keep-project-key flag was removed (#226): it wrote rows into the current
+` + `project's database while stamping them with the dump's original key, leaving them
+` + `unreachable by search/list_stored/forget and invisible to the size cap.
+` + "Run `mcp-recall import <file>` without it \u2014 items land in the current project and\n" + `behave normally. To recover rows already stranded by the old flag, see
+` + '"Recovering rows stranded by --keep-project-key" in docs/troubleshooting.md.');
+    process.exit(1);
+  }
   const rawPath = args.find((a) => !a.startsWith("--"));
   const filePath = rawPath ? resolve3(rawPath) : null;
   let raw;
@@ -9935,7 +9942,7 @@ async function handleImportCommand(args) {
       raw = readFileSync9("/dev/stdin", "utf8");
     } catch {
       console.error("No file specified and stdin is not readable.");
-      console.error("Usage: mcp-recall import <file.json> [--overwrite] [--dry-run]   (--keep-project-key is broken, see #226)");
+      console.error("Usage: mcp-recall import <file.json> [--overwrite] [--dry-run]");
       process.exit(1);
     }
   }
@@ -9965,13 +9972,12 @@ async function handleImportCommand(args) {
   }
   const projectKey = getProjectKey(process.cwd());
   const dbPath = defaultDbPath(projectKey);
-  const targetProjectKey = keepProjectKey ? null : projectKey;
   console.log(`
 Importing ${items.length} item(s) into ${dbPath}`);
   if (dryRun)
     console.log(`(dry run \u2014 nothing will be written)
 `);
-  const result = dryRun ? dryRunCount(dbPath, items, overwrite) : importItems(dbPath, items, { overwrite, targetProjectKey });
+  const result = dryRun ? dryRunCount(dbPath, items, overwrite) : importItems(dbPath, items, { overwrite, projectKey });
   const parts = [];
   if (result.imported > 0)
     parts.push(`${result.imported} imported`);
