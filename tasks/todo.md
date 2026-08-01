@@ -11,7 +11,7 @@ are in `CLAUDE.md`; #208 and #205 stay open deliberately.
 |------|-------|
 | A — CLAUDE.md accuracy | ✓ DONE, PR [#220](https://github.com/sakebomb/mcp-recall/pull/220) @ `709c780` |
 | B — full docs re-read | ✓ DONE — both passes, all 12 surfaces, review-hardened |
-| C — `docs/architecture.md` for contributors | ✓ DONE, branch `docs/phase-13-architecture` @ `5297c48` — pipeline+module map+dispatch+4 invariants, per-assertion verified, linked from README & CONTRIBUTING |
+| C — `docs/architecture.md` for contributors | ✓ DONE, PR [#229](https://github.com/sakebomb/mcp-recall/pull/229) — pipeline+module map+dispatch+4 invariants, per-assertion verified, independent claim audit found+fixed 1 wrong claim (`203d463`), linked from README & CONTRIBUTING |
 | D — `ROADMAP.md` with explicit non-goals | not started ← resume here (terminal Phase 13 deliverable) |
 
 ### Step B pass 1 — what was fixed (2026-07-28)
