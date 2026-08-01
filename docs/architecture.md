@@ -142,10 +142,14 @@ Tables (`db/schema.ts`):
 - **`outputs_fts`** (FTS5) — full-text index over `tool_name`/`summary`/`full_content`;
   powers `recall__search`. Kept in sync by insert/delete triggers.
 - **`content_chunks`** (FTS5) — `full_content` split into chunks (`db/chunking.ts`);
-  powers the bounded `peek` window and graduated retrieval. Also trigger-maintained.
+  powers the bounded `peek` window and graduated retrieval. Populated programmatically
+  by `storeChunks` on write and cleaned up by a delete trigger (unlike `outputs_fts`,
+  which is fully trigger-maintained on both insert and delete).
 - **`sessions`** — one row per active-use date; underpins "session days" expiry.
-- **`meta`** — key/value; holds `project_path` (written by session-start) and the
-  schema version. Migrations live in `MIGRATIONS` in `schema.ts`, each idempotent.
+- **`meta`** — key/value; holds `project_path` (written by session-start). Migrations
+  live in `MIGRATIONS` in `schema.ts`, applied unconditionally on open and each
+  idempotent (`CREATE … IF NOT EXISTS` + a duplicate-column catch); no version row is
+  tracked.
 
 ## Load-bearing invariants
 
@@ -160,9 +164,11 @@ Its rule (`gc/index.ts`) is: recorded `project_path` gone but its parent present
 project deleted ⇒ deletable. That inference is valid **only for an absolute path** —
 `dirname("")` and `dirname("bare-name")` are both `"."`, which always exists, so a
 relative path would read as "parent survived, project deleted" and get the DB
-removed. Two defenses hold this: `project-key.ts` absolutises the path at its
-source (`resolve(cwd)`, never a bare string), and session-start records a path
-*only* when it resolves to a real directory (`session-start.ts:60`). Non-absolute
+removed. Two defenses hold this: `project-key.ts` guarantees the recorded path is always
+absolute — git's `--show-toplevel` is already absolute (and is left verbatim to
+avoid re-keying every existing DB), and the non-git fallback is run through
+`resolve(cwd)` rather than used bare (`project-key.ts:49-51`) — and session-start
+records a path *only* when it resolves to a real directory (`session-start.ts:60`). Non-absolute
 or unresolvable paths classify as `unverifiable` and are never deleted.
 
 `STATUS_POLICY` (`gc/index.ts:55`) is the single source of truth for deletion —
@@ -179,13 +185,16 @@ per project), `searchOutputs`, `listOutputs`, `forgetOutputs` (every branch), an
 `export`. A project cannot see, evict, or delete another project's rows through
 those paths.
 
-But **direct by-id reads are not scoped**: `retrieveOutput` (`queries.ts:111`),
-`retrievePeek`, `retrieveSnippet`, and `recordAccess` are `WHERE id = ?` only. The
-random id acts as an unguessable capability. This asymmetry is deliberate but
-sharp-edged — it is why `import --keep-project-key` can land rows that
-`retrieve`-by-id can reach yet `forget`, `evict`, and `export` cannot (#226). A
-new query that enumerates or mutates must carry the `project_key` filter; only a
-read that already has a specific id may omit it.
+But **operations that target a specific id are not scoped**: the reads
+`retrieveOutput` (`queries.ts:111`), `retrievePeek`, `retrieveSnippet` — and the
+`recordAccess` mutation that bumps `access_count` — are all `WHERE id = ?` only. The
+random id acts as an unguessable capability, so a cross-project access bump is
+deliberately tolerated (`pinOutput` and every `forgetOutputs` branch, by contrast,
+*are* scoped). This asymmetry is deliberate but sharp-edged — it is why
+`import --keep-project-key` can land rows that `retrieve`-by-id can reach yet
+`forget`, `evict`, and `export` cannot (#226). The rule for new code: any query that
+enumerates, or that mutates by a *non-id* selector, must carry the `project_key`
+filter; only an operation targeting a specific id may omit it.
 
 ### 3. Compress only when it shrinks
 
