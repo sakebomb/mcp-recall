@@ -5,7 +5,7 @@ import { join } from "path";
 import { z } from "zod";
 import { log, setDebugEnabled } from "./log";
 
-const RecallConfigSchema = z.object({
+export const RecallConfigSchema = z.object({
   store: z.object({
     expire_after_session_days: z.number().positive(),
     key: z.enum(["git_root", "cwd"]),
