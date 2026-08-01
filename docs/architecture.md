@@ -190,9 +190,9 @@ But **operations that target a specific id are not scoped**: the reads
 `recordAccess` mutation that bumps `access_count` — are all `WHERE id = ?` only. The
 random id acts as an unguessable capability, so a cross-project access bump is
 deliberately tolerated (`pinOutput` and every `forgetOutputs` branch, by contrast,
-*are* scoped). This asymmetry is deliberate but sharp-edged — it is why
-`import --keep-project-key` can land rows that `retrieve`-by-id can reach yet
-`forget`, `evict`, and `export` cannot (#226). The rule for new code: any query that
+*are* scoped). This asymmetry is deliberate but sharp-edged — it is why the former
+`import --keep-project-key` flag *would* land rows that `retrieve`-by-id could reach yet
+`forget`, `evict`, and `export` could not, and why that flag was removed (#226). The rule for new code: any query that
 enumerates, or that mutates by a *non-id* selector, must carry the `project_key`
 filter; only an operation targeting a specific id may omit it.
 

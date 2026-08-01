@@ -74,6 +74,21 @@ Or delete the database directly:
 rm -rf ~/.local/share/mcp-recall/
 ```
 
+## Recovering rows stranded by the old import flag
+
+`mcp-recall import --keep-project-key` (removed in [#226](https://github.com/sakebomb/mcp-recall/issues/226)) could write rows into the current project's database stamped with a *foreign* project key. Such rows are invisible to `recall__search`, `list_stored`, `stats`, and `suggest`, and cannot be deleted with `recall__forget` — every `forget` branch is scoped to the current project key. `recall__retrieve` by id still works, but nothing enumerates them. If you used the flag before it was removed, delete the stranded rows directly with `sqlite3` (the `AFTER DELETE` triggers cascade to the FTS index and content chunks automatically):
+
+```bash
+# The database is ~/.local/share/mcp-recall/<project-key>.db
+# (or your RECALL_DB_PATH override). List distinct keys to spot the foreign one:
+sqlite3 "$db" 'SELECT project_key, count(*) FROM stored_outputs GROUP BY project_key;'
+
+# Delete the rows carrying the foreign key:
+sqlite3 "$db" "DELETE FROM stored_outputs WHERE project_key = '<foreign-key>';"
+```
+
+Then re-import the dump **without** the flag so the items land under the current project's key and behave normally.
+
 ---
 
 ## Profile not matching
