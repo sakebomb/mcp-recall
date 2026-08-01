@@ -188,8 +188,8 @@ When `install`, `update`, or `seed` download the community manifest, mcp-recall 
 
 ```toml
 [profiles]
-verify_signature = "warn"   # default — logs a warning if verification fails
-# verify_signature = "error"  # hard-fail if the signature does not verify — but see below: still skipped when gh is unavailable
+verify_signature = "warn"   # default — logs a warning if verification fails or can't run
+# verify_signature = "error"  # hard-fail unless the signature verifies — including when gh is unavailable
 # verify_signature = "skip"   # disable verification entirely
 ```
 
@@ -205,12 +205,21 @@ job. Repo scope alone would accept an attestation from any workflow in that repo
 and pinning only the workflow path would still accept one signed from any branch — the
 full identity pins the ref as well.
 
-If `gh` is absent, or too old to support the flags used above, verification is skipped
-with a distinct message rather than reported as a signature failure — an unusable tool is
-not evidence of tampering. Note the consequence: `error` strengthens how a *failed*
-signature is handled, not whether verification is *available*. In an environment without
-a usable `gh` (a container image, for instance), `error` still proceeds with an unverified
-manifest and only a line on stderr.
+If `gh` is absent, or too old to support the flags used above, verification cannot run.
+That is a tooling gap, not evidence of tampering, so it is always reported with a
+*distinct* message — never as a signature failure. What happens next depends on the mode:
+
+- **`warn`** (default) and **`skip`** proceed with an unverified manifest, `warn` logging
+  the gap to stderr.
+- **`error`** treats an unavailable verifier as fatal: `error` means verification must
+  *succeed*, so a missing or too-old `gh` is a hard failure, not a silent pass. The error
+  names the reason and points at `--skip-verify` so it is actionable.
+
+> **Breaking change:** previously `error` only governed how a *failed*
+> signature was handled and silently proceeded when `gh` was unavailable. It now also
+> fails when verification *cannot run*. If you run `error` in an environment without a
+> usable `gh` (a slim container image, for instance) and intend to proceed anyway, use
+> `--skip-verify` or set `verify_signature = "warn"`. The default (`warn`) is unaffected.
 
 To skip verification for a single command (e.g. in CI without `gh` installed):
 

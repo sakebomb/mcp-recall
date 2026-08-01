@@ -8638,6 +8638,13 @@ function verifyHash(content, expected, id) {
   }
 }
 var UNSUPPORTED_FLAG_RE = /unknown (flag|command|shorthand flag)/i;
+function reportUnavailable(mode, reason) {
+  if (mode === "error") {
+    throw new Error(`[recall] manifest signature cannot be verified: ${reason}. ` + `verify_signature = "error" requires verification to succeed \u2014 ` + `install or upgrade gh, or pass --skip-verify to proceed without it.`);
+  }
+  process.stderr.write(`[recall] manifest signature verification skipped: ${reason}
+`);
+}
 function verifyManifest(manifestPath, mode) {
   if (mode === "skip")
     return;
@@ -8647,8 +8654,7 @@ function verifyManifest(manifestPath, mode) {
     ghAvailable = probe.exitCode === 0;
   } catch {}
   if (!ghAvailable) {
-    process.stderr.write(`[recall] manifest signature verification skipped: gh CLI not found in PATH
-`);
+    reportUnavailable(mode, "gh CLI not found in PATH");
     return;
   }
   const result = Bun.spawnSync([
@@ -8664,8 +8670,7 @@ function verifyManifest(manifestPath, mode) {
   if (result.exitCode !== 0) {
     const errText = result.stderr ? new TextDecoder().decode(result.stderr).trim() : "";
     if (UNSUPPORTED_FLAG_RE.test(errText)) {
-      process.stderr.write(`[recall] manifest signature verification skipped: this gh CLI does not support the flags we verify with (upgrade gh)
-`);
+      reportUnavailable(mode, "this gh CLI does not support the flags we verify with (upgrade gh)");
       return;
     }
     const msg = `[recall] manifest signature verification failed${errText ? `: ${errText}` : ""}
