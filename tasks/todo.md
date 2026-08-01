@@ -4,15 +4,16 @@ Active work and upcoming tasks.
 
 ## In Progress
 
-**Phase 13 — stabilize + document.** No new features until it lands. Plan and phase table
-are in `CLAUDE.md`; #208 and #205 stay open deliberately.
+**Phase 13 — stabilize + document. ✓ COMPLETE** (all four steps landed). Plan and phase
+table are in `CLAUDE.md`; #208 and #205 stay open deliberately. Deferred feature/fix work
+that was blocked by the docs-only policy can now proceed: #227, #228, #205, #226, #214, #208.
 
 | Step | State |
 |------|-------|
 | A — CLAUDE.md accuracy | ✓ DONE, PR [#220](https://github.com/sakebomb/mcp-recall/pull/220) @ `709c780` |
 | B — full docs re-read | ✓ DONE — both passes, all 12 surfaces, review-hardened |
 | C — `docs/architecture.md` for contributors | ✓ DONE, PR [#229](https://github.com/sakebomb/mcp-recall/pull/229) — pipeline+module map+dispatch+4 invariants, per-assertion verified, independent claim audit found+fixed 1 wrong claim (`203d463`), linked from README & CONTRIBUTING |
-| D — `ROADMAP.md` with explicit non-goals | not started ← resume here (terminal Phase 13 deliverable) |
+| D — `ROADMAP.md` with explicit non-goals | ✓ DONE, PR [#230](https://github.com/sakebomb/mcp-recall/pull/230) — the bet, themes-not-commitments, #188/#189 deferred, 4 non-goals, linked from README |
 
 ### Step B pass 1 — what was fixed (2026-07-28)
 
