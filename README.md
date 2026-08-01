@@ -563,7 +563,7 @@ bun install
 bun test
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for project structure, workflow, and how to add a new compression handler.
+See [docs/architecture.md](docs/architecture.md) for how the system fits together — the capture pipeline, module map, and the invariants a change must not break. See [CONTRIBUTING.md](CONTRIBUTING.md) for the step-by-step workflow and how to add a new compression handler.
 
 ---
 

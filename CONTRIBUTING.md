@@ -2,6 +2,8 @@
 
 Issues and PRs welcome. For significant changes, open an issue first to discuss the approach.
 
+New here? [docs/architecture.md](docs/architecture.md) explains how the system fits together — the capture pipeline, module map, and the invariants a change must not break. This file has the step-by-step recipes.
+
 ## Setup
 
 ```bash
