@@ -2,8 +2,8 @@ import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { patternsOverlap, testProfile, cmdList, cmdInstall, cmdRemove, cmdAvailable, verifyManifest } from "../src/profiles/commands";
-import { SIGNER_IDENTITY, COMMUNITY_REPO, fetchManifest } from "../src/profiles/shared";
+import { patternsOverlap, testProfile, cmdList, cmdInstall, cmdRemove, cmdAvailable, cmdInfo, verifyManifest } from "../src/profiles/commands";
+import { SIGNER_IDENTITY, COMMUNITY_REPO, fetchManifest, ManifestVerificationError } from "../src/profiles/shared";
 import { clearProfileCache, getShortName } from "../src/profiles/loader";
 import { resetConfig } from "../src/config";
 
@@ -1088,5 +1088,143 @@ describe("verifyManifest", () => {
       process.stderr.write = origWrite;
       spy.mockRestore();
     }
+  });
+});
+
+// ── cmdInfo does not mask verification failures as "offline" (#234) ────────────
+
+describe("cmdInfo verification (#234)", () => {
+  let communityDir: string;
+  let originalFetch: typeof globalThis.fetch;
+
+  const fakeManifest = {
+    profiles: [
+      {
+        id: "mcp__grafana",
+        short_name: "grafana",
+        version: "1.0.0",
+        description: "Grafana dashboards and alerts",
+        mcp_pattern: "mcp__grafana__*",
+        file: "profiles/mcp__grafana/default.toml",
+        mcp_url: "https://github.com/grafana/mcp-grafana",
+        author: "sakebomb",
+      },
+    ],
+  };
+
+  const fakeToml = (id: string) => `[profile]
+id = "${id}"
+version = "1.0.0"
+description = "Test"
+mcp_pattern = "${id}__*"
+[strategy]
+type = "text_truncate"`;
+
+  function captureStdout(): { lines: string[]; restore: () => void } {
+    const lines: string[] = [];
+    const origLog = console.log;
+    const origWrite = process.stdout.write.bind(process.stdout);
+    console.log = (...args: unknown[]) => lines.push(args.join(" "));
+    process.stdout.write = ((msg: string | Uint8Array) => {
+      lines.push(typeof msg === "string" ? msg : new TextDecoder().decode(msg));
+      return true;
+    }) as typeof process.stdout.write;
+    return {
+      lines,
+      restore: () => {
+        console.log = origLog;
+        process.stdout.write = origWrite;
+      },
+    };
+  }
+
+  beforeEach(() => {
+    communityDir = mkdtempSync(join(tmpdir(), "recall-info-"));
+    clearProfileCache();
+    process.env.RECALL_COMMUNITY_PROFILES_PATH = communityDir;
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const u = url.toString();
+      if (u.includes("manifest.json")) return new Response(JSON.stringify(fakeManifest), { status: 200 });
+      return new Response("not found", { status: 404 });
+    }) as typeof globalThis.fetch;
+  });
+
+  afterEach(() => {
+    rmSync(communityDir, { recursive: true, force: true });
+    delete process.env.RECALL_COMMUNITY_PROFILES_PATH;
+    clearProfileCache();
+    globalThis.fetch = originalFetch;
+    restoreConfig();
+  });
+
+  test("error mode: a signature that does not verify hard-fails instead of printing offline", async () => {
+    writeConfig("error");
+    const spy = spyOn(Bun, "spawnSync").mockImplementation((cmd: unknown, ..._rest: unknown[]) => {
+      const args = cmd as string[];
+      if (args[1] === "--version") {
+        return { exitCode: 0, stderr: new Uint8Array(), stdout: new Uint8Array(), success: true } as ReturnType<typeof Bun.spawnSync>;
+      }
+      return { exitCode: 1, stderr: new TextEncoder().encode("no attestation found"), stdout: new Uint8Array(), success: false } as ReturnType<typeof Bun.spawnSync>;
+    });
+    const cap = captureStdout();
+    let caught: unknown;
+    try {
+      await cmdInfo(["grafana"]);
+    } catch (err) {
+      caught = err;
+    } finally {
+      cap.restore();
+      spy.mockRestore();
+    }
+    expect(caught).toBeInstanceOf(ManifestVerificationError);
+    expect((caught as Error).message).toContain("verification failed");
+    expect(cap.lines.join("\n")).not.toContain("offline");
+  });
+
+  test("error mode: verification that cannot run hard-fails, distinct from a failed signature", async () => {
+    writeConfig("error");
+    // gh absent from PATH: the version probe throws, so verification cannot run.
+    const spy = spyOn(Bun, "spawnSync").mockImplementation((..._args: unknown[]) => {
+      throw new Error("spawn gh ENOENT");
+    });
+    const cap = captureStdout();
+    let caught: unknown;
+    try {
+      await cmdInfo(["grafana"]);
+    } catch (err) {
+      caught = err;
+    } finally {
+      cap.restore();
+      spy.mockRestore();
+    }
+    expect(caught).toBeInstanceOf(ManifestVerificationError);
+    expect((caught as Error).message).toContain("cannot be verified");
+    expect(cap.lines.join("\n")).not.toContain("offline");
+  });
+
+  test("error mode: a genuine network failure still degrades to local-only display", async () => {
+    writeConfig("error");
+    // Local data to fall back to.
+    mkdirSync(join(communityDir, "mcp__grafana"), { recursive: true });
+    writeFileSync(join(communityDir, "mcp__grafana", "default.toml"), fakeToml("mcp__grafana"));
+    clearProfileCache();
+    // The manifest fetch itself fails — no verification is even attempted.
+    globalThis.fetch = (async (_url: string | URL | Request) => {
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof globalThis.fetch;
+    const cap = captureStdout();
+    let caught: unknown;
+    try {
+      await cmdInfo(["grafana"]);
+    } catch (err) {
+      caught = err;
+    } finally {
+      cap.restore();
+    }
+    expect(caught).toBeUndefined();
+    const output = cap.lines.join("\n");
+    expect(output).toContain("offline");
+    expect(output).toContain("grafana");
   });
 });

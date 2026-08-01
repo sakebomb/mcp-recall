@@ -13,6 +13,7 @@ import {
   saveToCommunityDir,
   installedCommunityMap,
   resolveManifestEntry,
+  ManifestVerificationError,
 } from "./shared";
 
 // ── install ───────────────────────────────────────────────────────────────────
@@ -189,7 +190,12 @@ export async function cmdInfo(args: string[]): Promise<void> {
     manifestEntry =
       entries.find((e) => e.id === lookupId) ??
       entries.find((e) => manifestShortName(e) === nameOrId);
-  } catch {
+  } catch (err) {
+    // A verification failure must not be masked as "offline": in `error` mode it
+    // means the manifest could not be trusted, so hard-fail like the write
+    // commands do (#234). A genuine network/fetch error still degrades to the
+    // local-only view. The typed error keeps this decision off message strings.
+    if (err instanceof ManifestVerificationError) throw err;
     console.log("(offline — showing local data only)");
   }
 
