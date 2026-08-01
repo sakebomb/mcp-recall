@@ -98,6 +98,22 @@ export function manifestShortName(e: ManifestEntry): string {
 
 // ── manifest fetch + verify ───────────────────────────────────────────────────
 
+/**
+ * Thrown when manifest signature verification does not pass in `error` mode —
+ * either the signature failed to verify, or verification could not run at all.
+ *
+ * A distinct type so read-only callers (e.g. `profiles info`) can tell a
+ * verification failure apart from an offline/network error and refuse to mask
+ * the former as the latter (#234) — without matching on message strings, which
+ * would couple that decision to wording that is free to change.
+ */
+export class ManifestVerificationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ManifestVerificationError";
+  }
+}
+
 export async function fetchProfileContent(filePath: string): Promise<string> {
   const res = await fetch(`${PROFILE_BASE_URL}${filePath}`);
   if (!res.ok) throw new Error(`profile fetch failed (${filePath}): ${res.status}`);
@@ -132,7 +148,7 @@ const UNSUPPORTED_FLAG_RE = /unknown (flag|command|shorthand flag)/i;
  */
 function reportUnavailable(mode: "warn" | "error", reason: string): void {
   if (mode === "error") {
-    throw new Error(
+    throw new ManifestVerificationError(
       `[recall] manifest signature cannot be verified: ${reason}. ` +
         `verify_signature = "error" requires verification to succeed — ` +
         `install or upgrade gh, or pass --skip-verify to proceed without it.`
@@ -191,7 +207,7 @@ export function verifyManifest(manifestPath: string, mode: "warn" | "error" | "s
 
     const msg = `[recall] manifest signature verification failed${errText ? `: ${errText}` : ""}\n`;
     if (mode === "error") {
-      throw new Error(msg.trim());
+      throw new ManifestVerificationError(msg.trim());
     }
     process.stderr.write(msg);
   }

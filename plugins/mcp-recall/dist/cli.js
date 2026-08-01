@@ -8622,6 +8622,13 @@ function userDir() {
 function manifestShortName(e) {
   return e.short_name ?? e.id.replace(/^mcp__/, "");
 }
+
+class ManifestVerificationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ManifestVerificationError";
+  }
+}
 async function fetchProfileContent(filePath) {
   const res = await fetch(`${PROFILE_BASE_URL}${filePath}`);
   if (!res.ok)
@@ -8640,7 +8647,7 @@ function verifyHash(content, expected, id) {
 var UNSUPPORTED_FLAG_RE = /unknown (flag|command|shorthand flag)/i;
 function reportUnavailable(mode, reason) {
   if (mode === "error") {
-    throw new Error(`[recall] manifest signature cannot be verified: ${reason}. ` + `verify_signature = "error" requires verification to succeed \u2014 ` + `install or upgrade gh, or pass --skip-verify to proceed without it.`);
+    throw new ManifestVerificationError(`[recall] manifest signature cannot be verified: ${reason}. ` + `verify_signature = "error" requires verification to succeed \u2014 ` + `install or upgrade gh, or pass --skip-verify to proceed without it.`);
   }
   process.stderr.write(`[recall] manifest signature verification skipped: ${reason}
 `);
@@ -8676,7 +8683,7 @@ function verifyManifest(manifestPath, mode) {
     const msg = `[recall] manifest signature verification failed${errText ? `: ${errText}` : ""}
 `;
     if (mode === "error") {
-      throw new Error(msg.trim());
+      throw new ManifestVerificationError(msg.trim());
     }
     process.stderr.write(msg);
   }
@@ -9101,7 +9108,9 @@ async function cmdInfo(args) {
     console.log("done");
     const lookupId = local?.spec.profile.id ?? nameOrId;
     manifestEntry = entries.find((e) => e.id === lookupId) ?? entries.find((e) => manifestShortName(e) === nameOrId);
-  } catch {
+  } catch (err) {
+    if (err instanceof ManifestVerificationError)
+      throw err;
     console.log("(offline \u2014 showing local data only)");
   }
   if (!local && !manifestEntry) {

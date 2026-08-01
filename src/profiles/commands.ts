@@ -5,7 +5,7 @@ import { cmdTest } from "./cmd-test";
 
 // Re-exports consumed by tests and external callers
 export { patternsOverlap, cmdList, cmdRemove } from "./cmd-local";
-export { cmdInstall, cmdSeed, cmdAvailable } from "./cmd-catalog";
+export { cmdInstall, cmdSeed, cmdAvailable, cmdInfo } from "./cmd-catalog";
 export { testProfile, type TestResult } from "./cmd-test";
 export { verifyManifest } from "./shared";
 
