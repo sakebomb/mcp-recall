@@ -121,6 +121,29 @@ export function verifyHash(content: string, expected: string | undefined, id: st
 const UNSUPPORTED_FLAG_RE = /unknown (flag|command|shorthand flag)/i;
 
 /**
+ * Handle a verification that could not run — gh absent from PATH, or too old for
+ * the flags we pin with. This is a tooling gap, not evidence of tampering, so its
+ * diagnosis must never collapse into the "signature did not verify" message.
+ *
+ * In `error` mode verification is mandatory (#208, option B): `error` means
+ * verification must *succeed*, so an unavailable verifier is fatal. `warn` logs the
+ * gap and proceeds. `--skip-verify` is the documented escape hatch and is named in
+ * the failure so it is actionable.
+ */
+function reportUnavailable(mode: "warn" | "error", reason: string): void {
+  if (mode === "error") {
+    throw new Error(
+      `[recall] manifest signature cannot be verified: ${reason}. ` +
+        `verify_signature = "error" requires verification to succeed — ` +
+        `install or upgrade gh, or pass --skip-verify to proceed without it.`
+    );
+  }
+  process.stderr.write(
+    `[recall] manifest signature verification skipped: ${reason}\n`
+  );
+}
+
+/**
  * Verify the manifest file has a valid GitHub Artifact Attestation.
  * Shells out to `gh attestation verify`. Degrades gracefully if gh is absent
  * or too old to support the flags we pin with.
@@ -137,9 +160,7 @@ export function verifyManifest(manifestPath: string, mode: "warn" | "error" | "s
   }
 
   if (!ghAvailable) {
-    process.stderr.write(
-      "[recall] manifest signature verification skipped: gh CLI not found in PATH\n"
-    );
+    reportUnavailable(mode, "gh CLI not found in PATH");
     return;
   }
 
@@ -161,8 +182,9 @@ export function verifyManifest(manifestPath: string, mode: "warn" | "error" | "s
     // Covers both an unknown --cert-identity and, on older still, no `attestation`
     // subcommand at all; the remedy is the same either way.
     if (UNSUPPORTED_FLAG_RE.test(errText)) {
-      process.stderr.write(
-        "[recall] manifest signature verification skipped: this gh CLI does not support the flags we verify with (upgrade gh)\n"
+      reportUnavailable(
+        mode,
+        "this gh CLI does not support the flags we verify with (upgrade gh)"
       );
       return;
     }

@@ -943,7 +943,9 @@ describe("verifyManifest", () => {
     expect(stderrLines.join("")).toContain("gh CLI not found");
   });
 
-  test("error mode does not throw when gh is not in PATH (degrade gracefully)", () => {
+  test("error mode throws a distinct, actionable error when gh is not in PATH", () => {
+    // Option B (#208): `error` means verification must succeed, so an unavailable
+    // verifier is fatal — not the old silent-proceed-with-a-stderr-line behavior.
     const spy = spyOn(Bun, "spawnSync").mockImplementation((..._args: unknown[]) => {
       throw new Error("spawn ENOENT");
     });
@@ -951,12 +953,23 @@ describe("verifyManifest", () => {
     const origWrite = process.stderr.write.bind(process.stderr);
     process.stderr.write = () => true;
 
+    let caught: Error | undefined;
     try {
-      expect(() => verifyManifest(tmpFile, "error")).not.toThrow();
+      verifyManifest(tmpFile, "error");
+    } catch (e) {
+      caught = e as Error;
     } finally {
       process.stderr.write = origWrite;
       spy.mockRestore();
     }
+
+    expect(caught).toBeDefined();
+    expect(caught!.message).toContain("cannot be verified");
+    expect(caught!.message).toContain("gh CLI not found");
+    // Actionable: names the documented escape hatch.
+    expect(caught!.message).toContain("--skip-verify");
+    // Distinct from a signature that ran and failed — never conflate the two.
+    expect(caught!.message).not.toContain("verification failed");
   });
 
   test("pins the exact signer identity, not just the repo", () => {
@@ -989,35 +1002,72 @@ describe("verifyManifest", () => {
 
   // "unknown flag" is gh too old for --cert-identity; "unknown command" is gh < 2.49,
   // which has no `attestation` subcommand at all. Same remedy, so same branch.
-  test.each([
+  const OLD_GH_STDERR: [string][] = [
     ["unknown flag: --cert-identity"],
     ['unknown command "attestation" for "gh"'],
-  ])("reports an old gh (%s) as a tooling gap, not a failed signature", (ghStderr) => {
-    const spy = spyOn(Bun, "spawnSync").mockImplementation((cmd: unknown, ..._rest: unknown[]) => {
-      const args = cmd as string[];
-      if (args[1] === "--version") return { exitCode: 0, stderr: new Uint8Array(), stdout: new Uint8Array(), success: true } as ReturnType<typeof Bun.spawnSync>;
-      return { exitCode: 1, stderr: new TextEncoder().encode(ghStderr), stdout: new Uint8Array(), success: false } as ReturnType<typeof Bun.spawnSync>;
-    });
+  ];
 
-    const stderrLines: string[] = [];
-    const origWrite = process.stderr.write.bind(process.stderr);
-    process.stderr.write = (msg: string | Uint8Array, ..._rest: unknown[]) => {
-      stderrLines.push(typeof msg === "string" ? msg : new TextDecoder().decode(msg));
-      return true;
-    };
+  test.each(OLD_GH_STDERR)(
+    "warn mode reports an old gh (%s) as a tooling gap, not a failed signature",
+    (ghStderr) => {
+      const spy = spyOn(Bun, "spawnSync").mockImplementation((cmd: unknown, ..._rest: unknown[]) => {
+        const args = cmd as string[];
+        if (args[1] === "--version") return { exitCode: 0, stderr: new Uint8Array(), stdout: new Uint8Array(), success: true } as ReturnType<typeof Bun.spawnSync>;
+        return { exitCode: 1, stderr: new TextEncoder().encode(ghStderr), stdout: new Uint8Array(), success: false } as ReturnType<typeof Bun.spawnSync>;
+      });
 
-    try {
-      // error mode must not throw: gh being too old is not evidence of tampering.
-      expect(() => verifyManifest(tmpFile, "error")).not.toThrow();
-    } finally {
-      process.stderr.write = origWrite;
-      spy.mockRestore();
+      const stderrLines: string[] = [];
+      const origWrite = process.stderr.write.bind(process.stderr);
+      process.stderr.write = (msg: string | Uint8Array, ..._rest: unknown[]) => {
+        stderrLines.push(typeof msg === "string" ? msg : new TextDecoder().decode(msg));
+        return true;
+      };
+
+      try {
+        // warn mode is unchanged: gh being too old is not evidence of tampering.
+        expect(() => verifyManifest(tmpFile, "warn")).not.toThrow();
+      } finally {
+        process.stderr.write = origWrite;
+        spy.mockRestore();
+      }
+
+      const out = stderrLines.join("");
+      expect(out).toContain("upgrade gh");
+      expect(out).not.toContain("verification failed");
     }
+  );
 
-    const out = stderrLines.join("");
-    expect(out).toContain("upgrade gh");
-    expect(out).not.toContain("verification failed");
-  });
+  test.each(OLD_GH_STDERR)(
+    "error mode throws for an old gh (%s), distinct from a failed signature",
+    (ghStderr) => {
+      // Option B (#208): unavailable verification is fatal in error mode, but the
+      // "cannot verify" diagnosis must never read as "signature did not verify".
+      const spy = spyOn(Bun, "spawnSync").mockImplementation((cmd: unknown, ..._rest: unknown[]) => {
+        const args = cmd as string[];
+        if (args[1] === "--version") return { exitCode: 0, stderr: new Uint8Array(), stdout: new Uint8Array(), success: true } as ReturnType<typeof Bun.spawnSync>;
+        return { exitCode: 1, stderr: new TextEncoder().encode(ghStderr), stdout: new Uint8Array(), success: false } as ReturnType<typeof Bun.spawnSync>;
+      });
+
+      const origWrite = process.stderr.write.bind(process.stderr);
+      process.stderr.write = () => true;
+
+      let caught: Error | undefined;
+      try {
+        verifyManifest(tmpFile, "error");
+      } catch (e) {
+        caught = e as Error;
+      } finally {
+        process.stderr.write = origWrite;
+        spy.mockRestore();
+      }
+
+      expect(caught).toBeDefined();
+      expect(caught!.message).toContain("cannot be verified");
+      expect(caught!.message).toContain("upgrade gh");
+      expect(caught!.message).toContain("--skip-verify");
+      expect(caught!.message).not.toContain("verification failed");
+    }
+  );
 
   test("warn mode succeeds silently when gh exits zero", () => {
     const spy = spyOn(Bun, "spawnSync").mockImplementation((..._args: unknown[]) => ({

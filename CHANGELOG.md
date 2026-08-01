@@ -6,6 +6,10 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING (non-default mode): `verify_signature = "error"` now hard-fails when signature verification cannot run.** `error` previously governed only how a *failed* signature was handled — if `gh` was absent from `PATH`, or too old for the flags we verify with, it wrote a line to stderr and proceeded against an **unverified** manifest, the opposite of what a user setting `error` to guarantee verification expects. `error` now means verification must *succeed*: a missing or unusable `gh` is fatal for `profiles install/seed/update`, with a message distinct from a signature failure (an unusable tool is not evidence of tampering) that names `--skip-verify` as the escape hatch. `warn` (the default) and `skip` are unchanged. If you run `error` in an environment without a usable `gh` (a slim container image, for instance) and intend to proceed, pass `--skip-verify` or set `verify_signature = "warn"` (#208)
+
 ### Fixed
 
 - **The recorded project path is now always absolute.** `session-start` stores a `project_path` that `mcp-recall gc` uses to classify each project database, but it was taken verbatim from the hook payload's `cwd`, which is never validated — so a relative or empty value could be stored. `gc` cannot root such a path, so it classified those databases `unverifiable`: never deleted, but also never reclaimable, even by `--vacuum`. The path is now absolutised at its source, and one that does not resolve to a real directory is not recorded at all rather than recorded as a guess, so this can no longer happen for newly recorded paths. Nothing rewrites an existing one: a database that already recorded a relative path keeps it, stays `unverifiable`, and must be removed by hand. Note for anyone whose hook payload supplied a *relative* `cwd`: the project key is a hash of this value, so it changes — that project starts a new database and its earlier history becomes unreachable (nothing is deleted). Claude Code supplies an absolute `cwd`, so this is not expected in normal use (#213)
