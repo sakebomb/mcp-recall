@@ -573,6 +573,8 @@ The easiest way to contribute is a TOML profile — no TypeScript, no clone of t
 
 TypeScript handlers are welcome for tools with complex, non-JSON output (HTML, DOM trees, binary formats) — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
+For where the project is headed and, just as importantly, what it deliberately won't become, see [ROADMAP.md](ROADMAP.md).
+
 ---
 
 ## Changelog
