@@ -136,6 +136,10 @@ server.tool(
     all: z.boolean().optional().describe("Clear entire store (requires confirmed: true)"),
     confirmed: z.boolean().optional().describe("Required to execute all: true"),
     force: z.boolean().optional().describe("Override pin protection and delete pinned items too"),
+    project_key: z
+      .string()
+      .optional()
+      .describe("Target a specific (e.g. foreign) project key instead of the current project — for deleting rows stranded under another key. Must be an explicit key; there is no all-projects wildcard. Discover foreign keys via recall__list_stored."),
   },
   safeTool((args) => ({
     content: [{ type: "text", text: toolForget(db, projectKey, args) }],
@@ -153,6 +157,10 @@ server.tool(
       .enum(["recent", "accessed", "size"])
       .optional()
       .describe("Sort order: recent (default), accessed (most-used first), size (largest first)"),
+    project_key: z
+      .string()
+      .optional()
+      .describe("List items under a specific (e.g. foreign) project key instead of the current project. Omit to see the current project; a footer then names any foreign keys present."),
   },
   safeTool((args) => ({
     content: [{ type: "text", text: toolListStored(db, projectKey, args) }],

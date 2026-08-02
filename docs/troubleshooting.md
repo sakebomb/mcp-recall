@@ -76,7 +76,15 @@ rm -rf ~/.local/share/mcp-recall/
 
 ## Recovering rows stranded by the old import flag
 
-`mcp-recall import --keep-project-key` (removed in [#226](https://github.com/sakebomb/mcp-recall/issues/226)) could write rows into the current project's database stamped with a *foreign* project key. Such rows are invisible to `recall__search`, `list_stored`, `stats`, and `suggest`, and cannot be deleted with `recall__forget` — every `forget` branch is scoped to the current project key. `recall__retrieve` by id still works, but nothing enumerates them. If you used the flag before it was removed, delete the stranded rows directly with `sqlite3` (the `AFTER DELETE` triggers cascade to the FTS index and content chunks automatically):
+`mcp-recall import --keep-project-key` (removed in [#226](https://github.com/sakebomb/mcp-recall/issues/226)) could write rows into the current project's database stamped with a *foreign* project key. Such rows are invisible to `recall__search`, `stats`, and `suggest`, and by default `recall__list_stored` and `recall__forget` only see the current project's key. As of [#237](https://github.com/sakebomb/mcp-recall/issues/237) you can enumerate and delete them through the tool layer with a `project_key` override — no raw `sqlite3` needed:
+
+1. **Discover the foreign key.** Run `recall__list_stored` with no arguments. If any rows carry a foreign key, a footer names each key and its row count.
+2. **Inspect the stranded rows** (optional): `recall__list_stored` with `project_key="<foreign-key>"`.
+3. **Delete them:** `recall__forget` with `project_key="<foreign-key>"` and `all: true, confirmed: true` (or scope the delete further with `tool` / `session_id` / `older_than_days` / `id`). The `all`+`confirmed` guard still applies, and the override always names exactly one key — there is no all-projects wildcard.
+
+Then re-import the dump **without** `--keep-project-key` so the items land under the current project's key and behave normally.
+
+If you prefer to edit the database directly, the equivalent `sqlite3` commands still work (the `AFTER DELETE` triggers cascade to the FTS index and content chunks automatically):
 
 ```bash
 # The database is ~/.local/share/mcp-recall/<project-key>.db
@@ -86,8 +94,6 @@ sqlite3 "$db" 'SELECT project_key, count(*) FROM stored_outputs GROUP BY project
 # Delete the rows carrying the foreign key:
 sqlite3 "$db" "DELETE FROM stored_outputs WHERE project_key = '<foreign-key>';"
 ```
-
-Then re-import the dump **without** the flag so the items land under the current project's key and behave normally.
 
 ---
 

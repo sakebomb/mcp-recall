@@ -19903,6 +19903,13 @@ function forgetOutputs(db, project_key, options) {
   reclaimPages(db, deleted);
   return deleted;
 }
+function foreignKeyBreakdown(db, current_key) {
+  return db.prepare(`SELECT project_key, COUNT(*) AS count
+       FROM stored_outputs
+       WHERE project_key != ?
+       GROUP BY project_key
+       ORDER BY count DESC, project_key ASC`).all(current_key);
+}
 function getSessionDays(db) {
   return db.prepare(`SELECT date FROM sessions ORDER BY date DESC`).all().map((r) => r.date);
 }
@@ -21147,6 +21154,26 @@ var LIST_ID_COL_WIDTH = 16;
 function formatDate(unixSecs) {
   return new Date(unixSecs * 1000).toISOString().slice(0, 10);
 }
+function resolveScopeKey(currentKey, override) {
+  if (override === undefined)
+    return { key: currentKey };
+  const trimmed = override.trim();
+  if (trimmed === "") {
+    return {
+      error: `[recall: project_key must be a non-empty key \u2014 omit it to target the current project]`
+    };
+  }
+  return { key: trimmed };
+}
+function foreignKeyFooter(db, currentKey) {
+  const breakdown = foreignKeyBreakdown(db, currentKey);
+  if (breakdown.length === 0)
+    return "";
+  const total = breakdown.reduce((n, b) => n + b.count, 0);
+  const keys = breakdown.map((b) => `${b.project_key} (${b.count})`).join(", ");
+  const plural = breakdown.length === 1 ? "" : "s";
+  return `[recall: ${total} item${total === 1 ? "" : "s"} under other project key${plural}: ${keys} \u2014 inspect with recall__list_stored project_key=\u2026, delete with recall__forget project_key=\u2026]`;
+}
 function reductionPct(original, summary) {
   if (original === 0)
     return "0%";
@@ -21256,6 +21283,9 @@ function toolExport(db, projectKey) {
   return JSON.stringify(items, null, 2);
 }
 function toolForget(db, projectKey, args) {
+  const scope = resolveScopeKey(projectKey, args.project_key);
+  if ("error" in scope)
+    return scope.error;
   if (args.all && !args.confirmed) {
     return `[recall: clearing all stored items requires confirmed: true]`;
   }
@@ -21270,13 +21300,17 @@ function toolForget(db, projectKey, args) {
     all: args.all,
     force: args.force
   };
-  const deleted = forgetOutputs(db, projectKey, options);
+  const deleted = forgetOutputs(db, scope.key, options);
   if (deleted === 0) {
     return `[recall: no items matched \u2014 nothing deleted]`;
   }
-  return `[recall: deleted ${deleted} item${deleted === 1 ? "" : "s"}]`;
+  const scopeNote = scope.key !== projectKey ? ` under project key ${scope.key}` : "";
+  return `[recall: deleted ${deleted} item${deleted === 1 ? "" : "s"}${scopeNote}]`;
 }
 function toolListStored(db, projectKey, args) {
+  const scope = resolveScopeKey(projectKey, args.project_key);
+  if ("error" in scope)
+    return scope.error;
   const limit = args.limit ?? 10;
   const offset = args.offset ?? 0;
   const order = args.sort === "size" ? "original_size DESC" : args.sort === "accessed" ? "access_count DESC, last_accessed DESC NULLS LAST, created_at DESC" : "created_at DESC";
@@ -21287,13 +21321,17 @@ function toolListStored(db, projectKey, args) {
     ORDER BY ${order}
     LIMIT ? OFFSET ?
   `;
-  const params = [projectKey];
+  const params = [scope.key];
   if (args.tool)
     params.push(`%${args.tool}%`);
   params.push(limit, offset);
   const items = db.prepare(sql).all(...params);
+  const usingOverride = scope.key !== projectKey;
+  const footer = !usingOverride && offset === 0 ? foreignKeyFooter(db, projectKey) : "";
+  const withFooter = (body) => footer ? `${body}
+${footer}` : body;
   if (!items || items.length === 0) {
-    return offset > 0 ? `[recall: no more items]` : `[recall: no stored items]`;
+    return offset > 0 ? `[recall: no more items]` : withFooter(`[recall: no stored items]`);
   }
   const rows = items.map((item) => {
     const reduction = reductionPct(item.original_size, item.summary_size);
@@ -21302,8 +21340,8 @@ function toolListStored(db, projectKey, args) {
   });
   const header = `${"ID".padEnd(LIST_ID_COL_WIDTH)}  ${"Tool".padEnd(LIST_TOOL_COL_WIDTH)}  ${"Date".padEnd(10)}  ${"Size".padStart(7)} ${"\u2192".padEnd(9)}  Red.`;
   const separator = "-".repeat(header.length);
-  return [header, separator, ...rows].join(`
-`);
+  return withFooter([header, separator, ...rows].join(`
+`));
 }
 function toolContext(db, projectKey, args) {
   const data = getContext(db, projectKey, args);
@@ -21572,7 +21610,8 @@ server.tool("recall__forget", "Delete stored items by ID, tool pattern, session,
   older_than_days: exports_external.number().optional().describe("Delete items older than N calendar days"),
   all: exports_external.boolean().optional().describe("Clear entire store (requires confirmed: true)"),
   confirmed: exports_external.boolean().optional().describe("Required to execute all: true"),
-  force: exports_external.boolean().optional().describe("Override pin protection and delete pinned items too")
+  force: exports_external.boolean().optional().describe("Override pin protection and delete pinned items too"),
+  project_key: exports_external.string().optional().describe("Target a specific (e.g. foreign) project key instead of the current project \u2014 for deleting rows stranded under another key. Must be an explicit key; there is no all-projects wildcard. Discover foreign keys via recall__list_stored.")
 }, safeTool((args) => ({
   content: [{ type: "text", text: toolForget(db, projectKey, args) }]
 })));
@@ -21580,7 +21619,8 @@ server.tool("recall__list_stored", "Browse stored items by recency, access frequ
   limit: exports_external.number().optional().describe("Items per page (default 10)"),
   offset: exports_external.number().optional().describe("Pagination offset"),
   tool: exports_external.string().optional().describe("Filter by tool name substring"),
-  sort: exports_external.enum(["recent", "accessed", "size"]).optional().describe("Sort order: recent (default), accessed (most-used first), size (largest first)")
+  sort: exports_external.enum(["recent", "accessed", "size"]).optional().describe("Sort order: recent (default), accessed (most-used first), size (largest first)"),
+  project_key: exports_external.string().optional().describe("List items under a specific (e.g. foreign) project key instead of the current project. Omit to see the current project; a footer then names any foreign keys present.")
 }, safeTool((args) => ({
   content: [{ type: "text", text: toolListStored(db, projectKey, args) }]
 })));

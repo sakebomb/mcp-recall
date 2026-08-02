@@ -505,6 +505,27 @@ export function pruneExpired(
   return deleted;
 }
 
+/**
+ * Returns the count of stored outputs grouped by every project key OTHER than
+ * the current one, most rows first. Used to surface rows stranded under a
+ * foreign key (e.g. by the removed `import --keep-project-key` flag, see #237)
+ * so they can be enumerated and deleted through the tool layer.
+ */
+export function foreignKeyBreakdown(
+  db: Database,
+  current_key: string
+): { project_key: string; count: number }[] {
+  return db
+    .prepare(
+      `SELECT project_key, COUNT(*) AS count
+       FROM stored_outputs
+       WHERE project_key != ?
+       GROUP BY project_key
+       ORDER BY count DESC, project_key ASC`
+    )
+    .all(current_key) as { project_key: string; count: number }[];
+}
+
 /** Records a session date (YYYY-MM-DD) in the sessions table. No-op if already present. */
 export function recordSession(db: Database, date: string): void {
   db.prepare(`INSERT OR IGNORE INTO sessions (date) VALUES (?)`).run(date);
