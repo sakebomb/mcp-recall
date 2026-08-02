@@ -21015,7 +21015,7 @@ var RecallConfigSchema = exports_external.object({
     max_pinned_mb: exports_external.number().positive(),
     pin_recommendation_threshold: exports_external.number().int().positive(),
     stale_item_days: exports_external.number().int().positive(),
-    eviction_half_life_days: exports_external.number().positive(),
+    eviction_half_life_days: exports_external.number().positive().finite(),
     gc_reminder_mb: exports_external.number().nonnegative()
   }),
   retrieve: exports_external.object({

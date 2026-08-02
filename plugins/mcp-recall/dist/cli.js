@@ -5065,7 +5065,7 @@ var RecallConfigSchema = exports_external.object({
     max_pinned_mb: exports_external.number().positive(),
     pin_recommendation_threshold: exports_external.number().int().positive(),
     stale_item_days: exports_external.number().int().positive(),
-    eviction_half_life_days: exports_external.number().positive(),
+    eviction_half_life_days: exports_external.number().positive().finite(),
     gc_reminder_mb: exports_external.number().nonnegative()
   }),
   retrieve: exports_external.object({
@@ -5412,7 +5412,8 @@ function evictIfNeeded(db, project_key, max_size_mb, half_life_days = DEFAULT_EV
   `).all(project_key);
   if (candidates.length === 0)
     return 0;
-  const halfLifeSecs = Math.max(1, half_life_days * SECONDS_PER_DAY);
+  const safeHalfLifeDays = Number.isFinite(half_life_days) && half_life_days > 0 ? half_life_days : DEFAULT_EVICTION_HALF_LIFE_DAYS;
+  const halfLifeSecs = Math.max(1, safeHalfLifeDays * SECONDS_PER_DAY);
   const scoreOf = (c) => {
     const lastActive = c.last_accessed ?? c.created_at;
     const ageSecs = Math.max(0, now_secs - lastActive);

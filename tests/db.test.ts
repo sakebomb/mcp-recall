@@ -765,6 +765,72 @@ describe("db", () => {
       }).not.toThrow();
       expect(evicted).toBeGreaterThan(0);
     });
+
+    // #228: Infinity reaches this function from user config (`eviction_half_life_days = inf`
+    // is legal TOML and passes z.number().positive()). Math.max(1, Infinity) is Infinity, so
+    // every recency factor becomes 1 and eviction silently degrades to pure LFU. The guard
+    // must fall back to the finite default so ranking stays recency-aware.
+    it("stays recency-ranked when half_life_days is Infinity (does not degrade to LFU)", () => {
+      const now = 1_000_000_000;
+      const day = 86400;
+      const fresh = storeOutput(db, makeInput({ original_size: 300, summary: "fresh" }));
+      const old = storeOutput(db, makeInput({ original_size: 300, summary: "old heavy" }));
+      // Under LFU (the Infinity bug), 'old' (2 accesses) outscores 'fresh' (1) and 'fresh'
+      // is wrongly evicted. Under the finite default, 'old' is 60 days stale → evicted.
+      db.prepare("UPDATE stored_outputs SET access_count = 1, last_accessed = ? WHERE id = ?").run(now, fresh.id);
+      db.prepare("UPDATE stored_outputs SET access_count = 2, last_accessed = ? WHERE id = ?").run(now - 60 * day, old.id);
+
+      const evicted = evictIfNeeded(db, PROJECT_KEY, 0.0005, Infinity, now);
+
+      expect(evicted).toBeGreaterThan(0);
+      expect(retrieveOutput(db, fresh.id)).not.toBeNull();
+      expect(retrieveOutput(db, old.id)).toBeNull();
+    });
+
+    // #228: NaN cannot come from config (Zod rejects it) but a direct caller can pass it.
+    // Math.max(1, NaN) is NaN → every score NaN → the score comparator is NaN (falsy) → sort
+    // falls through to the created_at tiebreak, evicting by insertion age, unranked. The guard
+    // must fall back to the finite default so recency, not creation order, decides.
+    it("stays recency-ranked when half_life_days is NaN", () => {
+      const now = 1_000_000_000;
+      const day = 86400;
+      const fresh = storeOutput(db, makeInput({ original_size: 300, summary: "fresh" }));
+      const old = storeOutput(db, makeInput({ original_size: 300, summary: "old" }));
+      // created_at is set so the NaN-path tiebreak would evict 'fresh' (older creation) —
+      // the opposite of the recency-correct outcome, making the bug observable.
+      db.prepare("UPDATE stored_outputs SET access_count = 1, last_accessed = ?, created_at = ? WHERE id = ?").run(now, now - 1000, fresh.id);
+      db.prepare("UPDATE stored_outputs SET access_count = 2, last_accessed = ?, created_at = ? WHERE id = ?").run(now - 60 * day, now - 10, old.id);
+
+      let evicted = 0;
+      expect(() => {
+        evicted = evictIfNeeded(db, PROJECT_KEY, 0.0005, NaN, now);
+      }).not.toThrow();
+      expect(evicted).toBeGreaterThan(0);
+      expect(retrieveOutput(db, fresh.id)).not.toBeNull();
+      expect(retrieveOutput(db, old.id)).toBeNull();
+    });
+
+    // #228 lower bound: the "evicts an item aged one half-life" test above only bounds decay
+    // from ABOVE (it reduces to recency < 1, so any decreasing decay passes). This bounds it
+    // from BELOW: an item accessed 4× but one half-life stale must still outrank a fresh,
+    // never-accessed item — which holds only if recency at one half-life exceeds 0.25
+    // (it is 0.5). Reddens if a future change makes decay too aggressive (e.g. base 0.1).
+    it("does not over-decay: a much-accessed item one half-life old outranks a fresh unaccessed one", () => {
+      const now = 1_000_000_000;
+      const day = 86400;
+      const halfLife = 4;
+      const freshUnused = storeOutput(db, makeInput({ original_size: 300, summary: "fresh unused" }));
+      const agedBusy = storeOutput(db, makeInput({ original_size: 300, summary: "aged busy" }));
+      // freshUnused: score (0+1) * 1     = 1
+      // agedBusy:    score (3+1) * 0.5   = 2   → freshUnused evicted, agedBusy survives.
+      db.prepare("UPDATE stored_outputs SET access_count = 0, last_accessed = ? WHERE id = ?").run(now, freshUnused.id);
+      db.prepare("UPDATE stored_outputs SET access_count = 3, last_accessed = ? WHERE id = ?").run(now - halfLife * day, agedBusy.id);
+
+      evictIfNeeded(db, PROJECT_KEY, 0.0005, halfLife, now);
+
+      expect(retrieveOutput(db, freshUnused.id)).toBeNull();
+      expect(retrieveOutput(db, agedBusy.id)).not.toBeNull();
+    });
   });
 
   // -------------------------------------------------------------------------
