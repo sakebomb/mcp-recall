@@ -125,19 +125,51 @@ export function recordAccess(db: Database, id: string): void {
 }
 
 /**
- * Pins or unpins an item. Pinned items are exempt from expiry and eviction.
- * Returns `true` if the item was found and updated.
+ * Outcome of a {@link pinOutput} call. `over_budget` carries the byte figures so
+ * the caller can build an actionable message without re-querying.
+ */
+export type PinOutcome =
+  | { ok: true }
+  | { ok: false; reason: "not_found" }
+  | { ok: false; reason: "over_budget"; pinnedBytes: number; itemBytes: number; capBytes: number };
+
+/**
+ * Pins or unpins an item. Pinned items are exempt from expiry and eviction, so an
+ * unbounded number of pins would silently void `store.max_size_mb`. When pinning a
+ * not-yet-pinned item and `maxPinnedMb` is supplied, this enforces that cap *at the
+ * write*: if the item's `original_size` would push total pinned bytes over the cap,
+ * the row is left unpinned and `over_budget` is returned — so the bound holds even
+ * if the caller ignores the result and keeps pinning. Unpinning, and re-pinning an
+ * already-pinned item, are never budget-checked. Omitting `maxPinnedMb` disables the
+ * check (used by tests and internal callers that pin unconditionally).
  */
 export function pinOutput(
   db: Database,
   id: string,
   project_key: string,
-  pinned: boolean
-): boolean {
-  const result = db.prepare(`
+  pinned: boolean,
+  maxPinnedMb?: number
+): PinOutcome {
+  const item = db.prepare(`
+    SELECT original_size, pinned FROM stored_outputs WHERE id = ? AND project_key = ?
+  `).get(id, project_key) as { original_size: number; pinned: number } | null;
+  if (!item) return { ok: false, reason: "not_found" };
+
+  if (pinned && item.pinned === 0 && maxPinnedMb !== undefined) {
+    const capBytes = maxPinnedMb * 1024 * 1024;
+    const { pinnedBytes } = db.prepare(`
+      SELECT COALESCE(SUM(original_size), 0) as pinnedBytes
+      FROM stored_outputs WHERE project_key = ? AND pinned = 1
+    `).get(project_key) as { pinnedBytes: number };
+    if (pinnedBytes + item.original_size > capBytes) {
+      return { ok: false, reason: "over_budget", pinnedBytes, itemBytes: item.original_size, capBytes };
+    }
+  }
+
+  db.prepare(`
     UPDATE stored_outputs SET pinned = ? WHERE id = ? AND project_key = ?
   `).run(pinned ? 1 : 0, id, project_key);
-  return result.changes > 0;
+  return { ok: true };
 }
 
 /**

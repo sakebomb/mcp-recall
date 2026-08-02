@@ -354,6 +354,17 @@ key = "git_root"
 # of mostly-pinned data can exceed it. recall__stats reports when it does.
 max_size_mb = 500
 
+# Bound on pinned data in megabytes. Pinned items are exempt from eviction, so
+# without a separate cap an unbounded number of pins would silently void
+# max_size_mb. recall__pin enforces this at pin time: a pin that would push total
+# pinned bytes over the cap is refused with an actionable message, so the bound
+# holds even if the caller ignores it. Must not exceed max_size_mb (a config that
+# sets it higher is rejected). If you set max_size_mb but leave this unset, it
+# defaults to half of max_size_mb rather than the 250 shown here, so lowering the
+# total cap alone never creates a contradiction. Existing over-cap pins are never
+# auto-deleted — unpin or recall__forget to reclaim.
+max_pinned_mb = 250
+
 # Access count threshold for pin suggestions in recall__stats.
 # Items accessed at least this many times will appear as pin candidates.
 pin_recommendation_threshold = 5

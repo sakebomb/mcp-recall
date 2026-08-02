@@ -7,6 +7,7 @@ const baseConfig: RecallConfig = {
     expire_after_session_days: 7,
     key: "git_root",
     max_size_mb: 500,
+    max_pinned_mb: 250,
     pin_recommendation_threshold: 3,
     stale_item_days: 3,
     eviction_half_life_days: 7,

@@ -34,7 +34,7 @@ import { formatBytes, formatRelativeTime } from "./format";
 // Display constants
 // ---------------------------------------------------------------------------
 
-const PIN_BUDGET_WARN_PCT = 80;  // warn in recall__stats when pinned bytes reach this % of max_size_mb
+const PIN_BUDGET_WARN_PCT = 80;  // warn in recall__stats when pinned bytes reach this % of max_pinned_mb
 const SEARCH_EXCERPT_LEN  = 120; // chars shown per result in recall__search
 const NOTE_EXCERPT_LEN    = 200; // chars shown in recall__note store confirmation
 const CONTEXT_EXCERPT_LEN = 100; // chars shown per item in recall__context
@@ -185,11 +185,20 @@ export function toolPin(
   args: PinArgs
 ): string {
   const pinned = args.pinned ?? true;
-  const success = pinOutput(db, args.id, projectKey, pinned);
-  if (!success) {
+  const outcome = pinOutput(db, args.id, projectKey, pinned, loadConfig().store.max_pinned_mb);
+  if (outcome.ok) {
+    return `[recall: ${pinned ? "pinned" : "unpinned"} ${args.id}]`;
+  }
+  if (outcome.reason === "not_found") {
     return `[recall: no item found with id "${args.id}"]`;
   }
-  return `[recall: ${pinned ? "pinned" : "unpinned"} ${args.id}]`;
+  return (
+    `[recall: cannot pin ${args.id} — pinned data would reach ` +
+    `${formatBytes(outcome.pinnedBytes + outcome.itemBytes)}, over the ` +
+    `${formatBytes(outcome.capBytes)} store.max_pinned_mb cap. Pinned items are exempt ` +
+    `from eviction, so this cap bounds them separately from store.max_size_mb. Unpin an ` +
+    `item, raise store.max_pinned_mb, or recall__forget to reclaim space.]`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -541,20 +550,21 @@ export function toolStats(
     `  Session days:      ${sessionDays.length}`,
   ];
 
-  // Pin-budget awareness: pinned items are exempt from eviction, so a store that
-  // is mostly pinned can silently defeat the max_size_mb cap. Surface it.
+  // Pin-budget awareness: pinned items are exempt from eviction and bounded
+  // separately by store.max_pinned_mb, which recall__pin enforces at pin time.
+  // Report usage against that cap (an existing store may already be over it).
   if (stats.pinned_items > 0) {
-    const maxSizeMb = loadConfig().store.max_size_mb;
-    const maxBytes = maxSizeMb * 1024 * 1024;
+    const maxPinnedMb = loadConfig().store.max_pinned_mb;
+    const maxBytes = maxPinnedMb * 1024 * 1024;
     const capPct = maxBytes > 0 ? (stats.pinned_bytes / maxBytes) * 100 : 0;
     lines.push(
       `  Pinned:            ${stats.pinned_items} item${stats.pinned_items === 1 ? "" : "s"}` +
-        ` (${formatBytes(stats.pinned_bytes)}, ${capPct.toFixed(0)}% of cap)`
+        ` (${formatBytes(stats.pinned_bytes)}, ${capPct.toFixed(0)}% of max_pinned_mb)`
     );
     if (capPct >= PIN_BUDGET_WARN_PCT) {
       lines.push(
-        `  ⚠ Pinned data is ${capPct.toFixed(0)}% of the ${maxSizeMb} MB cap and is exempt` +
-          ` from eviction — unpin or raise store.max_size_mb to reclaim space.`
+        `  ⚠ Pinned data is ${capPct.toFixed(0)}% of the ${maxPinnedMb} MB store.max_pinned_mb cap.` +
+          ` New pins are refused once it is full — unpin or raise the cap to make room.`
       );
     }
   }
