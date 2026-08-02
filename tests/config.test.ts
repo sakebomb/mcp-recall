@@ -78,6 +78,42 @@ describe("loadConfig", () => {
     expect((config.store as Record<string, unknown>).unknown_key).toBeUndefined();
   });
 
+  it("max_pinned_mb defaults to 250", () => {
+    const config = loadConfig();
+    expect(config.store.max_pinned_mb).toBe(250);
+  });
+
+  it("defaults max_pinned_mb to half of max_size_mb when only max_size_mb is set", () => {
+    // Lowering max_size_mb alone must not manufacture a contradiction with the
+    // static 250 default — the pinned cap tracks the effective total cap.
+    writeFileSync(TEST_CONFIG_PATH, "[store]\nmax_size_mb = 100\n");
+    const config = loadConfig();
+    expect(config.store.max_size_mb).toBe(100);
+    expect(config.store.max_pinned_mb).toBe(50);
+  });
+
+  it("accepts a valid max_pinned_mb below max_size_mb", () => {
+    writeFileSync(TEST_CONFIG_PATH, "[store]\nmax_pinned_mb = 128\n");
+    const config = loadConfig();
+    expect(config.store.max_pinned_mb).toBe(128);
+  });
+
+  it("accepts max_pinned_mb equal to max_size_mb", () => {
+    writeFileSync(TEST_CONFIG_PATH, "[store]\nmax_size_mb = 300\nmax_pinned_mb = 300\n");
+    const config = loadConfig();
+    expect(config.store.max_size_mb).toBe(300);
+    expect(config.store.max_pinned_mb).toBe(300);
+  });
+
+  it("rejects config where max_pinned_mb exceeds max_size_mb, using defaults", () => {
+    writeFileSync(TEST_CONFIG_PATH, "[store]\nmax_size_mb = 100\nmax_pinned_mb = 200\n");
+    const config = loadConfig();
+    // A pinned cap above the total cap is a contradiction; the whole config is
+    // rejected to defaults, consistent with any other schema-invalid value.
+    expect(config.store.max_size_mb).toBe(500);
+    expect(config.store.max_pinned_mb).toBe(250);
+  });
+
   it("debug.enabled defaults to false", () => {
     const config = loadConfig();
     expect(config.debug.enabled).toBe(false);

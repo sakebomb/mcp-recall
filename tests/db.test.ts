@@ -476,13 +476,66 @@ describe("db", () => {
       expect(retrieveOutput(db, stored.id)!.pinned).toBe(0);
     });
 
-    it("returns true when item exists", () => {
+    it("returns ok when item exists", () => {
       const stored = storeOutput(db, makeInput());
-      expect(pinOutput(db, stored.id, PROJECT_KEY, true)).toBe(true);
+      expect(pinOutput(db, stored.id, PROJECT_KEY, true).ok).toBe(true);
     });
 
-    it("returns false for unknown id", () => {
-      expect(pinOutput(db, "recall_00000000", PROJECT_KEY, true)).toBe(false);
+    it("returns not_found for unknown id", () => {
+      const outcome = pinOutput(db, "recall_00000000", PROJECT_KEY, true);
+      expect(outcome.ok).toBe(false);
+      expect(outcome).toMatchObject({ reason: "not_found" });
+    });
+
+    // store.max_pinned_mb (#205): pinned items are eviction-exempt, so without a
+    // separate cap an unbounded number of pins voids store.max_size_mb.
+    const CAP_MB = 1; // 1 MiB = 1_048_576 bytes
+    const HALF = 600_000; // one fits under the cap; a second would exceed it
+
+    it("refuses a pin that would exceed max_pinned_mb and leaves the item unpinned", () => {
+      const a = storeOutput(db, makeInput({ original_size: HALF }));
+      const b = storeOutput(db, makeInput({ original_size: HALF }));
+      expect(pinOutput(db, a.id, PROJECT_KEY, true, CAP_MB).ok).toBe(true);
+      const outcome = pinOutput(db, b.id, PROJECT_KEY, true, CAP_MB);
+      expect(outcome.ok).toBe(false);
+      expect(outcome).toMatchObject({ reason: "over_budget", itemBytes: HALF });
+      expect(retrieveOutput(db, b.id)!.pinned).toBe(0); // the write did not apply
+    });
+
+    it("bounds total pinned bytes even when the caller ignores the error", () => {
+      // A client that keeps pinning past the cap must not be able to grow the store.
+      for (let i = 0; i < 10; i++) {
+        const item = storeOutput(db, makeInput({ original_size: HALF }));
+        pinOutput(db, item.id, PROJECT_KEY, true, CAP_MB); // return deliberately ignored
+      }
+      const { pinnedBytes } = db.prepare(
+        "SELECT COALESCE(SUM(original_size),0) as pinnedBytes FROM stored_outputs WHERE project_key = ? AND pinned = 1"
+      ).get(PROJECT_KEY) as { pinnedBytes: number };
+      expect(pinnedBytes).toBeLessThanOrEqual(CAP_MB * 1024 * 1024);
+      expect(pinnedBytes).toBe(HALF); // exactly one pin landed
+    });
+
+    it("re-pinning an already-pinned item is a no-op success, not over_budget", () => {
+      const a = storeOutput(db, makeInput({ original_size: HALF }));
+      expect(pinOutput(db, a.id, PROJECT_KEY, true, CAP_MB).ok).toBe(true);
+      // Already counted toward the budget; pinning it again must not be rejected.
+      expect(pinOutput(db, a.id, PROJECT_KEY, true, CAP_MB).ok).toBe(true);
+      expect(retrieveOutput(db, a.id)!.pinned).toBe(1);
+    });
+
+    it("unpinning is never budget-checked", () => {
+      const a = storeOutput(db, makeInput({ original_size: HALF }));
+      pinOutput(db, a.id, PROJECT_KEY, true, CAP_MB);
+      expect(pinOutput(db, a.id, PROJECT_KEY, false, CAP_MB).ok).toBe(true);
+      expect(retrieveOutput(db, a.id)!.pinned).toBe(0);
+    });
+
+    it("omitting the cap disables enforcement (internal/test callers)", () => {
+      const a = storeOutput(db, makeInput({ original_size: HALF }));
+      const b = storeOutput(db, makeInput({ original_size: HALF }));
+      expect(pinOutput(db, a.id, PROJECT_KEY, true).ok).toBe(true);
+      expect(pinOutput(db, b.id, PROJECT_KEY, true).ok).toBe(true); // no cap → both pin
+      expect(retrieveOutput(db, b.id)!.pinned).toBe(1);
     });
 
     it("pruneExpired skips pinned items", () => {

@@ -6,6 +6,10 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Added
+
+- **`store.max_pinned_mb` bounds pinned data (default: half of `max_size_mb`).** Pinned items are exempt from eviction, so without a separate cap an unbounded number of pins silently voids `store.max_size_mb` — observed in dogfooding when a store reached 99% pinned. `recall__pin` now enforces this cap *at pin time*: a pin that would push total pinned bytes past `max_pinned_mb` is refused with a message naming what to do (unpin, raise the cap, or `recall__forget`), and the bound holds even if the caller ignores the error, since the row is never marked pinned. Unpinning and re-pinning an already-pinned item are never budget-checked. The cap defaults to half of the effective `max_size_mb` (so lowering the total cap alone never creates a contradiction) and must not exceed it (a config that sets it higher is rejected to defaults). Existing over-cap pins are never auto-deleted; `recall__stats` reports pinned usage against the new cap (#205)
+
 ## [1.11.0] — 2026-08-01
 
 ### Changed

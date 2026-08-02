@@ -5062,6 +5062,7 @@ var RecallConfigSchema = exports_external.object({
     expire_after_session_days: exports_external.number().positive(),
     key: exports_external.enum(["git_root", "cwd"]),
     max_size_mb: exports_external.number().positive(),
+    max_pinned_mb: exports_external.number().positive(),
     pin_recommendation_threshold: exports_external.number().int().positive(),
     stale_item_days: exports_external.number().int().positive(),
     eviction_half_life_days: exports_external.number().positive(),
@@ -5083,11 +5084,13 @@ var RecallConfigSchema = exports_external.object({
   })
 });
 var PartialConfigSchema = RecallConfigSchema.deepPartial();
+var DEFAULT_PINNED_FRACTION = 0.5;
 var DEFAULTS = {
   store: {
     expire_after_session_days: 30,
     key: "git_root",
     max_size_mb: 500,
+    max_pinned_mb: 250,
     pin_recommendation_threshold: 5,
     stale_item_days: 3,
     eviction_half_life_days: 7,
@@ -5132,7 +5135,16 @@ function loadConfig() {
     const raw = readFileSync(getConfigPath(), "utf8");
     const result = PartialConfigSchema.safeParse(parse(raw));
     if (result.success) {
-      cached = deepMerge(DEFAULTS, result.data);
+      const base = deepMerge(DEFAULTS, result.data);
+      const userSetPinned = result.data.store?.max_pinned_mb !== undefined;
+      const max_pinned_mb = userSetPinned ? base.store.max_pinned_mb : base.store.max_size_mb * DEFAULT_PINNED_FRACTION;
+      const merged = { ...base, store: { ...base.store, max_pinned_mb } };
+      if (merged.store.max_pinned_mb > merged.store.max_size_mb) {
+        log.warn(`invalid config (store.max_pinned_mb ${merged.store.max_pinned_mb} exceeds ` + `store.max_size_mb ${merged.store.max_size_mb}); using defaults`);
+        cached = deepMerge(DEFAULTS, {});
+      } else {
+        cached = merged;
+      }
     } else {
       const issues = result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(", ");
       log.warn(`invalid config (${issues}); using defaults`);

@@ -19788,11 +19788,26 @@ function recordAccess(db, id) {
     WHERE id = ?
   `).run(now, id);
 }
-function pinOutput(db, id, project_key, pinned) {
-  const result = db.prepare(`
+function pinOutput(db, id, project_key, pinned, maxPinnedMb) {
+  const item = db.prepare(`
+    SELECT original_size, pinned FROM stored_outputs WHERE id = ? AND project_key = ?
+  `).get(id, project_key);
+  if (!item)
+    return { ok: false, reason: "not_found" };
+  if (pinned && item.pinned === 0 && maxPinnedMb !== undefined) {
+    const capBytes = maxPinnedMb * 1024 * 1024;
+    const { pinnedBytes } = db.prepare(`
+      SELECT COALESCE(SUM(original_size), 0) as pinnedBytes
+      FROM stored_outputs WHERE project_key = ? AND pinned = 1
+    `).get(project_key);
+    if (pinnedBytes + item.original_size > capBytes) {
+      return { ok: false, reason: "over_budget", pinnedBytes, itemBytes: item.original_size, capBytes };
+    }
+  }
+  db.prepare(`
     UPDATE stored_outputs SET pinned = ? WHERE id = ? AND project_key = ?
   `).run(pinned ? 1 : 0, id, project_key);
-  return result.changes > 0;
+  return { ok: true };
 }
 function retrieveSnippet(db, id, query) {
   const row = db.prepare(`SELECT rowid FROM stored_outputs WHERE id = ?`).get(id);
@@ -20997,6 +21012,7 @@ var RecallConfigSchema = exports_external.object({
     expire_after_session_days: exports_external.number().positive(),
     key: exports_external.enum(["git_root", "cwd"]),
     max_size_mb: exports_external.number().positive(),
+    max_pinned_mb: exports_external.number().positive(),
     pin_recommendation_threshold: exports_external.number().int().positive(),
     stale_item_days: exports_external.number().int().positive(),
     eviction_half_life_days: exports_external.number().positive(),
@@ -21018,11 +21034,13 @@ var RecallConfigSchema = exports_external.object({
   })
 });
 var PartialConfigSchema = RecallConfigSchema.deepPartial();
+var DEFAULT_PINNED_FRACTION = 0.5;
 var DEFAULTS = {
   store: {
     expire_after_session_days: 30,
     key: "git_root",
     max_size_mb: 500,
+    max_pinned_mb: 250,
     pin_recommendation_threshold: 5,
     stale_item_days: 3,
     eviction_half_life_days: 7,
@@ -21067,7 +21085,16 @@ function loadConfig() {
     const raw = readFileSync(getConfigPath(), "utf8");
     const result = PartialConfigSchema.safeParse(parse6(raw));
     if (result.success) {
-      cached2 = deepMerge(DEFAULTS, result.data);
+      const base = deepMerge(DEFAULTS, result.data);
+      const userSetPinned = result.data.store?.max_pinned_mb !== undefined;
+      const max_pinned_mb = userSetPinned ? base.store.max_pinned_mb : base.store.max_size_mb * DEFAULT_PINNED_FRACTION;
+      const merged = { ...base, store: { ...base.store, max_pinned_mb } };
+      if (merged.store.max_pinned_mb > merged.store.max_size_mb) {
+        log.warn(`invalid config (store.max_pinned_mb ${merged.store.max_pinned_mb} exceeds ` + `store.max_size_mb ${merged.store.max_size_mb}); using defaults`);
+        cached2 = deepMerge(DEFAULTS, {});
+      } else {
+        cached2 = merged;
+      }
     } else {
       const issues = result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(", ");
       log.warn(`invalid config (${issues}); using defaults`);
@@ -21195,11 +21222,14 @@ ${lines.join(`
 }
 function toolPin(db, projectKey, args) {
   const pinned = args.pinned ?? true;
-  const success = pinOutput(db, args.id, projectKey, pinned);
-  if (!success) {
+  const outcome = pinOutput(db, args.id, projectKey, pinned, loadConfig().store.max_pinned_mb);
+  if (outcome.ok) {
+    return `[recall: ${pinned ? "pinned" : "unpinned"} ${args.id}]`;
+  }
+  if (outcome.reason === "not_found") {
     return `[recall: no item found with id "${args.id}"]`;
   }
-  return `[recall: ${pinned ? "pinned" : "unpinned"} ${args.id}]`;
+  return `[recall: cannot pin ${args.id} \u2014 pinned data would reach ` + `${formatBytes(outcome.pinnedBytes + outcome.itemBytes)}, over the ` + `${formatBytes(outcome.capBytes)} store.max_pinned_mb cap. Pinned items are exempt ` + `from eviction, so this cap bounds them separately from store.max_size_mb. Unpin an ` + `item, raise store.max_pinned_mb, or recall__forget to reclaim space.]`;
 }
 function toolNote(db, projectKey, args) {
   const title = args.title ?? "(note)";
@@ -21404,12 +21434,12 @@ function toolStats(db, projectKey, args = {}) {
     `  Session days:      ${sessionDays.length}`
   ];
   if (stats.pinned_items > 0) {
-    const maxSizeMb = loadConfig().store.max_size_mb;
-    const maxBytes = maxSizeMb * 1024 * 1024;
+    const maxPinnedMb = loadConfig().store.max_pinned_mb;
+    const maxBytes = maxPinnedMb * 1024 * 1024;
     const capPct = maxBytes > 0 ? stats.pinned_bytes / maxBytes * 100 : 0;
-    lines.push(`  Pinned:            ${stats.pinned_items} item${stats.pinned_items === 1 ? "" : "s"}` + ` (${formatBytes(stats.pinned_bytes)}, ${capPct.toFixed(0)}% of cap)`);
+    lines.push(`  Pinned:            ${stats.pinned_items} item${stats.pinned_items === 1 ? "" : "s"}` + ` (${formatBytes(stats.pinned_bytes)}, ${capPct.toFixed(0)}% of max_pinned_mb)`);
     if (capPct >= PIN_BUDGET_WARN_PCT) {
-      lines.push(`  \u26A0 Pinned data is ${capPct.toFixed(0)}% of the ${maxSizeMb} MB cap and is exempt` + ` from eviction \u2014 unpin or raise store.max_size_mb to reclaim space.`);
+      lines.push(`  \u26A0 Pinned data is ${capPct.toFixed(0)}% of the ${maxPinnedMb} MB store.max_pinned_mb cap.` + ` New pins are refused once it is full \u2014 unpin or raise the cap to make room.`);
     }
   }
   const breakdown = getToolBreakdown(db, projectKey);
@@ -21520,7 +21550,7 @@ server.tool("recall__search", "Search across all stored tool outputs by content.
 }, safeTool((args) => ({
   content: [{ type: "text", text: toolSearch(db, projectKey, args) }]
 })));
-server.tool("recall__pin", "Pin an item to protect it from expiry and eviction. Use for important results you want to keep indefinitely. Pass pinned: false to unpin.", {
+server.tool("recall__pin", "Pin an item to protect it from expiry and eviction. Use for important results you want to keep indefinitely. Pass pinned: false to unpin. Pinning can fail: because pinned items are eviction-exempt they are bounded by store.max_pinned_mb, and a pin that would exceed that cap is refused (the response says so and how to make room). Unpinning always succeeds.", {
   id: exports_external.string().describe("Item ID to pin or unpin"),
   pinned: exports_external.boolean().optional().describe("true to pin (default), false to unpin")
 }, safeTool((args) => ({

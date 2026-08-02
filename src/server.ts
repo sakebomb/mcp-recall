@@ -91,7 +91,7 @@ server.tool(
 
 server.tool(
   "recall__pin",
-  "Pin an item to protect it from expiry and eviction. Use for important results you want to keep indefinitely. Pass pinned: false to unpin.",
+  "Pin an item to protect it from expiry and eviction. Use for important results you want to keep indefinitely. Pass pinned: false to unpin. Pinning can fail: because pinned items are eviction-exempt they are bounded by store.max_pinned_mb, and a pin that would exceed that cap is refused (the response says so and how to make room). Unpinning always succeeds.",
   {
     id: z.string().describe("Item ID to pin or unpin"),
     pinned: z.boolean().optional().describe("true to pin (default), false to unpin"),
