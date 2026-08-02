@@ -6,6 +6,8 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+## [1.11.0] — 2026-08-01
+
 ### Changed
 
 - **BREAKING (non-default mode): `verify_signature = "error"` now hard-fails when signature verification cannot run.** `error` previously governed only how a *failed* signature was handled — if `gh` was absent from `PATH`, or too old for the flags we verify with, it wrote a line to stderr and proceeded against an **unverified** manifest, the opposite of what a user setting `error` to guarantee verification expects. `error` now means verification must *succeed*: a missing or unusable `gh` is fatal for `profiles install/seed/update`, with a message distinct from a signature failure (an unusable tool is not evidence of tampering) that names `--skip-verify` as the escape hatch. `warn` (the default) and `skip` are unchanged. If you run `error` in an environment without a usable `gh` (a slim container image, for instance) and intend to proceed, pass `--skip-verify` or set `verify_signature = "warn"` (#208)
@@ -358,7 +360,8 @@ Ten `recall__*` tools available in every Claude session:
 
 ---
 
-[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.10.1...HEAD
+[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.11.0...HEAD
+[1.11.0]: https://github.com/sakebomb/mcp-recall/compare/v1.10.1...v1.11.0
 [1.10.1]: https://github.com/sakebomb/mcp-recall/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/sakebomb/mcp-recall/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/sakebomb/mcp-recall/compare/v1.8.0...v1.9.0
