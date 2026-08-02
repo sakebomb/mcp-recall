@@ -13,7 +13,9 @@ export const RecallConfigSchema = z.object({
     max_pinned_mb: z.number().positive(),
     pin_recommendation_threshold: z.number().int().positive(),
     stale_item_days: z.number().int().positive(),
-    eviction_half_life_days: z.number().positive(),
+    // .finite() rejects `inf` (legal TOML that passes bare .positive() since Infinity > 0);
+    // a non-finite half-life would collapse decay eviction to plain LFU. See #228.
+    eviction_half_life_days: z.number().positive().finite(),
     gc_reminder_mb: z.number().nonnegative(),
   }),
   retrieve: z.object({

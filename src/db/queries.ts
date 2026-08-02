@@ -254,16 +254,17 @@ export function evictIfNeeded(
 
   if (candidates.length === 0) return 0; // all remaining items are pinned
 
-  // Floors zero, negative and -Infinity at 1 second. It does NOT cover the two
-  // non-finite cases — Math.max(1, NaN) is NaN, and Infinity passes straight through:
-  //   NaN      -> every score NaN -> comparator NaN -> sort treats as 0 -> eviction
-  //               proceeds in insertion order, unranked. Needs a direct caller; Zod
-  //               rejects NaN.
-  //   Infinity -> every recency factor 1, so decay is off and eviction is plain LFU.
-  //               REACHABLE FROM USER CONFIG: `eviction_half_life_days = inf` is legal
-  //               TOML and z.number().positive() accepts Infinity. See #228.
-  // A Number.isFinite check would close both.
-  const halfLifeSecs = Math.max(1, half_life_days * SECONDS_PER_DAY);
+  // Fall back to the finite default for any non-finite or non-positive half-life before
+  // deriving seconds. This closes two silent-degradation cases (#228): Infinity — reachable
+  // from `eviction_half_life_days = inf`, legal TOML that passes z.number().positive() —
+  // makes every recency factor 1, degrading decay to plain LFU; NaN (a direct caller only,
+  // Zod rejects it) makes every score NaN, so the comparator falls through to insertion
+  // order, unranked. The trailing Math.max(1, …) still floors sub-second finite values.
+  const safeHalfLifeDays =
+    Number.isFinite(half_life_days) && half_life_days > 0
+      ? half_life_days
+      : DEFAULT_EVICTION_HALF_LIFE_DAYS;
+  const halfLifeSecs = Math.max(1, safeHalfLifeDays * SECONDS_PER_DAY);
   const scoreOf = (c: (typeof candidates)[number]): number => {
     const lastActive = c.last_accessed ?? c.created_at;
     const ageSecs = Math.max(0, now_secs - lastActive);

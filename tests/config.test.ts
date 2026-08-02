@@ -68,6 +68,15 @@ describe("loadConfig", () => {
     expect(config.store.expire_after_session_days).toBe(30);
   });
 
+  // #228: `inf` is legal TOML and passes z.number().positive() (Infinity > 0), so it would
+  // silently disable decay eviction. The schema must reject non-finite values so the loader
+  // falls back to the finite default rather than degrading eviction to plain LFU.
+  it("rejects non-finite eviction_half_life_days and falls back to the default", () => {
+    writeFileSync(TEST_CONFIG_PATH, "[store]\neviction_half_life_days = inf\n");
+    const config = loadConfig();
+    expect(config.store.eviction_half_life_days).toBe(7);
+  });
+
   it("strips unknown keys from TOML", () => {
     writeFileSync(
       TEST_CONFIG_PATH,

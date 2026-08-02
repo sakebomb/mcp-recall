@@ -10,6 +10,10 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 - **`store.max_pinned_mb` bounds pinned data (default: half of `max_size_mb`).** Pinned items are exempt from eviction, so without a separate cap an unbounded number of pins silently voids `store.max_size_mb` — observed in dogfooding when a store reached 99% pinned. `recall__pin` now enforces this cap *at pin time*: a pin that would push total pinned bytes past `max_pinned_mb` is refused with a message naming what to do (unpin, raise the cap, or `recall__forget`), and the bound holds even if the caller ignores the error, since the row is never marked pinned. Unpinning and re-pinning an already-pinned item are never budget-checked. The cap defaults to half of the effective `max_size_mb` (so lowering the total cap alone never creates a contradiction) and must not exceed it (a config that sets it higher is rejected to defaults). Existing over-cap pins are never auto-deleted; `recall__stats` reports pinned usage against the new cap (#205)
 
+### Fixed
+
+- **`eviction_half_life_days = inf` no longer silently disables decay eviction.** `inf` is legal TOML and passed the bare `z.number().positive()` check (since `Infinity > 0`), so the loader accepted it; `Math.max(1, Infinity)` then made every recency factor `1`, quietly degrading eviction from recency-weighted to plain LFU with no error. The config schema now rejects non-finite values (`.finite()`), so such a config falls back to the default `7`, and `evictIfNeeded` guards its half-life with `Number.isFinite` as defense in depth against a direct caller passing `Infinity` or `NaN` (#228)
+
 ## [1.11.0] — 2026-08-01
 
 ### Changed
