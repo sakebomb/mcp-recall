@@ -18,6 +18,7 @@ import { formatRelativeTime } from "../src/format";
 import type { Database } from "bun:sqlite";
 
 const PROJECT_KEY = "tooltest1234567";
+const FOREIGN_KEY = "foreignproj9999";
 
 function makeInput(overrides: Partial<StoreInput> = {}): StoreInput {
   return {
@@ -237,6 +238,121 @@ describe("MCP tool handlers", () => {
       expect(db.prepare("SELECT id FROM stored_outputs WHERE id = ?").get(pinned.id)).not.toBeNull();
       expect(db.prepare("SELECT id FROM stored_outputs WHERE id = ?").get(unpinned.id)).toBeNull();
     });
+
+    // #237 — foreign / explicit project-key override
+    it("deletes rows carrying an explicit foreign project key", () => {
+      storeOutput(db, makeInput({ project_key: FOREIGN_KEY, summary: "stranded a" }));
+      storeOutput(db, makeInput({ project_key: FOREIGN_KEY, summary: "stranded b" }));
+      const mine = storeOutput(db, makeInput({ summary: "mine" }));
+
+      const result = toolForget(db, PROJECT_KEY, {
+        project_key: FOREIGN_KEY,
+        all: true,
+        confirmed: true,
+      });
+
+      expect(result).toContain("deleted 2 items");
+      expect(result).toContain(FOREIGN_KEY);
+      expect(
+        db.prepare("SELECT COUNT(*) AS n FROM stored_outputs WHERE project_key = ?").get(FOREIGN_KEY)
+      ).toEqual({ n: 0 });
+      expect(db.prepare("SELECT id FROM stored_outputs WHERE id = ?").get(mine.id)).not.toBeNull();
+    });
+
+    it("forgets a foreign-keyed row by id only when the override is supplied", () => {
+      const stranded = storeOutput(db, makeInput({ project_key: FOREIGN_KEY }));
+
+      // Without the override, an id delete is scoped to the current key and misses it.
+      const missed = toolForget(db, PROJECT_KEY, { id: stranded.id });
+      expect(missed).toContain("no items matched");
+      expect(db.prepare("SELECT id FROM stored_outputs WHERE id = ?").get(stranded.id)).not.toBeNull();
+
+      const hit = toolForget(db, PROJECT_KEY, { project_key: FOREIGN_KEY, id: stranded.id });
+      expect(hit).toContain("deleted 1 item");
+      expect(db.prepare("SELECT id FROM stored_outputs WHERE id = ?").get(stranded.id)).toBeNull();
+    });
+
+    it("still requires confirmed for all: true under a foreign project_key override", () => {
+      storeOutput(db, makeInput({ project_key: FOREIGN_KEY }));
+      const result = toolForget(db, PROJECT_KEY, { project_key: FOREIGN_KEY, all: true });
+      expect(result).toContain("requires confirmed");
+      expect(
+        db.prepare("SELECT COUNT(*) AS n FROM stored_outputs WHERE project_key = ?").get(FOREIGN_KEY)
+      ).toEqual({ n: 1 });
+    });
+
+    it("rejects a blank project_key override and deletes nothing", () => {
+      storeOutput(db, makeInput({ project_key: FOREIGN_KEY }));
+      const result = toolForget(db, PROJECT_KEY, { project_key: "   ", all: true, confirmed: true });
+      expect(result).toContain("non-empty");
+      expect(
+        db.prepare("SELECT COUNT(*) AS n FROM stored_outputs WHERE project_key = ?").get(FOREIGN_KEY)
+      ).toEqual({ n: 1 });
+    });
+
+    // #241 review — a project_key override with no selector would silently no-op
+    it("rejects a project_key override with no selector instead of no-opping", () => {
+      storeOutput(db, makeInput({ project_key: FOREIGN_KEY }));
+      const result = toolForget(db, PROJECT_KEY, { project_key: FOREIGN_KEY });
+      expect(result).toContain("needs a selector");
+      expect(result).not.toContain("nothing deleted");
+      expect(
+        db.prepare("SELECT COUNT(*) AS n FROM stored_outputs WHERE project_key = ?").get(FOREIGN_KEY)
+      ).toEqual({ n: 1 });
+    });
+
+    // #241 review — a mistyped override key must not read as "nothing there"
+    it("names existing keys when a foreign-key delete matches nothing", () => {
+      storeOutput(db, makeInput({ project_key: FOREIGN_KEY }));
+      const result = toolForget(db, PROJECT_KEY, {
+        project_key: "typoproj0000000",
+        all: true,
+        confirmed: true,
+      });
+      expect(result).toContain("no items matched");
+      expect(result).toContain(FOREIGN_KEY); // points at the key that does exist
+    });
+
+    // #241 review — the tool/session_id/older_than_days selectors must stay key-scoped
+    it("scopes a tool-selector delete to the explicit foreign key", () => {
+      const foreign = storeOutput(db, makeInput({ project_key: FOREIGN_KEY, tool_name: "mcp__x__y" }));
+      const mine = storeOutput(db, makeInput({ tool_name: "mcp__x__y" }));
+      toolForget(db, PROJECT_KEY, { project_key: FOREIGN_KEY, tool: "mcp__x__y" });
+      expect(db.prepare("SELECT id FROM stored_outputs WHERE id = ?").get(foreign.id)).toBeNull();
+      expect(db.prepare("SELECT id FROM stored_outputs WHERE id = ?").get(mine.id)).not.toBeNull();
+    });
+
+    it("scopes a session_id-selector delete to the explicit foreign key", () => {
+      const foreign = storeOutput(db, makeInput({ project_key: FOREIGN_KEY, session_id: "sess-shared" }));
+      const mine = storeOutput(db, makeInput({ session_id: "sess-shared" }));
+      toolForget(db, PROJECT_KEY, { project_key: FOREIGN_KEY, session_id: "sess-shared" });
+      expect(db.prepare("SELECT id FROM stored_outputs WHERE id = ?").get(foreign.id)).toBeNull();
+      expect(db.prepare("SELECT id FROM stored_outputs WHERE id = ?").get(mine.id)).not.toBeNull();
+    });
+
+    it("scopes an older_than_days delete to the explicit foreign key", () => {
+      const old = Math.floor(Date.now() / 1000) - 30 * 86400;
+      const foreign = storeOutput(db, makeInput({ project_key: FOREIGN_KEY }));
+      const mine = storeOutput(db, makeInput());
+      db.prepare("UPDATE stored_outputs SET created_at = ?").run(old); // age both
+      toolForget(db, PROJECT_KEY, { project_key: FOREIGN_KEY, older_than_days: 7 });
+      expect(db.prepare("SELECT id FROM stored_outputs WHERE id = ?").get(foreign.id)).toBeNull();
+      expect(db.prepare("SELECT id FROM stored_outputs WHERE id = ?").get(mine.id)).not.toBeNull();
+    });
+
+    // #241 review — pin protection + scope override interaction
+    it("respects pin protection under a foreign override unless force is set", () => {
+      const pinned = storeOutput(db, makeInput({ project_key: FOREIGN_KEY, summary: "pinned foreign" }));
+      pinOutput(db, pinned.id, FOREIGN_KEY, true);
+
+      const skipped = toolForget(db, PROJECT_KEY, { project_key: FOREIGN_KEY, all: true, confirmed: true });
+      expect(skipped).toContain("no items matched"); // pin guard skipped the only row
+      expect(db.prepare("SELECT id FROM stored_outputs WHERE id = ?").get(pinned.id)).not.toBeNull();
+
+      const forced = toolForget(db, PROJECT_KEY, { project_key: FOREIGN_KEY, all: true, confirmed: true, force: true });
+      expect(forced).toContain("deleted 1 item");
+      expect(db.prepare("SELECT id FROM stored_outputs WHERE id = ?").get(pinned.id)).toBeNull();
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -287,6 +403,80 @@ describe("MCP tool handlers", () => {
       const first = result.indexOf("5.0KB");
       const second = result.indexOf("100B");
       expect(first).toBeLessThan(second);
+    });
+
+    // #237 — foreign / explicit project-key override + discovery footer
+    it("lists rows under an explicit foreign project key, excluded from the default scope", () => {
+      storeOutput(db, makeInput({ project_key: FOREIGN_KEY, tool_name: "mcp__foreign__tool" }));
+
+      const foreign = toolListStored(db, PROJECT_KEY, { project_key: FOREIGN_KEY });
+      expect(foreign).toContain("recall_");
+      expect(foreign).toContain("mcp__foreign__tool");
+
+      const mine = toolListStored(db, PROJECT_KEY, {});
+      expect(mine).not.toContain("mcp__foreign__tool");
+    });
+
+    it("surfaces a discovery footer naming foreign keys and counts", () => {
+      storeOutput(db, makeInput({ summary: "mine" }));
+      storeOutput(db, makeInput({ project_key: FOREIGN_KEY }));
+      storeOutput(db, makeInput({ project_key: FOREIGN_KEY }));
+
+      const result = toolListStored(db, PROJECT_KEY, {});
+      expect(result).toContain(FOREIGN_KEY);
+      expect(result).toContain("(2)");
+      expect(result).toContain("project_key=");
+    });
+
+    it("surfaces foreign rows even when the current project is empty", () => {
+      storeOutput(db, makeInput({ project_key: FOREIGN_KEY }));
+      const result = toolListStored(db, PROJECT_KEY, {});
+      expect(result).toContain("no stored items");
+      expect(result).toContain(FOREIGN_KEY);
+    });
+
+    it("omits the discovery footer when no foreign-keyed rows exist", () => {
+      storeOutput(db, makeInput());
+      const result = toolListStored(db, PROJECT_KEY, {});
+      expect(result).not.toContain("other project key");
+    });
+
+    it("does not repeat the discovery footer when listing an explicit foreign key", () => {
+      storeOutput(db, makeInput({ project_key: FOREIGN_KEY }));
+      const result = toolListStored(db, PROJECT_KEY, { project_key: FOREIGN_KEY });
+      expect(result).not.toContain("other project key");
+    });
+
+    it("rejects a blank project_key override", () => {
+      const result = toolListStored(db, PROJECT_KEY, { project_key: "   " });
+      expect(result).toContain("non-empty");
+    });
+
+    // #241 review — plural grammar + multi-key join in the footer
+    it("names every foreign key when more than one exists", () => {
+      const other = "otherproj999999";
+      storeOutput(db, makeInput({ project_key: FOREIGN_KEY }));
+      storeOutput(db, makeInput({ project_key: other }));
+      const result = toolListStored(db, PROJECT_KEY, {});
+      expect(result).toContain("other project keys:"); // plural
+      expect(result).toContain(FOREIGN_KEY);
+      expect(result).toContain(other);
+    });
+
+    // #241 review — footer is a first-page affordance, not repeated while paging
+    it("suppresses the discovery footer on paginated pages", () => {
+      for (let i = 0; i < 3; i++) storeOutput(db, makeInput());
+      storeOutput(db, makeInput({ project_key: FOREIGN_KEY }));
+      const page2 = toolListStored(db, PROJECT_KEY, { limit: 2, offset: 2 });
+      expect(page2).not.toContain("other project key");
+    });
+
+    // #241 review — a mistyped override key must not read as "nothing there"
+    it("names existing keys when a foreign-key listing matches nothing", () => {
+      storeOutput(db, makeInput({ project_key: FOREIGN_KEY }));
+      const result = toolListStored(db, PROJECT_KEY, { project_key: "typoproj0000000" });
+      expect(result).toContain("no stored items");
+      expect(result).toContain(FOREIGN_KEY); // points at the key that does exist
     });
   });
 
