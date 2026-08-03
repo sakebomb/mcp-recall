@@ -139,7 +139,7 @@ server.tool(
     project_key: z
       .string()
       .optional()
-      .describe("Target a specific (e.g. foreign) project key instead of the current project — for deleting rows stranded under another key. Must be an explicit key; there is no all-projects wildcard. Discover foreign keys via recall__list_stored."),
+      .describe("Target a specific (e.g. foreign) project key instead of the current project — for deleting rows stranded under another key. Must be an explicit key (no all-projects wildcard) and must be paired with a selector (all + confirmed, or id / tool / session_id / older_than_days). Discover foreign keys via recall__list_stored."),
   },
   safeTool((args) => ({
     content: [{ type: "text", text: toolForget(db, projectKey, args) }],

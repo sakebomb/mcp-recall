@@ -21172,7 +21172,7 @@ function foreignKeyFooter(db, currentKey) {
   const total = breakdown.reduce((n, b) => n + b.count, 0);
   const keys = breakdown.map((b) => `${b.project_key} (${b.count})`).join(", ");
   const plural = breakdown.length === 1 ? "" : "s";
-  return `[recall: ${total} item${total === 1 ? "" : "s"} under other project key${plural}: ${keys} \u2014 inspect with recall__list_stored project_key=\u2026, delete with recall__forget project_key=\u2026]`;
+  return `[recall: ${total} item${total === 1 ? "" : "s"} under other project key${plural}: ${keys} \u2014 inspect with recall__list_stored project_key=\u2026, delete with recall__forget project_key=\u2026 all=true confirmed=true]`;
 }
 function reductionPct(original, summary) {
   if (original === 0)
@@ -21286,6 +21286,11 @@ function toolForget(db, projectKey, args) {
   const scope = resolveScopeKey(projectKey, args.project_key);
   if ("error" in scope)
     return scope.error;
+  const usingOverride = scope.key !== projectKey;
+  const hasSelector = args.all || args.id !== undefined || args.tool !== undefined || args.session_id !== undefined || args.older_than_days !== undefined;
+  if (args.project_key !== undefined && !hasSelector) {
+    return `[recall: project_key needs a selector \u2014 add all: true (with confirmed: true), or id / tool / session_id / older_than_days]`;
+  }
   if (args.all && !args.confirmed) {
     return `[recall: clearing all stored items requires confirmed: true]`;
   }
@@ -21302,9 +21307,11 @@ function toolForget(db, projectKey, args) {
   };
   const deleted = forgetOutputs(db, scope.key, options);
   if (deleted === 0) {
-    return `[recall: no items matched \u2014 nothing deleted]`;
+    const hint = usingOverride ? foreignKeyFooter(db, projectKey) : "";
+    return hint ? `[recall: no items matched under project key ${scope.key} \u2014 nothing deleted]
+${hint}` : `[recall: no items matched \u2014 nothing deleted]`;
   }
-  const scopeNote = scope.key !== projectKey ? ` under project key ${scope.key}` : "";
+  const scopeNote = usingOverride ? ` under project key ${scope.key}` : "";
   return `[recall: deleted ${deleted} item${deleted === 1 ? "" : "s"}${scopeNote}]`;
 }
 function toolListStored(db, projectKey, args) {
@@ -21328,10 +21335,18 @@ function toolListStored(db, projectKey, args) {
   const items = db.prepare(sql).all(...params);
   const usingOverride = scope.key !== projectKey;
   const footer = !usingOverride && offset === 0 ? foreignKeyFooter(db, projectKey) : "";
-  const withFooter = (body) => footer ? `${body}
-${footer}` : body;
+  const footerSuffix = footer ? `
+${footer}` : "";
   if (!items || items.length === 0) {
-    return offset > 0 ? `[recall: no more items]` : withFooter(`[recall: no stored items]`);
+    if (offset > 0)
+      return `[recall: no more items]`;
+    if (usingOverride) {
+      const hint = foreignKeyFooter(db, projectKey);
+      const base = `[recall: no stored items under project key ${scope.key}]`;
+      return hint ? `${base}
+${hint}` : base;
+    }
+    return `[recall: no stored items]${footerSuffix}`;
   }
   const rows = items.map((item) => {
     const reduction = reductionPct(item.original_size, item.summary_size);
@@ -21340,8 +21355,8 @@ ${footer}` : body;
   });
   const header = `${"ID".padEnd(LIST_ID_COL_WIDTH)}  ${"Tool".padEnd(LIST_TOOL_COL_WIDTH)}  ${"Date".padEnd(10)}  ${"Size".padStart(7)} ${"\u2192".padEnd(9)}  Red.`;
   const separator = "-".repeat(header.length);
-  return withFooter([header, separator, ...rows].join(`
-`));
+  return `${[header, separator, ...rows].join(`
+`)}${footerSuffix}`;
 }
 function toolContext(db, projectKey, args) {
   const data = getContext(db, projectKey, args);
@@ -21611,7 +21626,7 @@ server.tool("recall__forget", "Delete stored items by ID, tool pattern, session,
   all: exports_external.boolean().optional().describe("Clear entire store (requires confirmed: true)"),
   confirmed: exports_external.boolean().optional().describe("Required to execute all: true"),
   force: exports_external.boolean().optional().describe("Override pin protection and delete pinned items too"),
-  project_key: exports_external.string().optional().describe("Target a specific (e.g. foreign) project key instead of the current project \u2014 for deleting rows stranded under another key. Must be an explicit key; there is no all-projects wildcard. Discover foreign keys via recall__list_stored.")
+  project_key: exports_external.string().optional().describe("Target a specific (e.g. foreign) project key instead of the current project \u2014 for deleting rows stranded under another key. Must be an explicit key (no all-projects wildcard) and must be paired with a selector (all + confirmed, or id / tool / session_id / older_than_days). Discover foreign keys via recall__list_stored.")
 }, safeTool((args) => ({
   content: [{ type: "text", text: toolForget(db, projectKey, args) }]
 })));

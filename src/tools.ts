@@ -82,7 +82,9 @@ function foreignKeyFooter(db: Database, currentKey: string): string {
   const total = breakdown.reduce((n, b) => n + b.count, 0);
   const keys = breakdown.map((b) => `${b.project_key} (${b.count})`).join(", ");
   const plural = breakdown.length === 1 ? "" : "s";
-  return `[recall: ${total} item${total === 1 ? "" : "s"} under other project key${plural}: ${keys} — inspect with recall__list_stored project_key=…, delete with recall__forget project_key=…]`;
+  // The delete example is intentionally complete (all + confirmed): recall__forget
+  // needs a selector, so a project_key-only call would silently match nothing (#241 review).
+  return `[recall: ${total} item${total === 1 ? "" : "s"} under other project key${plural}: ${keys} — inspect with recall__list_stored project_key=…, delete with recall__forget project_key=… all=true confirmed=true]`;
 }
 
 function reductionPct(original: number, summary: number): string {
@@ -309,6 +311,21 @@ export function toolForget(
 ): string {
   const scope = resolveScopeKey(projectKey, args.project_key);
   if ("error" in scope) return scope.error;
+  const usingOverride = scope.key !== projectKey;
+
+  const hasSelector =
+    args.all ||
+    args.id !== undefined ||
+    args.tool !== undefined ||
+    args.session_id !== undefined ||
+    args.older_than_days !== undefined;
+
+  // A project_key override with no selector matches no branch in forgetOutputs and
+  // would silently no-op, reading as "nothing there". Reject it explicitly so the
+  // footer's suggested recovery command can't mislead (#241 review).
+  if (args.project_key !== undefined && !hasSelector) {
+    return `[recall: project_key needs a selector — add all: true (with confirmed: true), or id / tool / session_id / older_than_days]`;
+  }
 
   if (args.all && !args.confirmed) {
     return `[recall: clearing all stored items requires confirmed: true]`;
@@ -330,10 +347,15 @@ export function toolForget(
   const deleted = forgetOutputs(db, scope.key, options);
 
   if (deleted === 0) {
-    return `[recall: no items matched — nothing deleted]`;
+    // Under an override, a zero match may just be a mistyped key — name the keys
+    // that do exist so a typo isn't indistinguishable from "nothing there" (#241 review).
+    const hint = usingOverride ? foreignKeyFooter(db, projectKey) : "";
+    return hint
+      ? `[recall: no items matched under project key ${scope.key} — nothing deleted]\n${hint}`
+      : `[recall: no items matched — nothing deleted]`;
   }
 
-  const scopeNote = scope.key !== projectKey ? ` under project key ${scope.key}` : "";
+  const scopeNote = usingOverride ? ` under project key ${scope.key}` : "";
   return `[recall: deleted ${deleted} item${deleted === 1 ? "" : "s"}${scopeNote}]`;
 }
 
@@ -383,12 +405,17 @@ export function toolListStored(
   // not when already listing an explicit foreign key.
   const usingOverride = scope.key !== projectKey;
   const footer = !usingOverride && offset === 0 ? foreignKeyFooter(db, projectKey) : "";
-  const withFooter = (body: string) => (footer ? `${body}\n${footer}` : body);
+  const footerSuffix = footer ? `\n${footer}` : "";
 
   if (!items || items.length === 0) {
-    return offset > 0
-      ? `[recall: no more items]`
-      : withFooter(`[recall: no stored items]`);
+    if (offset > 0) return `[recall: no more items]`;
+    if (usingOverride) {
+      // A zero-row override may be a mistyped key — name the keys that exist (#241 review).
+      const hint = foreignKeyFooter(db, projectKey);
+      const base = `[recall: no stored items under project key ${scope.key}]`;
+      return hint ? `${base}\n${hint}` : base;
+    }
+    return `[recall: no stored items]${footerSuffix}`;
   }
 
   const rows = items.map((item) => {
@@ -400,7 +427,7 @@ export function toolListStored(
   const header = `${"ID".padEnd(LIST_ID_COL_WIDTH)}  ${"Tool".padEnd(LIST_TOOL_COL_WIDTH)}  ${"Date".padEnd(10)}  ${"Size".padStart(7)} ${"→".padEnd(9)}  Red.`;
   const separator = "-".repeat(header.length);
 
-  return withFooter([header, separator, ...rows].join("\n"));
+  return `${[header, separator, ...rows].join("\n")}${footerSuffix}`;
 }
 
 // ---------------------------------------------------------------------------
