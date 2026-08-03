@@ -6520,7 +6520,7 @@ var require_dist = __commonJS((exports, module) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "mcp-recall",
-    version: "1.11.0",
+    version: "1.12.0",
     description: "Context compression and persistent retrieval for Claude Code",
     author: {
       name: "sakebomb",

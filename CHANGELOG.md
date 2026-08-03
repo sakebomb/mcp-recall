@@ -6,6 +6,8 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+## [1.12.0] — 2026-08-02
+
 ### Added
 
 - **`recall__forget` and `recall__list_stored` accept a `project_key` override to reach rows stranded under a foreign key.** The removed `import --keep-project-key` flag (#226) could leave rows stamped with a foreign project key; every `forget`/`list_stored` branch is scoped to the current key, so those rows were only reachable via raw `sqlite3`. Both tools now take an optional explicit `project_key` that retargets the operation to that one key, and a default `recall__list_stored` appends a footer naming any foreign keys present (with row counts) so they can be discovered. The override requires a non-empty explicit key — there is no all-projects wildcard — must be paired with a selector (`all`+`confirmed`, or `id`/`tool`/`session_id`/`older_than_days`) rather than silently no-opping, and `all: true` still requires `confirmed: true` under it, so scope can never be widened by accident. A foreign-key operation that matches nothing names the keys that do exist, so a mistyped key isn't mistaken for "nothing there". Default current-project deletes and listings are unchanged; the only default-path change is the new discovery footer, shown solely when foreign-keyed rows are present (#237)
