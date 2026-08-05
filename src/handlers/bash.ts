@@ -16,10 +16,12 @@ import {
 import { gitDiffHandler, gitLogHandler, gitStatusHandler } from "./bash-git";
 import { testRunnerHandler } from "./bash-test";
 import { dockerPsHandler } from "./bash-docker";
+import { compilerDiagnosticsHandler } from "./bash-compilers";
 
 export { gitDiffHandler, gitLogHandler, gitStatusHandler } from "./bash-git";
 export { testRunnerHandler } from "./bash-test";
 export { dockerPsHandler } from "./bash-docker";
+export { compilerDiagnosticsHandler } from "./bash-compilers";
 
 // ---------------------------------------------------------------------------
 // terraform plan
@@ -294,6 +296,15 @@ export function getBashHandler(input: unknown): Handler {
       /^docker\s+compose\s+ps(\s|$)/.test(command)) return dockerPsHandler;
   if (/^(make|just)(\s|$)/.test(command)) return buildToolHandler;
   if (/^gh\s+/.test(command)) return ghHandler;
+  // Compiler / linter diagnostics (build, typecheck, lint). Safe to route
+  // broadly: the handler falls back to shell when it finds no diagnostics.
+  if (/^cargo\s+(build|check|clippy)(\s|$)/.test(command)) return compilerDiagnosticsHandler;
+  if (/^go\s+(build|vet)(\s|$)/.test(command)) return compilerDiagnosticsHandler;
+  if (/^(npx\s+)?tsc(\s|$)/.test(command)) return compilerDiagnosticsHandler;
+  if (/^(npx\s+)?eslint(\s|$)/.test(command)) return compilerDiagnosticsHandler;
+  if (/^ruff(\s|$)/.test(command)) return compilerDiagnosticsHandler;
+  if (/^(npm|pnpm|yarn|bun)\s+run\s+(typecheck|lint|build|check)(\s|$)/.test(command))
+    return compilerDiagnosticsHandler;
 
   return shellHandler;
 }
