@@ -10,7 +10,7 @@ import { slackHandler } from "../src/handlers/slack";
 import { jsonHandler } from "../src/handlers/json";
 import { genericHandler } from "../src/handlers/generic";
 import { getHandler, extractText } from "../src/handlers/index";
-import { getBashHandler, gitDiffHandler, gitLogHandler, terraformPlanHandler, gitStatusHandler, packageInstallHandler, testRunnerHandler, dockerPsHandler, buildToolHandler, ghHandler } from "../src/handlers/bash";
+import { getBashHandler, gitDiffHandler, gitLogHandler, terraformPlanHandler, gitStatusHandler, packageInstallHandler, testRunnerHandler, dockerPsHandler, buildToolHandler, ghHandler, compilerDiagnosticsHandler } from "../src/handlers/bash";
 import { tavilyHandler } from "../src/handlers/tavily";
 import { databaseHandler } from "../src/handlers/database";
 import { sentryHandler } from "../src/handlers/sentry";
@@ -916,6 +916,26 @@ describe("getBashHandler", () => {
     expect(getBashHandler({ command: "npm test" })).toBe(shellHandler);
   });
 
+  it("routes compilers/typecheck/lint to compilerDiagnosticsHandler", () => {
+    expect(getBashHandler({ command: "cargo build" })).toBe(compilerDiagnosticsHandler);
+    expect(getBashHandler({ command: "cargo check --all-targets" })).toBe(compilerDiagnosticsHandler);
+    expect(getBashHandler({ command: "cargo clippy" })).toBe(compilerDiagnosticsHandler);
+    expect(getBashHandler({ command: "go build ./..." })).toBe(compilerDiagnosticsHandler);
+    expect(getBashHandler({ command: "go vet ./..." })).toBe(compilerDiagnosticsHandler);
+    expect(getBashHandler({ command: "tsc --noEmit" })).toBe(compilerDiagnosticsHandler);
+    expect(getBashHandler({ command: "npx tsc -p ." })).toBe(compilerDiagnosticsHandler);
+    expect(getBashHandler({ command: "eslint src/" })).toBe(compilerDiagnosticsHandler);
+    expect(getBashHandler({ command: "ruff check ." })).toBe(compilerDiagnosticsHandler);
+    expect(getBashHandler({ command: "bun run typecheck" })).toBe(compilerDiagnosticsHandler);
+    expect(getBashHandler({ command: "npm run lint" })).toBe(compilerDiagnosticsHandler);
+  });
+
+  it("does NOT route cargo test / go test to the compiler handler", () => {
+    // cargo test is deferred to the test-runner batch, not this one.
+    expect(getBashHandler({ command: "cargo test" })).toBe(shellHandler);
+    expect(getBashHandler({ command: "go test ./..." })).toBe(testRunnerHandler);
+  });
+
   it("routes gh commands to ghHandler", () => {
     expect(getBashHandler({ command: "gh pr list" })).toBe(ghHandler);
     expect(getBashHandler({ command: "gh issue list" })).toBe(ghHandler);
@@ -994,6 +1014,130 @@ describe("ghHandler", () => {
     // JSON handler output, not line-count header
     expect(summary).not.toContain("[bash ·");
     expect(summary).toContain('"mcp-recall"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// compilerDiagnosticsHandler (cargo / go / tsc / eslint / ruff)
+// ---------------------------------------------------------------------------
+
+describe("compilerDiagnosticsHandler", () => {
+  const makeOutput = (stdout: string, stderr = "", exit_code = 0) =>
+    JSON.stringify({ stdout, stderr, exit_code });
+
+  it("compresses tsc errors, surfaces them, and reflects failure", () => {
+    const stdout = [
+      "src/foo.ts(42,10): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.",
+      "src/bar.ts(7,3): error TS2304: Cannot find name 'baz'.",
+      "src/qux.ts(9,1): warning TS6133: 'unused' is declared but its value is never read.",
+      "Found 2 errors in 2 files.",
+      "",
+      "Errors  Files",
+      "     1  src/foo.ts:42",
+      "     1  src/bar.ts:7",
+    ].join("\n");
+    const { summary, originalSize } = compilerDiagnosticsHandler("Bash", makeOutput(stdout, "", 2));
+    expect(summary).toContain("✗");
+    expect(summary).toContain("2 errors");
+    expect(summary).toContain("src/foo.ts:42");
+    expect(summary).toContain("not assignable");
+    // Byte reduction vs original.
+    expect(Buffer.byteLength(summary, "utf8")).toBeLessThan(originalSize);
+  });
+
+  it("compresses cargo errors and attaches the --> location", () => {
+    const stderr = [
+      "   Compiling demo v0.1.0 (/home/u/demo)",
+      "error[E0308]: mismatched types",
+      "  --> src/main.rs:10:20",
+      "   |",
+      "10 |     let x: u32 = \"hi\";",
+      "   |            ---   ^^^^ expected `u32`, found `&str`",
+      "   |",
+      "error: aborting due to 1 previous error",
+      "error: could not compile `demo` (bin \"demo\") due to 1 previous error",
+    ].join("\n");
+    const { summary } = compilerDiagnosticsHandler("Bash", makeOutput("", stderr, 101));
+    expect(summary).toContain("✗");
+    expect(summary).toContain("1 error");
+    expect(summary).toContain("mismatched types");
+    expect(summary).toContain("src/main.rs:10:20");
+  });
+
+  it("compresses go build errors (file:line:col form)", () => {
+    const stderr = [
+      "# example.com/m",
+      "./main.go:10:6: undefined: doThing",
+      "./util.go:3:2: imported and not used: \"fmt\"",
+    ].join("\n");
+    const { summary } = compilerDiagnosticsHandler("Bash", makeOutput("", stderr, 1));
+    expect(summary).toContain("✗");
+    expect(summary).toContain("main.go:10");
+    expect(summary).toContain("undefined: doThing");
+  });
+
+  it("compresses eslint stylish output with its problem summary", () => {
+    const stdout = [
+      "/repo/src/a.ts",
+      "  10:5  error    'x' is assigned a value but never used  no-unused-vars",
+      "  22:1  warning  Unexpected console statement              no-console",
+      "",
+      "/repo/src/b.ts",
+      "  3:9  error  Missing semicolon  semi",
+      "",
+      "✖ 3 problems (2 errors, 1 warning)",
+    ].join("\n");
+    const { summary } = compilerDiagnosticsHandler("Bash", makeOutput(stdout, "", 1));
+    expect(summary).toContain("✗");
+    expect(summary).toContain("2 errors");
+    expect(summary).toContain("1 warning");
+    expect(summary).toContain("Missing semicolon");
+  });
+
+  it("compresses ruff output and its Found-N-errors summary", () => {
+    const stdout = [
+      "app.py:1:8: F401 [*] `os` imported but unused",
+      "app.py:5:1: E402 Module level import not at top of file",
+      "Found 2 errors.",
+    ].join("\n");
+    const { summary } = compilerDiagnosticsHandler("Bash", makeOutput(stdout, "", 1));
+    expect(summary).toContain("✗");
+    expect(summary).toContain("2 errors");
+    expect(summary).toContain("app.py:1");
+  });
+
+  it("reports a clean run with only warnings as success", () => {
+    const stderr = [
+      "warning: unused variable: `y`",
+      "  --> src/main.rs:4:9",
+      "warning: `demo` (bin \"demo\") generated 1 warning",
+    ].join("\n");
+    const { summary } = compilerDiagnosticsHandler("Bash", makeOutput("", stderr, 0));
+    expect(summary).toContain("✓");
+    expect(summary).toContain("1 warning");
+    expect(summary).not.toContain("✗");
+  });
+
+  it("SAFETY: falls back to shell (never fabricates success) when a non-zero exit yields no parseable diagnostics", () => {
+    const stderr = "Segmentation fault (core dumped)\nsome unrecognised failure blob\n".repeat(3);
+    const { summary } = compilerDiagnosticsHandler("Bash", makeOutput("", stderr, 139));
+    // Shell fallback header, and the real failure text is preserved, not hidden.
+    expect(summary).toContain("[bash ·");
+    expect(summary).toContain("Segmentation fault");
+    expect(summary).not.toContain("✓");
+  });
+
+  it("SAFETY: never shows ✓ when the exit code is non-zero", () => {
+    // A diagnostic parses but exit is non-zero — status must be failure.
+    const stderr = "warning: something minor\n  --> src/x.rs:1:1";
+    const { summary } = compilerDiagnosticsHandler("Bash", makeOutput("", stderr, 1));
+    expect(summary).toContain("✗");
+    expect(summary).not.toContain("✓");
+  });
+
+  it("falls back to shell when output has no diagnostics at all", () => {
+    const { summary } = compilerDiagnosticsHandler("Bash", makeOutput("Compiling...\nDone in 1.2s\n", "", 0));
+    expect(summary).toContain("[bash ·");
   });
 });
 
