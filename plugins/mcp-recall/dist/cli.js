@@ -6660,6 +6660,48 @@ var gitStatusHandler = (toolName, output) => {
   return { summary: lines.join(`
 `), originalSize };
 };
+var MAX_REFS = 25;
+var gitRefsHandler = (toolName, output) => {
+  const stdout = extractStdout(output);
+  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const lines = stdout.split(`
+`).filter((l) => l.trim());
+  if (lines.length === 0)
+    return shellHandler(toolName, output);
+  if (lines.filter((l) => /^stash@\{\d+\}:/.test(l.trim())).length >= Math.ceil(lines.length * 0.5)) {
+    const shown = lines.slice(0, MAX_REFS).map((l) => `  ${l.trim().slice(0, 100)}`);
+    const overflow = lines.length > MAX_REFS ? [`  \u2026 (+${lines.length - MAX_REFS} more)`] : [];
+    return { summary: [`git stash \u2014 ${lines.length} entr${lines.length === 1 ? "y" : "ies"}`, ...shown, ...overflow].join(`
+`), originalSize };
+  }
+  if (lines.filter((l) => /\((fetch|push)\)\s*$/.test(l)).length >= Math.ceil(lines.length * 0.5)) {
+    const remotes = new Map;
+    for (const l of lines) {
+      const m = l.match(/^(\S+)\s+(\S+)\s+\(fetch\)/);
+      if (m)
+        remotes.set(m[1], m[2]);
+    }
+    const shown = [...remotes].slice(0, MAX_REFS).map(([n, u]) => `  ${n} \u2192 ${u.slice(0, 80)}`);
+    return { summary: [`git remote \u2014 ${remotes.size} remote${remotes.size === 1 ? "" : "s"}`, ...shown].join(`
+`), originalSize };
+  }
+  const refOf = (l) => l.replace(/^[*+]?\s*/, "").trim();
+  const branchLines = lines.filter((l) => {
+    const r = refOf(l);
+    return r.length > 0 && !/\s/.test(r);
+  });
+  if (branchLines.length >= Math.ceil(lines.length * 0.5)) {
+    const current = lines.find((l) => l.trimStart().startsWith("* "));
+    const remotes = branchLines.filter((l) => l.includes("remotes/")).length;
+    const local = branchLines.length - remotes;
+    const header = `git branch \u2014 ${local} local${remotes ? `, ${remotes} remote` : ""}${current ? ` (on ${current.replace(/^\s*\*\s*/, "").trim()})` : ""}`;
+    const shown = branchLines.slice(0, MAX_REFS).map((l) => `  ${l.trim().slice(0, 80)}`);
+    const overflow = branchLines.length > MAX_REFS ? [`  \u2026 (+${branchLines.length - MAX_REFS} more)`] : [];
+    return { summary: [header, ...shown, ...overflow].join(`
+`), originalSize };
+  }
+  return shellHandler(toolName, output);
+};
 
 // src/handlers/bash-test.ts
 var testRunnerHandler = (toolName, output) => {
@@ -6909,6 +6951,116 @@ ${stderr}`;
 `), originalSize };
 };
 
+// src/handlers/bash-search.ts
+var MAX_SAMPLE = 40;
+var clip2 = (s, n = 100) => s.length > n ? s.slice(0, n) + "\u2026" : s;
+function overflowLine(total, shown, noun) {
+  return total > shown ? [`  \u2026 (+${total - shown} more ${noun})`] : [];
+}
+var GREP_LINE_RE = /^(.+?):(\d+):(.*)$/;
+var grepHandler = (toolName, output) => {
+  const stdout = extractStdout(output);
+  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const lines = stdout.split(`
+`).filter((l) => l.length > 0);
+  if (lines.length === 0) {
+    return { summary: "[grep \u2014 no matches]", originalSize };
+  }
+  const matches = [];
+  const files = new Set;
+  for (const l of lines) {
+    const m = l.match(GREP_LINE_RE);
+    if (m) {
+      matches.push({ file: m[1], line: m[2], text: m[3] });
+      files.add(m[1]);
+    }
+  }
+  if (matches.length < Math.ceil(lines.length * 0.5)) {
+    return shellHandler(toolName, output);
+  }
+  const header = `grep \u2014 ${matches.length} match${matches.length === 1 ? "" : "es"} in ${files.size} file${files.size === 1 ? "" : "s"}`;
+  const shown = matches.slice(0, MAX_SAMPLE).map((m) => `  ${m.file}:${m.line}: ${clip2(m.text.trim())}`);
+  return {
+    summary: [header, ...shown, ...overflowLine(matches.length, MAX_SAMPLE, "matches")].join(`
+`),
+    originalSize
+  };
+};
+var LS_LONG_RE = /^([-dlbcps])[rwxsStT-]{9}[+@.]?\s+\d+\s/;
+var LS_RECURSIVE_HEADER_RE = /^(\.?[^\s:]*):$/;
+var lsHandler = (toolName, output) => {
+  const stdout = extractStdout(output);
+  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const raw = stdout.split(`
+`);
+  const nonEmpty = raw.filter((l) => l.trim().length > 0);
+  if (nonEmpty.length === 0) {
+    return { summary: "[ls \u2014 empty]", originalSize };
+  }
+  const dirHeaders = nonEmpty.filter((l) => LS_RECURSIVE_HEADER_RE.test(l.trim()));
+  if (dirHeaders.length >= 2) {
+    const entries = nonEmpty.length - dirHeaders.length - nonEmpty.filter((l) => /^total\s+\d+$/.test(l.trim())).length;
+    const shown2 = dirHeaders.slice(0, MAX_SAMPLE).map((d) => `  ${d.trim()}`);
+    const header2 = `ls -R \u2014 ${dirHeaders.length} directories, ~${entries} entries`;
+    return {
+      summary: [header2, ...shown2, ...overflowLine(dirHeaders.length, MAX_SAMPLE, "directories")].join(`
+`),
+      originalSize
+    };
+  }
+  const longLines = nonEmpty.filter((l) => LS_LONG_RE.test(l));
+  if (longLines.length >= Math.ceil(nonEmpty.length * 0.5)) {
+    let dirs = 0;
+    const names = [];
+    for (const l of longLines) {
+      const m = l.match(LS_LONG_RE);
+      if (m && m[1] === "d")
+        dirs++;
+      const name = l.split(/\s+/).slice(8).join(" ");
+      if (name)
+        names.push(name);
+    }
+    const files = longLines.length - dirs;
+    const header2 = `ls \u2014 ${longLines.length} entries (${dirs} dir${dirs === 1 ? "" : "s"}, ${files} file${files === 1 ? "" : "s"})`;
+    const shown2 = names.slice(0, MAX_SAMPLE).map((n) => `  ${clip2(n)}`);
+    return {
+      summary: [header2, ...shown2, ...overflowLine(names.length, MAX_SAMPLE, "entries")].join(`
+`),
+      originalSize
+    };
+  }
+  const tokens = nonEmpty.flatMap((l) => l.split(/\s{2,}|\t/)).map((t) => t.trim()).filter(Boolean);
+  if (tokens.length < 2)
+    return shellHandler(toolName, output);
+  const header = `ls \u2014 ${tokens.length} entries`;
+  const shown = tokens.slice(0, MAX_SAMPLE).map((n) => `  ${clip2(n)}`);
+  return {
+    summary: [header, ...shown, ...overflowLine(tokens.length, MAX_SAMPLE, "entries")].join(`
+`),
+    originalSize
+  };
+};
+var findHandler = (toolName, output) => {
+  const stdout = extractStdout(output);
+  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const paths = stdout.split(`
+`).map((l) => l.trimEnd()).filter((l) => l.length > 0);
+  if (paths.length === 0) {
+    return { summary: "[find \u2014 no results]", originalSize };
+  }
+  const pathLike = paths.filter((p) => !/^\s/.test(p) && !/^find: /.test(p));
+  if (pathLike.length < Math.ceil(paths.length * 0.7)) {
+    return shellHandler(toolName, output);
+  }
+  const header = `find \u2014 ${paths.length} path${paths.length === 1 ? "" : "s"}`;
+  const shown = paths.slice(0, MAX_SAMPLE).map((p) => `  ${clip2(p, 120)}`);
+  return {
+    summary: [header, ...shown, ...overflowLine(paths.length, MAX_SAMPLE, "paths")].join(`
+`),
+    originalSize
+  };
+};
+
 // src/handlers/bash.ts
 var TERRAFORM_RESOURCE_RE = /^\s+#\s+(.+?)\s+will\s+be\s+(created|destroyed|updated in-place|replaced)/;
 var TERRAFORM_PLAN_SUMMARY_RE = /^Plan:\s+.+$/m;
@@ -7092,16 +7244,33 @@ ${meta.join(`
   }
   return shellHandler(toolName, output);
 };
+function normalizeCommand(command) {
+  let c = command.trim();
+  const cd = c.match(/^cd\s+[^\s&;]+\s*(?:&&|;)\s*(.+)$/s);
+  if (cd)
+    c = cd[1].trim();
+  c = c.replace(/^git\s+(?:(?:--no-pager|--paginate|-P)\s+|-[cC]\s+\S+\s+)+/, "git ");
+  return c;
+}
 function getBashHandler(input) {
-  const command = extractCommand(input);
-  if (!command)
+  const rawCommand = extractCommand(input);
+  if (!rawCommand)
     return shellHandler;
+  const command = normalizeCommand(rawCommand);
+  if (/^git\s+grep(\s|$)/.test(command))
+    return grepHandler;
   if (/^git\s+(diff|show)(\s|$)/.test(command))
     return gitDiffHandler;
   if (/^git\s+log(\s|$)/.test(command))
     return gitLogHandler;
   if (/^git\s+status(\s|$)/.test(command))
     return gitStatusHandler;
+  if (/^git\s+branch(\s|$)/.test(command))
+    return gitRefsHandler;
+  if (/^git\s+stash\s+list(\s|$)/.test(command))
+    return gitRefsHandler;
+  if (/^git\s+remote(\s|$)/.test(command))
+    return gitRefsHandler;
   if (/^terraform\s+plan(\s|$)/.test(command))
     return terraformPlanHandler;
   if (/^(npm|bun|yarn|pnpm)\s+install(\s|$)/.test(command) || /^pip\d*\s+install(\s|$)/.test(command))
@@ -7126,6 +7295,12 @@ function getBashHandler(input) {
     return compilerDiagnosticsHandler;
   if (/^(npm|pnpm|yarn|bun)\s+run\s+(typecheck|lint|build|check)(\s|$)/.test(command))
     return compilerDiagnosticsHandler;
+  if (/^(grep|egrep|fgrep|rg|ag)(\s|$)/.test(command))
+    return grepHandler;
+  if (/^ls(\s|$)/.test(command))
+    return lsHandler;
+  if (/^(find|fd)(\s|$)/.test(command))
+    return findHandler;
   return shellHandler;
 }
 
