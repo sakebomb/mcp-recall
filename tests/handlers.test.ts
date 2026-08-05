@@ -10,7 +10,7 @@ import { slackHandler } from "../src/handlers/slack";
 import { jsonHandler } from "../src/handlers/json";
 import { genericHandler } from "../src/handlers/generic";
 import { getHandler, extractText } from "../src/handlers/index";
-import { getBashHandler, gitDiffHandler, gitLogHandler, terraformPlanHandler, gitStatusHandler, packageInstallHandler, testRunnerHandler, dockerPsHandler, buildToolHandler, ghHandler, compilerDiagnosticsHandler } from "../src/handlers/bash";
+import { getBashHandler, normalizeCommand, gitDiffHandler, gitLogHandler, terraformPlanHandler, gitStatusHandler, gitRefsHandler, packageInstallHandler, testRunnerHandler, dockerPsHandler, buildToolHandler, ghHandler, compilerDiagnosticsHandler, grepHandler, lsHandler, findHandler } from "../src/handlers/bash";
 import { tavilyHandler } from "../src/handlers/tavily";
 import { databaseHandler } from "../src/handlers/database";
 import { sentryHandler } from "../src/handlers/sentry";
@@ -936,6 +936,32 @@ describe("getBashHandler", () => {
     expect(getBashHandler({ command: "go test ./..." })).toBe(testRunnerHandler);
   });
 
+  it("routes search/listing commands", () => {
+    expect(getBashHandler({ command: "grep -rn foo src/" })).toBe(grepHandler);
+    expect(getBashHandler({ command: "rg --no-heading foo" })).toBe(grepHandler);
+    expect(getBashHandler({ command: "git grep foo" })).toBe(grepHandler);
+    expect(getBashHandler({ command: "ls -la" })).toBe(lsHandler);
+    expect(getBashHandler({ command: "find . -name '*.ts'" })).toBe(findHandler);
+    expect(getBashHandler({ command: "fd '\\.ts$'" })).toBe(findHandler);
+  });
+
+  it("routes git branch/stash list/remote to gitRefsHandler", () => {
+    expect(getBashHandler({ command: "git branch -a" })).toBe(gitRefsHandler);
+    expect(getBashHandler({ command: "git stash list" })).toBe(gitRefsHandler);
+    expect(getBashHandler({ command: "git remote -v" })).toBe(gitRefsHandler);
+  });
+
+  it("normalizes git global options so `git --no-pager diff` still routes (the fallback-gap fix)", () => {
+    expect(getBashHandler({ command: "git --no-pager diff" })).toBe(gitDiffHandler);
+    expect(getBashHandler({ command: "git -C /some/repo diff HEAD~1" })).toBe(gitDiffHandler);
+    expect(getBashHandler({ command: "git -c core.pager=cat log --oneline" })).toBe(gitLogHandler);
+  });
+
+  it("unwraps a leading `cd <dir> && ` before routing", () => {
+    expect(getBashHandler({ command: "cd /home/u/repo && git diff" })).toBe(gitDiffHandler);
+    expect(normalizeCommand("cd x && git --no-pager show abc")).toBe("git show abc");
+  });
+
   it("routes gh commands to ghHandler", () => {
     expect(getBashHandler({ command: "gh pr list" })).toBe(ghHandler);
     expect(getBashHandler({ command: "gh issue list" })).toBe(ghHandler);
@@ -1138,6 +1164,97 @@ describe("compilerDiagnosticsHandler", () => {
   it("falls back to shell when output has no diagnostics at all", () => {
     const { summary } = compilerDiagnosticsHandler("Bash", makeOutput("Compiling...\nDone in 1.2s\n", "", 0));
     expect(summary).toContain("[bash ·");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// grep / ls / find / git refs (search + VCS listing handlers)
+// ---------------------------------------------------------------------------
+
+describe("grepHandler", () => {
+  const out = (stdout: string) => JSON.stringify({ stdout, stderr: "", exit_code: 0 });
+
+  it("summarises match count + files and caps the sample without dropping the count", () => {
+    const lines = Array.from({ length: 90 }, (_, i) =>
+      `src/mod${i % 6}/file.ts:${i + 1}:  const x = doThing(${i})`);
+    const { summary, originalSize } = grepHandler("Bash", out(lines.join("\n")));
+    expect(summary).toMatch(/grep — 90 matches in 6 files/);
+    expect(summary).toContain("+50 more matches"); // 90 - 40 cap
+    expect(Buffer.byteLength(summary, "utf8")).toBeLessThan(originalSize);
+  });
+
+  it("reports no matches on empty output", () => {
+    expect(grepHandler("Bash", out("")).summary).toContain("no matches");
+  });
+
+  it("falls back to shell when output is not file:line:content", () => {
+    const prose = Array.from({ length: 30 }, () => "just some prose without the colon-number shape").join("\n");
+    expect(grepHandler("Bash", out(prose)).summary).toContain("[bash ·");
+  });
+});
+
+describe("lsHandler", () => {
+  const out = (stdout: string) => JSON.stringify({ stdout, stderr: "", exit_code: 0 });
+
+  it("counts dirs vs files for long format", () => {
+    const rows = [
+      "total 40",
+      "drwxr-xr-x 2 u g 4096 Jan 1 00:00 src",
+      "drwxr-xr-x 2 u g 4096 Jan 1 00:00 tests",
+      "-rw-r--r-- 1 u g  100 Jan 1 00:00 README.md",
+      "-rw-r--r-- 1 u g  200 Jan 1 00:00 package.json",
+    ];
+    const { summary } = lsHandler("Bash", out(rows.join("\n")));
+    expect(summary).toMatch(/ls — 4 entries \(2 dirs, 2 files\)/);
+    expect(summary).toContain("README.md");
+  });
+
+  it("collapses recursive -R output to directory counts", () => {
+    const rows = [
+      "./src:", "a.ts", "b.ts", "",
+      "./src/lib:", "c.ts", "",
+      "./tests:", "x.test.ts",
+    ];
+    const { summary } = lsHandler("Bash", out(rows.join("\n")));
+    expect(summary).toMatch(/ls -R — 3 directories/);
+  });
+});
+
+describe("findHandler", () => {
+  const out = (stdout: string) => JSON.stringify({ stdout, stderr: "", exit_code: 0 });
+
+  it("reports path count and caps the sample", () => {
+    const paths = Array.from({ length: 120 }, (_, i) => `./src/deep/path/file${i}.ts`);
+    const { summary, originalSize } = findHandler("Bash", out(paths.join("\n")));
+    expect(summary).toContain("find — 120 paths");
+    expect(summary).toContain("+80 more paths");
+    expect(Buffer.byteLength(summary, "utf8")).toBeLessThan(originalSize);
+  });
+
+  it("falls back when output is mostly find errors, not paths", () => {
+    const errs = Array.from({ length: 20 }, (_, i) => `find: '/root/x${i}': Permission denied`).join("\n");
+    expect(findHandler("Bash", out(errs)).summary).toContain("[bash ·");
+  });
+});
+
+describe("gitRefsHandler", () => {
+  const out = (stdout: string) => JSON.stringify({ stdout, stderr: "", exit_code: 0 });
+
+  it("summarises git branch with current + local/remote counts", () => {
+    const rows = ["* main", "  feat/a", "  feat/b", "  remotes/origin/main", "  remotes/origin/feat/a"];
+    const { summary } = gitRefsHandler("Bash", out(rows.join("\n")));
+    expect(summary).toMatch(/git branch — 3 local, 2 remote \(on main\)/);
+  });
+
+  it("summarises git stash list entries", () => {
+    const rows = ["stash@{0}: WIP on main: abc123 msg", "stash@{1}: On feat: def456 other"];
+    expect(gitRefsHandler("Bash", out(rows.join("\n"))).summary).toContain("git stash — 2 entries");
+  });
+
+  it("summarises git remote -v", () => {
+    const rows = ["origin\tgit@github.com:x/y.git (fetch)", "origin\tgit@github.com:x/y.git (push)"];
+    const { summary } = gitRefsHandler("Bash", out(rows.join("\n")));
+    expect(summary).toContain("git remote — 1 remote");
   });
 });
 
