@@ -19917,11 +19917,13 @@ function getSessionDays(db) {
 function getStats(db, project_key) {
   const row = db.prepare(`
     SELECT
-      COUNT(*) as total_items,
-      COALESCE(SUM(original_size), 0) as total_original_bytes,
-      COALESCE(SUM(summary_size), 0) as total_summary_bytes,
+      COALESCE(SUM(CASE WHEN tool_name != 'recall__note' THEN 1 ELSE 0 END), 0) as total_items,
+      COALESCE(SUM(CASE WHEN tool_name != 'recall__note' THEN original_size ELSE 0 END), 0) as total_original_bytes,
+      COALESCE(SUM(CASE WHEN tool_name != 'recall__note' THEN summary_size ELSE 0 END), 0) as total_summary_bytes,
       COALESCE(SUM(pinned), 0) as pinned_items,
-      COALESCE(SUM(CASE WHEN pinned = 1 THEN original_size ELSE 0 END), 0) as pinned_bytes
+      COALESCE(SUM(CASE WHEN pinned = 1 THEN original_size ELSE 0 END), 0) as pinned_bytes,
+      COALESCE(SUM(CASE WHEN tool_name = 'recall__note' THEN 1 ELSE 0 END), 0) as note_items,
+      COALESCE(SUM(CASE WHEN tool_name = 'recall__note' THEN original_size ELSE 0 END), 0) as note_bytes
     FROM stored_outputs
     WHERE project_key = ?
   `).get(project_key);
@@ -21471,21 +21473,22 @@ function toolSessionSummary(db, projectKey, args) {
 function toolStats(db, projectKey, args = {}) {
   const stats = getStats(db, projectKey);
   const sessionDays = getSessionDays(db);
-  if (stats.total_items === 0) {
+  if (stats.total_items === 0 && stats.note_items === 0) {
     return `[recall: no data stored for this project yet]`;
   }
-  const saved = stats.total_original_bytes - stats.total_summary_bytes;
-  const reductionPctVal = ((1 - stats.compression_ratio) * 100).toFixed(1);
-  const tokensSaved = Math.floor(saved / 4);
-  const lines = [
-    `Session stats for current project:`,
-    `  Items stored:      ${stats.total_items}`,
-    `  Original size:     ${formatBytes(stats.total_original_bytes)}`,
-    `  Compressed size:   ${formatBytes(stats.total_summary_bytes)}`,
-    `  Saved:             ${formatBytes(saved)} (${reductionPctVal}% reduction)`,
-    `  ~Tokens saved:     ~${tokensSaved.toLocaleString()}`,
-    `  Session days:      ${sessionDays.length}`
-  ];
+  const lines = [`Session stats for current project:`];
+  if (stats.total_items > 0) {
+    const saved = stats.total_original_bytes - stats.total_summary_bytes;
+    const reductionPctVal = ((1 - stats.compression_ratio) * 100).toFixed(1);
+    const tokensSaved = Math.floor(saved / 4);
+    lines.push(`  Intercepted items: ${stats.total_items}`, `  Original size:     ${formatBytes(stats.total_original_bytes)}`, `  Compressed size:   ${formatBytes(stats.total_summary_bytes)}`, `  Saved:             ${formatBytes(saved)} (${reductionPctVal}% reduction)`, `  ~Tokens saved:     ~${tokensSaved.toLocaleString()}`);
+  } else {
+    lines.push(`  Intercepted items: 0 (no tool output compressed yet)`);
+  }
+  lines.push(`  Session days:      ${sessionDays.length}`);
+  if (stats.note_items > 0) {
+    lines.push(`  Notes/memory:      ${stats.note_items} item${stats.note_items === 1 ? "" : "s"}` + ` (${formatBytes(stats.note_bytes)}) \u2014 stored memory, not interception`);
+  }
   if (stats.pinned_items > 0) {
     const maxPinnedMb = loadConfig().store.max_pinned_mb;
     const maxBytes = maxPinnedMb * 1024 * 1024;

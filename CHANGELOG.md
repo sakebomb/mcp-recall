@@ -6,6 +6,10 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Fixed
+
+- **`recall__stats` no longer lets stored `recall__note` memory inflate the interception savings figure.** The savings headline (item count, sizes, reduction %, tokens saved) and `compression_ratio` are computed over *intercepted tool output only*; `recall__note` items — including bulk backends such as memoree-sync that write thousands of pinned notes under one project key — are excluded from those figures and reported on a separate `Notes/memory` line. Previously a project sharing its key with such a backend reported a reduction dominated by the notes: on one real store the headline read "91.3% reduction across 13,565 items" while the actual interception was 49.5% over 2,581 items. Pin-budget accounting (`pinned_items`/`pinned_bytes`, used for the `store.max_pinned_mb` warning) stays store-wide, since notes are pinned and do consume that budget. The reported reduction number may now look lower — it reflects real interception rather than mixed-in memory. `Stats` gains `note_items`/`note_bytes`; `total_*` now count interception only (the `Items stored` line is relabelled `Intercepted items`).
+
 ## [1.12.0] — 2026-08-02
 
 ### Added
