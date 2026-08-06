@@ -611,16 +611,13 @@ export function toolStats(
     return `[recall: no data stored for this project yet]`;
   }
 
-  const saved = stats.total_original_bytes - stats.total_summary_bytes;
-  const reductionPctVal = ((1 - stats.compression_ratio) * 100).toFixed(1);
-
-  // Rough token savings: ~4 bytes per token
-  const tokensSaved = Math.floor(saved / 4);
-
   // Savings figures cover intercepted tool output only; recall__note memory is
   // reported on its own line so a bulk note backend can't inflate/dilute them.
   const lines = [`Session stats for current project:`];
   if (stats.total_items > 0) {
+    const saved = stats.total_original_bytes - stats.total_summary_bytes;
+    const reductionPctVal = ((1 - stats.compression_ratio) * 100).toFixed(1);
+    const tokensSaved = Math.floor(saved / 4); // rough: ~4 bytes per token
     lines.push(
       `  Intercepted items: ${stats.total_items}`,
       `  Original size:     ${formatBytes(stats.total_original_bytes)}`,
