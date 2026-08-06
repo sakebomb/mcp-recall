@@ -607,7 +607,7 @@ export function toolStats(
   const stats = getStats(db, projectKey);
   const sessionDays = getSessionDays(db);
 
-  if (stats.total_items === 0) {
+  if (stats.total_items === 0 && stats.note_items === 0) {
     return `[recall: no data stored for this project yet]`;
   }
 
@@ -617,15 +617,27 @@ export function toolStats(
   // Rough token savings: ~4 bytes per token
   const tokensSaved = Math.floor(saved / 4);
 
-  const lines = [
-    `Session stats for current project:`,
-    `  Items stored:      ${stats.total_items}`,
-    `  Original size:     ${formatBytes(stats.total_original_bytes)}`,
-    `  Compressed size:   ${formatBytes(stats.total_summary_bytes)}`,
-    `  Saved:             ${formatBytes(saved)} (${reductionPctVal}% reduction)`,
-    `  ~Tokens saved:     ~${tokensSaved.toLocaleString()}`,
-    `  Session days:      ${sessionDays.length}`,
-  ];
+  // Savings figures cover intercepted tool output only; recall__note memory is
+  // reported on its own line so a bulk note backend can't inflate/dilute them.
+  const lines = [`Session stats for current project:`];
+  if (stats.total_items > 0) {
+    lines.push(
+      `  Intercepted items: ${stats.total_items}`,
+      `  Original size:     ${formatBytes(stats.total_original_bytes)}`,
+      `  Compressed size:   ${formatBytes(stats.total_summary_bytes)}`,
+      `  Saved:             ${formatBytes(saved)} (${reductionPctVal}% reduction)`,
+      `  ~Tokens saved:     ~${tokensSaved.toLocaleString()}`,
+    );
+  } else {
+    lines.push(`  Intercepted items: 0 (no tool output compressed yet)`);
+  }
+  lines.push(`  Session days:      ${sessionDays.length}`);
+  if (stats.note_items > 0) {
+    lines.push(
+      `  Notes/memory:      ${stats.note_items} item${stats.note_items === 1 ? "" : "s"}` +
+        ` (${formatBytes(stats.note_bytes)}) — stored memory, not interception`
+    );
+  }
 
   // Pin-budget awareness: pinned items are exempt from eviction and bounded
   // separately by store.max_pinned_mb, which recall__pin enforces at pin time.
