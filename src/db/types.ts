@@ -57,14 +57,22 @@ export interface ForgetOptions {
 
 /** Aggregate storage statistics for a project. */
 export interface Stats {
+  /** Interception items only (`recall__note` memory is excluded). */
   total_items: number;
+  /** Original bytes of intercepted output (excludes `recall__note`). */
   total_original_bytes: number;
+  /** Summary bytes of intercepted output (excludes `recall__note`). */
   total_summary_bytes: number;
+  /** Compression ratio over intercepted output only — the meaningful savings figure. */
   compression_ratio: number;
-  /** Number of pinned items (exempt from eviction). */
+  /** Number of pinned items (exempt from eviction). Store-wide, includes notes. */
   pinned_items: number;
-  /** Sum of `original_size` across pinned items — bytes eviction cannot reclaim. */
+  /** Sum of `original_size` across pinned items — bytes eviction cannot reclaim. Store-wide. */
   pinned_bytes: number;
+  /** `recall__note` items — stored memory, not interception. Reported separately so it never dilutes the savings figure. */
+  note_items: number;
+  /** Sum of `original_size` across `recall__note` items. */
+  note_bytes: number;
 }
 
 /** Options for the session-orientation context snapshot. */
