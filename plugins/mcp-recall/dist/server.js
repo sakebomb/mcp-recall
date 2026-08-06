@@ -21476,11 +21476,11 @@ function toolStats(db, projectKey, args = {}) {
   if (stats.total_items === 0 && stats.note_items === 0) {
     return `[recall: no data stored for this project yet]`;
   }
-  const saved = stats.total_original_bytes - stats.total_summary_bytes;
-  const reductionPctVal = ((1 - stats.compression_ratio) * 100).toFixed(1);
-  const tokensSaved = Math.floor(saved / 4);
   const lines = [`Session stats for current project:`];
   if (stats.total_items > 0) {
+    const saved = stats.total_original_bytes - stats.total_summary_bytes;
+    const reductionPctVal = ((1 - stats.compression_ratio) * 100).toFixed(1);
+    const tokensSaved = Math.floor(saved / 4);
     lines.push(`  Intercepted items: ${stats.total_items}`, `  Original size:     ${formatBytes(stats.total_original_bytes)}`, `  Compressed size:   ${formatBytes(stats.total_summary_bytes)}`, `  Saved:             ${formatBytes(saved)} (${reductionPctVal}% reduction)`, `  ~Tokens saved:     ~${tokensSaved.toLocaleString()}`);
   } else {
     lines.push(`  Intercepted items: 0 (no tool output compressed yet)`);
