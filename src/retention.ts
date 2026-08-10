@@ -19,10 +19,13 @@ export type RetentionLevel = "full" | "balanced" | "minimal";
 // valid later (network fetches / API calls) — worth keeping under `balanced`.
 const NETWORK_BASH_RE = /^(curl|wget|https?|xh)\b|^gh\s+api\b/;
 
-/** Strips a leading `cd <dir> && ` / `cd <dir>; ` wrapper so the real command is seen. */
+// Strips ALL leading `cd <dir> && ` / `cd <dir>; ` segments so a fetch chained
+// behind one or more directory changes (`cd a && cd b && curl …`) is still seen.
+const CD_PREFIX_RE = /^cd\s+[^\s&;]+\s*(?:&&|;)\s*/;
 function unwrapCommand(command: string): string {
-  const m = command.trim().match(/^cd\s+[^\s&;]+\s*(?:&&|;)\s*(.+)$/s);
-  return (m ? m[1]! : command).trim();
+  let c = command.trim();
+  while (CD_PREFIX_RE.test(c)) c = c.replace(CD_PREFIX_RE, "").trim();
+  return c;
 }
 
 /**

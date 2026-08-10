@@ -8594,9 +8594,12 @@ function extractHints(content, maxHints = DEFAULT_MAX_HINTS) {
 
 // src/retention.ts
 var NETWORK_BASH_RE = /^(curl|wget|https?|xh)\b|^gh\s+api\b/;
+var CD_PREFIX_RE = /^cd\s+[^\s&;]+\s*(?:&&|;)\s*/;
 function unwrapCommand(command) {
-  const m = command.trim().match(/^cd\s+[^\s&;]+\s*(?:&&|;)\s*(.+)$/s);
-  return (m ? m[1] : command).trim();
+  let c = command.trim();
+  while (CD_PREFIX_RE.test(c))
+    c = c.replace(CD_PREFIX_RE, "").trim();
+  return c;
 }
 function shouldRetainFullBody(level, toolName, command) {
   if (level === "full")

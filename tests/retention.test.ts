@@ -35,9 +35,12 @@ describe("shouldRetainFullBody", () => {
       }
     });
 
-    it("unwraps a leading `cd <dir> && ` before classifying", () => {
+    it("unwraps leading `cd <dir> && ` (including multi-hop) before classifying", () => {
       expect(shouldRetainFullBody("balanced", "Bash", "cd /repo && git diff")).toBe(false);
       expect(shouldRetainFullBody("balanced", "Bash", "cd /repo && curl https://x")).toBe(true);
+      // multi-hop cd chains must still reach the real command
+      expect(shouldRetainFullBody("balanced", "Bash", "cd /a && cd /b && curl https://x")).toBe(true);
+      expect(shouldRetainFullBody("balanced", "Bash", "cd /a; cd /b; git diff")).toBe(false);
     });
 
     it("keeps unknown intercepted tools (never silently drop the unrecognised)", () => {

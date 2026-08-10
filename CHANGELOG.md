@@ -15,7 +15,7 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ### Changed
 
-- **Default retention is now `balanced`, not full-body-for-everything.** On upgrade, reproducible Bash/git/test output is stored summary-only. This only affects *future* writes — existing stored bodies are untouched — and is reversible by setting `store.retention = "full"`. Set `minimal` to reclaim the most disk.
+- **Default retention is now `balanced`, not full-body-for-everything.** On upgrade, reproducible Bash/git/test output is stored summary-only. This only affects *future* writes — existing stored bodies are untouched — and is reversible for future writes by setting `store.retention = "full"` (content that keeps deduplicating against an existing summary-only row stays summary-only until it actually changes). Set `minimal` to reclaim the most disk. Note: `store.max_size_mb` and eviction account for each item's *original* size, so lowering retention shrinks bytes-on-disk but not the logical item budget before eviction fires.
 
 ### Fixed
 
