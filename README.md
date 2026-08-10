@@ -128,6 +128,19 @@ Real numbers from actual tool calls:
 
 Across a full session: 315 KB of tool output → 5.4 KB delivered to context.
 
+Command-aware Bash compression, per-output on representative fixtures (regenerate with `bun run bench`):
+
+| Command | Original | Delivered | Reduction |
+|---|---|---|---|
+| `tsc --noEmit` (60 errors) | 28.5 KB | 2.2 KB | 92.4% |
+| `find` (400 paths) | 19.0 KB | 2.0 KB | 89.6% |
+| `rg` (240 matches, 6 files) | 13.6 KB | 2.3 KB | 83.1% |
+| `ls -R` (deep tree) | 1.5 KB | 403 B | 73.8% |
+| `cargo build` (12 errors) | 1.9 KB | 581 B | 69.8% |
+| `git --no-pager diff` (18 files) | 4.1 KB | 1.3 KB | 68.0% |
+
+These are per-output compression ratios, not a whole-session token figure — most outputs are smaller and the generic fallback already caps long output. For real session savings, read `recall__stats` (which counts intercepted output only).
+
 Used daily in development of this project since the first release in March 2026, across 13 releases. No broken sessions, no data loss.
 
 ---

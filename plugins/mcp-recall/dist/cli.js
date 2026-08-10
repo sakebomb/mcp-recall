@@ -93,6 +93,7 @@ var require_package = __commonJS((exports, module) => {
       test: "bun test",
       dev: "bun --watch src/server.ts",
       typecheck: "tsc --noEmit",
+      bench: "bun run scripts/benchmark.ts",
       build: "bun build src/server.ts --target bun --outfile plugins/mcp-recall/dist/server.js && bun build src/cli.ts --target bun --outfile plugins/mcp-recall/dist/cli.js && cp hooks/hooks.json plugins/mcp-recall/hooks/hooks.json && rm -rf plugins/mcp-recall/profiles && cp -r profiles plugins/mcp-recall/profiles",
       prepare: "git config core.hooksPath .githooks"
     },
