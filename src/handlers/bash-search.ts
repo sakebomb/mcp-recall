@@ -83,9 +83,13 @@ export const lsHandler: Handler = (
     return { summary: "[ls — empty]", originalSize };
   }
 
-  // Recursive: directory-header lines like "./src:" grouping entries.
+  // Recursive: directory-header lines like "./src:" grouping entries. `ls -R`
+  // always blank-line-separates directory blocks; a plain listing that merely
+  // happens to contain colon-suffixed names has no such separator, so require
+  // one to avoid misreading a plain listing as recursive (and hiding files).
   const dirHeaders = nonEmpty.filter((l) => LS_RECURSIVE_HEADER_RE.test(l.trim()));
-  if (dirHeaders.length >= 2) {
+  const hasBlankSeparator = raw.some((l) => l.trim() === "");
+  if (dirHeaders.length >= 2 && hasBlankSeparator) {
     const entries = nonEmpty.length - dirHeaders.length - nonEmpty.filter((l) => /^total\s+\d+$/.test(l.trim())).length;
     const shown = dirHeaders.slice(0, MAX_SAMPLE).map((d) => `  ${d.trim()}`);
     const header = `ls -R — ${dirHeaders.length} directories, ~${entries} entries`;

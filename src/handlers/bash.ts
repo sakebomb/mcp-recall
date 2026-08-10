@@ -279,11 +279,6 @@ export const ghHandler: Handler = (
 // ---------------------------------------------------------------------------
 
 /**
- * Returns the appropriate handler for a native Bash tool call based on the
- * command string in `tool_input`. Falls back to the shell handler when no
- * CLI-specific handler matches.
- */
-/**
  * Normalises a Bash command so routing sees the real subcommand: unwraps a
  * leading `cd <dir> && …` and strips git global options (`--no-pager`, `-C
  * <path>`, `-c <k=v>`, `--paginate`, `-P`) that would otherwise push `git diff`
@@ -297,6 +292,11 @@ export function normalizeCommand(command: string): string {
   return c;
 }
 
+/**
+ * Returns the appropriate handler for a native Bash tool call based on the
+ * command string in `tool_input`. Falls back to the shell handler when no
+ * CLI-specific handler matches.
+ */
 export function getBashHandler(input: unknown): Handler {
   const rawCommand = extractCommand(input);
   if (!rawCommand) return shellHandler;

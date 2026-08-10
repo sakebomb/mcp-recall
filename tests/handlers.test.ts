@@ -1240,6 +1240,15 @@ describe("lsHandler", () => {
     const { summary } = lsHandler("Bash", out(rows.join("\n")));
     expect(summary).toMatch(/ls -R — 3 directories/);
   });
+
+  it("does NOT misread a plain listing with colon-suffixed names as recursive", () => {
+    // No blank-line group separators → not `ls -R`; filenames must not be hidden.
+    const rows = ["notes:", "todo:", "readme.md", "package.json"];
+    const { summary } = lsHandler("Bash", out(rows.join("\n")));
+    expect(summary).not.toContain("ls -R");
+    expect(summary).toContain("readme.md");
+    expect(summary).toContain("package.json");
+  });
 });
 
 describe("findHandler", () => {
@@ -1277,6 +1286,14 @@ describe("gitRefsHandler", () => {
     const rows = ["origin\tgit@github.com:x/y.git (fetch)", "origin\tgit@github.com:x/y.git (push)"];
     const { summary } = gitRefsHandler("Bash", out(rows.join("\n")));
     expect(summary).toContain("git remote — 1 remote");
+  });
+
+  it("shows an overflow line when git remote exceeds the cap (never drops silently)", () => {
+    const rows = Array.from({ length: 30 }, (_, i) =>
+      [`r${i}\tgit@github.com:o/r${i}.git (fetch)`, `r${i}\tgit@github.com:o/r${i}.git (push)`]).flat();
+    const { summary } = gitRefsHandler("Bash", out(rows.join("\n")));
+    expect(summary).toContain("git remote — 30 remotes");
+    expect(summary).toContain("+5 more");
   });
 });
 

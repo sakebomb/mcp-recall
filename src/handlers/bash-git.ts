@@ -240,7 +240,8 @@ export const gitRefsHandler: Handler = (
       if (m) remotes.set(m[1]!, m[2]!);
     }
     const shown = [...remotes].slice(0, MAX_REFS).map(([n, u]) => `  ${n} → ${u.slice(0, 80)}`);
-    return { summary: [`git remote — ${remotes.size} remote${remotes.size === 1 ? "" : "s"}`, ...shown].join("\n"), originalSize };
+    const overflow = remotes.size > MAX_REFS ? [`  … (+${remotes.size - MAX_REFS} more)`] : [];
+    return { summary: [`git remote — ${remotes.size} remote${remotes.size === 1 ? "" : "s"}`, ...shown, ...overflow].join("\n"), originalSize };
   }
 
   // git branch: "* main" / "  feat/x" / "  remotes/origin/y". A branch line is

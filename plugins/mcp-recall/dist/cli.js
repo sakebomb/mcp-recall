@@ -6682,7 +6682,8 @@ var gitRefsHandler = (toolName, output) => {
         remotes.set(m[1], m[2]);
     }
     const shown = [...remotes].slice(0, MAX_REFS).map(([n, u]) => `  ${n} \u2192 ${u.slice(0, 80)}`);
-    return { summary: [`git remote \u2014 ${remotes.size} remote${remotes.size === 1 ? "" : "s"}`, ...shown].join(`
+    const overflow = remotes.size > MAX_REFS ? [`  \u2026 (+${remotes.size - MAX_REFS} more)`] : [];
+    return { summary: [`git remote \u2014 ${remotes.size} remote${remotes.size === 1 ? "" : "s"}`, ...shown, ...overflow].join(`
 `), originalSize };
   }
   const refOf = (l) => l.replace(/^[*+]?\s*/, "").trim();
@@ -6998,7 +6999,8 @@ var lsHandler = (toolName, output) => {
     return { summary: "[ls \u2014 empty]", originalSize };
   }
   const dirHeaders = nonEmpty.filter((l) => LS_RECURSIVE_HEADER_RE.test(l.trim()));
-  if (dirHeaders.length >= 2) {
+  const hasBlankSeparator = raw.some((l) => l.trim() === "");
+  if (dirHeaders.length >= 2 && hasBlankSeparator) {
     const entries = nonEmpty.length - dirHeaders.length - nonEmpty.filter((l) => /^total\s+\d+$/.test(l.trim())).length;
     const shown2 = dirHeaders.slice(0, MAX_SAMPLE).map((d) => `  ${d.trim()}`);
     const header2 = `ls -R \u2014 ${dirHeaders.length} directories, ~${entries} entries`;
