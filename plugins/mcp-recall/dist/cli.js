@@ -6451,11 +6451,22 @@ function extractStdout(output) {
   return stripSshNoise(stripAnsi(text));
 }
 function extractStderr(output) {
-  if (output !== null && typeof output === "object") {
-    const obj = output;
-    if (typeof obj.stderr === "string")
-      return stripAnsi(obj.stderr);
-  }
+  const read = (o) => {
+    if (o !== null && typeof o === "object") {
+      const obj = o;
+      if (typeof obj.stderr === "string")
+        return stripAnsi(obj.stderr);
+    }
+    return null;
+  };
+  const direct = read(output);
+  if (direct !== null)
+    return direct;
+  try {
+    const parsed = read(JSON.parse(extractText(output)));
+    if (parsed !== null)
+      return parsed;
+  } catch {}
   return "";
 }
 function extractCommand(input) {
@@ -6465,6 +6476,26 @@ function extractCommand(input) {
       return obj.command.trim();
   }
   return null;
+}
+function extractExitCode(output) {
+  const read = (o) => {
+    if (o !== null && typeof o === "object") {
+      const obj = o;
+      if (typeof obj.exit_code === "number")
+        return obj.exit_code;
+      if (typeof obj.returncode === "number")
+        return obj.returncode;
+    }
+    return;
+  };
+  const direct = read(output);
+  if (direct !== undefined)
+    return direct;
+  try {
+    return read(JSON.parse(extractText(output)));
+  } catch {
+    return;
+  }
 }
 
 // src/handlers/bash-git.ts
@@ -6762,6 +6793,122 @@ var dockerPsHandler = (toolName, output) => {
   };
 };
 
+// src/handlers/bash-compilers.ts
+var MAX_MESSAGE_LEN = 100;
+var TSC_RE = /^(\S+?)\((\d+),(\d+)\):\s+(error|warning)\s+TS\d+:\s+(.+)$/;
+var FILE_LOC_RE = /^(\S*\.\w+):(\d+)(?::(\d+))?:\s+(?:(error|warning|note):\s+)?(.+)$/;
+var SEVERITY_RE = /^(error|warning)(?:\[[A-Za-z]?\d+\])?:\s+(.+)$/;
+var CARGO_LOC_RE = /^\s*-->\s+(\S+:\d+(?::\d+)?)/;
+var ESLINT_FILE_RE = /^(\/?\S+\.\w+)$/;
+var ESLINT_RE = /^\s+(\d+):(\d+)\s+(error|warning)\s+(.+?)(?:\s{2,}[\w./-]+)?$/;
+var CARGO_ERR_SUM_RE = /could not compile .*? due to (\d+) previous error/i;
+var CARGO_WARN_SUM_RE = /generated (\d+) warning/i;
+var ESLINT_SUM_RE = /[\u2716\u2717x]\s+\d+\s+problems?\s+\((\d+)\s+errors?,\s+(\d+)\s+warnings?\)/i;
+var RUFF_SUM_RE = /Found (\d+) error/i;
+var TSC_SUM_RE = /Found (\d+) errors?\b/i;
+var CARGO_ABORT_RE = /^error: aborting due to \d+ previous error/i;
+var clip = (s) => s.trim().slice(0, MAX_MESSAGE_LEN);
+var compilerDiagnosticsHandler = (toolName, output) => {
+  const stdout = extractStdout(output);
+  const stderr = extractStderr(output);
+  const combined = `${stdout}
+${stderr}`;
+  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const exitCode = extractExitCode(output);
+  const diagnostics = [];
+  let summaryErrors = null;
+  let summaryWarnings = null;
+  let eslintFile = null;
+  for (const raw of combined.split(`
+`)) {
+    const t = raw.trimEnd();
+    if (!t.trim())
+      continue;
+    let m;
+    if (m = t.match(CARGO_ERR_SUM_RE)) {
+      summaryErrors = (summaryErrors ?? 0) + parseInt(m[1], 10);
+      continue;
+    }
+    if (m = t.match(CARGO_WARN_SUM_RE)) {
+      summaryWarnings = parseInt(m[1], 10);
+      continue;
+    }
+    if (m = t.match(ESLINT_SUM_RE)) {
+      summaryErrors = parseInt(m[1], 10);
+      summaryWarnings = parseInt(m[2], 10);
+      continue;
+    }
+    if (m = t.match(RUFF_SUM_RE)) {
+      summaryErrors = parseInt(m[1], 10);
+      continue;
+    }
+    if (m = t.match(TSC_SUM_RE)) {
+      summaryErrors = parseInt(m[1], 10);
+      continue;
+    }
+    if (CARGO_ABORT_RE.test(t))
+      continue;
+    if (m = t.match(TSC_RE)) {
+      diagnostics.push({ severity: m[4], location: `${m[1]}:${m[2]}`, message: clip(m[5]), labeled: true });
+      continue;
+    }
+    if (m = t.match(FILE_LOC_RE)) {
+      const sev = m[4];
+      if (sev === "note")
+        continue;
+      diagnostics.push({ severity: sev ?? "error", location: `${m[1]}:${m[2]}`, message: clip(m[5]), labeled: sev !== undefined });
+      continue;
+    }
+    if (m = t.match(SEVERITY_RE)) {
+      diagnostics.push({ severity: m[1], location: null, message: clip(m[2]), labeled: true });
+      continue;
+    }
+    if (m = t.match(CARGO_LOC_RE)) {
+      const last = diagnostics[diagnostics.length - 1];
+      if (last && last.location === null)
+        last.location = m[1];
+      continue;
+    }
+    if (ESLINT_FILE_RE.test(t)) {
+      eslintFile = t.trim();
+      continue;
+    }
+    if (m = t.match(ESLINT_RE)) {
+      const loc = eslintFile ? `${eslintFile}:${m[1]}` : `${m[1]}:${m[2]}`;
+      diagnostics.push({ severity: m[3], location: loc, message: clip(m[4]), labeled: true });
+      continue;
+    }
+  }
+  if (diagnostics.length === 0 && summaryErrors === null && summaryWarnings === null) {
+    return shellHandler(toolName, output);
+  }
+  const cleanExit = exitCode === 0;
+  const visible = cleanExit ? diagnostics.filter((d) => d.labeled) : diagnostics;
+  const diagErrors = visible.filter((d) => d.severity === "error").length;
+  const diagWarnings = visible.filter((d) => d.severity === "warning").length;
+  const errorCount = summaryErrors ?? diagErrors;
+  const warnCount = summaryWarnings ?? diagWarnings;
+  const failed = exitCode !== undefined ? exitCode !== 0 : errorCount > 0;
+  const status = failed ? "\u2717" : "\u2713";
+  const parts = [];
+  if (errorCount > 0)
+    parts.push(`${errorCount} error${errorCount === 1 ? "" : "s"}`);
+  if (warnCount > 0)
+    parts.push(`${warnCount} warning${warnCount === 1 ? "" : "s"}`);
+  const headline = `${status} ${parts.length ? parts.join(", ") : failed ? "failed" : "clean"}`;
+  const ordered = [
+    ...visible.filter((d) => d.severity === "error"),
+    ...visible.filter((d) => d.severity === "warning")
+  ];
+  const shown = ordered.slice(0, MAX_BUILD_ERRORS).map((d) => {
+    const label = d.severity === "warning" ? "warn" : "error";
+    return `  ${label}: ${d.location ? d.location + " \u2014 " : ""}${d.message}`;
+  });
+  const overflow = ordered.length > MAX_BUILD_ERRORS ? [`  \u2026 (+${ordered.length - MAX_BUILD_ERRORS} more)`] : [];
+  return { summary: [headline, ...shown, ...overflow].join(`
+`), originalSize };
+};
+
 // src/handlers/bash.ts
 var TERRAFORM_RESOURCE_RE = /^\s+#\s+(.+?)\s+will\s+be\s+(created|destroyed|updated in-place|replaced)/;
 var TERRAFORM_PLAN_SUMMARY_RE = /^Plan:\s+.+$/m;
@@ -6882,7 +7029,7 @@ ${stderr}`.trim();
   if (errorLines.length === 0 && targetLines.length === 0) {
     return shellHandler(toolName, output);
   }
-  const exitCode = output?.exit_code;
+  const exitCode = extractExitCode(output);
   const status = exitCode === 0 ? "\u2713" : exitCode !== undefined ? "\u2717" : "";
   const lines = [`${status ? status + " " : ""}build`];
   if (errorLines.length > 0) {
@@ -6967,6 +7114,18 @@ function getBashHandler(input) {
     return buildToolHandler;
   if (/^gh\s+/.test(command))
     return ghHandler;
+  if (/^cargo\s+(build|check|clippy)(\s|$)/.test(command))
+    return compilerDiagnosticsHandler;
+  if (/^go\s+(build|vet)(\s|$)/.test(command))
+    return compilerDiagnosticsHandler;
+  if (/^(npx\s+)?tsc(\s|$)/.test(command))
+    return compilerDiagnosticsHandler;
+  if (/^(npx\s+)?eslint(\s|$)/.test(command))
+    return compilerDiagnosticsHandler;
+  if (/^ruff(\s|$)/.test(command))
+    return compilerDiagnosticsHandler;
+  if (/^(npm|pnpm|yarn|bun)\s+run\s+(typecheck|lint|build|check)(\s|$)/.test(command))
+    return compilerDiagnosticsHandler;
   return shellHandler;
 }
 

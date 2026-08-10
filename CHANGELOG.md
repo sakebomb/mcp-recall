@@ -6,6 +6,14 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Added
+
+- **Command-aware Bash compression for compilers, typecheckers, and linters.** `cargo build`/`check`/`clippy`, `go build`/`vet`, `tsc`, `eslint`, `ruff`, and `npm`/`pnpm`/`yarn`/`bun run typecheck`/`lint`/`build` now route to a diagnostics handler that collapses verbose build output to a headline error/warning count plus the individual diagnostics (errors first, capped, with `file:line` locations) — measured at ~94% byte reduction on a large `tsc` run — while the full output stays retrievable via `recall__*`. Pass/fail is driven by the command's exit code when available, so it never reports success on a non-zero exit *and* never fabricates a failure on a clean one (an incidental `host:port: message` line on a passing `*run build` won't read as an error); it falls back to the raw shell handler whenever it cannot recognise any diagnostics, so an unparsed failure is shown head/tail rather than hidden.
+
+### Fixed
+
+- **`stderr` is no longer dropped from Bash tool output.** Native Bash responses arrive as a JSON string (`{exit_code, stdout, stderr}`), but the shared `extractStderr` helper only handled the object shape and returned `""` for the string form — so every CLI-aware Bash handler (build, package-install, test-runner) silently lost `stderr`, where compilers and many tools write their errors. It now parses the JSON-string shape symmetrically with `extractStdout`. Relatedly, `buildToolHandler`'s ✓/✗ status marker read `exit_code` directly off the (string) payload and was always blank in production; it now uses the shared `extractExitCode`.
+
 ## [1.12.0] — 2026-08-02
 
 ### Added

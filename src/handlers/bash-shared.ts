@@ -31,9 +31,22 @@ export function extractStdout(output: unknown): string {
 }
 
 export function extractStderr(output: unknown): string {
-  if (output !== null && typeof output === "object") {
-    const obj = output as Record<string, unknown>;
-    if (typeof obj.stderr === "string") return stripAnsi(obj.stderr);
+  const read = (o: unknown): string | null => {
+    if (o !== null && typeof o === "object") {
+      const obj = o as Record<string, unknown>;
+      if (typeof obj.stderr === "string") return stripAnsi(obj.stderr);
+    }
+    return null;
+  };
+  const direct = read(output);
+  if (direct !== null) return direct;
+  // Bash tool responses arrive as a JSON string: {exit_code, stdout, stderr}.
+  // Parse it so stderr-bound output (compiler/build errors) isn't dropped.
+  try {
+    const parsed = read(JSON.parse(extractText(output)));
+    if (parsed !== null) return parsed;
+  } catch {
+    /* not a structured JSON response */
   }
   return "";
 }
@@ -44,4 +57,27 @@ export function extractCommand(input: unknown): string | null {
     if (typeof obj.command === "string") return obj.command.trim();
   }
   return null;
+}
+
+/**
+ * Reads the process exit code from a native Bash tool response, handling both
+ * the object shape `{exit_code}` and the JSON-string shape the Bash tool
+ * actually delivers. Returns undefined when no code is present.
+ */
+export function extractExitCode(output: unknown): number | undefined {
+  const read = (o: unknown): number | undefined => {
+    if (o !== null && typeof o === "object") {
+      const obj = o as Record<string, unknown>;
+      if (typeof obj.exit_code === "number") return obj.exit_code;
+      if (typeof obj.returncode === "number") return obj.returncode;
+    }
+    return undefined;
+  };
+  const direct = read(output);
+  if (direct !== undefined) return direct;
+  try {
+    return read(JSON.parse(extractText(output)));
+  } catch {
+    return undefined;
+  }
 }

@@ -10,16 +10,19 @@ import {
   extractStdout,
   extractStderr,
   extractCommand,
+  extractExitCode,
   MAX_TERRAFORM_RESOURCES,
   MAX_BUILD_ERRORS,
 } from "./bash-shared";
 import { gitDiffHandler, gitLogHandler, gitStatusHandler } from "./bash-git";
 import { testRunnerHandler } from "./bash-test";
 import { dockerPsHandler } from "./bash-docker";
+import { compilerDiagnosticsHandler } from "./bash-compilers";
 
 export { gitDiffHandler, gitLogHandler, gitStatusHandler } from "./bash-git";
 export { testRunnerHandler } from "./bash-test";
 export { dockerPsHandler } from "./bash-docker";
+export { compilerDiagnosticsHandler } from "./bash-compilers";
 
 // ---------------------------------------------------------------------------
 // terraform plan
@@ -180,8 +183,9 @@ export const buildToolHandler: Handler = (
     return shellHandler(toolName, output);
   }
 
-  // Determine overall result from exit code if available
-  const exitCode = (output as Record<string, unknown>)?.exit_code;
+  // Determine overall result from exit code if available. Use extractExitCode so
+  // the JSON-string Bash payload is parsed (a bare property read is undefined).
+  const exitCode = extractExitCode(output);
   const status = exitCode === 0 ? "✓" : exitCode !== undefined ? "✗" : "";
 
   const lines: string[] = [`${status ? status + " " : ""}build`];
@@ -294,6 +298,15 @@ export function getBashHandler(input: unknown): Handler {
       /^docker\s+compose\s+ps(\s|$)/.test(command)) return dockerPsHandler;
   if (/^(make|just)(\s|$)/.test(command)) return buildToolHandler;
   if (/^gh\s+/.test(command)) return ghHandler;
+  // Compiler / linter diagnostics (build, typecheck, lint). Safe to route
+  // broadly: the handler falls back to shell when it finds no diagnostics.
+  if (/^cargo\s+(build|check|clippy)(\s|$)/.test(command)) return compilerDiagnosticsHandler;
+  if (/^go\s+(build|vet)(\s|$)/.test(command)) return compilerDiagnosticsHandler;
+  if (/^(npx\s+)?tsc(\s|$)/.test(command)) return compilerDiagnosticsHandler;
+  if (/^(npx\s+)?eslint(\s|$)/.test(command)) return compilerDiagnosticsHandler;
+  if (/^ruff(\s|$)/.test(command)) return compilerDiagnosticsHandler;
+  if (/^(npm|pnpm|yarn|bun)\s+run\s+(typecheck|lint|build|check)(\s|$)/.test(command))
+    return compilerDiagnosticsHandler;
 
   return shellHandler;
 }
