@@ -10,6 +10,7 @@ import {
   checkOutputDedup,
   hashContent,
   evictIfNeeded,
+  retrievePeek,
   retrieveSnippet,
   searchOutputs,
   listOutputs,
@@ -382,6 +383,43 @@ describe("db", () => {
       const stats = getStats(db, PROJECT_KEY);
       expect(stats.note_items).toBe(0);
       expect(stats.note_bytes).toBe(0);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // storeOutput retention (full_retained)
+  // -------------------------------------------------------------------------
+
+  describe("storeOutput retention", () => {
+    it("retains body and chunks by default", () => {
+      const body = "x".repeat(3000);
+      const r = storeOutput(db, makeInput({ full_content: body }));
+      expect(r.full_retained).toBe(1);
+      expect(retrieveOutput(db, r.id)!.full_content).toBe(body);
+      // chunked → peek (no query) returns content
+      expect(retrievePeek(db, r.id, undefined)).not.toBeNull();
+    });
+
+    it("summary-only: drops body and chunks but keeps summary", () => {
+      const body = "line\n".repeat(500);
+      const r = storeOutput(db, makeInput({
+        tool_name: "Bash", full_content: body, original_size: body.length, full_retained: 0,
+      }));
+      expect(r.full_retained).toBe(0);
+      const row = retrieveOutput(db, r.id)!;
+      expect(row.full_content).toBe("");        // body not persisted
+      expect(row.summary).toBe("Summary of issues"); // summary preserved
+      expect(retrievePeek(db, r.id, undefined)).toBeNull(); // no chunks written
+    });
+
+    it("summary-only still stores output_hash so dedup keeps working", () => {
+      const body = "duplicate output body ".repeat(50);
+      storeOutput(db, makeInput({
+        tool_name: "Bash", full_content: body, original_size: body.length, full_retained: 0,
+      }));
+      // The dedup key is the hash of the REAL content, not the dropped body.
+      const hit = checkOutputDedup(db, PROJECT_KEY, hashContent(body));
+      expect(hit).not.toBeNull();
     });
   });
 

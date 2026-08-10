@@ -86,6 +86,39 @@ describe("import round-trip", () => {
     }
   });
 
+  test("preserves summary-only rows (full_retained) across export/import", async () => {
+    // A retained row and a summary-only row (body dropped per store.retention).
+    storeOutput(sourceDb, makeInput({ tool_name: "mcp__github__list_issues", full_content: "kept body" }));
+    storeOutput(sourceDb, makeInput({
+      tool_name: "Bash", full_content: "dropped body ".repeat(50), full_retained: 0,
+    }));
+
+    const dumpFile = makeTmpPath();
+    const targetDbPath = makeTmpPath(".db");
+    exportToFile(dumpFile);
+
+    process.env.RECALL_DB_PATH = targetDbPath;
+    try {
+      await handleImportCommand([dumpFile]);
+      const targetDb = new Database(targetDbPath);
+      const bash = targetDb
+        .prepare(`SELECT full_retained, full_content FROM stored_outputs WHERE tool_name = 'Bash'`)
+        .get() as { full_retained: number; full_content: string };
+      const chunkCount = (
+        targetDb.prepare(
+          `SELECT COUNT(*) n FROM content_chunks c JOIN stored_outputs s ON s.id = c.output_id WHERE s.tool_name = 'Bash'`
+        ).get() as { n: number }
+      ).n;
+      targetDb.close();
+
+      expect(bash.full_retained).toBe(0);   // flag round-trips, not silently reset to 1
+      expect(bash.full_content).toBe("");    // body stays dropped
+      expect(chunkCount).toBe(0);            // no chunks re-indexed for a bodiless row
+    } finally {
+      delete process.env.RECALL_DB_PATH;
+    }
+  });
+
   test("remaps project key to current project by default", async () => {
     storeOutput(sourceDb, makeInput());
     const dumpFile = makeTmpPath();

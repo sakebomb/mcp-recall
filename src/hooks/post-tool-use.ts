@@ -6,6 +6,7 @@ import { findSecrets } from "../secrets";
 import { getHandler, extractText } from "../handlers/index";
 import { extractHints } from "../hints";
 import { getDb, defaultDbPath, storeOutput, checkDedup, checkOutputDedup, hashContent, evictIfNeeded } from "../db/index";
+import { shouldRetainFullBody } from "../retention";
 import { formatBytes } from "../format";
 import { log } from "../log";
 
@@ -98,7 +99,19 @@ export function handlePostToolUse(raw: string): HookOutput {
     return {};
   }
 
-  // 7. Store
+  // 7. Store. Retention policy decides whether to keep the verbatim body or
+  //    store the row summary-only (store.retention). The command drives the
+  //    balanced-tier classification for Bash; output_hash (computed above from
+  //    the real content) is passed through so dedup works even when the body is
+  //    dropped.
+  const command =
+    tool_input !== null && typeof tool_input === "object" &&
+    typeof (tool_input as { command?: unknown }).command === "string"
+      ? (tool_input as { command: string }).command
+      : undefined;
+  const full_retained = shouldRetainFullBody(config.store.retention, tool_name, command) ? 1 : 0;
+  if (!full_retained) log.debug(`summary-only · ${tool_name} · retention=${config.store.retention}`);
+
   const stored = storeOutput(db, {
     project_key: projectKey,
     session_id,
@@ -108,6 +121,7 @@ export function handlePostToolUse(raw: string): HookOutput {
     original_size: originalSize,
     input_hash: input_hash ?? undefined,
     output_hash, // reuse the hash computed above for the dedup check
+    full_retained,
   });
 
   // 8. Evict if store exceeds size limit

@@ -17,6 +17,11 @@ export const RecallConfigSchema = z.object({
     // a non-finite half-life would collapse decay eviction to plain LFU. See #228.
     eviction_half_life_days: z.number().positive().finite(),
     gc_reminder_mb: z.number().nonnegative(),
+    // Which intercepted outputs keep a retrievable full body vs. summary-only.
+    // full = keep every body; balanced = keep MCP/web/API + network Bash, drop
+    // reproducible Bash (git/tests/ls/grep/cat…); minimal = drop all intercepted
+    // bodies. Notes always keep their body regardless. See #-retention.
+    retention: z.enum(["full", "balanced", "minimal"]),
   }),
   retrieve: z.object({
     default_max_bytes: z.number().positive(),
@@ -54,6 +59,7 @@ const DEFAULTS: RecallConfig = {
     stale_item_days: 3,
     eviction_half_life_days: 7,
     gc_reminder_mb: 2048,
+    retention: "balanced",
   },
   retrieve: {
     default_max_bytes: 8192,

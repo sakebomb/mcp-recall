@@ -43,6 +43,9 @@ const StoredOutputSchema = z.object({
   access_count: z.number().int().nonnegative(),
   last_accessed: z.number().int().nullable(),
   input_hash: z.string().nullable(),
+  // Optional for backward-compat with dumps predating store.retention: an older
+  // dump has no flag and its rows all carry bodies, so default to retained (1).
+  full_retained: z.number().int().min(0).max(1).optional().default(1),
 });
 
 type StoredOutputRow = z.infer<typeof StoredOutputSchema>;
@@ -130,8 +133,8 @@ function importItems(
       INSERT INTO stored_outputs
         (id, project_key, session_id, tool_name, summary, full_content,
          original_size, summary_size, created_at, pinned, access_count,
-         last_accessed, input_hash)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         last_accessed, input_hash, full_retained)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       item.id,
       projectKey,
@@ -145,13 +148,17 @@ function importItems(
       item.pinned,
       item.access_count,
       item.last_accessed,
-      item.input_hash
+      item.input_hash,
+      item.full_retained
     );
 
-    // Re-index chunks (FTS trigger covers stored_outputs but not content_chunks)
-    const chunks = chunkText(item.full_content);
-    for (let i = 0; i < chunks.length; i++) {
-      chunkStmt.run(item.id, i, chunks[i]!);
+    // Re-index chunks (FTS trigger covers stored_outputs but not content_chunks).
+    // Summary-only rows have no body, so skip — matches storeOutput's behavior.
+    if (item.full_retained) {
+      const chunks = chunkText(item.full_content);
+      for (let i = 0; i < chunks.length; i++) {
+        chunkStmt.run(item.id, i, chunks[i]!);
+      }
     }
 
     return existing ? "overwritten" as const : "imported" as const;

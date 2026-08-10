@@ -14,6 +14,8 @@ export interface StoredOutput {
   last_accessed: number | null;
   input_hash: string | null;
   output_hash: string | null;
+  /** 1 = verbatim body persisted (retrievable); 0 = summary-only (body dropped per store.retention). */
+  full_retained: number;
 }
 
 /** Input required to persist a new compressed tool output. */
@@ -27,6 +29,13 @@ export interface StoreInput {
   input_hash?: string;
   /** Precomputed sha256 of full_content; storeOutput derives it when omitted. */
   output_hash?: string;
+  /**
+   * 1 (default) persists the verbatim body and chunks it for retrieval; 0 stores
+   * the row summary-only — `full_content` is not persisted and no chunks are
+   * written, but `output_hash` is still derived from the real content so dedup
+   * keeps working.
+   */
+  full_retained?: number;
 }
 
 /** Options for full-text search across stored outputs. */

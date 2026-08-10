@@ -75,30 +75,37 @@ export function storeOutput(db: Database, input: StoreInput): StoredOutput {
   // Content hash enables dedup of identical output across different calls,
   // independent of the input-based hash. Reuse the caller's hash when provided
   // (the hook already computed it for the dedup check) to avoid re-hashing.
+  // Hash the REAL content even for summary-only rows, so dedup still works.
   const output_hash = input.output_hash ?? hashContent(input.full_content);
+
+  // Summary-only rows (store.retention) drop the verbatim body and its chunks.
+  // full_content is NOT NULL, so store an empty string rather than NULL.
+  const full_retained = input.full_retained ?? 1;
+  const bodyToStore = full_retained ? input.full_content : "";
 
   const insertAndChunk = db.transaction(() => {
     db.prepare(`
       INSERT INTO stored_outputs
         (id, project_key, session_id, tool_name, summary, full_content,
-         original_size, summary_size, created_at, input_hash, output_hash)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         original_size, summary_size, created_at, input_hash, output_hash, full_retained)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, input.project_key, input.session_id, input.tool_name,
-      input.summary, input.full_content, input.original_size,
-      summary_size, created_at, input_hash, output_hash
+      input.summary, bodyToStore, input.original_size,
+      summary_size, created_at, input_hash, output_hash, full_retained
     );
 
-    storeChunks(db, id, input.full_content);
+    if (full_retained) storeChunks(db, id, input.full_content);
   });
 
   insertAndChunk();
 
   return {
-    id, ...input, summary_size, created_at,
+    id, ...input, full_content: bodyToStore, summary_size, created_at,
     pinned: 0, access_count: 0, last_accessed: null,
     input_hash: input_hash,
     output_hash,
+    full_retained,
   };
 }
 

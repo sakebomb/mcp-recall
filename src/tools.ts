@@ -133,6 +133,17 @@ export function toolRetrieve(db: Database, args: RetrieveArgs): string {
 
   const mode: RetrieveMode = args.mode ?? (args.query ? "peek" : "summary");
 
+  // Summary-only rows (store.retention) have no verbatim body or chunks. Return
+  // the summary with an explicit note instead of an empty/misleading result, so
+  // full/peek never silently yields nothing.
+  if (item.full_retained === 0 && mode !== "summary") {
+    return (
+      `${header}\n${item.summary}\n` +
+      `[recall: full body was not retained for this output (summary-only) — ` +
+      `re-run the command for current output, or set store.retention="full" to keep future bodies]`
+    );
+  }
+
   const fullCapped = (): string => {
     const content = item.full_content.slice(0, cap);
     const truncated =
