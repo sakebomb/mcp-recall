@@ -70,6 +70,20 @@ describe("MCP tool handlers", () => {
       expect(result).toContain("Something is broken");
     });
 
+    it("summary-only row: full/peek degrade to summary + a not-retained note", () => {
+      const stored = storeOutput(db, makeInput({
+        tool_name: "Bash", full_content: "big body ".repeat(200), full_retained: 0,
+      }));
+      const full = toolRetrieve(db, { id: stored.id, mode: "full" });
+      expect(full).toContain("full body was not retained");
+      expect(full).not.toContain("big body big body"); // never emits the (absent) body
+      const peek = toolRetrieve(db, { id: stored.id, mode: "peek" });
+      expect(peek).toContain("full body was not retained");
+      // summary mode is unaffected and carries no scary note
+      const summary = toolRetrieve(db, { id: stored.id, mode: "summary" });
+      expect(summary).not.toContain("not retained");
+    });
+
     it("applies max_bytes cap to full_content", () => {
       const stored = storeOutput(db, makeInput({ full_content: "x".repeat(2000) }));
       const result = toolRetrieve(db, { id: stored.id, query: "x", max_bytes: 100 });

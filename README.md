@@ -384,6 +384,18 @@ eviction_half_life_days = 7
 # Set to 0 to disable the reminder. Detection is cheap (no databases are opened).
 gc_reminder_mb = 2048
 
+# Which intercepted outputs keep a retrievable verbatim body vs. summary-only:
+#   full     = keep every intercepted body (most retrievable, most disk)
+#   balanced = keep MCP/web/API results + network Bash (curl/wget/gh api);
+#              store reproducible Bash (git, tests, ls, grep, cat, docker ps,
+#              build/lint) summary-only — an old copy is either trivially
+#              reproducible or misleadingly stale, so it isn't worth keeping
+#   minimal  = drop every intercepted body (summary-only for all)
+# Notes stored via recall__note always keep their body, regardless of this.
+# Only affects future writes; existing bodies are untouched. When a body was
+# not retained, recall__retrieve returns the summary and says to re-run.
+retention = "balanced"
+
 [retrieve]
 # Max bytes returned by recall__retrieve(mode: "full").
 # Claude can override this per-call via the max_bytes parameter.

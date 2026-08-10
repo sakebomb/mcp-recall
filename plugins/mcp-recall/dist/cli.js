@@ -5066,7 +5066,8 @@ var RecallConfigSchema = exports_external.object({
     pin_recommendation_threshold: exports_external.number().int().positive(),
     stale_item_days: exports_external.number().int().positive(),
     eviction_half_life_days: exports_external.number().positive().finite(),
-    gc_reminder_mb: exports_external.number().nonnegative()
+    gc_reminder_mb: exports_external.number().nonnegative(),
+    retention: exports_external.enum(["full", "balanced", "minimal"])
   }),
   retrieve: exports_external.object({
     default_max_bytes: exports_external.number().positive()
@@ -5094,7 +5095,8 @@ var DEFAULTS = {
     pin_recommendation_threshold: 5,
     stale_item_days: 3,
     eviction_half_life_days: 7,
-    gc_reminder_mb: 2048
+    gc_reminder_mb: 2048,
+    retention: "balanced"
   },
   retrieve: {
     default_max_bytes: 8192
@@ -5257,7 +5259,8 @@ var MIGRATIONS = [
   "ALTER TABLE stored_outputs ADD COLUMN last_accessed INTEGER",
   "ALTER TABLE stored_outputs ADD COLUMN input_hash TEXT",
   "ALTER TABLE stored_outputs ADD COLUMN output_hash TEXT",
-  "CREATE INDEX IF NOT EXISTS idx_so_output_hash ON stored_outputs(project_key, output_hash)"
+  "CREATE INDEX IF NOT EXISTS idx_so_output_hash ON stored_outputs(project_key, output_hash)",
+  "ALTER TABLE stored_outputs ADD COLUMN full_retained INTEGER NOT NULL DEFAULT 1"
 ];
 function applyMigrations(db) {
   for (const sql of MIGRATIONS) {
@@ -5353,26 +5356,31 @@ function storeOutput(db, input) {
   const created_at = Math.floor(Date.now() / 1000);
   const input_hash = input.input_hash ?? null;
   const output_hash = input.output_hash ?? hashContent(input.full_content);
+  const full_retained = input.full_retained ?? 1;
+  const bodyToStore = full_retained ? input.full_content : "";
   const insertAndChunk = db.transaction(() => {
     db.prepare(`
       INSERT INTO stored_outputs
         (id, project_key, session_id, tool_name, summary, full_content,
-         original_size, summary_size, created_at, input_hash, output_hash)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, input.project_key, input.session_id, input.tool_name, input.summary, input.full_content, input.original_size, summary_size, created_at, input_hash, output_hash);
-    storeChunks(db, id, input.full_content);
+         original_size, summary_size, created_at, input_hash, output_hash, full_retained)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, input.project_key, input.session_id, input.tool_name, input.summary, bodyToStore, input.original_size, summary_size, created_at, input_hash, output_hash, full_retained);
+    if (full_retained)
+      storeChunks(db, id, input.full_content);
   });
   insertAndChunk();
   return {
     id,
     ...input,
+    full_content: bodyToStore,
     summary_size,
     created_at,
     pinned: 0,
     access_count: 0,
     last_accessed: null,
     input_hash,
-    output_hash
+    output_hash,
+    full_retained
   };
 }
 function hashContent(content) {
@@ -8584,6 +8592,25 @@ function extractHints(content, maxHints = DEFAULT_MAX_HINTS) {
   })).sort((a, b) => b.score - a.score || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)).slice(0, maxHints).map((t) => t.display);
 }
 
+// src/retention.ts
+var NETWORK_BASH_RE = /^(curl|wget|https?|xh)\b|^gh\s+api\b/;
+function unwrapCommand(command) {
+  const m = command.trim().match(/^cd\s+[^\s&;]+\s*(?:&&|;)\s*(.+)$/s);
+  return (m ? m[1] : command).trim();
+}
+function shouldRetainFullBody(level, toolName, command) {
+  if (level === "full")
+    return true;
+  if (level === "minimal")
+    return false;
+  if (toolName.startsWith("mcp__"))
+    return true;
+  if (toolName === "Bash") {
+    return NETWORK_BASH_RE.test(unwrapCommand(command ?? ""));
+  }
+  return true;
+}
+
 // src/hooks/post-tool-use.ts
 function handlePostToolUse(raw) {
   let parsed;
@@ -8638,6 +8665,10 @@ ${cached2.summary}`,
     log.debug(`SKIP no-compression \xB7 ${tool_name} \xB7 ${formatBytes(summarySize)} \u2265 ${formatBytes(originalSize)}`);
     return {};
   }
+  const command = tool_input !== null && typeof tool_input === "object" && typeof tool_input.command === "string" ? tool_input.command : undefined;
+  const full_retained = shouldRetainFullBody(config.store.retention, tool_name, command) ? 1 : 0;
+  if (!full_retained)
+    log.debug(`summary-only \xB7 ${tool_name} \xB7 retention=${config.store.retention}`);
   const stored = storeOutput(db, {
     project_key: projectKey,
     session_id,
@@ -8646,7 +8677,8 @@ ${cached2.summary}`,
     full_content: fullContent,
     original_size: originalSize,
     input_hash: input_hash ?? undefined,
-    output_hash
+    output_hash,
+    full_retained
   });
   evictIfNeeded(db, projectKey, config.store.max_size_mb, config.store.eviction_half_life_days);
   const reduction = ((1 - summarySize / originalSize) * 100).toFixed(0);

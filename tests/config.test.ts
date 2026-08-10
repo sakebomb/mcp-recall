@@ -29,6 +29,7 @@ describe("loadConfig", () => {
     expect(config.store.stale_item_days).toBe(3);
     expect(config.store.eviction_half_life_days).toBe(7);
     expect(config.store.gc_reminder_mb).toBe(2048);
+    expect(config.store.retention).toBe("balanced");
     expect(config.retrieve.default_max_bytes).toBe(8192);
     expect(config.denylist.additional).toEqual([]);
     expect(config.denylist.override_defaults).toEqual([]);
@@ -60,6 +61,16 @@ describe("loadConfig", () => {
     writeFileSync(TEST_CONFIG_PATH, '[store]\nkey = "invalid_value"\n');
     const config = loadConfig();
     expect(config.store.key).toBe("git_root");
+  });
+
+  it("accepts a valid store.retention override", () => {
+    writeFileSync(TEST_CONFIG_PATH, '[store]\nretention = "minimal"\n');
+    expect(loadConfig().store.retention).toBe("minimal");
+  });
+
+  it("falls back to defaults on an invalid store.retention", () => {
+    writeFileSync(TEST_CONFIG_PATH, '[store]\nretention = "bogus"\n');
+    expect(loadConfig().store.retention).toBe("balanced");
   });
 
   it("falls back to defaults on malformed TOML", () => {

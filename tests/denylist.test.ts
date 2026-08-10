@@ -12,6 +12,7 @@ const baseConfig: RecallConfig = {
     stale_item_days: 3,
     eviction_half_life_days: 7,
     gc_reminder_mb: 2048,
+    retention: "balanced",
   },
   retrieve: { default_max_bytes: 8192 },
   denylist: { additional: [], override_defaults: [], allowlist: [] },
