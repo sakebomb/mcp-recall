@@ -209,3 +209,57 @@ export const gitStatusHandler: Handler = (
 
   return { summary: lines.join("\n"), originalSize };
 };
+
+// ---------------------------------------------------------------------------
+// git branch / stash list / remote -v — long ref listings
+// ---------------------------------------------------------------------------
+
+const MAX_REFS = 25;
+
+export const gitRefsHandler: Handler = (
+  toolName: string,
+  output: unknown
+): CompressionResult => {
+  const stdout = extractStdout(output);
+  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const lines = stdout.split("\n").filter((l) => l.trim());
+  if (lines.length === 0) return shellHandler(toolName, output);
+
+  // git stash list: "stash@{0}: WIP on ..."
+  if (lines.filter((l) => /^stash@\{\d+\}:/.test(l.trim())).length >= Math.ceil(lines.length * 0.5)) {
+    const shown = lines.slice(0, MAX_REFS).map((l) => `  ${l.trim().slice(0, 100)}`);
+    const overflow = lines.length > MAX_REFS ? [`  … (+${lines.length - MAX_REFS} more)`] : [];
+    return { summary: [`git stash — ${lines.length} entr${lines.length === 1 ? "y" : "ies"}`, ...shown, ...overflow].join("\n"), originalSize };
+  }
+
+  // git remote -v: "origin\tgit@...\t(fetch)"
+  if (lines.filter((l) => /\((fetch|push)\)\s*$/.test(l)).length >= Math.ceil(lines.length * 0.5)) {
+    const remotes = new Map<string, string>();
+    for (const l of lines) {
+      const m = l.match(/^(\S+)\s+(\S+)\s+\(fetch\)/);
+      if (m) remotes.set(m[1]!, m[2]!);
+    }
+    const shown = [...remotes].slice(0, MAX_REFS).map(([n, u]) => `  ${n} → ${u.slice(0, 80)}`);
+    const overflow = remotes.size > MAX_REFS ? [`  … (+${remotes.size - MAX_REFS} more)`] : [];
+    return { summary: [`git remote — ${remotes.size} remote${remotes.size === 1 ? "" : "s"}`, ...shown, ...overflow].join("\n"), originalSize };
+  }
+
+  // git branch: "* main" / "  feat/x" / "  remotes/origin/y". A branch line is
+  // the leading marker (`* `/`+ `/spaces) followed by a single whitespace-free ref.
+  const refOf = (l: string) => l.replace(/^[*+]?\s*/, "").trim();
+  const branchLines = lines.filter((l) => {
+    const r = refOf(l);
+    return r.length > 0 && !/\s/.test(r);
+  });
+  if (branchLines.length >= Math.ceil(lines.length * 0.5)) {
+    const current = lines.find((l) => l.trimStart().startsWith("* "));
+    const remotes = branchLines.filter((l) => l.includes("remotes/")).length;
+    const local = branchLines.length - remotes;
+    const header = `git branch — ${local} local${remotes ? `, ${remotes} remote` : ""}${current ? ` (on ${current.replace(/^\s*\*\s*/, "").trim()})` : ""}`;
+    const shown = branchLines.slice(0, MAX_REFS).map((l) => `  ${l.trim().slice(0, 80)}`);
+    const overflow = branchLines.length > MAX_REFS ? [`  … (+${branchLines.length - MAX_REFS} more)`] : [];
+    return { summary: [header, ...shown, ...overflow].join("\n"), originalSize };
+  }
+
+  return shellHandler(toolName, output);
+};

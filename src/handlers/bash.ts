@@ -14,15 +14,17 @@ import {
   MAX_TERRAFORM_RESOURCES,
   MAX_BUILD_ERRORS,
 } from "./bash-shared";
-import { gitDiffHandler, gitLogHandler, gitStatusHandler } from "./bash-git";
+import { gitDiffHandler, gitLogHandler, gitStatusHandler, gitRefsHandler } from "./bash-git";
 import { testRunnerHandler } from "./bash-test";
 import { dockerPsHandler } from "./bash-docker";
 import { compilerDiagnosticsHandler } from "./bash-compilers";
+import { grepHandler, lsHandler, findHandler } from "./bash-search";
 
-export { gitDiffHandler, gitLogHandler, gitStatusHandler } from "./bash-git";
+export { gitDiffHandler, gitLogHandler, gitStatusHandler, gitRefsHandler } from "./bash-git";
 export { testRunnerHandler } from "./bash-test";
 export { dockerPsHandler } from "./bash-docker";
 export { compilerDiagnosticsHandler } from "./bash-compilers";
+export { grepHandler, lsHandler, findHandler } from "./bash-search";
 
 // ---------------------------------------------------------------------------
 // terraform plan
@@ -277,17 +279,36 @@ export const ghHandler: Handler = (
 // ---------------------------------------------------------------------------
 
 /**
+ * Normalises a Bash command so routing sees the real subcommand: unwraps a
+ * leading `cd <dir> && …` and strips git global options (`--no-pager`, `-C
+ * <path>`, `-c <k=v>`, `--paginate`, `-P`) that would otherwise push `git diff`
+ * output to the generic shell fallback.
+ */
+export function normalizeCommand(command: string): string {
+  let c = command.trim();
+  const cd = c.match(/^cd\s+[^\s&;]+\s*(?:&&|;)\s*(.+)$/s);
+  if (cd) c = cd[1]!.trim();
+  c = c.replace(/^git\s+(?:(?:--no-pager|--paginate|-P)\s+|-[cC]\s+\S+\s+)+/, "git ");
+  return c;
+}
+
+/**
  * Returns the appropriate handler for a native Bash tool call based on the
  * command string in `tool_input`. Falls back to the shell handler when no
  * CLI-specific handler matches.
  */
 export function getBashHandler(input: unknown): Handler {
-  const command = extractCommand(input);
-  if (!command) return shellHandler;
+  const rawCommand = extractCommand(input);
+  if (!rawCommand) return shellHandler;
+  const command = normalizeCommand(rawCommand);
 
+  if (/^git\s+grep(\s|$)/.test(command)) return grepHandler;
   if (/^git\s+(diff|show)(\s|$)/.test(command)) return gitDiffHandler;
   if (/^git\s+log(\s|$)/.test(command)) return gitLogHandler;
   if (/^git\s+status(\s|$)/.test(command)) return gitStatusHandler;
+  if (/^git\s+branch(\s|$)/.test(command)) return gitRefsHandler;
+  if (/^git\s+stash\s+list(\s|$)/.test(command)) return gitRefsHandler;
+  if (/^git\s+remote(\s|$)/.test(command)) return gitRefsHandler;
   if (/^terraform\s+plan(\s|$)/.test(command)) return terraformPlanHandler;
   if (/^(npm|bun|yarn|pnpm)\s+install(\s|$)/.test(command) ||
       /^pip\d*\s+install(\s|$)/.test(command)) return packageInstallHandler;
@@ -307,6 +328,11 @@ export function getBashHandler(input: unknown): Handler {
   if (/^ruff(\s|$)/.test(command)) return compilerDiagnosticsHandler;
   if (/^(npm|pnpm|yarn|bun)\s+run\s+(typecheck|lint|build|check)(\s|$)/.test(command))
     return compilerDiagnosticsHandler;
+  // Search / listing — bulk is length, not structure. Handlers report the count
+  // + a capped sample and fall back to shell on an unexpected shape.
+  if (/^(grep|egrep|fgrep|rg|ag)(\s|$)/.test(command)) return grepHandler;
+  if (/^ls(\s|$)/.test(command)) return lsHandler;
+  if (/^(find|fd)(\s|$)/.test(command)) return findHandler;
 
   return shellHandler;
 }
