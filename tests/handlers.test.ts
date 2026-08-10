@@ -1139,6 +1139,28 @@ describe("compilerDiagnosticsHandler", () => {
     const { summary } = compilerDiagnosticsHandler("Bash", makeOutput("Compiling...\nDone in 1.2s\n", "", 0));
     expect(summary).toContain("[bash ·");
   });
+
+  it("SAFETY: an incidental host:port line on a clean exit does NOT fabricate a failure", () => {
+    // `foo run build` that logs a listening address, exit 0 — must stay ✓.
+    const stdout = "Compiling project...\nlocalhost.dev:8080: dev server listening\nBuild finished in 1.2s";
+    const { summary } = compilerDiagnosticsHandler("Bash", makeOutput(stdout, "", 0));
+    expect(summary).toContain("✓");
+    expect(summary).not.toContain("✗");
+    expect(summary).not.toContain("dev server listening"); // unlabeled line not shown as an error
+  });
+
+  it("does not double-list cargo's 'aborting due to N previous error' trailer", () => {
+    const stderr = [
+      "error[E0308]: mismatched types",
+      "  --> src/main.rs:10:20",
+      "error: aborting due to 1 previous error",
+      "error: could not compile `demo` (bin \"demo\") due to 1 previous error",
+    ].join("\n");
+    const { summary } = compilerDiagnosticsHandler("Bash", makeOutput("", stderr, 101));
+    expect(summary).toContain("1 error");
+    expect(summary).toContain("mismatched types");
+    expect(summary).not.toContain("aborting due to"); // trailer absorbed, not a diagnostic line
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1413,6 +1435,20 @@ describe("packageInstallHandler", () => {
     };
     const { summary } = packageInstallHandler("Bash", output);
     expect(summary).toContain("error:");
+  });
+
+  it("surfaces stderr when the Bash payload arrives as a JSON string (extractStderr fix)", () => {
+    // Production shape: the Bash tool delivers a JSON *string*, not an object.
+    // Before the extractStderr fix this stderr was silently dropped for every
+    // CLI-aware Bash handler — this guards the blast-radius claim.
+    const output = JSON.stringify({
+      stdout: "",
+      stderr: "npm error code E404\nnpm error 404 Not Found - missing-package",
+      exit_code: 1,
+    });
+    const { summary } = packageInstallHandler("Bash", output);
+    expect(summary).toContain("error:");
+    expect(summary).toContain("E404");
   });
 
   it("reports originalSize correctly", () => {

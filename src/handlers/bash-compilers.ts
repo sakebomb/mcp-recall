@@ -26,6 +26,10 @@ interface Diagnostic {
   severity: "error" | "warning";
   location: string | null;
   message: string;
+  /** True when the line carried an explicit severity word. An unlabeled
+   * `file:line: message` (go-style) defaults to "error" but is only trusted as a
+   * failure when the run didn't cleanly succeed — see the clean-exit filter. */
+  labeled: boolean;
 }
 
 const MAX_MESSAGE_LEN = 100;
@@ -50,6 +54,9 @@ const CARGO_WARN_SUM_RE = /generated (\d+) warning/i;
 const ESLINT_SUM_RE = /[✖✗x]\s+\d+\s+problems?\s+\((\d+)\s+errors?,\s+(\d+)\s+warnings?\)/i;
 const RUFF_SUM_RE = /Found (\d+) error/i;
 const TSC_SUM_RE = /Found (\d+) errors?\b/i;
+// cargo's boilerplate trailer — redundant with CARGO_ERR_SUM_RE's count, and
+// must not be parsed as another SEVERITY_RE diagnostic ("error: aborting …").
+const CARGO_ABORT_RE = /^error: aborting due to \d+ previous error/i;
 
 const clip = (s: string): string => s.trim().slice(0, MAX_MESSAGE_LEN);
 
@@ -80,22 +87,23 @@ export const compilerDiagnosticsHandler: Handler = (
     if ((m = t.match(ESLINT_SUM_RE))) { summaryErrors = parseInt(m[1]!, 10); summaryWarnings = parseInt(m[2]!, 10); continue; }
     if ((m = t.match(RUFF_SUM_RE))) { summaryErrors = parseInt(m[1]!, 10); continue; }
     if ((m = t.match(TSC_SUM_RE))) { summaryErrors = parseInt(m[1]!, 10); continue; }
+    if (CARGO_ABORT_RE.test(t)) continue; // redundant trailer, not a diagnostic
 
     // --- tsc paren form (check before FILE_LOC so TS codes are dropped) ---
     if ((m = t.match(TSC_RE))) {
-      diagnostics.push({ severity: m[4] as Diagnostic["severity"], location: `${m[1]}:${m[2]}`, message: clip(m[5]!) });
+      diagnostics.push({ severity: m[4] as Diagnostic["severity"], location: `${m[1]}:${m[2]}`, message: clip(m[5]!), labeled: true });
       continue;
     }
     // --- gcc / go / ruff file:line:col form ---
     if ((m = t.match(FILE_LOC_RE))) {
       const sev = m[4] as "error" | "warning" | "note" | undefined;
       if (sev === "note") continue;
-      diagnostics.push({ severity: sev ?? "error", location: `${m[1]}:${m[2]}`, message: clip(m[5]!) });
+      diagnostics.push({ severity: sev ?? "error", location: `${m[1]}:${m[2]}`, message: clip(m[5]!), labeled: sev !== undefined });
       continue;
     }
     // --- rustc / cargo bare severity ---
     if ((m = t.match(SEVERITY_RE))) {
-      diagnostics.push({ severity: m[1] as Diagnostic["severity"], location: null, message: clip(m[2]!) });
+      diagnostics.push({ severity: m[1] as Diagnostic["severity"], location: null, message: clip(m[2]!), labeled: true });
       continue;
     }
     // --- cargo "  --> loc" attaches to the previous locationless diagnostic ---
@@ -109,15 +117,10 @@ export const compilerDiagnosticsHandler: Handler = (
     // --- eslint indented diagnostic ---
     if ((m = t.match(ESLINT_RE))) {
       const loc = eslintFile ? `${eslintFile}:${m[1]}` : `${m[1]}:${m[2]}`;
-      diagnostics.push({ severity: m[3] as Diagnostic["severity"], location: loc, message: clip(m[4]!) });
+      diagnostics.push({ severity: m[3] as Diagnostic["severity"], location: loc, message: clip(m[4]!), labeled: true });
       continue;
     }
   }
-
-  const diagErrors = diagnostics.filter((d) => d.severity === "error").length;
-  const diagWarnings = diagnostics.filter((d) => d.severity === "warning").length;
-  const errorCount = summaryErrors ?? diagErrors;
-  const warnCount = summaryWarnings ?? diagWarnings;
 
   // Nothing recognisable — don't risk a wrong summary; show the raw output via
   // the shell handler so an unparsed failure is never hidden. (A non-zero exit
@@ -126,7 +129,21 @@ export const compilerDiagnosticsHandler: Handler = (
     return shellHandler(toolName, output);
   }
 
-  const failed = errorCount > 0 || (exitCode !== undefined && exitCode !== 0);
+  // On a KNOWN-clean exit, drop unlabeled "error" diagnostics: a go-style
+  // `file:line: message` only appears on a real failure, so on a passing run an
+  // incidental `host:port: message` line must not fabricate an error.
+  const cleanExit = exitCode === 0;
+  const visible = cleanExit ? diagnostics.filter((d) => d.labeled) : diagnostics;
+
+  const diagErrors = visible.filter((d) => d.severity === "error").length;
+  const diagWarnings = visible.filter((d) => d.severity === "warning").length;
+  const errorCount = summaryErrors ?? diagErrors;
+  const warnCount = summaryWarnings ?? diagWarnings;
+
+  // Pass/fail is authoritative from the exit code when we have it (never hide a
+  // failure, never fabricate one on success); fall back to the parsed error
+  // count only when the exit code is unknown.
+  const failed = exitCode !== undefined ? exitCode !== 0 : errorCount > 0;
   const status = failed ? "✗" : "✓";
   const parts: string[] = [];
   if (errorCount > 0) parts.push(`${errorCount} error${errorCount === 1 ? "" : "s"}`);
@@ -135,8 +152,8 @@ export const compilerDiagnosticsHandler: Handler = (
 
   // Errors first, then warnings; cap the total shown.
   const ordered = [
-    ...diagnostics.filter((d) => d.severity === "error"),
-    ...diagnostics.filter((d) => d.severity === "warning"),
+    ...visible.filter((d) => d.severity === "error"),
+    ...visible.filter((d) => d.severity === "warning"),
   ];
   const shown = ordered.slice(0, MAX_BUILD_ERRORS).map((d) => {
     const label = d.severity === "warning" ? "warn" : "error";

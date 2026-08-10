@@ -6806,6 +6806,7 @@ var CARGO_WARN_SUM_RE = /generated (\d+) warning/i;
 var ESLINT_SUM_RE = /[\u2716\u2717x]\s+\d+\s+problems?\s+\((\d+)\s+errors?,\s+(\d+)\s+warnings?\)/i;
 var RUFF_SUM_RE = /Found (\d+) error/i;
 var TSC_SUM_RE = /Found (\d+) errors?\b/i;
+var CARGO_ABORT_RE = /^error: aborting due to \d+ previous error/i;
 var clip = (s) => s.trim().slice(0, MAX_MESSAGE_LEN);
 var compilerDiagnosticsHandler = (toolName, output) => {
   const stdout = extractStdout(output);
@@ -6845,19 +6846,21 @@ ${stderr}`;
       summaryErrors = parseInt(m[1], 10);
       continue;
     }
+    if (CARGO_ABORT_RE.test(t))
+      continue;
     if (m = t.match(TSC_RE)) {
-      diagnostics.push({ severity: m[4], location: `${m[1]}:${m[2]}`, message: clip(m[5]) });
+      diagnostics.push({ severity: m[4], location: `${m[1]}:${m[2]}`, message: clip(m[5]), labeled: true });
       continue;
     }
     if (m = t.match(FILE_LOC_RE)) {
       const sev = m[4];
       if (sev === "note")
         continue;
-      diagnostics.push({ severity: sev ?? "error", location: `${m[1]}:${m[2]}`, message: clip(m[5]) });
+      diagnostics.push({ severity: sev ?? "error", location: `${m[1]}:${m[2]}`, message: clip(m[5]), labeled: sev !== undefined });
       continue;
     }
     if (m = t.match(SEVERITY_RE)) {
-      diagnostics.push({ severity: m[1], location: null, message: clip(m[2]) });
+      diagnostics.push({ severity: m[1], location: null, message: clip(m[2]), labeled: true });
       continue;
     }
     if (m = t.match(CARGO_LOC_RE)) {
@@ -6872,18 +6875,20 @@ ${stderr}`;
     }
     if (m = t.match(ESLINT_RE)) {
       const loc = eslintFile ? `${eslintFile}:${m[1]}` : `${m[1]}:${m[2]}`;
-      diagnostics.push({ severity: m[3], location: loc, message: clip(m[4]) });
+      diagnostics.push({ severity: m[3], location: loc, message: clip(m[4]), labeled: true });
       continue;
     }
   }
-  const diagErrors = diagnostics.filter((d) => d.severity === "error").length;
-  const diagWarnings = diagnostics.filter((d) => d.severity === "warning").length;
-  const errorCount = summaryErrors ?? diagErrors;
-  const warnCount = summaryWarnings ?? diagWarnings;
   if (diagnostics.length === 0 && summaryErrors === null && summaryWarnings === null) {
     return shellHandler(toolName, output);
   }
-  const failed = errorCount > 0 || exitCode !== undefined && exitCode !== 0;
+  const cleanExit = exitCode === 0;
+  const visible = cleanExit ? diagnostics.filter((d) => d.labeled) : diagnostics;
+  const diagErrors = visible.filter((d) => d.severity === "error").length;
+  const diagWarnings = visible.filter((d) => d.severity === "warning").length;
+  const errorCount = summaryErrors ?? diagErrors;
+  const warnCount = summaryWarnings ?? diagWarnings;
+  const failed = exitCode !== undefined ? exitCode !== 0 : errorCount > 0;
   const status = failed ? "\u2717" : "\u2713";
   const parts = [];
   if (errorCount > 0)
@@ -6892,8 +6897,8 @@ ${stderr}`;
     parts.push(`${warnCount} warning${warnCount === 1 ? "" : "s"}`);
   const headline = `${status} ${parts.length ? parts.join(", ") : failed ? "failed" : "clean"}`;
   const ordered = [
-    ...diagnostics.filter((d) => d.severity === "error"),
-    ...diagnostics.filter((d) => d.severity === "warning")
+    ...visible.filter((d) => d.severity === "error"),
+    ...visible.filter((d) => d.severity === "warning")
   ];
   const shown = ordered.slice(0, MAX_BUILD_ERRORS).map((d) => {
     const label = d.severity === "warning" ? "warn" : "error";
@@ -7024,7 +7029,7 @@ ${stderr}`.trim();
   if (errorLines.length === 0 && targetLines.length === 0) {
     return shellHandler(toolName, output);
   }
-  const exitCode = output?.exit_code;
+  const exitCode = extractExitCode(output);
   const status = exitCode === 0 ? "\u2713" : exitCode !== undefined ? "\u2717" : "";
   const lines = [`${status ? status + " " : ""}build`];
   if (errorLines.length > 0) {

@@ -10,6 +10,7 @@ import {
   extractStdout,
   extractStderr,
   extractCommand,
+  extractExitCode,
   MAX_TERRAFORM_RESOURCES,
   MAX_BUILD_ERRORS,
 } from "./bash-shared";
@@ -182,8 +183,9 @@ export const buildToolHandler: Handler = (
     return shellHandler(toolName, output);
   }
 
-  // Determine overall result from exit code if available
-  const exitCode = (output as Record<string, unknown>)?.exit_code;
+  // Determine overall result from exit code if available. Use extractExitCode so
+  // the JSON-string Bash payload is parsed (a bare property read is undefined).
+  const exitCode = extractExitCode(output);
   const status = exitCode === 0 ? "✓" : exitCode !== undefined ? "✗" : "";
 
   const lines: string[] = [`${status ? status + " " : ""}build`];
