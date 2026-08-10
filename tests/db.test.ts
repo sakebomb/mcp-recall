@@ -351,6 +351,38 @@ describe("db", () => {
       expect(stats.pinned_items).toBe(0);
       expect(stats.pinned_bytes).toBe(0);
     });
+
+    it("excludes recall__note from interception totals and reports notes separately", () => {
+      // Real interception: a Bash output compressed 1000 -> 100 bytes.
+      storeOutput(db, makeInput({ tool_name: "Bash", original_size: 1000, summary: "x".repeat(100) }));
+      // Stored memory (e.g. an external memoree-sync backend) — NOT interception.
+      storeOutput(db, makeInput({ tool_name: "recall__note", original_size: 5000, summary: "y".repeat(4900) }));
+      const stats = getStats(db, PROJECT_KEY);
+      // Headline savings reflect interception only.
+      expect(stats.total_items).toBe(1);
+      expect(stats.total_original_bytes).toBe(1000);
+      expect(stats.compression_ratio).toBeCloseTo(0.1, 5);
+      // Notes are reported, not hidden.
+      expect(stats.note_items).toBe(1);
+      expect(stats.note_bytes).toBe(5000);
+    });
+
+    it("counts pinned notes in the store-wide pin budget even though they are not interception", () => {
+      const n = storeOutput(db, makeInput({ tool_name: "recall__note", original_size: 5000 }));
+      pinOutput(db, n.id, PROJECT_KEY, true);
+      const stats = getStats(db, PROJECT_KEY);
+      expect(stats.total_items).toBe(0);       // not interception
+      expect(stats.note_items).toBe(1);
+      expect(stats.pinned_items).toBe(1);      // but does consume the pin budget
+      expect(stats.pinned_bytes).toBe(5000);
+    });
+
+    it("reports zero notes when there are none", () => {
+      storeOutput(db, makeInput({ tool_name: "Bash", original_size: 200 }));
+      const stats = getStats(db, PROJECT_KEY);
+      expect(stats.note_items).toBe(0);
+      expect(stats.note_bytes).toBe(0);
+    });
   });
 
   // -------------------------------------------------------------------------

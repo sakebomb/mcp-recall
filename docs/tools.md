@@ -116,7 +116,11 @@ recall__note(text, title?)
 
 ## `recall__stats`
 
-Aggregate session efficiency report.
+Aggregate session efficiency report. The savings figures (items, sizes,
+reduction, tokens saved) cover **intercepted tool output only**; `recall__note`
+memory is reported on its own `Notes/memory` line so a bulk note backend can't
+dilute the compression number. Pinned-budget accounting stays store-wide, since
+notes are pinned and do count against `store.max_pinned_mb`.
 
 ```
 recall__stats()
@@ -126,12 +130,13 @@ Example output:
 
 ```
 Session stats for current project:
-  Items stored:      23
+  Intercepted items: 23
   Original size:     342KB
   Compressed size:   6.1KB
   Saved:             98.2% reduction
   ~Tokens saved:     ~84,000
   Session days:      4
+  Notes/memory:      5 items (18KB) — stored memory, not interception
 
 By tool (sorted by original size):
   mcp__playwright__browser_snapshot    4 items    215KB →  1.2KB    99%

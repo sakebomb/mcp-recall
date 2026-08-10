@@ -494,8 +494,27 @@ describe("MCP tool handlers", () => {
       storeOutput(db, makeInput({ original_size: 10000, summary: "x".repeat(100) }));
       storeOutput(db, makeInput({ original_size: 5000, summary: "y".repeat(50) }));
       const result = toolStats(db, PROJECT_KEY);
-      expect(result).toContain("Items stored:      2");
+      expect(result).toContain("Intercepted items: 2");
       expect(result).toContain("reduction");
+    });
+
+    it("reports recall__note memory separately without diluting the interception reduction", () => {
+      // One real interception (10000 -> 100 = 99% reduction)...
+      storeOutput(db, makeInput({ tool_name: "Bash", original_size: 10000, summary: "x".repeat(100) }));
+      // ...plus a large barely-compressed note backend dump that must NOT drag the headline down.
+      storeOutput(db, makeInput({ tool_name: "recall__note", original_size: 50000, summary: "y".repeat(49000) }));
+      const result = toolStats(db, PROJECT_KEY);
+      expect(result).toContain("Intercepted items: 1");
+      expect(result).toContain("99.0% reduction");   // reflects interception, not the note
+      expect(result).toMatch(/Notes\/memory:\s+1 item .*not interception/);
+    });
+
+    it("still reports a notes-only project instead of saying no data", () => {
+      storeOutput(db, makeInput({ tool_name: "recall__note", original_size: 5000 }));
+      const result = toolStats(db, PROJECT_KEY);
+      expect(result).not.toContain("no data stored");
+      expect(result).toContain("Intercepted items: 0");
+      expect(result).toMatch(/Notes\/memory:\s+1 item/);
     });
 
     it("shows session days count", () => {
