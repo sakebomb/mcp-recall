@@ -10229,7 +10229,8 @@ var StoredOutputSchema = exports_external.object({
   pinned: exports_external.number().int().min(0).max(1),
   access_count: exports_external.number().int().nonnegative(),
   last_accessed: exports_external.number().int().nullable(),
-  input_hash: exports_external.string().nullable()
+  input_hash: exports_external.string().nullable(),
+  full_retained: exports_external.number().int().min(0).max(1).optional().default(1)
 });
 var ExportSchema = exports_external.array(StoredOutputSchema);
 function dryRunCount(dbPath, items, overwrite) {
@@ -10278,12 +10279,14 @@ function importItems(dbPath, items, opts) {
       INSERT INTO stored_outputs
         (id, project_key, session_id, tool_name, summary, full_content,
          original_size, summary_size, created_at, pinned, access_count,
-         last_accessed, input_hash)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(item.id, projectKey, item.session_id, item.tool_name, item.summary, item.full_content, item.original_size, item.summary_size, item.created_at, item.pinned, item.access_count, item.last_accessed, item.input_hash);
-    const chunks = chunkText(item.full_content);
-    for (let i = 0;i < chunks.length; i++) {
-      chunkStmt.run(item.id, i, chunks[i]);
+         last_accessed, input_hash, full_retained)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(item.id, projectKey, item.session_id, item.tool_name, item.summary, item.full_content, item.original_size, item.summary_size, item.created_at, item.pinned, item.access_count, item.last_accessed, item.input_hash, item.full_retained);
+    if (item.full_retained) {
+      const chunks = chunkText(item.full_content);
+      for (let i = 0;i < chunks.length; i++) {
+        chunkStmt.run(item.id, i, chunks[i]);
+      }
     }
     return existing ? "overwritten" : "imported";
   });
