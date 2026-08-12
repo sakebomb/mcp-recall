@@ -963,6 +963,17 @@ describe("db", () => {
       }
     });
 
+    it("pin budget sums effective size across a MIX of full-retained and summary-only rows", () => {
+      const cap = 0.001; // ~1049 bytes
+      // Full row: effective == original 600, pinned first → running total 600.
+      const full = storeOutput(db, makeInput({ original_size: 600, summary: "f", full_retained: 1 }));
+      expect(pinOutput(db, full.id, PROJECT_KEY, true, cap).ok).toBe(true);
+      // Summary-only row: original 900 (600 + 900 = 1500 would blow an original-based
+      // cap) but its effective size is the tiny summary, so 600 + ~1 fits → ok.
+      const summ = storeOutput(db, makeInput({ original_size: 900, summary: "s", full_retained: 0 }));
+      expect(pinOutput(db, summ.id, PROJECT_KEY, true, cap).ok).toBe(true);
+    });
+
     it("getStats reports pinned bytes at effective size for summary-only rows", () => {
       const summary = "short summary";
       const s = storeOutput(db, makeInput({ original_size: 5000, summary, full_retained: 0 }));

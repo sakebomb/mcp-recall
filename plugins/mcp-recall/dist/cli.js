@@ -10286,7 +10286,7 @@ function importItems(dbPath, items, opts) {
          original_size, summary_size, created_at, pinned, access_count,
          last_accessed, input_hash, full_retained)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(item.id, projectKey, item.session_id, item.tool_name, item.summary, item.full_content, item.original_size, item.summary_size, item.created_at, item.pinned, item.access_count, item.last_accessed, item.input_hash, item.full_retained);
+    `).run(item.id, projectKey, item.session_id, item.tool_name, item.summary, item.full_retained ? item.full_content : "", item.original_size, item.summary_size, item.created_at, item.pinned, item.access_count, item.last_accessed, item.input_hash, item.full_retained);
     if (item.full_retained) {
       const chunks = chunkText(item.full_content);
       for (let i = 0;i < chunks.length; i++) {
