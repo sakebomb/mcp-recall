@@ -94,17 +94,18 @@ export function storeOutput(db: Database, input: StoreInput): StoredOutput {
   // full_content is NOT NULL, so store an empty string rather than NULL.
   const full_retained = input.full_retained ?? 1;
   const bodyToStore = full_retained ? input.full_content : "";
+  const command_fp = input.command_fp ?? null;
 
   const insertAndChunk = db.transaction(() => {
     db.prepare(`
       INSERT INTO stored_outputs
         (id, project_key, session_id, tool_name, summary, full_content,
-         original_size, summary_size, created_at, input_hash, output_hash, full_retained)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         original_size, summary_size, created_at, input_hash, output_hash, full_retained, command_fp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, input.project_key, input.session_id, input.tool_name,
       input.summary, bodyToStore, input.original_size,
-      summary_size, created_at, input_hash, output_hash, full_retained
+      summary_size, created_at, input_hash, output_hash, full_retained, command_fp
     );
 
     if (full_retained) storeChunks(db, id, input.full_content);
@@ -118,6 +119,7 @@ export function storeOutput(db: Database, input: StoreInput): StoredOutput {
     input_hash: input_hash,
     output_hash,
     full_retained,
+    command_fp,
   };
 }
 

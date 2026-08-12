@@ -16,6 +16,8 @@ export interface StoredOutput {
   output_hash: string | null;
   /** 1 = verbatim body persisted (retrievable); 0 = summary-only (body dropped per store.retention). */
   full_retained: number;
+  /** Privacy-safe command family fingerprint (Bash rows only; NULL otherwise or pre-migration). See #251. */
+  command_fp: string | null;
 }
 
 /** Input required to persist a new compressed tool output. */
@@ -36,6 +38,8 @@ export interface StoreInput {
    * keeps working.
    */
   full_retained?: number;
+  /** Privacy-safe command family fingerprint (Bash only); omitted/undefined stores NULL. See #251. */
+  command_fp?: string | null;
 }
 
 /** Options for full-text search across stored outputs. */
@@ -127,6 +131,14 @@ export interface SessionSummaryData {
 /** Per-tool row returned by {@link getToolBreakdown}. */
 export interface ToolBreakdownRow {
   tool_name: string;
+  items: number;
+  original_bytes: number;
+  summary_bytes: number;
+}
+
+/** Per-command-family row returned by {@link getBashCommandBreakdown} (#251). */
+export interface CommandBreakdownRow {
+  command_fp: string;   // "unknown" for pre-migration / untagged Bash rows
   items: number;
   original_bytes: number;
   summary_bytes: number;

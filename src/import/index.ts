@@ -46,6 +46,9 @@ const StoredOutputSchema = z.object({
   // Optional for backward-compat with dumps predating store.retention: an older
   // dump has no flag and its rows all carry bodies, so default to retained (1).
   full_retained: z.number().int().min(0).max(1).optional().default(1),
+  // Optional for backward-compat with dumps predating per-command attribution
+  // (#251): missing → NULL, reported as "unknown".
+  command_fp: z.string().nullable().optional().default(null),
 });
 
 type StoredOutputRow = z.infer<typeof StoredOutputSchema>;
@@ -133,8 +136,8 @@ function importItems(
       INSERT INTO stored_outputs
         (id, project_key, session_id, tool_name, summary, full_content,
          original_size, summary_size, created_at, pinned, access_count,
-         last_accessed, input_hash, full_retained)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         last_accessed, input_hash, full_retained, command_fp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       item.id,
       projectKey,
@@ -153,7 +156,8 @@ function importItems(
       item.access_count,
       item.last_accessed,
       item.input_hash,
-      item.full_retained
+      item.full_retained,
+      item.command_fp
     );
 
     // Re-index chunks (FTS trigger covers stored_outputs but not content_chunks).

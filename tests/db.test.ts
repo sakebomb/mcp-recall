@@ -16,6 +16,7 @@ import {
   listOutputs,
   forgetOutputs,
   getStats,
+  getBashCommandBreakdown,
   setMeta,
   getMeta,
   pruneExpired,
@@ -986,6 +987,50 @@ describe("db", () => {
       storeOutput(db, makeInput({ tool_name: "Bash", original_size: 5000, summary: "short summary", full_retained: 0 }));
       const stats = getStats(db, PROJECT_KEY);
       expect(stats.total_original_bytes).toBe(5000); // savings measured against the full original
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // command_fp persistence + getBashCommandBreakdown (#251)
+  // -------------------------------------------------------------------------
+
+  describe("command fingerprint (#251)", () => {
+    it("persists command_fp and returns it on retrieve", () => {
+      const s = storeOutput(db, makeInput({ tool_name: "Bash", command_fp: "git diff" }));
+      expect(s.command_fp).toBe("git diff");
+      expect(retrieveOutput(db, s.id)!.command_fp).toBe("git diff");
+    });
+
+    it("stores NULL command_fp when omitted (non-Bash / untagged)", () => {
+      const s = storeOutput(db, makeInput({ tool_name: "mcp__github__list_issues" }));
+      expect(s.command_fp).toBeNull();
+      expect(retrieveOutput(db, s.id)!.command_fp).toBeNull();
+    });
+
+    it("groups Bash rows by command family, sorted by original size", () => {
+      storeOutput(db, makeInput({ tool_name: "Bash", command_fp: "git diff", original_size: 5000, summary: "a" }));
+      storeOutput(db, makeInput({ tool_name: "Bash", command_fp: "git diff", original_size: 3000, summary: "b" }));
+      storeOutput(db, makeInput({ tool_name: "Bash", command_fp: "rg", original_size: 1000, summary: "c" }));
+
+      const rows = getBashCommandBreakdown(db, PROJECT_KEY);
+      expect(rows.map((r) => r.command_fp)).toEqual(["git diff", "rg"]); // sorted by original bytes desc
+      const gitDiff = rows.find((r) => r.command_fp === "git diff")!;
+      expect(gitDiff.items).toBe(2);
+      expect(gitDiff.original_bytes).toBe(8000);
+    });
+
+    it("folds untagged/pre-migration Bash rows into an 'unknown' bucket", () => {
+      storeOutput(db, makeInput({ tool_name: "Bash", command_fp: null, original_size: 900, summary: "x" }));
+      const rows = getBashCommandBreakdown(db, PROJECT_KEY);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.command_fp).toBe("unknown");
+    });
+
+    it("excludes non-Bash rows from the breakdown", () => {
+      storeOutput(db, makeInput({ tool_name: "mcp__github__list_issues", summary: "gh" }));
+      storeOutput(db, makeInput({ tool_name: "Bash", command_fp: "ls", summary: "ls" }));
+      const rows = getBashCommandBreakdown(db, PROJECT_KEY);
+      expect(rows.map((r) => r.command_fp)).toEqual(["ls"]);
     });
   });
 

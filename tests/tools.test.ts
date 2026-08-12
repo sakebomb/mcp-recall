@@ -512,6 +512,15 @@ describe("MCP tool handlers", () => {
       expect(result).toContain("reduction");
     });
 
+    it("renders a per-command Bash breakdown attributing the aggregate figure (#251)", () => {
+      storeOutput(db, makeInput({ tool_name: "Bash", command_fp: "git diff", original_size: 8000, summary: "d".repeat(80) }));
+      storeOutput(db, makeInput({ tool_name: "Bash", command_fp: "cat", original_size: 6000, summary: "c".repeat(5000) }));
+      const result = toolStats(db, PROJECT_KEY);
+      expect(result).toContain("By Bash command");
+      expect(result).toMatch(/git diff\s+1 item/);
+      expect(result).toMatch(/cat\s+1 item/);   // low-reduction family stays visible as a leak
+    });
+
     it("reports recall__note memory separately without diluting the interception reduction", () => {
       // One real interception (10000 -> 100 = 99% reduction)...
       storeOutput(db, makeInput({ tool_name: "Bash", original_size: 10000, summary: "x".repeat(100) }));

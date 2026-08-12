@@ -6,6 +6,14 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Added
+
+- `recall__stats` now includes a **By Bash command** breakdown that attributes the aggregate
+  Bash compression figure to command families (`git diff`, `rg`, `cat`, …), so low-reduction
+  families — the compression leaks — are visible. Families come from a privacy-safe fingerprint
+  stored per row (the leading command verb/subcommand only; arguments and secrets are never
+  captured). Rows written before this feature fold into an `unknown` bucket (#251).
+
 ### Changed
 
 - `store.max_size_mb` eviction and the `store.max_pinned_mb` pin budget now count each

@@ -123,6 +123,12 @@ memory is reported on its own `Notes/memory` line so a bulk note backend can't
 dilute the compression number. Pinned-budget accounting stays store-wide, since
 notes are pinned and do count against `store.max_pinned_mb`.
 
+A `By Bash command` section attributes the aggregate `Bash` figure to command
+families (`git diff`, `rg`, `cat`, …) so low-reduction families — the compression
+leaks — are visible. Families come from a privacy-safe fingerprint (the leading
+command verb/subcommand only; never an argument or secret); rows written before
+this feature, or with no bare command verb, fold into an `unknown` bucket.
+
 ```
 recall__stats()
 ```
@@ -142,7 +148,12 @@ Session stats for current project:
 By tool (sorted by original size):
   mcp__playwright__browser_snapshot    4 items    215KB →  1.2KB    99%
   mcp__github__list_issues             3 items    106KB →  3.3KB    97%
-  mcp__filesystem__read_file           2 items     21KB →  4.4KB    79%
+  Bash                                 6 items     88KB →   53KB    40%
+
+By Bash command (sorted by original size):
+  rg           3 items     42KB →  7.1KB    83%
+  git diff     2 items     34KB →   11KB    68%
+  cat          1 item      12KB →   11KB    12%
 
 Suggestions:
   📌 Consider pinning:

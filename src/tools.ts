@@ -20,6 +20,7 @@ import {
   foreignKeyBreakdown,
   getStats,
   getToolBreakdown,
+  getBashCommandBreakdown,
   getSuggestions,
   getSessionDays,
   getSessionSummary,
@@ -678,6 +679,24 @@ export function toolStats(
           : " —";
       lines.push(
         `  ${row.tool_name.padEnd(colW)}  ${String(row.items).padStart(4)} item${row.items === 1 ? " " : "s"}` +
+          `  ${formatBytes(row.original_bytes).padStart(8)} → ${formatBytes(row.summary_bytes).padEnd(8)}  ${reduction.padStart(4)}`
+      );
+    }
+  }
+
+  // Per-command breakdown for Bash — attributes the aggregate Bash figure to
+  // command families so low-reduction rows (the compression leaks) are visible (#251).
+  const cmdBreakdown = getBashCommandBreakdown(db, projectKey);
+  if (cmdBreakdown.length > 0) {
+    lines.push("", "By Bash command (sorted by original size):");
+    const colW = Math.min(40, Math.max(...cmdBreakdown.map((r) => r.command_fp.length)));
+    for (const row of cmdBreakdown) {
+      const reduction =
+        row.original_bytes > 0
+          ? `${((1 - row.summary_bytes / row.original_bytes) * 100).toFixed(0)}%`
+          : " —";
+      lines.push(
+        `  ${row.command_fp.padEnd(colW)}  ${String(row.items).padStart(4)} item${row.items === 1 ? " " : "s"}` +
           `  ${formatBytes(row.original_bytes).padStart(8)} → ${formatBytes(row.summary_bytes).padEnd(8)}  ${reduction.padStart(4)}`
       );
     }

@@ -10,7 +10,7 @@ import { slackHandler } from "../src/handlers/slack";
 import { jsonHandler } from "../src/handlers/json";
 import { genericHandler } from "../src/handlers/generic";
 import { getHandler, extractText } from "../src/handlers/index";
-import { getBashHandler, normalizeCommand, gitDiffHandler, gitLogHandler, terraformPlanHandler, gitStatusHandler, gitRefsHandler, packageInstallHandler, testRunnerHandler, dockerPsHandler, buildToolHandler, ghHandler, compilerDiagnosticsHandler, grepHandler, lsHandler, findHandler } from "../src/handlers/bash";
+import { getBashHandler, normalizeCommand, commandFingerprint, gitDiffHandler, gitLogHandler, terraformPlanHandler, gitStatusHandler, gitRefsHandler, packageInstallHandler, testRunnerHandler, dockerPsHandler, buildToolHandler, ghHandler, compilerDiagnosticsHandler, grepHandler, lsHandler, findHandler } from "../src/handlers/bash";
 import { tavilyHandler } from "../src/handlers/tavily";
 import { databaseHandler } from "../src/handlers/database";
 import { sentryHandler } from "../src/handlers/sentry";
@@ -971,6 +971,51 @@ describe("getBashHandler", () => {
   it("getHandler routes Bash tool name to bash dispatcher", () => {
     const handler = getHandler("Bash", "output", { command: "git diff HEAD" });
     expect(handler).toBe(gitDiffHandler);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// commandFingerprint (#251 — per-command savings attribution)
+// ---------------------------------------------------------------------------
+
+describe("commandFingerprint", () => {
+  it("returns the leading verb for a plain command", () => {
+    expect(commandFingerprint("rg foobar src/")).toBe("rg");
+    expect(commandFingerprint("tsc --noEmit")).toBe("tsc");
+    expect(commandFingerprint("cat file.txt")).toBe("cat");
+  });
+
+  it("includes the subcommand for dispatcher tools", () => {
+    expect(commandFingerprint("git diff HEAD~1")).toBe("git diff");
+    expect(commandFingerprint("cargo build --release")).toBe("cargo build");
+    expect(commandFingerprint("docker ps -a")).toBe("docker ps");
+    expect(commandFingerprint("go test ./...")).toBe("go test");
+  });
+
+  it("pairs with normalizeCommand so git global flags don't pollute the fingerprint", () => {
+    expect(commandFingerprint(normalizeCommand("git --no-pager diff"))).toBe("git diff");
+    expect(commandFingerprint(normalizeCommand("git -C /some/repo diff HEAD~1"))).toBe("git diff");
+  });
+
+  it("strips leading env-var assignments (value discarded, never in the fingerprint)", () => {
+    expect(commandFingerprint("RECALL_DEBUG=1 bun test")).toBe("bun test");
+    expect(commandFingerprint("TOKEN=sk-secret-xyz rg pattern")).toBe("rg");
+  });
+
+  // SECRET-SAFETY: an argument or credential must never enter the fingerprint.
+  it("never captures an argument, URL, header value, or secret", () => {
+    expect(commandFingerprint('curl -H "Authorization: Bearer sk-live-abc123" https://api')).toBe("curl");
+    expect(commandFingerprint("psql postgres://user:pw@host:5432/db")).toBe("psql");
+    expect(commandFingerprint("aws s3 cp s3://bucket/secret .")).toBe("aws"); // aws not a dispatcher in the set
+    expect(commandFingerprint("mysql -uroot -phunter2")).toBe("mysql");
+    // git IS a dispatcher, but only the bare subcommand word is taken — never the arg:
+    expect(commandFingerprint("git clone https://tok:x@github.com/o/r")).toBe("git clone");
+  });
+
+  it("returns '' (unknown) when there is no bare leading token", () => {
+    expect(commandFingerprint("./deploy.sh --prod")).toBe("");
+    expect(commandFingerprint("$(which node) app.js")).toBe("");
+    expect(commandFingerprint("")).toBe("");
   });
 });
 

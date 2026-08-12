@@ -125,6 +125,27 @@ describe("import round-trip", () => {
   // two independently. Import must enforce storeOutput's invariant so the body is
   // dropped, otherwise the row occupies its full bytes on disk while the
   // effective-size cap accounting (#247) counts it as summary_size only.
+  test("round-trips command_fp across export/import (#251)", async () => {
+    storeOutput(sourceDb, makeInput({ tool_name: "Bash", command_fp: "git diff", summary: "d" }));
+
+    const dumpFile = makeTmpPath();
+    const targetDbPath = makeTmpPath(".db");
+    exportToFile(dumpFile);
+
+    process.env.RECALL_DB_PATH = targetDbPath;
+    try {
+      await handleImportCommand([dumpFile]);
+      const targetDb = new Database(targetDbPath);
+      const row = targetDb
+        .prepare(`SELECT command_fp FROM stored_outputs WHERE tool_name = 'Bash'`)
+        .get() as { command_fp: string | null };
+      targetDb.close();
+      expect(row.command_fp).toBe("git diff"); // fingerprint survives, not reset to unknown
+    } finally {
+      delete process.env.RECALL_DB_PATH;
+    }
+  });
+
   test("drops the body of a summary-only row from a malformed dump (full_retained=0 invariant)", async () => {
     const bigBody = "x".repeat(10000);
     const dump = [{

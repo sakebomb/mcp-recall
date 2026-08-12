@@ -19631,7 +19631,9 @@ var MIGRATIONS = [
   "ALTER TABLE stored_outputs ADD COLUMN input_hash TEXT",
   "ALTER TABLE stored_outputs ADD COLUMN output_hash TEXT",
   "CREATE INDEX IF NOT EXISTS idx_so_output_hash ON stored_outputs(project_key, output_hash)",
-  "ALTER TABLE stored_outputs ADD COLUMN full_retained INTEGER NOT NULL DEFAULT 1"
+  "ALTER TABLE stored_outputs ADD COLUMN full_retained INTEGER NOT NULL DEFAULT 1",
+  "ALTER TABLE stored_outputs ADD COLUMN command_fp TEXT",
+  "CREATE INDEX IF NOT EXISTS idx_so_command_fp ON stored_outputs(project_key, command_fp)"
 ];
 function applyMigrations(db) {
   for (const sql of MIGRATIONS) {
@@ -19757,13 +19759,14 @@ function storeOutput(db, input) {
   const output_hash = input.output_hash ?? hashContent(input.full_content);
   const full_retained = input.full_retained ?? 1;
   const bodyToStore = full_retained ? input.full_content : "";
+  const command_fp = input.command_fp ?? null;
   const insertAndChunk = db.transaction(() => {
     db.prepare(`
       INSERT INTO stored_outputs
         (id, project_key, session_id, tool_name, summary, full_content,
-         original_size, summary_size, created_at, input_hash, output_hash, full_retained)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, input.project_key, input.session_id, input.tool_name, input.summary, bodyToStore, input.original_size, summary_size, created_at, input_hash, output_hash, full_retained);
+         original_size, summary_size, created_at, input_hash, output_hash, full_retained, command_fp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, input.project_key, input.session_id, input.tool_name, input.summary, bodyToStore, input.original_size, summary_size, created_at, input_hash, output_hash, full_retained, command_fp);
     if (full_retained)
       storeChunks(db, id, input.full_content);
   });
@@ -19779,7 +19782,8 @@ function storeOutput(db, input) {
     last_accessed: null,
     input_hash,
     output_hash,
-    full_retained
+    full_retained,
+    command_fp
   };
 }
 function hashContent(content) {
@@ -19937,6 +19941,19 @@ function getStats(db, project_key) {
   `).get(project_key);
   const compression_ratio = row.total_original_bytes > 0 ? row.total_summary_bytes / row.total_original_bytes : 0;
   return { ...row, compression_ratio };
+}
+function getBashCommandBreakdown(db, project_key) {
+  return db.prepare(`
+    SELECT
+      COALESCE(command_fp, 'unknown') AS command_fp,
+      COUNT(*)                       AS items,
+      COALESCE(SUM(original_size),0) AS original_bytes,
+      COALESCE(SUM(summary_size),0)  AS summary_bytes
+    FROM stored_outputs
+    WHERE project_key = ? AND tool_name = 'Bash'
+    GROUP BY COALESCE(command_fp, 'unknown')
+    ORDER BY original_bytes DESC
+  `).all(project_key);
 }
 function getToolBreakdown(db, project_key) {
   return db.prepare(`
@@ -21520,6 +21537,15 @@ function toolStats(db, projectKey, args = {}) {
     for (const row of breakdown) {
       const reduction = row.original_bytes > 0 ? `${((1 - row.summary_bytes / row.original_bytes) * 100).toFixed(0)}%` : " \u2014";
       lines.push(`  ${row.tool_name.padEnd(colW)}  ${String(row.items).padStart(4)} item${row.items === 1 ? " " : "s"}` + `  ${formatBytes(row.original_bytes).padStart(8)} \u2192 ${formatBytes(row.summary_bytes).padEnd(8)}  ${reduction.padStart(4)}`);
+    }
+  }
+  const cmdBreakdown = getBashCommandBreakdown(db, projectKey);
+  if (cmdBreakdown.length > 0) {
+    lines.push("", "By Bash command (sorted by original size):");
+    const colW = Math.min(40, Math.max(...cmdBreakdown.map((r) => r.command_fp.length)));
+    for (const row of cmdBreakdown) {
+      const reduction = row.original_bytes > 0 ? `${((1 - row.summary_bytes / row.original_bytes) * 100).toFixed(0)}%` : " \u2014";
+      lines.push(`  ${row.command_fp.padEnd(colW)}  ${String(row.items).padStart(4)} item${row.items === 1 ? " " : "s"}` + `  ${formatBytes(row.original_bytes).padStart(8)} \u2192 ${formatBytes(row.summary_bytes).padEnd(8)}  ${reduction.padStart(4)}`);
     }
   }
   const suggestions = getSuggestions(db, projectKey, {

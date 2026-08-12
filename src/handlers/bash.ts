@@ -292,6 +292,36 @@ export function normalizeCommand(command: string): string {
   return c;
 }
 
+// Dispatcher commands whose first token names a tool family, not the operation —
+// the meaningful fingerprint is "verb subcommand" (e.g. "git diff", "cargo build").
+const SUBCOMMAND_TOOLS = new Set([
+  "git", "cargo", "go", "npm", "pnpm", "yarn", "bun", "docker", "kubectl",
+]);
+
+/**
+ * Derives a privacy-safe command "family" fingerprint from a NORMALIZED command
+ * (see {@link normalizeCommand}) for per-command savings attribution (#251).
+ *
+ * Returns the leading bare token, plus the second bare token when the first is a
+ * known subcommand dispatcher. A "bare token" is a leading run of letters/digits/
+ * `-`/`_` that is followed by whitespace or end-of-string. Extraction therefore
+ * stops at the first flag, path, quote, `=`, pipe, or redirection — so an
+ * argument or secret (a URL with credentials, an auth header value) can NEVER
+ * enter the fingerprint. Leading `VAR=value` env assignments are stripped first
+ * (and discarded, so a secret in a value can't leak). Returns "" when no bare
+ * leading token exists (subshell, `./script`, etc.); callers store that as unknown.
+ */
+export function commandFingerprint(command: string): string {
+  // Strip leading env-var assignments; discarded, never stored.
+  const c = command.trim().replace(/^(?:[A-Za-z_]\w*=\S*\s+)+/, "");
+  const first = c.match(/^([a-zA-Z][\w-]*)(?:\s|$)/);
+  if (!first) return "";
+  const verb = first[1]!;
+  if (!SUBCOMMAND_TOOLS.has(verb)) return verb;
+  const second = c.slice(first[0].length).match(/^([a-zA-Z][\w-]*)(?:\s|$)/);
+  return second ? `${verb} ${second[1]!}` : verb;
+}
+
 /**
  * Returns the appropriate handler for a native Bash tool call based on the
  * command string in `tool_input`. Falls back to the shell handler when no
