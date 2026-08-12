@@ -5316,6 +5316,7 @@ function chunkText(text) {
 }
 // src/db/queries.ts
 import { randomBytes, createHash as createHash2 } from "crypto";
+var EFFECTIVE_SIZE_EXPR = "CASE WHEN full_retained = 1 THEN original_size ELSE summary_size END";
 function generateId() {
   return `recall_${randomBytes(8).toString("hex")}`;
 }
@@ -5408,14 +5409,14 @@ var SECONDS_PER_DAY = 86400;
 function evictIfNeeded(db, project_key, max_size_mb, half_life_days = DEFAULT_EVICTION_HALF_LIFE_DAYS, now_secs = Math.floor(Date.now() / 1000)) {
   const max_bytes = max_size_mb * 1024 * 1024;
   const { total } = db.prepare(`
-    SELECT COALESCE(SUM(original_size), 0) as total
+    SELECT COALESCE(SUM(${EFFECTIVE_SIZE_EXPR}), 0) as total
     FROM stored_outputs WHERE project_key = ?
   `).get(project_key);
   if (total <= max_bytes)
     return 0;
   const bytesToShed = total - max_bytes;
   const candidates = db.prepare(`
-    SELECT id, original_size, access_count, last_accessed, created_at
+    SELECT id, ${EFFECTIVE_SIZE_EXPR} AS effective_size, access_count, last_accessed, created_at
     FROM stored_outputs
     WHERE project_key = ? AND pinned = 0
   `).all(project_key);
@@ -5429,14 +5430,14 @@ function evictIfNeeded(db, project_key, max_size_mb, half_life_days = DEFAULT_EV
     const recency = Math.pow(0.5, ageSecs / halfLifeSecs);
     return (c.access_count + 1) * recency;
   };
-  const ranked = candidates.map((c) => ({ id: c.id, original_size: c.original_size, score: scoreOf(c), created_at: c.created_at })).sort((a, b) => a.score - b.score || a.created_at - b.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const ranked = candidates.map((c) => ({ id: c.id, effective_size: c.effective_size, score: scoreOf(c), created_at: c.created_at })).sort((a, b) => a.score - b.score || a.created_at - b.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const toEvict = [];
   let shed = 0;
   for (const row of ranked) {
     if (shed >= bytesToShed)
       break;
     toEvict.push(row.id);
-    shed += row.original_size;
+    shed += row.effective_size;
   }
   const placeholders = toEvict.map(() => "?").join(",");
   db.prepare(`DELETE FROM stored_outputs WHERE id IN (${placeholders})`).run(...toEvict);

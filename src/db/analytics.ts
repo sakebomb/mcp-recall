@@ -10,7 +10,7 @@ import type {
   SessionSummaryOptions,
   SessionSummaryData,
 } from "./types";
-import { getSessionDays } from "./queries";
+import { getSessionDays, EFFECTIVE_SIZE_EXPR } from "./queries";
 
 /**
  * Returns aggregate storage stats for a project. The savings figures
@@ -27,7 +27,7 @@ export function getStats(db: Database, project_key: string): Stats {
       COALESCE(SUM(CASE WHEN tool_name != 'recall__note' THEN original_size ELSE 0 END), 0) as total_original_bytes,
       COALESCE(SUM(CASE WHEN tool_name != 'recall__note' THEN summary_size ELSE 0 END), 0) as total_summary_bytes,
       COALESCE(SUM(pinned), 0) as pinned_items,
-      COALESCE(SUM(CASE WHEN pinned = 1 THEN original_size ELSE 0 END), 0) as pinned_bytes,
+      COALESCE(SUM(CASE WHEN pinned = 1 THEN ${EFFECTIVE_SIZE_EXPR} ELSE 0 END), 0) as pinned_bytes,
       COALESCE(SUM(CASE WHEN tool_name = 'recall__note' THEN 1 ELSE 0 END), 0) as note_items,
       COALESCE(SUM(CASE WHEN tool_name = 'recall__note' THEN original_size ELSE 0 END), 0) as note_bytes
     FROM stored_outputs

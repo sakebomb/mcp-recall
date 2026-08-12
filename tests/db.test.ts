@@ -904,6 +904,81 @@ describe("db", () => {
   });
 
   // -------------------------------------------------------------------------
+  // effective-size accounting under store.retention (#247)
+  //
+  // A summary-only row (full_retained = 0) occupies ~summary_size on disk, not
+  // original_size, so the byte-cap accounting (store.max_size_mb eviction and
+  // store.max_pinned_mb pin budget) counts it at its effective size. The
+  // *savings* figures in getStats keep reporting original_size.
+  // -------------------------------------------------------------------------
+
+  describe("effective-size accounting (#247)", () => {
+    it("eviction cap counts summary-only rows at reduced size, so more fit before eviction", () => {
+      const cap = 0.0008; // ~838 bytes
+
+      // Full-body rows: effective size == original_size → over the cap → evict.
+      const FULL_KEY = "fullkey123456789";
+      for (let i = 0; i < 3; i++) {
+        storeOutput(db, makeInput({ project_key: FULL_KEY, original_size: 400, summary: `f${i}`, full_retained: 1 }));
+      }
+      expect(evictIfNeeded(db, FULL_KEY, cap)).toBeGreaterThan(0);
+
+      // Summary-only rows: same original_size but effective size is the tiny
+      // summary → well under the cap → nothing evicted.
+      const SUMM_KEY = "summkey123456789";
+      const ids: string[] = [];
+      for (let i = 0; i < 3; i++) {
+        ids.push(storeOutput(db, makeInput({ project_key: SUMM_KEY, original_size: 400, summary: `s${i}`, full_retained: 0 })).id);
+      }
+      expect(evictIfNeeded(db, SUMM_KEY, cap)).toBe(0);
+      for (const id of ids) expect(retrieveOutput(db, id)).not.toBeNull();
+    });
+
+    it("eviction sheds by effective size: a full row is still evicted when a preceding summary-only row doesn't cover the shortfall", () => {
+      const now = 1_000_000_000;
+      // s: summary-only, original 1000 but effective ~1 byte; ranks lowest (evicted first).
+      const s = storeOutput(db, makeInput({ original_size: 1000, summary: "s", full_retained: 0 }));
+      // f: full body, effective 1000; more recent + accessed, so it ranks above s.
+      const f = storeOutput(db, makeInput({ original_size: 1000, summary: "a full body row", full_retained: 1 }));
+      db.prepare("UPDATE stored_outputs SET access_count = 0, last_accessed = ? WHERE id = ?").run(now - 100000, s.id);
+      db.prepare("UPDATE stored_outputs SET access_count = 3, last_accessed = ? WHERE id = ?").run(now, f.id);
+
+      // total effective ≈ 1 + 1000 = 1001; cap 501 bytes → bytesToShed ≈ 500.
+      // Correct: shedding s (≈1) doesn't cover 500, so f must also go.
+      // Buggy (shed by original_size): s alone "sheds" 1000 ≥ 500 → f wrongly survives.
+      const capMb = 501 / (1024 * 1024);
+      evictIfNeeded(db, PROJECT_KEY, capMb, 7, now);
+
+      expect(retrieveOutput(db, f.id)).toBeNull();
+    });
+
+    it("pin budget counts summary-only rows at reduced size, so more fit than original sizes suggest", () => {
+      const cap = 0.001; // ~1049 bytes; 3 × original 800 = 2400 would blow an original-based cap
+      const ids: string[] = [];
+      for (let i = 0; i < 3; i++) {
+        ids.push(storeOutput(db, makeInput({ original_size: 800, summary: `s${i}`, full_retained: 0 })).id);
+      }
+      for (const id of ids) {
+        expect(pinOutput(db, id, PROJECT_KEY, true, cap).ok).toBe(true);
+      }
+    });
+
+    it("getStats reports pinned bytes at effective size for summary-only rows", () => {
+      const summary = "short summary";
+      const s = storeOutput(db, makeInput({ original_size: 5000, summary, full_retained: 0 }));
+      pinOutput(db, s.id, PROJECT_KEY, true);
+      const stats = getStats(db, PROJECT_KEY);
+      expect(stats.pinned_bytes).toBe(Buffer.byteLength(summary, "utf8")); // NOT 5000
+    });
+
+    it("getStats savings figures still use original_size regardless of retention", () => {
+      storeOutput(db, makeInput({ tool_name: "Bash", original_size: 5000, summary: "short summary", full_retained: 0 }));
+      const stats = getStats(db, PROJECT_KEY);
+      expect(stats.total_original_bytes).toBe(5000); // savings measured against the full original
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // retrieveSnippet
   // -------------------------------------------------------------------------
 
