@@ -407,8 +407,10 @@ gc_reminder_mb = 2048
 # Notes stored via recall__note always keep their body, regardless of this.
 # Only affects future writes; existing bodies are untouched. When a body was
 # not retained, recall__retrieve returns the summary and says to re-run.
-# Note: max_size_mb / eviction count each item's ORIGINAL size, so lowering
-# retention reduces bytes-on-disk but not the item budget before eviction fires.
+# max_size_mb / eviction and the max_pinned_mb pin budget count each item's
+# EFFECTIVE size (a summary-only row costs its summary size, not the original),
+# so lowering retention both reduces bytes-on-disk and raises the number of
+# items the store holds before eviction fires.
 retention = "balanced"
 
 [retrieve]
