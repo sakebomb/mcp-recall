@@ -3,6 +3,7 @@ import type {
   StoredOutput,
   Stats,
   ToolBreakdownRow,
+  CommandBreakdownRow,
   SuggestionsOptions,
   SuggestionsData,
   ContextOptions,
@@ -40,6 +41,27 @@ export function getStats(db: Database, project_key: string): Stats {
       : 0;
 
   return { ...row, compression_ratio };
+}
+
+/**
+ * Returns per-command-family storage stats for Bash rows only, sorted by
+ * original_bytes desc (#251). Rows are grouped by their privacy-safe
+ * `command_fp`; pre-migration / untagged Bash rows fold into an "unknown"
+ * bucket. This is what makes the aggregate "Bash: N%" attributable — the
+ * low-reduction families are the compression leaks.
+ */
+export function getBashCommandBreakdown(db: Database, project_key: string): CommandBreakdownRow[] {
+  return db.prepare(`
+    SELECT
+      COALESCE(command_fp, 'unknown') AS command_fp,
+      COUNT(*)                       AS items,
+      COALESCE(SUM(original_size),0) AS original_bytes,
+      COALESCE(SUM(summary_size),0)  AS summary_bytes
+    FROM stored_outputs
+    WHERE project_key = ? AND tool_name = 'Bash'
+    GROUP BY COALESCE(command_fp, 'unknown')
+    ORDER BY original_bytes DESC
+  `).all(project_key) as CommandBreakdownRow[];
 }
 
 /** Returns per-tool storage stats, sorted by original_bytes desc. */

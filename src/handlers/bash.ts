@@ -292,6 +292,57 @@ export function normalizeCommand(command: string): string {
   return c;
 }
 
+// Dispatcher commands whose first token names a tool family, not the operation —
+// the meaningful fingerprint is "verb subcommand" (e.g. "git diff", "cargo build").
+const SUBCOMMAND_TOOLS = new Set([
+  "git", "cargo", "go", "npm", "pnpm", "yarn", "bun", "docker", "kubectl",
+]);
+
+// Wrapper commands that prefix a real command; skipped so the fingerprint names
+// the wrapped operation ("sudo apt-get …" → "apt-get"), not the wrapper.
+const WRAPPER_TOOLS = new Set(["sudo", "doas", "time", "nice"]);
+
+// A bare command token: letters then letters/digits/`-`/`_`, terminated by
+// whitespace, a shell operator (`; & | < > ( )`), or end-of-string. The lookahead
+// (zero-width) is what lets a glued operator like `ls;pwd` still yield "ls" while
+// never absorbing an argument or secret into the token itself.
+const BARE_TOKEN = /^([a-zA-Z][\w-]*)(?=[\s;&|<>()]|$)/;
+
+/**
+ * Derives a privacy-safe command "family" fingerprint from a NORMALIZED command
+ * (see {@link normalizeCommand}) for per-command savings attribution (#251).
+ *
+ * Returns the leading bare token, plus the second bare token when the first is a
+ * known subcommand dispatcher (`git diff`). A "bare token" is a run of letters/
+ * digits/`-`/`_` terminated by whitespace, a shell operator, or end-of-string —
+ * so extraction stops at the first flag, path, quote, `=`, pipe, or redirection
+ * and an argument or secret (a URL with credentials, an auth header value) can
+ * NEVER enter the fingerprint. Leading `VAR=value` env assignments and leading
+ * wrapper commands (`sudo`/`doas`/`time`/`nice`, when directly followed by a bare
+ * verb) are skipped first, and discarded, so a secret in a value can't leak and
+ * `sudo git diff` fingerprints as `git diff`. A *flagged* wrapper (`sudo -u www …`)
+ * is left intact — its argument span isn't safely parseable — so it keeps the
+ * wrapper name. Returns "" when no bare leading token exists (subshell,
+ * `./script`, …); callers store that as unknown.
+ */
+export function commandFingerprint(command: string): string {
+  // Strip leading env-var assignments; discarded, never stored.
+  let c = command.trim().replace(/^(?:[A-Za-z_]\w*=\S*\s+)+/, "");
+  // Skip leading wrapper commands when directly followed by another bare verb.
+  // Bounded loop (chained wrappers are rare); bails on a flagged wrapper.
+  for (let i = 0; i < 4; i++) {
+    const w = c.match(/^([a-zA-Z][\w-]*)\s+(?=[a-zA-Z])/);
+    if (!w || !WRAPPER_TOOLS.has(w[1]!)) break;
+    c = c.slice(w[0].length);
+  }
+  const first = c.match(BARE_TOKEN);
+  if (!first) return "";
+  const verb = first[1]!;
+  if (!SUBCOMMAND_TOOLS.has(verb)) return verb;
+  const second = c.slice(verb.length).trimStart().match(BARE_TOKEN);
+  return second ? `${verb} ${second[1]!}` : verb;
+}
+
 /**
  * Returns the appropriate handler for a native Bash tool call based on the
  * command string in `tool_input`. Falls back to the shell handler when no

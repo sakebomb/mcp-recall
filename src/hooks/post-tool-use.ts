@@ -7,6 +7,7 @@ import { getHandler, extractText } from "../handlers/index";
 import { extractHints } from "../hints";
 import { getDb, defaultDbPath, storeOutput, checkDedup, checkOutputDedup, hashContent, evictIfNeeded } from "../db/index";
 import { shouldRetainFullBody } from "../retention";
+import { commandFingerprint, normalizeCommand } from "../handlers/bash";
 import { formatBytes } from "../format";
 import { log } from "../log";
 
@@ -112,6 +113,13 @@ export function handlePostToolUse(raw: string): HookOutput {
   const full_retained = shouldRetainFullBody(config.store.retention, tool_name, command) ? 1 : 0;
   if (!full_retained) log.debug(`summary-only · ${tool_name} · retention=${config.store.retention}`);
 
+  // Privacy-safe command family fingerprint for per-command savings attribution
+  // (#251). Bash only; a "" fingerprint (no bare verb) is stored as NULL/unknown.
+  const command_fp =
+    tool_name === "Bash" && command
+      ? commandFingerprint(normalizeCommand(command)) || null
+      : null;
+
   const stored = storeOutput(db, {
     project_key: projectKey,
     session_id,
@@ -122,6 +130,7 @@ export function handlePostToolUse(raw: string): HookOutput {
     input_hash: input_hash ?? undefined,
     output_hash, // reuse the hash computed above for the dedup check
     full_retained,
+    command_fp,
   });
 
   // 8. Evict if store exceeds size limit

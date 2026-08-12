@@ -5261,7 +5261,9 @@ var MIGRATIONS = [
   "ALTER TABLE stored_outputs ADD COLUMN input_hash TEXT",
   "ALTER TABLE stored_outputs ADD COLUMN output_hash TEXT",
   "CREATE INDEX IF NOT EXISTS idx_so_output_hash ON stored_outputs(project_key, output_hash)",
-  "ALTER TABLE stored_outputs ADD COLUMN full_retained INTEGER NOT NULL DEFAULT 1"
+  "ALTER TABLE stored_outputs ADD COLUMN full_retained INTEGER NOT NULL DEFAULT 1",
+  "ALTER TABLE stored_outputs ADD COLUMN command_fp TEXT",
+  "CREATE INDEX IF NOT EXISTS idx_so_command_fp ON stored_outputs(project_key, command_fp)"
 ];
 function applyMigrations(db) {
   for (const sql of MIGRATIONS) {
@@ -5360,13 +5362,14 @@ function storeOutput(db, input) {
   const output_hash = input.output_hash ?? hashContent(input.full_content);
   const full_retained = input.full_retained ?? 1;
   const bodyToStore = full_retained ? input.full_content : "";
+  const command_fp = input.command_fp ?? null;
   const insertAndChunk = db.transaction(() => {
     db.prepare(`
       INSERT INTO stored_outputs
         (id, project_key, session_id, tool_name, summary, full_content,
-         original_size, summary_size, created_at, input_hash, output_hash, full_retained)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, input.project_key, input.session_id, input.tool_name, input.summary, bodyToStore, input.original_size, summary_size, created_at, input_hash, output_hash, full_retained);
+         original_size, summary_size, created_at, input_hash, output_hash, full_retained, command_fp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, input.project_key, input.session_id, input.tool_name, input.summary, bodyToStore, input.original_size, summary_size, created_at, input_hash, output_hash, full_retained, command_fp);
     if (full_retained)
       storeChunks(db, id, input.full_content);
   });
@@ -5382,7 +5385,8 @@ function storeOutput(db, input) {
     last_accessed: null,
     input_hash,
     output_hash,
-    full_retained
+    full_retained,
+    command_fp
   };
 }
 function hashContent(content) {
@@ -7264,6 +7268,36 @@ function normalizeCommand(command) {
   c = c.replace(/^git\s+(?:(?:--no-pager|--paginate|-P)\s+|-[cC]\s+\S+\s+)+/, "git ");
   return c;
 }
+var SUBCOMMAND_TOOLS = new Set([
+  "git",
+  "cargo",
+  "go",
+  "npm",
+  "pnpm",
+  "yarn",
+  "bun",
+  "docker",
+  "kubectl"
+]);
+var WRAPPER_TOOLS = new Set(["sudo", "doas", "time", "nice"]);
+var BARE_TOKEN = /^([a-zA-Z][\w-]*)(?=[\s;&|<>()]|$)/;
+function commandFingerprint(command) {
+  let c = command.trim().replace(/^(?:[A-Za-z_]\w*=\S*\s+)+/, "");
+  for (let i = 0;i < 4; i++) {
+    const w = c.match(/^([a-zA-Z][\w-]*)\s+(?=[a-zA-Z])/);
+    if (!w || !WRAPPER_TOOLS.has(w[1]))
+      break;
+    c = c.slice(w[0].length);
+  }
+  const first = c.match(BARE_TOKEN);
+  if (!first)
+    return "";
+  const verb = first[1];
+  if (!SUBCOMMAND_TOOLS.has(verb))
+    return verb;
+  const second = c.slice(verb.length).trimStart().match(BARE_TOKEN);
+  return second ? `${verb} ${second[1]}` : verb;
+}
 function getBashHandler(input) {
   const rawCommand = extractCommand(input);
   if (!rawCommand)
@@ -8674,6 +8708,7 @@ ${cached2.summary}`,
   const full_retained = shouldRetainFullBody(config.store.retention, tool_name, command) ? 1 : 0;
   if (!full_retained)
     log.debug(`summary-only \xB7 ${tool_name} \xB7 retention=${config.store.retention}`);
+  const command_fp = tool_name === "Bash" && command ? commandFingerprint(normalizeCommand(command)) || null : null;
   const stored = storeOutput(db, {
     project_key: projectKey,
     session_id,
@@ -8683,7 +8718,8 @@ ${cached2.summary}`,
     original_size: originalSize,
     input_hash: input_hash ?? undefined,
     output_hash,
-    full_retained
+    full_retained,
+    command_fp
   });
   evictIfNeeded(db, projectKey, config.store.max_size_mb, config.store.eviction_half_life_days);
   const reduction = ((1 - summarySize / originalSize) * 100).toFixed(0);
@@ -10235,7 +10271,8 @@ var StoredOutputSchema = exports_external.object({
   access_count: exports_external.number().int().nonnegative(),
   last_accessed: exports_external.number().int().nullable(),
   input_hash: exports_external.string().nullable(),
-  full_retained: exports_external.number().int().min(0).max(1).optional().default(1)
+  full_retained: exports_external.number().int().min(0).max(1).optional().default(1),
+  command_fp: exports_external.string().nullable().optional().default(null)
 });
 var ExportSchema = exports_external.array(StoredOutputSchema);
 function dryRunCount(dbPath, items, overwrite) {
@@ -10284,9 +10321,9 @@ function importItems(dbPath, items, opts) {
       INSERT INTO stored_outputs
         (id, project_key, session_id, tool_name, summary, full_content,
          original_size, summary_size, created_at, pinned, access_count,
-         last_accessed, input_hash, full_retained)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(item.id, projectKey, item.session_id, item.tool_name, item.summary, item.full_retained ? item.full_content : "", item.original_size, item.summary_size, item.created_at, item.pinned, item.access_count, item.last_accessed, item.input_hash, item.full_retained);
+         last_accessed, input_hash, full_retained, command_fp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(item.id, projectKey, item.session_id, item.tool_name, item.summary, item.full_retained ? item.full_content : "", item.original_size, item.summary_size, item.created_at, item.pinned, item.access_count, item.last_accessed, item.input_hash, item.full_retained, item.command_fp);
     if (item.full_retained) {
       const chunks = chunkText(item.full_content);
       for (let i = 0;i < chunks.length; i++) {

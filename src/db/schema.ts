@@ -74,6 +74,11 @@ const MIGRATIONS = [
   // Whether the verbatim body is persisted (1) or the row is summary-only (0).
   // Existing rows all have bodies, so default 1. See store.retention.
   "ALTER TABLE stored_outputs ADD COLUMN full_retained INTEGER NOT NULL DEFAULT 1",
+  // Privacy-safe command family fingerprint for per-command savings attribution
+  // (#251); NULL for non-Bash rows and for rows written before this migration
+  // (reported as "unknown"). See commandFingerprint in handlers/bash.ts.
+  "ALTER TABLE stored_outputs ADD COLUMN command_fp TEXT",
+  "CREATE INDEX IF NOT EXISTS idx_so_command_fp ON stored_outputs(project_key, command_fp)",
 ];
 
 function applyMigrations(db: Database): void {

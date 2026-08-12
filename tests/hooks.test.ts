@@ -348,6 +348,28 @@ describe("handlePostToolUse", () => {
   });
 
   // -------------------------------------------------------------------------
+  // command fingerprint (#251)
+  // -------------------------------------------------------------------------
+
+  it("derives and stores a command_fp for a Bash call", () => {
+    const bigDiff = "diff --git a/f b/f\n" + "+added line\n".repeat(400);
+    handlePostToolUse(
+      makePostToolUseInput(
+        "Bash",
+        JSON.stringify({ stdout: bigDiff, stderr: "", exit_code: 0 }),
+        { tool_input: { command: "git --no-pager diff HEAD~1" } }
+      )
+    );
+    const db = getDb(":memory:");
+    const row = db
+      .prepare("SELECT tool_name, command_fp FROM stored_outputs ORDER BY created_at DESC LIMIT 1")
+      .get() as { tool_name: string; command_fp: string | null };
+    // normalizeCommand strips --no-pager; fingerprint is the git subcommand, no args.
+    expect(row.tool_name).toBe("Bash");
+    expect(row.command_fp).toBe("git diff");
+  });
+
+  // -------------------------------------------------------------------------
   // Dedup
   // -------------------------------------------------------------------------
 
