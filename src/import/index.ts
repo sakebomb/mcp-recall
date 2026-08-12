@@ -141,7 +141,11 @@ function importItems(
       item.session_id,
       item.tool_name,
       item.summary,
-      item.full_content,
+      // Enforce storeOutput's invariant: a summary-only row (full_retained=0)
+      // carries no body. A legitimate export already has full_content="" here,
+      // but a malformed/tampered dump may not — dropping it keeps effective-size
+      // cap accounting (#247) honest and matches the write path.
+      item.full_retained ? item.full_content : "",
       item.original_size,
       item.summary_size,
       item.created_at,

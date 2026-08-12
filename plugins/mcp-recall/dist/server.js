@@ -19721,6 +19721,7 @@ var log = {
 };
 
 // src/db/queries.ts
+var EFFECTIVE_SIZE_EXPR = "CASE WHEN full_retained = 1 THEN original_size ELSE summary_size END";
 function generateId() {
   return `recall_${randomBytes(8).toString("hex")}`;
 }
@@ -19797,18 +19798,18 @@ function recordAccess(db, id) {
 }
 function pinOutput(db, id, project_key, pinned, maxPinnedMb) {
   const item = db.prepare(`
-    SELECT original_size, pinned FROM stored_outputs WHERE id = ? AND project_key = ?
+    SELECT ${EFFECTIVE_SIZE_EXPR} AS effective_size, pinned FROM stored_outputs WHERE id = ? AND project_key = ?
   `).get(id, project_key);
   if (!item)
     return { ok: false, reason: "not_found" };
   if (pinned && item.pinned === 0 && maxPinnedMb !== undefined) {
     const capBytes = maxPinnedMb * 1024 * 1024;
     const { pinnedBytes } = db.prepare(`
-      SELECT COALESCE(SUM(original_size), 0) as pinnedBytes
+      SELECT COALESCE(SUM(${EFFECTIVE_SIZE_EXPR}), 0) as pinnedBytes
       FROM stored_outputs WHERE project_key = ? AND pinned = 1
     `).get(project_key);
-    if (pinnedBytes + item.original_size > capBytes) {
-      return { ok: false, reason: "over_budget", pinnedBytes, itemBytes: item.original_size, capBytes };
+    if (pinnedBytes + item.effective_size > capBytes) {
+      return { ok: false, reason: "over_budget", pinnedBytes, itemBytes: item.effective_size, capBytes };
     }
   }
   db.prepare(`
@@ -19928,7 +19929,7 @@ function getStats(db, project_key) {
       COALESCE(SUM(CASE WHEN tool_name != 'recall__note' THEN original_size ELSE 0 END), 0) as total_original_bytes,
       COALESCE(SUM(CASE WHEN tool_name != 'recall__note' THEN summary_size ELSE 0 END), 0) as total_summary_bytes,
       COALESCE(SUM(pinned), 0) as pinned_items,
-      COALESCE(SUM(CASE WHEN pinned = 1 THEN original_size ELSE 0 END), 0) as pinned_bytes,
+      COALESCE(SUM(CASE WHEN pinned = 1 THEN ${EFFECTIVE_SIZE_EXPR} ELSE 0 END), 0) as pinned_bytes,
       COALESCE(SUM(CASE WHEN tool_name = 'recall__note' THEN 1 ELSE 0 END), 0) as note_items,
       COALESCE(SUM(CASE WHEN tool_name = 'recall__note' THEN original_size ELSE 0 END), 0) as note_bytes
     FROM stored_outputs

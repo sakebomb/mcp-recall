@@ -76,7 +76,7 @@ export interface Stats {
   compression_ratio: number;
   /** Number of pinned items (exempt from eviction). Store-wide, includes notes. */
   pinned_items: number;
-  /** Sum of `original_size` across pinned items — bytes eviction cannot reclaim. Store-wide. */
+  /** Sum of effective size (summary_size for summary-only rows, else original_size) across pinned items — the bytes eviction cannot reclaim, matching the `store.max_pinned_mb` budget. Store-wide. */
   pinned_bytes: number;
   /** `recall__note` items — stored memory, not interception. Reported separately so it never dilutes the savings figure. */
   note_items: number;

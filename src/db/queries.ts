@@ -4,6 +4,18 @@ import { log } from "../log";
 import type { StoredOutput, StoreInput, SearchOptions, ListOptions, ForgetOptions } from "./types";
 import { chunkText, sanitizeFtsQuery } from "./chunking";
 
+/**
+ * SQL expression for a row's *effective* stored size — the bytes it actually
+ * occupies. A summary-only row (`full_retained = 0`, written under
+ * `store.retention`) drops its body and chunks, so it costs ~`summary_size`,
+ * not `original_size`. Used by the byte-cap accounting (store.max_size_mb
+ * eviction, store.max_pinned_mb pin budget) so lowering retention genuinely
+ * expands the item budget (#247). NOT used for the *savings* figures in
+ * getStats — those keep reporting `original_size` (the context actually saved).
+ */
+export const EFFECTIVE_SIZE_EXPR =
+  "CASE WHEN full_retained = 1 THEN original_size ELSE summary_size END";
+
 function generateId(): string {
   return `recall_${randomBytes(8).toString("hex")}`;
 }
@@ -144,8 +156,9 @@ export type PinOutcome =
  * Pins or unpins an item. Pinned items are exempt from expiry and eviction, so an
  * unbounded number of pins would silently void `store.max_size_mb`. When pinning a
  * not-yet-pinned item and `maxPinnedMb` is supplied, this enforces that cap *at the
- * write*: if the item's `original_size` would push total pinned bytes over the cap,
- * the row is left unpinned and `over_budget` is returned — so the bound holds even
+ * write*: if the item's effective size (`summary_size` for summary-only rows,
+ * else `original_size`) would push total pinned bytes over the cap, the row is
+ * left unpinned and `over_budget` is returned — so the bound holds even
  * if the caller ignores the result and keeps pinning. Unpinning, and re-pinning an
  * already-pinned item, are never budget-checked. Omitting `maxPinnedMb` disables the
  * check (used by tests and internal callers that pin unconditionally).
@@ -158,18 +171,18 @@ export function pinOutput(
   maxPinnedMb?: number
 ): PinOutcome {
   const item = db.prepare(`
-    SELECT original_size, pinned FROM stored_outputs WHERE id = ? AND project_key = ?
-  `).get(id, project_key) as { original_size: number; pinned: number } | null;
+    SELECT ${EFFECTIVE_SIZE_EXPR} AS effective_size, pinned FROM stored_outputs WHERE id = ? AND project_key = ?
+  `).get(id, project_key) as { effective_size: number; pinned: number } | null;
   if (!item) return { ok: false, reason: "not_found" };
 
   if (pinned && item.pinned === 0 && maxPinnedMb !== undefined) {
     const capBytes = maxPinnedMb * 1024 * 1024;
     const { pinnedBytes } = db.prepare(`
-      SELECT COALESCE(SUM(original_size), 0) as pinnedBytes
+      SELECT COALESCE(SUM(${EFFECTIVE_SIZE_EXPR}), 0) as pinnedBytes
       FROM stored_outputs WHERE project_key = ? AND pinned = 1
     `).get(project_key) as { pinnedBytes: number };
-    if (pinnedBytes + item.original_size > capBytes) {
-      return { ok: false, reason: "over_budget", pinnedBytes, itemBytes: item.original_size, capBytes };
+    if (pinnedBytes + item.effective_size > capBytes) {
+      return { ok: false, reason: "over_budget", pinnedBytes, itemBytes: item.effective_size, capBytes };
     }
   }
 
@@ -219,7 +232,10 @@ const SECONDS_PER_DAY = 86400;
 
 /**
  * Enforces the project store size cap by evicting the lowest-value non-pinned
- * items until total `original_size` is within `max_size_mb`.
+ * items until total effective size is within `max_size_mb`. Effective size is
+ * `original_size` for full-body rows and `summary_size` for summary-only rows
+ * (`full_retained = 0`, written under `store.retention`), so lowering retention
+ * genuinely raises the number of items the store holds before eviction (#247).
  *
  * Value is a recency-weighted frequency score: `(access_count + 1)` decayed by
  * an exponential half-life on the time since last access (falling back to
@@ -239,7 +255,7 @@ export function evictIfNeeded(
   const max_bytes = max_size_mb * 1024 * 1024;
 
   const { total } = db.prepare(`
-    SELECT COALESCE(SUM(original_size), 0) as total
+    SELECT COALESCE(SUM(${EFFECTIVE_SIZE_EXPR}), 0) as total
     FROM stored_outputs WHERE project_key = ?
   `).get(project_key) as { total: number };
 
@@ -248,12 +264,12 @@ export function evictIfNeeded(
   const bytesToShed = total - max_bytes;
 
   const candidates = db.prepare(`
-    SELECT id, original_size, access_count, last_accessed, created_at
+    SELECT id, ${EFFECTIVE_SIZE_EXPR} AS effective_size, access_count, last_accessed, created_at
     FROM stored_outputs
     WHERE project_key = ? AND pinned = 0
   `).all(project_key) as {
     id: string;
-    original_size: number;
+    effective_size: number;
     access_count: number;
     last_accessed: number | null;
     created_at: number;
@@ -281,7 +297,7 @@ export function evictIfNeeded(
 
   // Evict lowest value first; tiebreak oldest creation, then id for full determinism.
   const ranked = candidates
-    .map((c) => ({ id: c.id, original_size: c.original_size, score: scoreOf(c), created_at: c.created_at }))
+    .map((c) => ({ id: c.id, effective_size: c.effective_size, score: scoreOf(c), created_at: c.created_at }))
     .sort(
       (a, b) =>
         a.score - b.score ||
@@ -294,7 +310,7 @@ export function evictIfNeeded(
   for (const row of ranked) {
     if (shed >= bytesToShed) break;
     toEvict.push(row.id);
-    shed += row.original_size;
+    shed += row.effective_size;
   }
 
   // Single DELETE for all selected IDs.

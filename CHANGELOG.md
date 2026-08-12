@@ -6,6 +6,14 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Changed
+
+- `store.max_size_mb` eviction and the `store.max_pinned_mb` pin budget now count each
+  item's **effective** stored size — a summary-only row (written under `store.retention`)
+  costs its summary size, not its original size. Lowering `store.retention` now genuinely
+  raises the number of items the store holds before eviction fires, not just bytes-on-disk
+  (#247). Savings figures in `recall__stats` still report original size (the context saved).
+
 ## [1.13.0] — 2026-08-10
 
 ### Added

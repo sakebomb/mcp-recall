@@ -119,6 +119,50 @@ describe("import round-trip", () => {
     }
   });
 
+  // A legitimate export never carries a body for a summary-only row (storeOutput
+  // zeroes it at write). But a hand-edited / tampered / foreign-version dump can
+  // pair full_retained=0 with a non-empty full_content — the schema validates the
+  // two independently. Import must enforce storeOutput's invariant so the body is
+  // dropped, otherwise the row occupies its full bytes on disk while the
+  // effective-size cap accounting (#247) counts it as summary_size only.
+  test("drops the body of a summary-only row from a malformed dump (full_retained=0 invariant)", async () => {
+    const bigBody = "x".repeat(10000);
+    const dump = [{
+      id: "recall_deadbeefcafe0001",
+      project_key: SOURCE_PROJECT,
+      session_id: "sess-abc",
+      tool_name: "Bash",
+      summary: "short summary",
+      full_content: bigBody,        // present despite full_retained = 0 (malformed)
+      original_size: 10000,
+      summary_size: 13,
+      created_at: 1_700_000_000,
+      pinned: 0,
+      access_count: 0,
+      last_accessed: null,
+      input_hash: null,
+      full_retained: 0,
+    }];
+    const dumpFile = makeTmpPath();
+    writeFileSync(dumpFile, JSON.stringify(dump));
+    const targetDbPath = makeTmpPath(".db");
+
+    process.env.RECALL_DB_PATH = targetDbPath;
+    try {
+      await handleImportCommand([dumpFile]);
+      const targetDb = new Database(targetDbPath);
+      const row = targetDb
+        .prepare(`SELECT full_retained, full_content FROM stored_outputs WHERE id = 'recall_deadbeefcafe0001'`)
+        .get() as { full_retained: number; full_content: string };
+      targetDb.close();
+
+      expect(row.full_retained).toBe(0);   // flag preserved
+      expect(row.full_content).toBe("");    // body dropped to honor the invariant
+    } finally {
+      delete process.env.RECALL_DB_PATH;
+    }
+  });
+
   test("remaps project key to current project by default", async () => {
     storeOutput(sourceDb, makeInput());
     const dumpFile = makeTmpPath();
