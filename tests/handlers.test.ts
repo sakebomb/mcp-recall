@@ -1017,6 +1017,28 @@ describe("commandFingerprint", () => {
     expect(commandFingerprint("$(which node) app.js")).toBe("");
     expect(commandFingerprint("")).toBe("");
   });
+
+  // Shell operators glued to a token without a space still terminate it (#252 review).
+  it("terminates a token at a glued shell operator, not just whitespace", () => {
+    expect(commandFingerprint("ls;pwd")).toBe("ls");
+    expect(commandFingerprint("make&&./run")).toBe("make");
+    expect(commandFingerprint("rg foo|wc -l")).toBe("rg");
+  });
+
+  // Irregular whitespace between a dispatcher verb and its subcommand (#252 review).
+  it("finds the subcommand across irregular whitespace", () => {
+    expect(commandFingerprint("git   diff --stat")).toBe("git diff");
+    expect(commandFingerprint("git\tdiff")).toBe("git diff");
+  });
+
+  // Wrapper prefixes are skipped so the wrapped operation is attributed (#252 review).
+  it("skips leading wrapper commands (sudo/time/nice) to the real verb", () => {
+    expect(commandFingerprint("sudo systemctl restart pg")).toBe("systemctl");
+    expect(commandFingerprint("sudo git diff")).toBe("git diff");
+    expect(commandFingerprint("time cargo build")).toBe("cargo build");
+    // A flagged wrapper isn't safely parseable → keeps the wrapper name (documented).
+    expect(commandFingerprint("sudo -u www git diff")).toBe("sudo");
+  });
 });
 
 // ---------------------------------------------------------------------------

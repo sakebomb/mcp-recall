@@ -7279,15 +7279,23 @@ var SUBCOMMAND_TOOLS = new Set([
   "docker",
   "kubectl"
 ]);
+var WRAPPER_TOOLS = new Set(["sudo", "doas", "time", "nice"]);
+var BARE_TOKEN = /^([a-zA-Z][\w-]*)(?=[\s;&|<>()]|$)/;
 function commandFingerprint(command) {
-  const c = command.trim().replace(/^(?:[A-Za-z_]\w*=\S*\s+)+/, "");
-  const first = c.match(/^([a-zA-Z][\w-]*)(?:\s|$)/);
+  let c = command.trim().replace(/^(?:[A-Za-z_]\w*=\S*\s+)+/, "");
+  for (let i = 0;i < 4; i++) {
+    const w = c.match(/^([a-zA-Z][\w-]*)\s+(?=[a-zA-Z])/);
+    if (!w || !WRAPPER_TOOLS.has(w[1]))
+      break;
+    c = c.slice(w[0].length);
+  }
+  const first = c.match(BARE_TOKEN);
   if (!first)
     return "";
   const verb = first[1];
   if (!SUBCOMMAND_TOOLS.has(verb))
     return verb;
-  const second = c.slice(first[0].length).match(/^([a-zA-Z][\w-]*)(?:\s|$)/);
+  const second = c.slice(verb.length).trimStart().match(BARE_TOKEN);
   return second ? `${verb} ${second[1]}` : verb;
 }
 function getBashHandler(input) {
