@@ -69,3 +69,6 @@ jobs:
             present reasoning as verification.' || '' }}
           trigger_phrase: "@claude"
           track_progress: "true"
+
+          # Cost control: pin claude-action to Sonnet-5 (~5x cheaper than Opus 4.8, strong at review + most coding).
+          claude_args: "--model claude-sonnet-5"
