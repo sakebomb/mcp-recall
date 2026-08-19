@@ -1,14 +1,16 @@
 name: Claude Code
 
 # Auto-reviews every PR and responds to @claude mentions in issue/PR comments.
-# Auth: Workload Identity Federation (keyless) — the action swaps GitHub's OIDC
-# token for a short-lived Anthropic token, so there is NO ANTHROPIC_API_KEY to
-# store or rotate. The fdrl_/svac_/org-UUID values below are identifiers, not
-# credentials, so they live in-repo by design.
+# Auth: Claude subscription OAuth token — reviews bill against the personal Max
+# subscription instead of metered API/Console usage. This trades the former
+# keyless WIF setup (rule repo:sakebomb/*) for a long-lived secret to rotate.
 #
-# Federation rule fdrl_01QrWEGMrXHmz5FtKb23Ckux is scoped to subject prefix
-# repo:sakebomb/* (claim repository_owner=sakebomb), so every sakebomb repo
-# shares this same workflow + identifiers. Console: Settings → Workload identity.
+# SETUP (one-time): `claude setup-token` on the Max account prints an sk-ant-oat
+# token; store it as this repo's CLAUDE_CODE_OAUTH_TOKEN secret via `gh secret set`.
+#
+# CAVEATS: ~1-year token, expires SILENTLY (regenerate with `claude setup-token`);
+# CI shares one rate-limit pool with interactive Claude Code and every other repo
+# on this token; tied to the individual who ran setup-token.
 
 on:
   pull_request:
@@ -32,7 +34,7 @@ jobs:
       pull-requests: write
       issues: write
       actions: read     # lets the github_ci MCP server read CI/check status during reviews
-      id-token: write   # REQUIRED for WIF: lets the action fetch a GitHub OIDC token
+      id-token: write   # the action fetches a GitHub OIDC token to mint its GitHub App token for posting
     steps:
       - uses: actions/checkout@v5
         with:
@@ -40,13 +42,9 @@ jobs:
 
       - uses: anthropics/claude-code-action@v1
         with:
-          # --- WIF identifiers (rule scoped to repo:sakebomb/*) --------------
-          # These are identifiers, not credentials — safe to keep in-repo.
-          anthropic_federation_rule_id: fdrl_01QrWEGMrXHmz5FtKb23Ckux
-          anthropic_organization_id: 1d3bf4a1-f7b8-47d9-8cda-850a04b89ee3
-          anthropic_service_account_id: svac_01TfdVVK716pxAGtc8rLezMG
-          anthropic_workspace_id: wrkspc_01SEA76zmcMvsuYcL8cDY3S9
-          # -------------------------------------------------------------------
+          # Subscription OAuth token (see header). Bills against the personal Max
+          # plan, not the API/Console workspace. Set via `gh secret set CLAUDE_CODE_OAUTH_TOKEN`.
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
           # Auto PR review supplies a review prompt; mentions use the comment body.
           #
