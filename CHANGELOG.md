@@ -6,6 +6,8 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+## [1.14.0] — 2026-08-20
+
 ### Added
 
 - `recall__stats` now includes a **By Bash command** breakdown that attributes the aggregate
