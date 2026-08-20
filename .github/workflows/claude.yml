@@ -69,3 +69,8 @@ jobs:
             present reasoning as verification.' || '' }}
           trigger_phrase: "@claude"
           track_progress: "true"
+
+          # Pin claude-action to Sonnet-5. Since #254 auth bills against the flat-rate Max
+          # subscription (not metered API), this is not a per-token saving — it conserves the
+          # shared Max rate-limit pool the header warns about, and Sonnet-5 is strong at review.
+          claude_args: "--model claude-sonnet-5"
