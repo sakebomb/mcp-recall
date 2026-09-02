@@ -70,6 +70,18 @@ jobs:
           trigger_phrase: "@claude"
           track_progress: "true"
 
+          # Documented bypasses of the write-access gate — pinned empty rather than
+          # relying on the action defaults, so a future default change cannot widen who
+          # can trigger the reviewer. This job stays deliberately read-only (no
+          # --allowedTools Bash grant): the reviewer runs on issue_comment in base
+          # context WITH secrets + id-token: write while the action checks out the PR
+          # head, and CLAUDE_CODE_OAUTH_TOKEN (a long-lived personal credential) sits in
+          # the job env, so granting execution would let PR-controlled code exfiltrate it.
+          # Reviewers verify test/CI claims via the github_ci MCP (actions: read), not by
+          # running them. See #221 (won't grant execution) and #224 (CI-verification prompt).
+          allowed_non_write_users: ""
+          allowed_bots: ""
+
           # Pin claude-action to Sonnet-5. Since #254 auth bills against the flat-rate Max
           # subscription (not metered API), this is not a per-token saving — it conserves the
           # shared Max rate-limit pool the header warns about, and Sonnet-5 is strong at review.
