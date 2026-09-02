@@ -116,7 +116,9 @@ describe("gc scanDatabases", () => {
 
   // `dirname("")` and `dirname("bare-name")` are both ".", which always exists, so
   // the parent-survived orphan test would read these as "project deleted" and
-  // destroy the DB. A relative path cannot be rooted, so it is un-verifiable.
+  // destroy the DB. A relative path cannot be rooted, so it must never be deleted on
+  // a deleted-project inference — but it should not stay pinned forever either (#214):
+  // once untouched past the stale window it falls through to the staleness rule.
   it.each([
     ["an empty recorded path", ""],
     ["a bare relative name", "myproject"],
@@ -124,10 +126,36 @@ describe("gc scanDatabases", () => {
     // Exists relative to whatever cwd gc runs from. Must not become "active":
     // a DB's status cannot depend on the directory the command was invoked in.
     ["a relative path that resolves against cwd", "."],
-  ])("classifies %s as unverifiable (never deleted)", (_label, recorded) => {
+  ])("keeps %s as unrooted-fresh before the stale window (never deleted)", (_label, recorded) => {
     makeDb("relpath", recorded);
-    const [entry] = scanDatabases(workDir, "/current.db", 90);
+    const [entry] = scanDatabases(workDir, "/current.db", 90, Date.now());
     expect(entry!.projectPath).toBe(recorded);
+    expect(entry!.status).toBe("unrooted-fresh");
+    expect(isDeletionCandidate(entry!.status)).toBe(false);
+  });
+
+  it.each([
+    ["an empty recorded path", ""],
+    ["a bare relative name", "myproject"],
+    ["a relative path with segments", "some/relative/path"],
+    ["a relative path that resolves against cwd", "."],
+  ])(
+    "reclaims %s as unrooted-stale once past the stale window (deletion candidate)",
+    (_label, recorded) => {
+      makeDb("relpath", recorded);
+      const [entry] = scanDatabases(workDir, "/current.db", 90, Date.now() + 200 * DAY_MS);
+      expect(entry!.projectPath).toBe(recorded);
+      expect(entry!.status).toBe("unrooted-stale");
+      expect(isDeletionCandidate(entry!.status)).toBe(true);
+    }
+  );
+
+  it("keeps an unmounted absolute path as unverifiable regardless of age (never deleted)", () => {
+    // Distinct from the un-rootable case above: an absolute path whose whole tree is
+    // absent is likely a mount that will return with its project intact, so it is
+    // never a candidate — not even long past the stale window.
+    makeDb("unmounted", "/no/such/mount/point/project");
+    const [entry] = scanDatabases(workDir, "/current.db", 90, Date.now() + 500 * DAY_MS);
     expect(entry!.status).toBe("unverifiable");
     expect(isDeletionCandidate(entry!.status)).toBe(false);
   });
@@ -194,14 +222,16 @@ describe("gc vacuumTargets", () => {
     const all: DbEntry[] = [
       entry("active"),
       entry("legacy-fresh"),
+      entry("unrooted-fresh"), // kept (un-rootable but fresh) — vacuumable
       entry("orphaned"), // deletion candidate — must be excluded (was the 5GB bug)
       entry("legacy-stale"), // deletion candidate — must be excluded
+      entry("unrooted-stale"), // deletion candidate — must be excluded
       entry("current"), // live-locked
       entry("unverifiable"), // path unverifiable — must be excluded
       entry("unreadable"),
     ];
     const targets = vacuumTargets(all).map((e) => e.status);
-    expect(targets).toEqual(["active", "legacy-fresh"]);
+    expect(targets).toEqual(["active", "legacy-fresh", "unrooted-fresh"]);
   });
 
   it("returns nothing when every database is a deletion candidate", () => {

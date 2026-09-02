@@ -5698,6 +5698,8 @@ var STATUS_POLICY = {
   active: { deletable: false, vacuumable: true },
   orphaned: { deletable: true, vacuumable: false },
   unverifiable: { deletable: false, vacuumable: false },
+  "unrooted-fresh": { deletable: false, vacuumable: true },
+  "unrooted-stale": { deletable: true, vacuumable: false },
   "legacy-fresh": { deletable: false, vacuumable: true },
   "legacy-stale": { deletable: true, vacuumable: false },
   unreadable: { deletable: false, vacuumable: false }
@@ -5764,8 +5766,9 @@ function classify(probe, mtimeMs, staleCutoffMs) {
   if (!probe.readable)
     return "unreadable";
   if (probe.projectPath !== null) {
-    if (!isAbsolute(probe.projectPath))
-      return "unverifiable";
+    if (!isAbsolute(probe.projectPath)) {
+      return mtimeMs < staleCutoffMs ? "unrooted-stale" : "unrooted-fresh";
+    }
     if (existsSync(probe.projectPath))
       return "active";
     return existsSync(dirname2(probe.projectPath)) ? "orphaned" : "unverifiable";
@@ -5804,6 +5807,8 @@ var STATUS_LABEL = {
   active: "active",
   orphaned: "ORPHANED",
   unverifiable: "unverifiable",
+  "unrooted-fresh": "unrooted",
+  "unrooted-stale": "UNROOTED-STALE",
   "legacy-fresh": "legacy",
   "legacy-stale": "LEGACY-STALE",
   unreadable: "unreadable"
@@ -5812,7 +5817,7 @@ function reportLine(e, nowMs) {
   const flag = isDeletionCandidate(e.status) ? "\u2717" : " ";
   const age = formatRelativeTime(nowMs - e.mtimeMs);
   const where = e.projectPath ?? "(no recorded path)";
-  return `  ${flag} ${STATUS_LABEL[e.status].padEnd(13)} ${formatBytes(e.sizeBytes).padStart(9)}` + `  ${String(e.items).padStart(6)} items  ${age.padEnd(14)}  ${basename(e.file)}
+  return `  ${flag} ${STATUS_LABEL[e.status].padEnd(14)} ${formatBytes(e.sizeBytes).padStart(9)}` + `  ${String(e.items).padStart(6)} items  ${age.padEnd(14)}  ${basename(e.file)}
 ` + `      ${where}`;
 }
 function vacuumFile(file) {
@@ -5867,7 +5872,7 @@ function gcCommand(opts = {}) {
     console.log(reportLine(e, nowMs));
   console.log(`
 ${entries.length} databases \xB7 ${formatBytes(sumBytes(entries))} total \xB7 ` + `${candidates.length} reclaimable (${formatBytes(sumBytes(candidates))})`);
-  console.log(`  ORPHANED = project path deleted \xB7 LEGACY-STALE = no recorded path, untouched > ${staleDays}d ` + `(--stale-days N) \xB7 unverifiable/unreadable are never deleted`);
+  console.log(`  ORPHANED = project path deleted \xB7 LEGACY-STALE = no recorded path \xB7 ` + `UNROOTED-STALE = un-rootable relative path \u2014 both untouched > ${staleDays}d (--stale-days N) \xB7 ` + `unverifiable (unmounted volume) / unreadable are never deleted`);
   if (dryRun) {
     if (candidates.length > 0) {
       console.log(`
