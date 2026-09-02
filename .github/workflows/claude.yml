@@ -1,6 +1,23 @@
 name: Claude Code
 
 # Auto-reviews every PR and responds to @claude mentions in issue/PR comments.
+#
+# Two jobs, split by trigger, for the reason in #221 (option B):
+#   - `pull-request` runs on PR events and MAY execute the test suite. A fork PR
+#     never reaches the action here — GitHub withholds repo secrets from fork
+#     `pull_request` runs, so the OAuth token is empty and the action no-ops; and
+#     fork PRs get no OIDC regardless. Execution therefore only fires for
+#     same-repo PRs, the same trust boundary `Test & typecheck` already runs under.
+#   - `mention` runs on comment events and has NO execution grant. `issue_comment`
+#     runs in base context WITH secrets and `id-token: write`, and
+#     claude-code-action fetches + checks out the PR head (`pull/<n>/head` for
+#     forks) itself — so granting Bash there would let fork code run in a
+#     token-minting job. It stays read-only and verifies CI via the github_ci MCP.
+#
+# NOTE: any change to this file self-disables the reviewer on the PR that makes it
+# (the action requires the workflow to match the default branch), so a PR cannot
+# grant itself new capabilities and use them in the same review.
+#
 # Auth: Claude subscription OAuth token — reviews bill against the personal Max
 # subscription instead of metered API/Console usage. This trades the former
 # keyless WIF setup (rule repo:sakebomb/*) for a long-lived secret to rotate.
@@ -21,13 +38,10 @@ on:
     types: [created]
 
 jobs:
-  claude:
-    # Skip comment events that don't tag @claude so we don't burn runner minutes
-    # on every comment; PR events always run (auto-review).
-    if: >
-      github.event_name == 'pull_request' ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
+  # PR auto-review. Execution grant lives here — safe because fork PRs cannot
+  # authenticate (no secrets) or mint OIDC on `pull_request`. See #221.
+  pull-request:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -46,31 +60,70 @@ jobs:
           # plan, not the API/Console workspace. Set via `gh secret set CLAUDE_CODE_OAUTH_TOKEN`.
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
-          # Auto PR review supplies a review prompt; mentions use the comment body.
-          #
-          # The CI-verification clause is deliberate. Reviews were inconsistently
-          # disclaiming "could not reproduce the test count" even though this job
-          # holds `actions: read` for exactly that — some reviews read the CI run and
-          # settled claims from it, others assumed they could not. Nothing in the old
-          # prompt asked them to look. See #221; this needs no extra permission.
+          # Auto-review prompt. This job only runs on pull_request, so no event
+          # branching is needed. The CI-verification and self-execution clauses are
+          # deliberate: reviews used to disclaim "could not reproduce the test count"
+          # despite holding `actions: read`, and now they may also run the suite
+          # directly (see claude_args). See #221.
           #
           # Folded scalar (>-) so the prompt stays readable; YAML folds the newlines
-          # to spaces before Actions evaluates the expression. Avoid apostrophes in
-          # the text — it lives inside a single-quoted GitHub expression string.
+          # to spaces. This is a plain scalar (not a GitHub expression), so apostrophes
+          # are fine, but the text avoids them out of habit.
           prompt: >-
-            ${{ github.event_name == 'pull_request' && 'Review this PR for
-            correctness, security, and adherence to the repo conventions in
-            CLAUDE.md. Flag CRITICAL/HIGH issues clearly and keep notes concise.
-            Treat every factual claim in the PR body as unverified until you have
-            checked it against the code. For claims about test counts, coverage, or
-            CI status, read the CI run for the head commit and settle them from it
-            rather than disclaiming that you could not verify them. Say plainly
+            Review this PR for correctness, security, and adherence to the repo
+            conventions in CLAUDE.md. Flag CRITICAL/HIGH issues clearly and keep
+            notes concise. Treat every factual claim in the PR body as unverified
+            until you have checked it against the code. For claims about test
+            counts, coverage, or CI status, read the CI run for the head commit and
+            settle them from it, or run the suite yourself — Bash(bun install),
+            Bash(bun test), and Bash(bun run typecheck) are permitted. Say plainly
             which claims you verified and how, and which you could not — never
-            present reasoning as verification.' || '' }}
+            present reasoning as verification.
           trigger_phrase: "@claude"
           track_progress: "true"
 
-          # Pin claude-action to Sonnet-5. Since #254 auth bills against the flat-rate Max
-          # subscription (not metered API), this is not a per-token saving — it conserves the
-          # shared Max rate-limit pool the header warns about, and Sonnet-5 is strong at review.
+          # Documented bypasses of the write-access gate — pinned empty rather than
+          # relying on the defaults, so a future default change cannot widen access.
+          allowed_non_write_users: ""
+          allowed_bots: ""
+
+          # Model pin (see mention job for rationale) PLUS the test-execution grant.
+          # This grant is safe ONLY here (see job/file comments). Do NOT copy it to
+          # the mention job.
+          claude_args: '--model claude-sonnet-5 --allowedTools "Bash(bun install:*),Bash(bun test:*),Bash(bun run typecheck:*)"'
+
+  # @claude mentions in issue/PR comments. NO execution grant — this is the one
+  # context where fork code + secrets + id-token: write coexist. See #221.
+  mention:
+    # Skip comment events that don't tag @claude so we don't burn runner minutes.
+    if: >
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read     # lets the github_ci MCP server read CI/check status during reviews
+      id-token: write   # the action fetches a GitHub OIDC token to mint its GitHub App token for posting
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          trigger_phrase: "@claude"
+          track_progress: "true"
+
+          # Documented bypasses of the write-access gate — pinned empty (see above).
+          allowed_non_write_users: ""
+          allowed_bots: ""
+
+          # Model pin only. NO --allowedTools Bash grant here: issue_comment runs in
+          # base context with working OIDC and the action checks out fork head, so
+          # executing anything would run untrusted code in a token-minting job. This
+          # job verifies test/CI claims via the github_ci MCP (actions: read), not by
+          # running them. Pinned to Sonnet-5 to conserve the shared Max rate-limit pool.
           claude_args: "--model claude-sonnet-5"
