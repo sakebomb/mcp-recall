@@ -42,6 +42,13 @@ function exportToFile(filePath: string): void {
 }
 
 beforeEach(() => {
+  // Reset any singleton a prior test file may have left open. getDb() returns
+  // the cached instance and ignores its path argument once one exists, so
+  // without this, a leaked singleton would make handleImportCommand write to
+  // the wrong DB and leave targetDbPath schema-less ("no such table") — an
+  // order-dependent cross-file flake. Resetting here makes the invariant below
+  // ("a fresh singleton to the target path") hold regardless of run order.
+  closeDb();
   // Use a raw Database (not the singleton) for the source so that
   // handleImportCommand can open a fresh singleton to the target path.
   sourceDb = new Database(":memory:");
