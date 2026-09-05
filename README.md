@@ -261,7 +261,7 @@ mcp-recall gc --force
 mcp-recall gc --force --vacuum
 ```
 
-Each database is classified by whether its recorded project path still exists on disk. Only two classifications are ever deleted:
+Each database is classified by whether its recorded project path still exists on disk. Only databases untouched past the stale window, or a project directory confirmed deleted, are ever removed:
 
 | Status | Meaning | `--force` deletes? |
 |---|---|---|
@@ -270,12 +270,14 @@ Each database is classified by whether its recorded project path still exists on
 | **orphaned** | Project directory gone, but its parent survives — a real deletion | **yes** |
 | **legacy-fresh** | No recorded project path, touched within `--stale-days` | never |
 | **legacy-stale** | No recorded project path, untouched longer than `--stale-days N` (default 90) | **yes** |
-| **unverifiable** | Can't be judged safely — a relative recorded path, or a missing parent directory (usually an unmounted volume, not a deleted project) | never |
+| **unrooted-fresh** | Un-rootable relative recorded path, touched within `--stale-days` | never |
+| **unrooted-stale** | Un-rootable relative recorded path, untouched longer than `--stale-days N` | **yes** |
+| **unverifiable** | Absolute path whose parent directory is also missing — usually an unmounted volume, not a deleted project | never |
 | **unreadable** | Not a readable recall database | never |
 
-The `orphaned` rule requires the *parent* directory to survive, so an unmounted volume reads as `unverifiable` rather than as a deleted project. Databases with a relative recorded path are also `unverifiable`: there is no way to know what they were rooted against. Both are kept.
+The `orphaned` rule requires the *parent* directory to survive, so an absolute path on an unmounted volume reads as `unverifiable` — the volume may return with its project intact, so it is never deleted regardless of age. A database with a *relative* recorded path can't be rooted against any directory, so it is never deleted on a deleted-project inference; instead it falls through to the same "untouched for `--stale-days`" rule as pathless legacy databases (`unrooted-fresh` before the window, `unrooted-stale` after).
 
-A database has no recorded project path either because it predates path tracking, or because its path never resolved to a real directory when a session started — session start records a path only once it confirms one exists, so it never overwrites good evidence with a guess. Either way the `legacy-*` classifications rest solely on "untouched for `--stale-days`", never on inferring that a project was deleted.
+A database has no recorded project path either because it predates path tracking, or because its path never resolved to a real directory when a session started — session start records a path only once it confirms one exists, so it never overwrites good evidence with a guess. Either way the `legacy-*` and `unrooted-*` classifications rest solely on "untouched for `--stale-days`", never on inferring that a project was deleted.
 
 The active project's database is always protected. When the store grows past `store.gc_reminder_mb` (default 2 GB), session start injects a one-line reminder to run `gc`, and `mcp-recall status` shows the store's size. There's no automatic deletion — reclaiming is always an explicit command.
 

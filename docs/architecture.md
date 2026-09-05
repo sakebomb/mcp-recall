@@ -168,14 +168,18 @@ removed. Two defenses hold this: `project-key.ts` guarantees the recorded path i
 absolute — git's `--show-toplevel` is already absolute (and is left verbatim to
 avoid re-keying every existing DB), and the non-git fallback is run through
 `resolve(cwd)` rather than used bare (`project-key.ts:49-51`) — and session-start
-records a path *only* when it resolves to a real directory (`session-start.ts:60`). Non-absolute
-or unresolvable paths classify as `unverifiable` and are never deleted.
+records a path *only* when it resolves to a real directory (`session-start.ts:60`). A
+relative recorded path is never deleted on that deleted-project inference; instead it
+falls through to the staleness rule as `unrooted-fresh`/`unrooted-stale` (#214), so it
+can eventually be reclaimed once untouched past the stale window without ever being
+attributed to a deleted project. An absolute path whose parent is also gone (an
+unmounted volume) stays `unverifiable` and is never deleted regardless of age.
 
 `STATUS_POLICY` (`gc/index.ts:55`) is the single source of truth for deletion —
 a `Record<DbStatus, …>`, so adding a status without a policy is a compile error.
-Only `orphaned` and `legacy-stale` are deletable; `unverifiable`, `unreadable`,
-`current`, `active`, `legacy-fresh` are all kept. When changing `gc/`, build a
-store containing the dangerous shapes and assert what survives.
+Only `orphaned`, `legacy-stale`, and `unrooted-stale` are deletable; `unverifiable`,
+`unreadable`, `current`, `active`, `legacy-fresh`, `unrooted-fresh` are all kept. When
+changing `gc/`, build a store containing the dangerous shapes and assert what survives.
 
 ### 2. project-key scoping — writes are scoped, by-id reads are capabilities
 

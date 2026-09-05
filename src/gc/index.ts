@@ -11,10 +11,11 @@
  *
  * Default is a dry run — nothing is deleted without `--force`. Deletion is
  * conservative: only DBs whose project was *definitively* removed (the recorded
- * path is gone but its parent still exists) or pathless DBs untouched past the
- * stale window are candidates. A path missing because its whole volume is
- * unmounted, a recorded path we cannot reason about (relative, so un-rootable), a
- * non-mcp-recall `.db`, or a corrupt DB is never a candidate.
+ * path is gone but its parent still exists), or DBs we cannot attribute to a live
+ * project that are also untouched past the stale window (pathless legacy DBs, or an
+ * un-rootable relative recorded path), are candidates. A path missing because its
+ * whole volume is unmounted (absolute, so it may return intact), a non-mcp-recall
+ * `.db`, or a corrupt DB is never a candidate.
  */
 
 import { Database } from "bun:sqlite";
@@ -41,7 +42,9 @@ export type DbStatus =
   | "current" // the active project's DB — never touched
   | "active" // recorded path still exists on disk
   | "orphaned" // recorded path gone but its parent exists — project deleted, safe to remove
-  | "unverifiable" // can't be reasoned about: path AND parent gone (likely an unmounted volume), or a relative path with no knowable root; never deleted
+  | "unverifiable" // path AND parent gone (likely an unmounted volume, which may return intact) — can't confirm deletion; never deleted
+  | "unrooted-fresh" // un-rootable recorded path (relative/empty), recently modified — kept
+  | "unrooted-stale" // un-rootable recorded path (relative/empty), untouched past the stale window — candidate
   | "legacy-fresh" // no recorded path, recently modified — kept
   | "legacy-stale" // no recorded path, untouched past the stale window — candidate
   | "unreadable"; // not an mcp-recall DB, or could not be read — reported, never deleted
@@ -57,6 +60,8 @@ const STATUS_POLICY: Record<DbStatus, { deletable: boolean; vacuumable: boolean 
   active: { deletable: false, vacuumable: true },
   orphaned: { deletable: true, vacuumable: false },
   unverifiable: { deletable: false, vacuumable: false },
+  "unrooted-fresh": { deletable: false, vacuumable: true },
+  "unrooted-stale": { deletable: true, vacuumable: false },
   "legacy-fresh": { deletable: false, vacuumable: true },
   "legacy-stale": { deletable: true, vacuumable: false },
   unreadable: { deletable: false, vacuumable: false },
@@ -190,8 +195,13 @@ function classify(
     // gc happens to run from, so it would otherwise classify differently per
     // invocation — and "." or a bare name would read as "parent survived, project
     // deleted" (dirname is ".", which always exists) and be destroyed. We cannot
-    // know where a relative path was rooted, so it is the can't-verify case.
-    if (!isAbsolute(probe.projectPath)) return "unverifiable";
+    // know where a relative path was rooted, so we never delete it on a
+    // deleted-project inference. But it should not stay pinned forever either
+    // (#214): fall through to the same untouched-past-the-stale-window rule used for
+    // pathless legacy DBs, tagged distinctly so the report stays legible.
+    if (!isAbsolute(probe.projectPath)) {
+      return mtimeMs < staleCutoffMs ? "unrooted-stale" : "unrooted-fresh";
+    }
     if (existsSync(probe.projectPath)) return "active";
     // Path gone: only call it orphaned if the PARENT still exists (the project
     // dir was really deleted). If the parent is also gone, the volume is likely
@@ -251,6 +261,8 @@ const STATUS_LABEL: Record<DbStatus, string> = {
   active: "active",
   orphaned: "ORPHANED",
   unverifiable: "unverifiable",
+  "unrooted-fresh": "unrooted",
+  "unrooted-stale": "UNROOTED-STALE",
   "legacy-fresh": "legacy",
   "legacy-stale": "LEGACY-STALE",
   unreadable: "unreadable",
@@ -261,7 +273,7 @@ function reportLine(e: DbEntry, nowMs: number): string {
   const age = formatRelativeTime(nowMs - e.mtimeMs);
   const where = e.projectPath ?? "(no recorded path)";
   return (
-    `  ${flag} ${STATUS_LABEL[e.status].padEnd(13)} ${formatBytes(e.sizeBytes).padStart(9)}` +
+    `  ${flag} ${STATUS_LABEL[e.status].padEnd(14)} ${formatBytes(e.sizeBytes).padStart(9)}` +
     `  ${String(e.items).padStart(6)} items  ${age.padEnd(14)}  ${basename(e.file)}\n` +
     `      ${where}`
   );
@@ -332,8 +344,9 @@ export function gcCommand(opts: GcOptions = {}): void {
       `${candidates.length} reclaimable (${formatBytes(sumBytes(candidates))})`
   );
   console.log(
-    `  ORPHANED = project path deleted · LEGACY-STALE = no recorded path, untouched > ${staleDays}d ` +
-      `(--stale-days N) · unverifiable/unreadable are never deleted`
+    `  ORPHANED = project path deleted · LEGACY-STALE = no recorded path · ` +
+      `UNROOTED-STALE = un-rootable relative path — both untouched > ${staleDays}d (--stale-days N) · ` +
+      `unverifiable (unmounted volume) / unreadable are never deleted`
   );
 
   if (dryRun) {
