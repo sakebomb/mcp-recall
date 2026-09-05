@@ -6,6 +6,17 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Fixed
+
+- `mcp-recall gc` can now reclaim databases whose recorded project path is un-rootable
+  (relative or empty) — previously classified `unverifiable`, they occupied disk with no
+  route to reclamation. Such a database is now kept while fresh (`unrooted-fresh`) and
+  becomes a deletion candidate only once untouched past `--stale-days` (`unrooted-stale`),
+  the same conservative staleness rule already used for pathless legacy databases. An
+  un-rootable path is still never deleted on a deleted-project inference, and an absolute
+  path whose whole volume is unmounted stays `unverifiable` and is never deleted at any
+  age (#214).
+
 ## [1.14.0] — 2026-08-20
 
 ### Added
