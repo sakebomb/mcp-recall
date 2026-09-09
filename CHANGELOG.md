@@ -6,6 +6,24 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Fixed
+
+- **A leading `cd <dir>` followed by a newline no longer defeats Bash handler routing.**
+  `normalizeCommand` unwrapped the `cd <dir> &&` and `cd <dir> ;` shapes but not a bare
+  newline separator — the shape a multi-line Bash call takes — so `cd /repo` + newline +
+  `git diff` fell through *every* CLI-aware handler (git diff/log/status/branch, grep/rg,
+  `gh`, test runners, compiler diagnostics, `docker ps`) to the generic shell fallback.
+  Measured on a real 69-database store, `cd` was the **largest** Bash command family:
+  7,977 rows and 9.43 MB (22% of all intercepted Bash bytes) compressing at 43.5%,
+  fallback grade, while commands that did reach a handler ran 68–75%. A directory
+  argument containing whitespace (quoted or backslash-escaped) was also not unwrapped,
+  and chained hops are now unwrapped across mixed separators. The same normalisation
+  feeds the `command_fp` attribution added in #251, so the "By Bash command" breakdown
+  was hiding its own largest bucket behind the wrapper name; it now reports the real
+  family. A bare `cd <dir>` with no following command is still left intact. This is the
+  same bug class as the `git --no-pager diff` leak fixed in 1.13.0 — a sibling input
+  shape of an already-handled wrapper (#260)
+
 ## [1.14.1] — 2026-09-05
 
 ### Fixed

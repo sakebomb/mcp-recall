@@ -7265,11 +7265,15 @@ ${meta.join(`
   }
   return shellHandler(toolName, output);
 };
+var CD_PREFIX = /^cd\s+(?:"[^"]*"|'[^']*'|(?:\\.|[^\s&;|<>])+)[ \t]*(?:&&|;|\r?\n)\s*(.+)$/s;
 function normalizeCommand(command) {
   let c = command.trim();
-  const cd = c.match(/^cd\s+[^\s&;]+\s*(?:&&|;)\s*(.+)$/s);
-  if (cd)
+  for (let i = 0;i < 4; i++) {
+    const cd = c.match(CD_PREFIX);
+    if (!cd)
+      break;
     c = cd[1].trim();
+  }
   c = c.replace(/^git\s+(?:(?:--no-pager|--paginate|-P)\s+|-[cC]\s+\S+\s+)+/, "git ");
   return c;
 }
