@@ -13,20 +13,20 @@
  * Notes (`recall__note`) never pass through here — they are stored via the note
  * tool, not the hook — so memory always keeps its body regardless of level.
  */
+import { normalizeCommand } from "./handlers/bash";
+
 export type RetentionLevel = "full" | "balanced" | "minimal";
 
 // Bash commands whose output is expensive/impossible to reproduce and stays
 // valid later (network fetches / API calls) — worth keeping under `balanced`.
 const NETWORK_BASH_RE = /^(curl|wget|https?|xh)\b|^gh\s+api\b/;
 
-// Strips ALL leading `cd <dir> && ` / `cd <dir>; ` segments so a fetch chained
-// behind one or more directory changes (`cd a && cd b && curl …`) is still seen.
-const CD_PREFIX_RE = /^cd\s+[^\s&;]+\s*(?:&&|;)\s*/;
-function unwrapCommand(command: string): string {
-  let c = command.trim();
-  while (CD_PREFIX_RE.test(c)) c = c.replace(CD_PREFIX_RE, "").trim();
-  return c;
-}
+// Unwrapping a leading `cd <dir>` prefix is delegated to the ONE shared
+// normalizer used by handler routing — this module previously kept its own copy
+// that understood only `&&`/`;`, so a fetch chained behind a newline-separated
+// `cd` was classified reproducible and its body dropped under `balanced`, losing
+// output that by definition cannot be reproduced (#260).
+const unwrapCommand = normalizeCommand;
 
 /**
  * Returns true when the verbatim body should be persisted for retrieval.

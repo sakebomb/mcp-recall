@@ -7265,11 +7265,15 @@ ${meta.join(`
   }
   return shellHandler(toolName, output);
 };
+var CD_PREFIX = /^cd\s+(?:"[^"]*"|'[^']*'|(?:\\[\s\S]|[^\s\\&;|<>])+)[ \t]*(?:&&|;|\r?\n)\s*(.+)$/s;
 function normalizeCommand(command) {
   let c = command.trim();
-  const cd = c.match(/^cd\s+[^\s&;]+\s*(?:&&|;)\s*(.+)$/s);
-  if (cd)
+  for (let i = 0;i < 4; i++) {
+    const cd = c.match(CD_PREFIX);
+    if (!cd)
+      break;
     c = cd[1].trim();
+  }
   c = c.replace(/^git\s+(?:(?:--no-pager|--paginate|-P)\s+|-[cC]\s+\S+\s+)+/, "git ");
   return c;
 }
@@ -8635,13 +8639,7 @@ function extractHints(content, maxHints = DEFAULT_MAX_HINTS) {
 
 // src/retention.ts
 var NETWORK_BASH_RE = /^(curl|wget|https?|xh)\b|^gh\s+api\b/;
-var CD_PREFIX_RE = /^cd\s+[^\s&;]+\s*(?:&&|;)\s*/;
-function unwrapCommand(command) {
-  let c = command.trim();
-  while (CD_PREFIX_RE.test(c))
-    c = c.replace(CD_PREFIX_RE, "").trim();
-  return c;
-}
+var unwrapCommand = normalizeCommand;
 function shouldRetainFullBody(level, toolName, command) {
   if (level === "full")
     return true;

@@ -962,6 +962,50 @@ describe("getBashHandler", () => {
     expect(normalizeCommand("cd x && git --no-pager show abc")).toBe("git show abc");
   });
 
+  // #260: the unwrap handled `&&` and `;` but not a newline separator, so a
+  // multi-line `cd <dir>` + command — a shape Claude Code emits routinely — fell
+  // through every CLI-aware handler to the generic shell fallback. Measured as the
+  // largest Bash family in a real store (22% of intercepted Bash bytes at 43.5%
+  // reduction, fallback grade).
+  it("unwraps a leading `cd <dir>` separated by a newline before routing (#260)", () => {
+    expect(getBashHandler({ command: "cd /home/u/repo\ngit diff" })).toBe(gitDiffHandler);
+    expect(getBashHandler({ command: "cd /home/u/repo\ngrep -rn foo src/" })).toBe(grepHandler);
+    expect(getBashHandler({ command: "cd /home/u/repo\ngh pr list" })).toBe(ghHandler);
+    expect(normalizeCommand("cd x\ngit --no-pager show abc")).toBe("git show abc");
+  });
+
+  it("unwraps a leading `cd <dir>` whose path contains whitespace (#260)", () => {
+    expect(getBashHandler({ command: 'cd "/home/u/my repo" && git diff' })).toBe(gitDiffHandler);
+    expect(getBashHandler({ command: "cd '/home/u/my repo' && git log" })).toBe(gitLogHandler);
+    expect(getBashHandler({ command: "cd /home/u/my\\ repo && git status" })).toBe(gitStatusHandler);
+  });
+
+  it("leaves a bare `cd <dir>` with no following command alone (#260)", () => {
+    expect(normalizeCommand("cd /home/u/repo")).toBe("cd /home/u/repo");
+    expect(getBashHandler({ command: "cd /home/u/repo" })).toBe(shellHandler);
+  });
+
+  // #260 review: the unquoted-directory branch must keep its two alternatives
+  // mutually exclusive. When a lone backslash can be consumed either as an escape
+  // pair or as a plain char, the group is ambiguous (the `(a|aa)+` shape) and the
+  // engine must explore many partitions to PROVE no match — which is exactly what
+  // a bare `cd <dir>` (no separator) asks it to do. Measured: the ambiguous form
+  // climbs to ~780ms and then plateaus there (V8 caps backtracking, so it is a
+  // bounded CPU cost rather than a hang) while the disjoint form is ~0.02ms — four
+  // orders of magnitude apart, so a 250ms bound separates them cleanly and stays
+  // safe on a slow CI runner. This runs on every intercepted Bash call.
+  it("disproves a bare `cd` with many escaped chars without backtracking (#260)", () => {
+    const input = "cd /repo" + "\\a".repeat(40);
+    const t0 = performance.now();
+    expect(normalizeCommand(input)).toBe(input);
+    expect(performance.now() - t0).toBeLessThan(250);
+  });
+
+  it("unwraps multi-hop `cd` prefixes across mixed separators (#260)", () => {
+    expect(normalizeCommand("cd /a && cd /b\ngit diff")).toBe("git diff");
+    expect(normalizeCommand("cd /a\ncd /b && git log")).toBe("git log");
+  });
+
   it("routes gh commands to ghHandler", () => {
     expect(getBashHandler({ command: "gh pr list" })).toBe(ghHandler);
     expect(getBashHandler({ command: "gh issue list" })).toBe(ghHandler);
@@ -979,6 +1023,19 @@ describe("getBashHandler", () => {
 // ---------------------------------------------------------------------------
 
 describe("commandFingerprint", () => {
+  // #260: fingerprints are derived from the NORMALIZED command, so a newline-
+  // separated `cd` prefix mis-attributed the row to the family "cd" and hid the
+  // real command from the #251 breakdown.
+  it("attributes a newline-separated `cd` prefix to the wrapped command (#260)", () => {
+    expect(commandFingerprint(normalizeCommand("cd /repo\ngit diff"))).toBe("git diff");
+    expect(commandFingerprint(normalizeCommand("cd /repo\ngrep -rn foo src/"))).toBe("grep");
+    expect(commandFingerprint(normalizeCommand('cd "/my repo" && rg foo'))).toBe("rg");
+  });
+
+  it("still attributes a bare `cd` with no wrapped command to cd (#260)", () => {
+    expect(commandFingerprint(normalizeCommand("cd /repo"))).toBe("cd");
+  });
+
   it("returns the leading verb for a plain command", () => {
     expect(commandFingerprint("rg foobar src/")).toBe("rg");
     expect(commandFingerprint("tsc --noEmit")).toBe("tsc");

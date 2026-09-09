@@ -35,6 +35,25 @@ describe("shouldRetainFullBody", () => {
       }
     });
 
+    // #260 review: this module kept its own `cd`-unwrap regex that understood only
+    // `&&`/`;`. A network fetch behind a NEWLINE-separated `cd` therefore failed
+    // both the unwrap and the network match, was classified reproducible, and had
+    // its body dropped under `balanced` — silently discarding output that by
+    // definition cannot be reproduced. Unwrapping now delegates to the one shared
+    // normalizer, so every separator shape classifies identically.
+    it("keeps a network-fetch body behind a newline-separated `cd` (#260)", () => {
+      expect(shouldRetainFullBody("balanced", "Bash", "cd /repo\ncurl https://example.com")).toBe(true);
+      expect(shouldRetainFullBody("balanced", "Bash", "cd /repo\ngh api /repos/x/y")).toBe(true);
+      expect(shouldRetainFullBody("balanced", "Bash", "cd /repo\nwget https://example.com/f.tar")).toBe(true);
+    });
+
+    it("classifies a newline-separated `cd` identically to `&&` (#260)", () => {
+      for (const cmd of ["curl https://example.com", "git diff", "ls -la", "gh api /x"]) {
+        expect(shouldRetainFullBody("balanced", "Bash", `cd /repo\n${cmd}`))
+          .toBe(shouldRetainFullBody("balanced", "Bash", `cd /repo && ${cmd}`));
+      }
+    });
+
     it("unwraps leading `cd <dir> && ` (including multi-hop) before classifying", () => {
       expect(shouldRetainFullBody("balanced", "Bash", "cd /repo && git diff")).toBe(false);
       expect(shouldRetainFullBody("balanced", "Bash", "cd /repo && curl https://x")).toBe(true);

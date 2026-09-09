@@ -278,16 +278,47 @@ export const ghHandler: Handler = (
 // Dispatcher
 // ---------------------------------------------------------------------------
 
+// A leading `cd <dir>` prefix, up to and including the separator that ends it.
+// Three separator shapes are equivalent in practice and all must be unwrapped:
+// `&&`, `;`, and a bare newline — multi-line Bash calls written as `cd <dir>`,
+// newline, then the real command are routine, and treating that shape as the
+// command `cd` sent every wrapped command to the generic fallback (#260).
+// The directory may be double-quoted, single-quoted, or contain backslash-escaped
+// whitespace; an unquoted run stops at whitespace or a shell operator so the
+// pattern can never swallow the separator it is looking for. A bare `cd <dir>`
+// with no following command does not match and is left intact.
+//
+// The unquoted branch's two alternatives are kept MUTUALLY EXCLUSIVE — an escape
+// pair (`\\[\s\S]`) versus a plain char that is explicitly not a backslash
+// (`[^\s\\&;|<>]`). Letting a lone backslash be consumed either way makes the group
+// ambiguous (the `(a|aa)+` shape), so the engine must explore many partitions to
+// *disprove* a match — which is what a bare `cd <dir>` (no separator) asks of it.
+// Measured with the ambiguous class on `cd /repo\a\a\a…`: ~193ms at 24 escapes
+// rising to ~780ms, then flat from 40 to 400 escapes (V8 caps backtracking, so the
+// cost is bounded — a slow path, not a hang). The disjoint form is ~0.02ms. Since
+// this runs on every intercepted Bash call and disjointness costs nothing, keep the
+// alternatives non-overlapping.
+const CD_PREFIX = /^cd\s+(?:"[^"]*"|'[^']*'|(?:\\[\s\S]|[^\s\\&;|<>])+)[ \t]*(?:&&|;|\r?\n)\s*(.+)$/s;
+
 /**
- * Normalises a Bash command so routing sees the real subcommand: unwraps a
- * leading `cd <dir> && …` and strips git global options (`--no-pager`, `-C
- * <path>`, `-c <k=v>`, `--paginate`, `-P`) that would otherwise push `git diff`
- * output to the generic shell fallback.
+ * Normalises a Bash command so routing sees the real subcommand: unwraps leading
+ * `cd <dir>` prefixes (see {@link CD_PREFIX} for the separator and quoting shapes
+ * accepted) and strips git global options (`--no-pager`, `-C <path>`, `-c <k=v>`,
+ * `--paginate`, `-P`) that would otherwise push `git diff` output to the generic
+ * shell fallback.
+ *
+ * Chained prefixes are unwrapped across mixed separators (`cd /a && cd /b\ngit
+ * diff`) under a bounded loop.
  */
 export function normalizeCommand(command: string): string {
   let c = command.trim();
-  const cd = c.match(/^cd\s+[^\s&;]+\s*(?:&&|;)\s*(.+)$/s);
-  if (cd) c = cd[1]!.trim();
+  // Bounded: chained `cd` hops are rare, and a bound keeps a pathological input
+  // from looping. Stops as soon as the prefix no longer matches.
+  for (let i = 0; i < 4; i++) {
+    const cd = c.match(CD_PREFIX);
+    if (!cd) break;
+    c = cd[1]!.trim();
+  }
   c = c.replace(/^git\s+(?:(?:--no-pager|--paginate|-P)\s+|-[cC]\s+\S+\s+)+/, "git ");
   return c;
 }
