@@ -5792,12 +5792,8 @@ function scanDatabases(dir, currentFile, staleDays, nowMs = Date.now()) {
       continue;
     }
     const sizeBytes = dbFootprint(file);
-    if (resolve2(file) === currentResolved) {
-      entries.push({ file, status: "current", projectPath: null, sizeBytes, mtimeMs, items: 0 });
-      continue;
-    }
     const probe = probeDb(file);
-    const status = classify(probe, mtimeMs, staleCutoffMs);
+    const status = resolve2(file) === currentResolved ? "current" : classify(probe, mtimeMs, staleCutoffMs);
     entries.push({ file, status, projectPath: probe.projectPath, sizeBytes, mtimeMs, items: probe.items });
   }
   return entries.sort((a, b) => b.sizeBytes - a.sizeBytes);

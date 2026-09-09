@@ -6,6 +6,17 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Fixed
+
+- **`gc` now reports the current project's database honestly.** The active project's DB was
+  short-circuited before the probe that reads every other row's identity, so it always
+  rendered as `0 items · (no recorded path)` no matter what it held — on the reporting
+  machine, a real 88.7 MB store with 11,544 items and a recorded path. The row a user is
+  most likely reading was the one row showing neither its size nor which project it belonged
+  to. It is now probed like any other database; only its `current` status is forced, so it
+  stays non-deletable and non-vacuumed even when the probe cannot read it. Report-only —
+  no deletion policy changed. (#265)
+
 ## [1.14.2] — 2026-09-08
 
 ### Fixed
