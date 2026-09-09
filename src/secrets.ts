@@ -29,8 +29,20 @@ export const SECRET_PATTERNS: SecretPattern[] = [
     pattern: /gho_[A-Za-z0-9]{36}/,
   },
   {
+    // The tail is base62 with NO hyphen: `[\w-]` here matched any hyphenated slug
+    // containing "risk-"/"task-"/"disk-" (#274) — a 97% false-positive rate against
+    // a real corpus of engineering notes, and after #271 a *refusal* rather than a
+    // silent skip. `sk-proj-` is the current key shape, bare `sk-` the legacy one.
     name: "OpenAI API key",
-    pattern: /sk-(?!ant-)[\w-]{32,}/,
+    pattern: /sk-(?:proj-)?[A-Za-z0-9]{32,}/,
+  },
+  {
+    // Must stay adjacent to the OpenAI entry: `sk-or-v1-` keys were previously
+    // caught only *by accident*, via the same over-broad character class that
+    // caused #274. Tightening OpenAI without this would swap a false positive
+    // for a false negative on a real credential class.
+    name: "OpenRouter API key",
+    pattern: /sk-or-v1-[A-Za-z0-9]{32,}/,
   },
   {
     name: "AWS access key ID",

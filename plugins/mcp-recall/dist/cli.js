@@ -5547,7 +5547,11 @@ var SECRET_PATTERNS = [
   },
   {
     name: "OpenAI API key",
-    pattern: /sk-(?!ant-)[\w-]{32,}/
+    pattern: /sk-(?:proj-)?[A-Za-z0-9]{32,}/
+  },
+  {
+    name: "OpenRouter API key",
+    pattern: /sk-or-v1-[A-Za-z0-9]{32,}/
   },
   {
     name: "AWS access key ID",

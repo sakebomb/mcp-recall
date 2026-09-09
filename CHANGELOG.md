@@ -8,6 +8,23 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ### Fixed
 
+- **The OpenAI key pattern no longer matches ordinary hyphenated slugs.** `[\w-]` includes
+  the hyphen, so `/sk-(?!ant-)[\w-]{32,}/` flagged any text containing `risk-`, `task-` or
+  `disk-` followed by 32+ characters — `docs/risk-based-pr-splitting-and-continuous-review.md`
+  was reported as an OpenAI API key. Measured against a 7,244-file corpus of ordinary
+  engineering notes it produced 36 matches of which 35 were slugs: a 97% false-positive rate.
+  The defect was latent while it only made the `PostToolUse` hook silently decline to store
+  such output; #271 gave it a loud path, where it *refused* legitimate notes. Real keys carry
+  a base62 tail with no hyphen, so the pattern is now `/sk-(?:proj-)?[A-Za-z0-9]{32,}/`.
+  The `sk-ant-` entry was checked for the same defect and is unaffected — it requires a
+  literal `sk-ant-`, which prose does not produce. (#274)
+
+- **OpenRouter keys are now detected deliberately rather than by accident.** `sk-or-v1-…`
+  keys matched only because the OpenAI pattern above was loose enough to swallow them, and
+  were mislabelled "OpenAI API key" when they did. Tightening that pattern alone would have
+  traded a false positive for a false negative on a real credential class, so a dedicated
+  `/sk-or-v1-[A-Za-z0-9]{32,}/` entry lands with it. (#274)
+
 - **`recall__note` now scans for credentials before storing.** `findSecrets` had exactly one
   call site — the `PostToolUse` interception hook — and `mcp__recall__*` is excluded from
   interception by design, so note text reached storage unscreened on every path. A note whose
