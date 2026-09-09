@@ -6,6 +6,8 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+## [1.14.2] — 2026-09-08
+
 ### Fixed
 
 - **A leading `cd <dir>` followed by a newline no longer defeats Bash handler routing.**
