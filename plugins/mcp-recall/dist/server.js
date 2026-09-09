@@ -21121,6 +21121,77 @@ function loadConfig() {
   return cached2;
 }
 
+// src/secrets.ts
+var SECRET_PATTERNS = [
+  {
+    name: "PEM private key",
+    pattern: /-----BEGIN .{0,20}PRIVATE KEY-----/
+  },
+  {
+    name: "GitHub PAT (classic)",
+    pattern: /ghp_[A-Za-z0-9]{36}/
+  },
+  {
+    name: "GitHub PAT (fine-grained)",
+    pattern: /github_pat_[A-Za-z0-9_]{82}/
+  },
+  {
+    name: "GitHub OAuth token",
+    pattern: /gho_[A-Za-z0-9]{36}/
+  },
+  {
+    name: "OpenAI API key",
+    pattern: /sk-(?!ant-)[\w-]{32,}/
+  },
+  {
+    name: "AWS access key ID",
+    pattern: /AKIA[0-9A-Z]{16}/
+  },
+  {
+    name: "AWS secret access key",
+    pattern: /aws.{0,20}secret.{0,20}[A-Za-z0-9/+=]{40}/i
+  },
+  {
+    name: "Anthropic API key",
+    pattern: /sk-ant-[A-Za-z0-9\-_]{32,}/
+  },
+  {
+    name: "Generic Bearer token",
+    pattern: /Bearer [A-Za-z0-9\-._~+/]{32,}/
+  },
+  {
+    name: "SSH private key",
+    pattern: /-----BEGIN OPENSSH PRIVATE KEY-----/
+  },
+  {
+    name: "GCP service account key",
+    pattern: /"type"\s*:\s*"service_account"/
+  },
+  {
+    name: "Azure storage connection string",
+    pattern: /DefaultEndpointsProtocol=https?;AccountName=[^;]{1,100};AccountKey=[A-Za-z0-9+/=]{32,}/
+  },
+  {
+    name: "Stripe secret/restricted key",
+    pattern: /[sr]k_(?:live|test)_[A-Za-z0-9]{24,}/
+  },
+  {
+    name: "SendGrid API key",
+    pattern: /SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}/
+  },
+  {
+    name: "Twilio Account SID",
+    pattern: /\bAC[0-9a-f]{32}\b/
+  },
+  {
+    name: "npm publish token",
+    pattern: /npm_[A-Za-z0-9]{36}/
+  }
+];
+function findSecrets(content) {
+  return SECRET_PATTERNS.filter(({ pattern }) => pattern.test(content)).map(({ name }) => name);
+}
+
 // src/format.ts
 function formatBytes(bytes) {
   if (bytes < 1024)
@@ -21267,6 +21338,11 @@ function toolPin(db, projectKey, args) {
   return `[recall: cannot pin ${args.id} \u2014 pinned data would reach ` + `${formatBytes(outcome.pinnedBytes + outcome.itemBytes)}, over the ` + `${formatBytes(outcome.capBytes)} store.max_pinned_mb cap. Pinned items are exempt ` + `from eviction, so this cap bounds them separately from store.max_size_mb. Unpin an ` + `item, raise store.max_pinned_mb, or recall__forget to reclaim space.]`;
 }
 function toolNote(db, projectKey, args) {
+  const secretNames = findSecrets(`${args.title ?? ""}
+${args.text}`);
+  if (secretNames.length > 0) {
+    return `[recall: note NOT stored \u2014 detected ${secretNames.join(", ")}. Remove the credential and retry, or store a reference to it instead of the value.]`;
+  }
   const title = args.title ?? "(note)";
   const excerpt = args.text.slice(0, NOTE_EXCERPT_LEN);
   const ellipsis = args.text.length > NOTE_EXCERPT_LEN ? "\u2026" : "";
