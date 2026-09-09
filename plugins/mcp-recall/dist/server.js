@@ -21141,7 +21141,11 @@ var SECRET_PATTERNS = [
   },
   {
     name: "OpenAI API key",
-    pattern: /sk-(?!ant-)[\w-]{32,}/
+    pattern: /(?<![A-Za-z0-9_-])sk-(?!ant-)(?!or-v1-)[A-Za-z0-9_-]{20,}/
+  },
+  {
+    name: "OpenRouter API key",
+    pattern: /(?<![A-Za-z0-9_-])sk-or-v1-[A-Za-z0-9_-]{20,}/
   },
   {
     name: "AWS access key ID",
@@ -21153,7 +21157,7 @@ var SECRET_PATTERNS = [
   },
   {
     name: "Anthropic API key",
-    pattern: /sk-ant-[A-Za-z0-9\-_]{32,}/
+    pattern: /(?<![A-Za-z0-9_-])sk-ant-[A-Za-z0-9\-_]{32,}/
   },
   {
     name: "Generic Bearer token",

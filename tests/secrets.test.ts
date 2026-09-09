@@ -45,6 +45,57 @@ describe("containsSecret", () => {
     expect(hits).toContain("OpenAI API key");
   });
 
+  // #274 negative controls. These are verbatim slugs from a real corpus of
+  // engineering notes, where the old /sk-(?!ant-)[\w-]{32,}/ scored a 97%
+  // false-positive rate: `[\w-]` ate the hyphen, so any "risk-"/"task-"/"disk-"
+  // slug looked like a key. After #271 that became a user-facing refusal, not
+  // just a silent skip, so these guard a live behaviour.
+  it.each([
+    "risk-mitigation-through-controlled-rollout",
+    "task-notification-and-output-file-tracking",
+    "docs/risk-based-pr-splitting-and-continuous-review.md",
+    "disk-usage-monitoring-and-alerting-playbook",
+    "memoree/knowledge/2026-05-23-task-archiving-as-a-standard-practice-71c096",
+    "risk-mitigation-none-526433-state-lockdown-procedures-x",
+  ])("does not flag the ordinary slug %s", (slug) => {
+    expect(findSecrets(slug)).toEqual([]);
+    expect(containsSecret(slug)).toBe(false);
+  });
+
+  // #274 false-NEGATIVE controls. Modern OpenAI keys carry a base64url body
+  // containing "-" and "_". A first attempt at this fix narrowed the body to
+  // [A-Za-z0-9], which killed the slug false positives but then failed open on
+  // every current key shape — trading a noisy bug for a silent one. These pin
+  // the body permissive; the leading word boundary is what excludes slugs.
+  it.each([
+    ["sk-proj- with a hyphen early in the body", "sk-proj-Ab3-dEfGh1jKlM2nOpQr5tUvWxYz7aBcDeFgH9jKlMnOpQrStUvWxYz"],
+    ["sk-proj- with an underscore early in the body", "sk-proj-Ab3_dEfGh1jKlM2nOpQr5tUvWxYz7aBcDeFgH9jKlMnOpQrStUvWxYz"],
+    ["sk-svcacct- service-account key", "sk-svcacct-Ab3dEfGh1jKlM2nOpQr5tUvWxYz7aBcDeFgH9jKlMnOpQrStUv"],
+    ["sk-admin- admin key", "sk-admin-Ab3dEfGh1jKlM2nOpQr5tUvWxYz7aBcDeFgH9jKlMnOpQrStUvWx"],
+    ["sk-None- legacy key", "sk-None-Ab3dEfGh1jKlM2nOpQr5tUvWxYz7aBcDeFgH9jKlMnOpQrStUvWxY"],
+  ])("detects %s", (_label, key) => {
+    expect(findSecrets(key)).toContain("OpenAI API key");
+    expect(containsSecret(`OPENAI_API_KEY=${key}`)).toBe(true);
+  });
+
+  it("does not flag slugs that embed a real key prefix", () => {
+    // The prefix alone is not enough — "task-admin-" and "risk-proj-" contain
+    // "sk-admin-" and "sk-proj-" verbatim. Only the boundary separates them.
+    expect(findSecrets("task-admin-console-access-policy-and-review-doc")).toEqual([]);
+    expect(findSecrets("risk-proj-alpha-beta-gamma-delta-epsilon-zeta")).toEqual([]);
+    expect(findSecrets("risk-ant-icipation-and-mitigation-planning-doc-x")).toEqual([]);
+  });
+
+  it("detects an OpenRouter key (sk-or-v1-) and labels it as OpenRouter", () => {
+    // Previously matched only by accident, through the same over-broad class that
+    // caused #274 — so tightening OpenAI without this entry would have swapped a
+    // false positive for a false negative on a real credential class.
+    const key = "sk-or-v1-" + "9f3a".repeat(16);
+    const hits = findSecrets(key);
+    expect(hits).toContain("OpenRouter API key");
+    expect(containsSecret(key)).toBe(true);
+  });
+
   it("OpenAI pattern does not false-positive on Anthropic keys (sk-ant-)", () => {
     // sk-ant- keys must be caught by the Anthropic pattern, not reported as OpenAI
     const key = "sk-ant-" + "A".repeat(32);
