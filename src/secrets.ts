@@ -29,20 +29,25 @@ export const SECRET_PATTERNS: SecretPattern[] = [
     pattern: /gho_[A-Za-z0-9]{36}/,
   },
   {
-    // The tail is base62 with NO hyphen: `[\w-]` here matched any hyphenated slug
-    // containing "risk-"/"task-"/"disk-" (#274) — a 97% false-positive rate against
-    // a real corpus of engineering notes, and after #271 a *refusal* rather than a
-    // silent skip. `sk-proj-` is the current key shape, bare `sk-` the legacy one.
+    // The leading lookbehind is what fixes #274, NOT a narrower body class.
+    // `[\w-]` matched any hyphenated slug containing "risk-"/"task-"/"disk-" —
+    // 97% false positives on a real corpus — because in "ri|sk-" both neighbours
+    // are word characters, so there is no boundary. Requiring one kills the whole
+    // slug class outright.
+    //
+    // The body must STAY permissive: modern OpenAI keys (sk-proj-, sk-svcacct-,
+    // sk-admin-, legacy sk-None-) carry a base64url body containing "-" and "_",
+    // so a hyphen-free class would fail open on every current key shape — the
+    // false-negative trap this pattern was briefly rewritten into.
     name: "OpenAI API key",
-    pattern: /sk-(?:proj-)?[A-Za-z0-9]{32,}/,
+    pattern: /(?<![A-Za-z0-9_-])sk-(?!ant-)(?!or-v1-)[A-Za-z0-9_-]{20,}/,
   },
   {
-    // Must stay adjacent to the OpenAI entry: `sk-or-v1-` keys were previously
-    // caught only *by accident*, via the same over-broad character class that
-    // caused #274. Tightening OpenAI without this would swap a false positive
-    // for a false negative on a real credential class.
+    // Previously matched only *by accident*, through the over-broad class that
+    // caused #274, and mislabelled "OpenAI API key" when it did. The negative
+    // lookahead above keeps the labelling unambiguous.
     name: "OpenRouter API key",
-    pattern: /sk-or-v1-[A-Za-z0-9]{32,}/,
+    pattern: /(?<![A-Za-z0-9_-])sk-or-v1-[A-Za-z0-9_-]{20,}/,
   },
   {
     name: "AWS access key ID",
@@ -54,7 +59,9 @@ export const SECRET_PATTERNS: SecretPattern[] = [
   },
   {
     name: "Anthropic API key",
-    pattern: /sk-ant-[A-Za-z0-9\-_]{32,}/,
+    // Same leading-boundary guard as the OpenAI entry above (#274): without it
+    // a slug like "risk-ant-..." matches. Body stays permissive by design.
+    pattern: /(?<![A-Za-z0-9_-])sk-ant-[A-Za-z0-9\-_]{32,}/,
   },
   {
     name: "Generic Bearer token",
