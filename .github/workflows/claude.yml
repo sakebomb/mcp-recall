@@ -36,7 +36,7 @@ jobs:
       actions: read     # lets the github_ci MCP server read CI/check status during reviews
       id-token: write   # the action fetches a GitHub OIDC token to mint its GitHub App token for posting
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
