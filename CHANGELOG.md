@@ -8,6 +8,16 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ### Fixed
 
+- **`recall__note` now scans for credentials before storing.** `findSecrets` had exactly one
+  call site — the `PostToolUse` interception hook — and `mcp__recall__*` is excluded from
+  interception by design, so note text reached storage unscreened on every path. A note whose
+  text *or title* matches a `SECRET_PATTERNS` entry is now refused, and the message names the
+  matched pattern without echoing the value. This mattered more than a transient leak because
+  notes are the thing users are told to keep: `recall__pin` exempts an item from expiry and
+  decay eviction, `recall__export` dumps every item, and `recall__context` re-surfaces note
+  text at session start. Notes containing no secret are stored unchanged. Remediating
+  already-stored secrets is separate — see #269. (#271)
+
 - **`gc` now reports the current project's database honestly.** The active project's DB was
   short-circuited before the probe that reads every other row's identity, so it always
   rendered as `0 items · (no recorded path)` no matter what it held — on the reporting

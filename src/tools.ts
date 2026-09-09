@@ -30,6 +30,7 @@ import {
   type ForgetOptions,
 } from "./db/index";
 import { loadConfig } from "./config";
+import { findSecrets } from "./secrets";
 import { formatBytes, formatRelativeTime } from "./format";
 
 // ---------------------------------------------------------------------------
@@ -264,6 +265,16 @@ export function toolNote(
   projectKey: string,
   args: NoteArgs
 ): string {
+  // `recall__note` reaches storage without passing through the PostToolUse hook —
+  // `mcp__recall__*` is excluded from interception, so the hook's secret scan
+  // (hooks/post-tool-use.ts) never sees note text. Scan here or nothing does (#271).
+  // Refuse rather than redact: a note is user-authored text, and silently altering
+  // it would be worse than declining it. Pattern names only, never the matched value.
+  const secretNames = findSecrets(`${args.title ?? ""}\n${args.text}`);
+  if (secretNames.length > 0) {
+    return `[recall: note NOT stored — detected ${secretNames.join(", ")}. Remove the credential and retry, or store a reference to it instead of the value.]`;
+  }
+
   const title = args.title ?? "(note)";
   const excerpt = args.text.slice(0, NOTE_EXCERPT_LEN);
   const ellipsis = args.text.length > NOTE_EXCERPT_LEN ? "…" : "";

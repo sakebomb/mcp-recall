@@ -815,6 +815,43 @@ describe("MCP tool handlers", () => {
       const row = db.prepare("SELECT summary FROM stored_outputs WHERE tool_name = 'recall__note'").get() as { summary: string };
       expect(row.summary).toContain("…");
     });
+
+    // #271: note text never passes through the PostToolUse hook, so the hook's
+    // secret scan never sees it. These guard the scan that toolNote does itself.
+
+    it("refuses to store a note containing a secret", () => {
+      const secret = "sk-" + "a1b2c3d4e5f6g7h8".repeat(3);
+      const result = toolNote(db, PROJECT_KEY, { text: `the key is ${secret}` });
+      expect(result).toContain("NOT stored");
+      const rows = db.prepare("SELECT id FROM stored_outputs WHERE tool_name = 'recall__note'").all();
+      expect(rows.length).toBe(0);
+    });
+
+    it("names the matched pattern without echoing the secret", () => {
+      const secret = "sk-" + "a1b2c3d4e5f6g7h8".repeat(3);
+      const result = toolNote(db, PROJECT_KEY, { text: `the key is ${secret}` });
+      expect(result).toContain("OpenAI API key");
+      // The whole point of reporting names rather than values — a refusal that
+      // echoes the credential just moves it into the transcript.
+      expect(result).not.toContain(secret);
+    });
+
+    it("refuses a secret in the title, not just the body", () => {
+      // The title is stored in `summary`, so scanning only `text` would let a
+      // credential through on the field that recall__context surfaces first.
+      const secret = "sk-" + "a1b2c3d4e5f6g7h8".repeat(3);
+      const result = toolNote(db, PROJECT_KEY, { text: "harmless body", title: secret });
+      expect(result).toContain("NOT stored");
+      expect(db.prepare("SELECT id FROM stored_outputs WHERE tool_name = 'recall__note'").all().length).toBe(0);
+    });
+
+    it("stores a note with no secret unchanged", () => {
+      const text = "a perfectly ordinary note about the auth flow";
+      const result = toolNote(db, PROJECT_KEY, { text });
+      expect(result).toMatch(/recall_[0-9a-f]{16}/);
+      const row = db.prepare("SELECT full_content FROM stored_outputs WHERE tool_name = 'recall__note'").get() as { full_content: string };
+      expect(row.full_content).toBe(text);
+    });
   });
 
   // -------------------------------------------------------------------------
