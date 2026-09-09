@@ -97,6 +97,29 @@ describe("gc scanDatabases", () => {
     expect(isDeletionCandidate(entry!.status)).toBe(false);
   });
 
+  it("reports the current DB's own recorded path and item count", () => {
+    // #265: the current DB was short-circuited before probeDb, so the one row the user
+    // is most likely reading showed "(no recorded path)" and 0 items regardless of what
+    // it held. Its status is still forced, but its identity must be real.
+    const projectPath = join(projectsDir, "live");
+    mkdirSync(projectPath, { recursive: true });
+    const file = makeDb("mine", projectPath, 7);
+    const [entry] = scanDatabases(workDir, file, 90);
+    expect(entry!.status).toBe("current");
+    expect(entry!.projectPath).toBe(projectPath);
+    expect(entry!.items).toBe(7);
+  });
+
+  it("keeps the current DB non-deletable even when it probes unreadable", () => {
+    // Probing must not become a way for the live DB to be reclassified: a corrupt or
+    // non-recall current file probes readable:false, which for any other file is
+    // "unreadable" — the current one stays "current".
+    const file = makeForeignDb("mine");
+    const [entry] = scanDatabases(workDir, file, 90);
+    expect(entry!.status).toBe("current");
+    expect(isDeletionCandidate(entry!.status)).toBe(false);
+  });
+
   it("matches the current DB even when currentFile is a non-normalized path", () => {
     const file = makeDb("mine", null);
     // e.g. a RECALL_DB_PATH override with a "/./" segment — resolve() must still match.

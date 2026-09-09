@@ -242,13 +242,13 @@ export function scanDatabases(
     }
     const sizeBytes = dbFootprint(file);
 
-    if (resolve(file) === currentResolved) {
-      entries.push({ file, status: "current", projectPath: null, sizeBytes, mtimeMs, items: 0 });
-      continue;
-    }
-
     const probe = probeDb(file);
-    const status = classify(probe, mtimeMs, staleCutoffMs);
+    // The active project's DB is always "current" — never deletable, never vacuumed —
+    // whatever the probe returns, including a corrupt one that probes unreadable. It is
+    // still probed so the report can show its real path and item count (#265): a live
+    // WAL DB reads fine through a second readonly connection. Only the status is forced.
+    const status =
+      resolve(file) === currentResolved ? "current" : classify(probe, mtimeMs, staleCutoffMs);
     entries.push({ file, status, projectPath: probe.projectPath, sizeBytes, mtimeMs, items: probe.items });
   }
 
