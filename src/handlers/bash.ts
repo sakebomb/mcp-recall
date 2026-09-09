@@ -287,7 +287,18 @@ export const ghHandler: Handler = (
 // whitespace; an unquoted run stops at whitespace or a shell operator so the
 // pattern can never swallow the separator it is looking for. A bare `cd <dir>`
 // with no following command does not match and is left intact.
-const CD_PREFIX = /^cd\s+(?:"[^"]*"|'[^']*'|(?:\\.|[^\s&;|<>])+)[ \t]*(?:&&|;|\r?\n)\s*(.+)$/s;
+//
+// The unquoted branch's two alternatives are kept MUTUALLY EXCLUSIVE — an escape
+// pair (`\\[\s\S]`) versus a plain char that is explicitly not a backslash
+// (`[^\s\\&;|<>]`). Letting a lone backslash be consumed either way makes the group
+// ambiguous (the `(a|aa)+` shape), so the engine must explore many partitions to
+// *disprove* a match — which is what a bare `cd <dir>` (no separator) asks of it.
+// Measured with the ambiguous class on `cd /repo\a\a\a…`: ~193ms at 24 escapes
+// rising to ~780ms, then flat from 40 to 400 escapes (V8 caps backtracking, so the
+// cost is bounded — a slow path, not a hang). The disjoint form is ~0.02ms. Since
+// this runs on every intercepted Bash call and disjointness costs nothing, keep the
+// alternatives non-overlapping.
+const CD_PREFIX = /^cd\s+(?:"[^"]*"|'[^']*'|(?:\\[\s\S]|[^\s\\&;|<>])+)[ \t]*(?:&&|;|\r?\n)\s*(.+)$/s;
 
 /**
  * Normalises a Bash command so routing sees the real subcommand: unwraps leading

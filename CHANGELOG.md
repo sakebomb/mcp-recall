@@ -23,6 +23,14 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   family. A bare `cd <dir>` with no following command is still left intact. This is the
   same bug class as the `git --no-pager diff` leak fixed in 1.13.0 — a sibling input
   shape of an already-handled wrapper (#260)
+- **A network fetch behind a newline-separated `cd` no longer loses its stored body.**
+  `src/retention.ts` kept its *own* copy of the `cd`-unwrap pattern that understood only
+  `&&`/`;`, so under the default `balanced` retention `cd /repo` + newline + `curl …`
+  (or `wget`, `gh api`) failed both the unwrap and the network-command match, was
+  classified as reproducible Bash, and had its verbatim body dropped — discarding
+  output that by definition cannot be reproduced. Unwrapping now delegates to the one
+  shared normaliser used by handler routing, so every separator shape classifies
+  identically. Found in review of #260 (#260)
 
 ## [1.14.1] — 2026-09-05
 

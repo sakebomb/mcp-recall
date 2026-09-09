@@ -985,6 +985,22 @@ describe("getBashHandler", () => {
     expect(getBashHandler({ command: "cd /home/u/repo" })).toBe(shellHandler);
   });
 
+  // #260 review: the unquoted-directory branch must keep its two alternatives
+  // mutually exclusive. When a lone backslash can be consumed either as an escape
+  // pair or as a plain char, the group is ambiguous (the `(a|aa)+` shape) and the
+  // engine must explore many partitions to PROVE no match — which is exactly what
+  // a bare `cd <dir>` (no separator) asks it to do. Measured: the ambiguous form
+  // climbs to ~780ms and then plateaus there (V8 caps backtracking, so it is a
+  // bounded CPU cost rather than a hang) while the disjoint form is ~0.02ms — four
+  // orders of magnitude apart, so a 250ms bound separates them cleanly and stays
+  // safe on a slow CI runner. This runs on every intercepted Bash call.
+  it("disproves a bare `cd` with many escaped chars without backtracking (#260)", () => {
+    const input = "cd /repo" + "\\a".repeat(40);
+    const t0 = performance.now();
+    expect(normalizeCommand(input)).toBe(input);
+    expect(performance.now() - t0).toBeLessThan(250);
+  });
+
   it("unwraps multi-hop `cd` prefixes across mixed separators (#260)", () => {
     expect(normalizeCommand("cd /a && cd /b\ngit diff")).toBe("git diff");
     expect(normalizeCommand("cd /a\ncd /b && git log")).toBe("git log");
