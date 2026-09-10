@@ -308,6 +308,14 @@ mcp-recall import dump.json --dry-run        # report what would be imported
 
 Items are imported into the **current** project's store — run `import` from the project you want them in.
 
+Rows carrying a credential are **withheld, not imported** ([#273](https://github.com/sakebomb/mcp-recall/issues/273)). `import` writes through its own INSERT, bypassing the PostToolUse hook that scans intercepted tool output, so it runs the same [secret patterns](#scope) over each row's summary and body itself. A match withholds that row and the run reports the count and the pattern names — never the matched value:
+
+```
+Withheld 2 row(s) containing secrets (AWS access key ID, GitHub PAT (classic)). They were NOT imported.
+```
+
+Clean rows in the same dump import normally — one bad row does not fail a restore — and `--dry-run` reports what *would* be withheld. This matters most when restoring a dump taken before a credential was purged from your store: without the scan, the purge would be silently undone.
+
 > **`--keep-project-key` was removed** ([#226](https://github.com/sakebomb/mcp-recall/issues/226)). It retained the dump's original project key on each row but still wrote them to the *current* project's database, where almost everything is scoped by project key. `recall__retrieve` looks an item up by id alone, but everything else is scoped — so rows imported with the flag were readable if you still knew their id and otherwise inert: absent from `search`, `list_stored`, `stats`, `context`, `session_summary`, `suggest` and `export`; impossible to delete via `recall__forget`, even with `all: true`; not pinnable; never expired; and invisible to the `store.max_size_mb` accounting. The flag now exits with an error naming this. Import **without** it — the items land in the current project and behave normally. To recover rows already stranded by the old flag, see [Recovering rows stranded by the old import flag](docs/troubleshooting.md#recovering-rows-stranded-by-the-old-import-flag).
 
 **Shell completions.** Add to your shell profile once:

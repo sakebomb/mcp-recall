@@ -31,6 +31,7 @@ Before writing any tool output to disk, mcp-recall scans the content for these p
 | GitHub OAuth token | `gho_…` |
 | OpenAI API key | `sk-…` (32+ chars, excluding `sk-ant-`) |
 | Anthropic API key | `sk-ant-…` |
+| OpenRouter API key | `sk-or-v1-…` |
 | AWS access key ID | `AKIA…` |
 | AWS secret access key | an `aws`-adjacent 40-char secret |
 | GCP service account key | `"type": "service_account"` |
@@ -41,8 +42,22 @@ Before writing any tool output to disk, mcp-recall scans the content for these p
 | npm publish token | `npm_…` |
 | Generic Bearer token | `Bearer …` (32+ chars) |
 
-On a match: the output is skipped, nothing is written to disk, a warning is logged to
-stderr, and the full uncompressed output passes through to Claude unchanged.
+### Where the scan runs
+
+Every path that can write user-controlled content into the store scans it first. There
+are three, and they differ in what a match does:
+
+| Entry point | On a match |
+|-------------|------------|
+| `PostToolUse` hook (intercepted tool output) | Output is skipped, nothing is written, a warning goes to stderr, and the full uncompressed output passes through to Claude unchanged. |
+| `recall__note` (user-authored note text) | The note is **refused** — the tool returns an error naming the pattern. A note is authored text; silently altering or dropping it would be worse than declining it. |
+| `mcp-recall import` (rows from an export dump) | The matching **row** is withheld and the rest of the dump imports normally. One bad row must not fail a large restore. The run reports how many rows were withheld and which patterns matched. |
+
+In all three cases only the *pattern name* is ever reported. The matched value is never
+logged, echoed, or written anywhere.
+
+`import` matters in particular after a remediation: restoring a dump taken *before* you
+purged a credential from your store would otherwise silently reinstate it.
 
 ## Denylist
 

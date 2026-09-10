@@ -11,6 +11,9 @@
  * Imported rows are always stamped with the current project's key so they are
  * reachable through the project-scoped tool layer. The former
  * `--keep-project-key` flag is rejected (#226) — see handleImportCommand.
+ *
+ * Rows carrying a credential are withheld and reported rather than written —
+ * see partitionSecrets (#273). This is the only secret scan on the import path.
  */
 
 import { readFileSync, statSync, existsSync } from "fs";
@@ -20,6 +23,7 @@ import { z } from "zod";
 import { getDb, defaultDbPath } from "../db/schema";
 import { chunkText } from "../db/chunking";
 import { getProjectKey } from "../project-key";
+import { findSecrets } from "../secrets";
 
 // 50 MB — warn before loading a very large file synchronously
 const LARGE_FILE_BYTES = 50 * 1024 * 1024;
@@ -54,6 +58,50 @@ const StoredOutputSchema = z.object({
 type StoredOutputRow = z.infer<typeof StoredOutputSchema>;
 
 const ExportSchema = z.array(StoredOutputSchema);
+
+// ── Secret scan ───────────────────────────────────────────────────────────────
+
+interface SecretScan {
+  clean: StoredOutputRow[];
+  withheld: number;
+  patterns: string[];
+}
+
+/**
+ * Partitions dump rows into those safe to write and those carrying a credential.
+ *
+ * `mcp-recall import` reaches storage through its own INSERT — it bypasses both
+ * the PostToolUse hook and storeOutput — so this is the only secret scan on the
+ * path (#273, the sibling entry point left open by #271/#272).
+ *
+ * The scan runs once here, before either the dry-run counter or the real insert
+ * sees the array, rather than inside importItems: a matching row is then never
+ * *constructed* into an INSERT, and `--dry-run` cannot disagree with the run it
+ * is predicting.
+ *
+ * Skip-and-report rather than abort — one bad row must not fail a 10,000-row
+ * restore. Pattern names are reported, never the matched values.
+ */
+function partitionSecrets(items: StoredOutputRow[]): SecretScan {
+  const clean: StoredOutputRow[] = [];
+  const patterns = new Set<string>();
+  let withheld = 0;
+
+  for (const item of items) {
+    // Scan the body even for full_retained=0, whose body the insert drops: a
+    // tampered dump can pair that flag with a populated body, and a credential
+    // surviving only in the summary is just as unsafe to store.
+    const found = findSecrets(`${item.summary}\n${item.full_content}`);
+    if (found.length > 0) {
+      withheld++;
+      for (const name of found) patterns.add(name);
+      continue;
+    }
+    clean.push(item);
+  }
+
+  return { clean, withheld, patterns: [...patterns].sort() };
+}
 
 // ── Core import logic ─────────────────────────────────────────────────────────
 
@@ -267,12 +315,24 @@ export async function handleImportCommand(args: string[]): Promise<void> {
   const projectKey = getProjectKey(process.cwd());
   const dbPath = defaultDbPath(projectKey);
 
-  console.log(`\nImporting ${items.length} item(s) into ${dbPath}`);
+  const { clean, withheld, patterns } = partitionSecrets(items);
+
+  console.log(`\nImporting ${clean.length} item(s) into ${dbPath}`);
   if (dryRun) console.log("(dry run — nothing will be written)\n");
 
+  // Loud, and on stderr, so the warning survives `| tee` / redirected stdout.
+  // Deliberately worded apart from the "skipped (already exist)" count below —
+  // both can occur in one run and they mean different things.
+  if (withheld > 0) {
+    console.error(
+      `${dryRun ? "Would withhold" : "Withheld"} ${withheld} row(s) containing secrets ` +
+      `(${patterns.join(", ")}). ${dryRun ? "They would not be imported." : "They were NOT imported."}`
+    );
+  }
+
   const result = dryRun
-    ? dryRunCount(dbPath, items, overwrite)
-    : importItems(dbPath, items, { overwrite, projectKey });
+    ? dryRunCount(dbPath, clean, overwrite)
+    : importItems(dbPath, clean, { overwrite, projectKey });
 
   const parts: string[] = [];
   if (result.imported > 0) parts.push(`${result.imported} imported`);

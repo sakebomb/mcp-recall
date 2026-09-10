@@ -465,6 +465,188 @@ describe("import --dry-run", () => {
   });
 });
 
+// ── secret scan (#273) ────────────────────────────────────────────────────────
+
+// Canonical non-secret sample from AWS's own docs — matches "AWS access key ID"
+// without being a live credential.
+const AWS_KEY_SAMPLE = "AKIAIOSFODNN7EXAMPLE";
+const GH_PAT_SAMPLE = "ghp_" + "A".repeat(36);
+
+function makeDumpRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: "recall_row0000000000001",
+    project_key: SOURCE_PROJECT,
+    session_id: "sess-abc",
+    tool_name: "mcp__github__list_issues",
+    summary: "a clean summary",
+    full_content: "a clean body",
+    original_size: 12,
+    summary_size: 15,
+    created_at: 1_700_000_000,
+    pinned: 0,
+    access_count: 0,
+    last_accessed: null,
+    input_hash: null,
+    full_retained: 1,
+    ...overrides,
+  };
+}
+
+/** Captures both stdout and stderr written via console during `fn`. */
+async function captureOutput(fn: () => Promise<void>): Promise<string> {
+  let out = "";
+  const origLog = console.log;
+  const origErr = console.error;
+  console.log = (...a: unknown[]) => { out += a.join(" ") + "\n"; };
+  console.error = (...a: unknown[]) => { out += a.join(" ") + "\n"; };
+  try {
+    await fn();
+  } finally {
+    console.log = origLog;
+    console.error = origErr;
+  }
+  return out;
+}
+
+function idsIn(dbPath: string): string[] {
+  const db = new Database(dbPath);
+  const rows = db.prepare(`SELECT id FROM stored_outputs ORDER BY id ASC`).all() as Array<{ id: string }>;
+  db.close();
+  return rows.map((r) => r.id);
+}
+
+describe("import secret scan", () => {
+  test("withholds a row whose full_content carries a credential", async () => {
+    const dump = [
+      makeDumpRow({ id: "clean_row", full_content: "nothing sensitive here" }),
+      makeDumpRow({ id: "dirty_row", full_content: `export AWS_ACCESS_KEY_ID=${AWS_KEY_SAMPLE}` }),
+    ];
+    const dumpFile = makeTmpPath();
+    writeFileSync(dumpFile, JSON.stringify(dump));
+    const targetDbPath = makeTmpPath(".db");
+
+    process.env.RECALL_DB_PATH = targetDbPath;
+    try {
+      await captureOutput(() => handleImportCommand([dumpFile]));
+      // The clean row still restores — one bad row does not fail the import.
+      expect(idsIn(targetDbPath)).toEqual(["clean_row"]);
+    } finally {
+      delete process.env.RECALL_DB_PATH;
+    }
+  });
+
+  test("withholds a row whose summary carries a credential", async () => {
+    // The body is bodiless-by-flag, so only the summary can carry it — the row
+    // must still be withheld.
+    const dump = [
+      makeDumpRow({
+        id: "dirty_summary",
+        summary: `token ${GH_PAT_SAMPLE}`,
+        full_content: "",
+        full_retained: 0,
+      }),
+    ];
+    const dumpFile = makeTmpPath();
+    writeFileSync(dumpFile, JSON.stringify(dump));
+    const targetDbPath = makeTmpPath(".db");
+
+    process.env.RECALL_DB_PATH = targetDbPath;
+    try {
+      await captureOutput(() => handleImportCommand([dumpFile]));
+      expect(idsIn(targetDbPath)).toEqual([]);
+    } finally {
+      delete process.env.RECALL_DB_PATH;
+    }
+  });
+
+  test("reports the withheld count and pattern names, never the matched value", async () => {
+    const dump = [
+      makeDumpRow({ id: "clean_row" }),
+      makeDumpRow({ id: "dirty_aws", full_content: `key=${AWS_KEY_SAMPLE}` }),
+      makeDumpRow({ id: "dirty_gh", full_content: `token=${GH_PAT_SAMPLE}` }),
+    ];
+    const dumpFile = makeTmpPath();
+    writeFileSync(dumpFile, JSON.stringify(dump));
+    const targetDbPath = makeTmpPath(".db");
+
+    process.env.RECALL_DB_PATH = targetDbPath;
+    try {
+      const output = await captureOutput(() => handleImportCommand([dumpFile]));
+
+      expect(output).toContain("Withheld 2 row(s)");
+      expect(output).toContain("AWS access key ID");
+      expect(output).toContain("GitHub PAT (classic)");
+      // The whole point: the credential itself must never be echoed back.
+      expect(output).not.toContain(AWS_KEY_SAMPLE);
+      expect(output).not.toContain(GH_PAT_SAMPLE);
+      // …and the clean row is still counted as imported.
+      expect(output).toContain("1 imported");
+    } finally {
+      delete process.env.RECALL_DB_PATH;
+    }
+  });
+
+  test("--dry-run reports what would be withheld and writes nothing", async () => {
+    const dump = [
+      makeDumpRow({ id: "clean_row" }),
+      makeDumpRow({ id: "dirty_aws", full_content: `key=${AWS_KEY_SAMPLE}` }),
+    ];
+    const dumpFile = makeTmpPath();
+    writeFileSync(dumpFile, JSON.stringify(dump));
+    const targetDbPath = makeTmpPath(".db");
+
+    process.env.RECALL_DB_PATH = targetDbPath;
+    try {
+      const output = await captureOutput(() => handleImportCommand([dumpFile, "--dry-run"]));
+
+      expect(output).toContain("Would withhold 1 row(s)");
+      expect(output).toContain("AWS access key ID");
+      expect(output).not.toContain(AWS_KEY_SAMPLE);
+      // The dry-run count must predict the real run: 1 importable, not 2.
+      expect(output).toContain("1 imported");
+      expect(existsSync(targetDbPath)).toBe(false);
+    } finally {
+      delete process.env.RECALL_DB_PATH;
+    }
+  });
+
+  test("withholding every row leaves the store empty rather than failing", async () => {
+    const dump = [
+      makeDumpRow({ id: "dirty_a", full_content: `key=${AWS_KEY_SAMPLE}` }),
+      makeDumpRow({ id: "dirty_b", full_content: `token=${GH_PAT_SAMPLE}` }),
+    ];
+    const dumpFile = makeTmpPath();
+    writeFileSync(dumpFile, JSON.stringify(dump));
+    const targetDbPath = makeTmpPath(".db");
+
+    process.env.RECALL_DB_PATH = targetDbPath;
+    try {
+      const output = await captureOutput(() => handleImportCommand([dumpFile]));
+      expect(output).toContain("Withheld 2 row(s)");
+      expect(output).toContain("Nothing imported.");
+      expect(idsIn(targetDbPath)).toEqual([]);
+    } finally {
+      delete process.env.RECALL_DB_PATH;
+    }
+  });
+
+  test("a clean dump reports no withheld rows", async () => {
+    storeOutput(sourceDb, makeInput());
+    const dumpFile = makeTmpPath();
+    const targetDbPath = makeTmpPath(".db");
+    exportToFile(dumpFile);
+
+    process.env.RECALL_DB_PATH = targetDbPath;
+    try {
+      const output = await captureOutput(() => handleImportCommand([dumpFile]));
+      expect(output).not.toContain("Withheld");
+      expect(output).toContain("1 imported");
+    } finally {
+      delete process.env.RECALL_DB_PATH;
+    }
+  });
+});
+
 // ── validation ────────────────────────────────────────────────────────────────
 
 describe("import validation", () => {
