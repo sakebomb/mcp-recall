@@ -5547,7 +5547,7 @@ var SECRET_PATTERNS = [
   },
   {
     name: "OpenAI API key",
-    pattern: /(?<![A-Za-z0-9_-])sk-(?!ant-)(?!or-v1-)[A-Za-z0-9_-]{20,}/
+    pattern: /(?<![A-Za-z0-9_-])sk-(?!ant-)(?!or-v1-)(?:[A-Za-z0-9_-]{16,120}T3BlbkFJ[A-Za-z0-9_-]{16,120}|(?:proj|svcacct|admin|None)-[A-Za-z0-9_-]{20,}|[A-Za-z0-9]{32,})/
   },
   {
     name: "OpenRouter API key",
