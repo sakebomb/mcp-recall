@@ -104,21 +104,50 @@ describe("containsSecret", () => {
     for (let i = 0; i < n; i++) out += cs[(i * 37 + 11) % cs.length]!;
     return out;
   };
-  // Mirrors a real key's anatomy: prefix + ~74 base64url + marker + ~74 base64url.
+  // Mirrors a real key's anatomy: prefix + base64url + marker + base64url.
   const markerKey = (prefix: string, pad = 74) =>
     `sk-${prefix}${b64url(pad)}T3BlbkFJ${b64url(pad)}`;
+
+  // Arm 1's window, mirrored from the pattern: after `sk-`, {16,120} base64url,
+  // the marker, then {16,120}. Derived rather than hardcoded so a fixture cannot
+  // silently drift to the default pad and stop probing the edge it claims to.
+  const WINDOW_MIN = 16;
+  const WINDOW_MAX = 120;
+  const UNKNOWN_PREFIX = "newtype-";
+  const MARKER = "T3BlbkFJ";
 
   it.each([
     ["sk-proj- with watermark", markerKey("proj-")],
     ["sk-svcacct- with watermark", markerKey("svcacct-")],
     ["sk-admin- with watermark", markerKey("admin-")],
     ["legacy bare sk- with watermark", markerKey("")],
-    ["an UNKNOWN future prefix with watermark", markerKey("newtype-")],
-    ["an unknown prefix with the marker at the far edge", markerKey("newtype-", 74)],
+    ["an UNKNOWN future prefix with watermark", markerKey(UNKNOWN_PREFIX)],
+    [
+      "an unknown prefix with the marker at the window's upper edge",
+      markerKey(UNKNOWN_PREFIX, WINDOW_MAX - UNKNOWN_PREFIX.length),
+    ],
+    ["a key at the window's lower edge", markerKey(UNKNOWN_PREFIX, WINDOW_MIN)],
     ["a short-bodied key with watermark", markerKey("proj-", 20)],
   ])("detects %s", (_label, key) => {
     expect(findSecrets(key)).toContain("OpenAI API key");
     expect(containsSecret(`OPENAI_API_KEY=${key}`)).toBe(true);
+  });
+
+  // Guards the fixtures above, not the pattern. The first version of this block
+  // paired markerKey("newtype-") with markerKey("newtype-", 74) — byte-identical,
+  // because 74 is the default pad — so the case labelled "far edge" probed the
+  // middle of the window while advertising the boundary. Pin that the edge
+  // fixtures are distinct AND actually sit on the edge they name.
+  it("the window fixtures sit on distinct, named boundaries", () => {
+    const mid = markerKey(UNKNOWN_PREFIX);
+    const upper = markerKey(UNKNOWN_PREFIX, WINDOW_MAX - UNKNOWN_PREFIX.length);
+    const lower = markerKey(UNKNOWN_PREFIX, WINDOW_MIN);
+
+    expect(new Set([mid, upper, lower]).size).toBe(3);
+    // Pre-marker run of `upper` is exactly the window's maximum.
+    expect(upper.indexOf(MARKER) - "sk-".length).toBe(WINDOW_MAX);
+    // Post-marker run of `lower` is exactly the window's minimum.
+    expect(lower.length - lower.indexOf(MARKER) - MARKER.length).toBe(WINDOW_MIN);
   });
 
   it("detects a watermarked key embedded in surrounding prose", () => {
