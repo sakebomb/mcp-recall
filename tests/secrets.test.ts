@@ -78,6 +78,54 @@ describe("containsSecret", () => {
     expect(containsSecret(`OPENAI_API_KEY=${key}`)).toBe(true);
   });
 
+  // #276 negative controls. #275's left boundary killed the *fused* slug class
+  // ("risk-"/"task-"/"disk-") but not "sk-" as a STANDALONE token followed by a
+  // long hyphenated body: an initials-prefixed filename, or a branch named after
+  // a two-letter Jira project key. Both match the #275 pattern on main.
+  it.each([
+    "sk-project-notes-draft-for-final-review.md",
+    "sk-1042-add-retry-logic-to-worker-queue",
+    "sk-2024-Q3-roadmap-planning-notes-for-team",
+    "sk-ui-redesign-migration-checklist-v2",
+  ])("does not flag the standalone sk- slug %s", (slug) => {
+    expect(findSecrets(slug)).toEqual([]);
+    expect(containsSecret(slug)).toBe(false);
+  });
+
+  // #276 false-NEGATIVE controls, and the reason arm 2's prefix list is not a
+  // trap. Every modern OpenAI key embeds the watermark T3BlbkFJ (base64
+  // "OpenAI") mid-body, which gitleaks and Semgrep both key on. Matching it
+  // PREFIX-AGNOSTICALLY is what lets an unknown future `sk-<newtype>-` key be
+  // caught even though it is absent from the prefix list — the exact
+  // false-negative these controls exist to prevent.
+  const b64url = (n: number) => {
+    const cs = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let out = "";
+    for (let i = 0; i < n; i++) out += cs[(i * 37 + 11) % cs.length]!;
+    return out;
+  };
+  // Mirrors a real key's anatomy: prefix + ~74 base64url + marker + ~74 base64url.
+  const markerKey = (prefix: string, pad = 74) =>
+    `sk-${prefix}${b64url(pad)}T3BlbkFJ${b64url(pad)}`;
+
+  it.each([
+    ["sk-proj- with watermark", markerKey("proj-")],
+    ["sk-svcacct- with watermark", markerKey("svcacct-")],
+    ["sk-admin- with watermark", markerKey("admin-")],
+    ["legacy bare sk- with watermark", markerKey("")],
+    ["an UNKNOWN future prefix with watermark", markerKey("newtype-")],
+    ["an unknown prefix with the marker at the far edge", markerKey("newtype-", 74)],
+    ["a short-bodied key with watermark", markerKey("proj-", 20)],
+  ])("detects %s", (_label, key) => {
+    expect(findSecrets(key)).toContain("OpenAI API key");
+    expect(containsSecret(`OPENAI_API_KEY=${key}`)).toBe(true);
+  });
+
+  it("detects a watermarked key embedded in surrounding prose", () => {
+    const key = markerKey("proj-");
+    expect(findSecrets(`the key is ${key} — do not commit it`)).toContain("OpenAI API key");
+  });
+
   it("does not flag slugs that embed a real key prefix", () => {
     // The prefix alone is not enough — "task-admin-" and "risk-proj-" contain
     // "sk-admin-" and "sk-proj-" verbatim. Only the boundary separates them.

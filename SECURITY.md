@@ -29,7 +29,7 @@ Before writing any tool output to disk, mcp-recall scans the content for these p
 | GitHub PAT (classic) | `ghp_…` |
 | GitHub PAT (fine-grained) | `github_pat_…` |
 | GitHub OAuth token | `gho_…` |
-| OpenAI API key | `sk-…` (32+ chars, excluding `sk-ant-`) |
+| OpenAI API key | the `T3BlbkFJ` watermark carried by every modern key (any prefix); `sk-proj-` / `sk-svcacct-` / `sk-admin-` / `sk-None-`; legacy hyphen-free `sk-` |
 | Anthropic API key | `sk-ant-…` |
 | OpenRouter API key | `sk-or-v1-…` |
 | AWS access key ID | `AKIA…` |

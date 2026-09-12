@@ -7,9 +7,12 @@ export interface SecretPattern {
  * Patterns for detecting secrets in tool output content.
  * Any match prevents storage regardless of denylist settings.
  *
- * ReDoS audit (2026-04-08): no catastrophic backtracking. Worst case is the
- * AWS secret pattern (.{0,20}…{0,20}) at 400 max backtracks — fully bounded.
- * All other patterns use simple character classes with no nested quantifiers.
+ * ReDoS audit (2026-09-11): no catastrophic backtracking. The AWS secret
+ * pattern (.{0,20}…{0,20}) tops out at 400 backtracks. The OpenAI watermark arm
+ * bounds both runs around a literal ({16,120}); measured linear in input length
+ * — 52 KB of adversarial "sk-" starts with no marker takes 0.5 ms, 1 MB takes
+ * 10 ms, with no superlinear knee. All other patterns use simple character
+ * classes with no nested quantifiers.
  */
 export const SECRET_PATTERNS: SecretPattern[] = [
   {
@@ -29,18 +32,46 @@ export const SECRET_PATTERNS: SecretPattern[] = [
     pattern: /gho_[A-Za-z0-9]{36}/,
   },
   {
-    // The leading lookbehind is what fixes #274, NOT a narrower body class.
+    // Three arms, most-specific first. Read them together — each covers a shape
+    // the others structurally cannot, and dropping any one fails open.
+    //
+    // The leading lookbehind is what fixed #274, NOT a narrower body class.
     // `[\w-]` matched any hyphenated slug containing "risk-"/"task-"/"disk-" —
     // 97% false positives on a real corpus — because in "ri|sk-" both neighbours
-    // are word characters, so there is no boundary. Requiring one kills the whole
-    // slug class outright.
+    // are word characters, so there is no boundary. Requiring one killed that
+    // whole slug class. It did not, however, help where "sk-" is a *standalone*
+    // token: "sk-project-notes-draft-…" and "sk-1042-add-retry-…" (a two-letter
+    // Jira key) still matched a bare `[A-Za-z0-9_-]{20,}` body (#276).
     //
-    // The body must STAY permissive: modern OpenAI keys (sk-proj-, sk-svcacct-,
-    // sk-admin-, legacy sk-None-) carry a base64url body containing "-" and "_",
-    // so a hyphen-free class would fail open on every current key shape — the
+    // Arm 1 — the watermark. Every modern OpenAI key embeds `T3BlbkFJ`
+    // (base64 "OpenAI") mid-body; gitleaks and Semgrep both key on it precisely
+    // because it is specific enough to need no other constraint. This arm is
+    // deliberately PREFIX-AGNOSTIC, which is what keeps arm 2's closed list from
+    // being a false-negative trap: a future `sk-<newtype>-` key is still caught
+    // here. The window is wider than gitleaks' {20,74} so an unknown prefix
+    // cannot push the marker out of range; widening cannot add false positives
+    // because the marker itself is doing the discriminating.
+    //
+    // Arm 2 — known prefixes, permissive body, no upper bound. Covers a modern
+    // key whose marker is absent or sits beyond arm 1's window. The body must
+    // STAY permissive: these carry base64url containing "-" and "_", so a
+    // hyphen-free class would fail open on every current key shape — the
     // false-negative trap this pattern was briefly rewritten into.
+    // DO NOT "simplify" this list away, and do not treat it as the only
+    // prefix defence; it is the backstop for arm 1, not a whitelist.
+    //
+    // Arm 3 — legacy bare `sk-`: 32+ hyphen-free base62. Stopping at the first
+    // hyphen is exactly what rejects the #276 slugs ("project", "1042").
+    //
+    // The two lookaheads are structurally redundant today (no arm can match
+    // "sk-ant-"/"sk-or-v1-"), but they are kept so the "label the vendor
+    // unambiguously" invariant survives anyone loosening arm 3's class.
+    //
+    // ReDoS: bounded quantifiers around a literal; measured linear in input
+    // (1 MB → ~10 ms, no plateau), see the audit note above.
     name: "OpenAI API key",
-    pattern: /(?<![A-Za-z0-9_-])sk-(?!ant-)(?!or-v1-)[A-Za-z0-9_-]{20,}/,
+    pattern:
+      /(?<![A-Za-z0-9_-])sk-(?!ant-)(?!or-v1-)(?:[A-Za-z0-9_-]{16,120}T3BlbkFJ[A-Za-z0-9_-]{16,120}|(?:proj|svcacct|admin|None)-[A-Za-z0-9_-]{20,}|[A-Za-z0-9]{32,})/,
   },
   {
     // Previously matched only *by accident*, through the over-broad class that
