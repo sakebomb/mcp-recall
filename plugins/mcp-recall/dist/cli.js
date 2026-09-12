@@ -10214,6 +10214,23 @@ var StoredOutputSchema = exports_external.object({
   command_fp: exports_external.string().nullable().optional().default(null)
 });
 var ExportSchema = exports_external.array(StoredOutputSchema);
+function partitionSecrets(items) {
+  const clean = [];
+  const patterns = new Set;
+  let withheld = 0;
+  for (const item of items) {
+    const found = findSecrets(`${item.summary}
+${item.full_content}`);
+    if (found.length > 0) {
+      withheld++;
+      for (const name of found)
+        patterns.add(name);
+      continue;
+    }
+    clean.push(item);
+  }
+  return { clean, withheld, patterns: [...patterns].sort() };
+}
 function dryRunCount(dbPath, items, overwrite) {
   if (dbPath === ":memory:" || !existsSync2(dbPath)) {
     return { imported: items.length, skipped: 0, overwritten: 0 };
@@ -10337,12 +10354,16 @@ async function handleImportCommand(args) {
   }
   const projectKey = getProjectKey(process.cwd());
   const dbPath = defaultDbPath(projectKey);
+  const { clean, withheld, patterns } = partitionSecrets(items);
   console.log(`
-Importing ${items.length} item(s) into ${dbPath}`);
+Importing ${clean.length} item(s) into ${dbPath}`);
   if (dryRun)
     console.log(`(dry run \u2014 nothing will be written)
 `);
-  const result = dryRun ? dryRunCount(dbPath, items, overwrite) : importItems(dbPath, items, { overwrite, projectKey });
+  if (withheld > 0) {
+    console.error(`${dryRun ? "Would withhold" : "Withheld"} ${withheld} row(s) containing secrets ` + `(${patterns.join(", ")}). ${dryRun ? "They would not be imported." : "They were NOT imported."}`);
+  }
+  const result = dryRun ? dryRunCount(dbPath, clean, overwrite) : importItems(dbPath, clean, { overwrite, projectKey });
   const parts = [];
   if (result.imported > 0)
     parts.push(`${result.imported} imported`);
