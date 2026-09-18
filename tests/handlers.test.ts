@@ -9,6 +9,7 @@ import { linearHandler } from "../src/handlers/linear";
 import { slackHandler } from "../src/handlers/slack";
 import { jsonHandler } from "../src/handlers/json";
 import { genericHandler } from "../src/handlers/generic";
+import { contentBlockHandler } from "../src/handlers/content-blocks";
 import { getHandler, extractText } from "../src/handlers/index";
 import { getBashHandler, normalizeCommand, commandFingerprint, gitDiffHandler, gitLogHandler, terraformPlanHandler, gitStatusHandler, gitRefsHandler, packageInstallHandler, testRunnerHandler, dockerPsHandler, buildToolHandler, ghHandler, compilerDiagnosticsHandler, grepHandler, lsHandler, findHandler } from "../src/handlers/bash";
 import { tavilyHandler } from "../src/handlers/tavily";
@@ -59,6 +60,22 @@ describe("extractText", () => {
   it("falls back to JSON.stringify for unknown shapes", () => {
     const output = { foo: 42 };
     expect(extractText(output)).toBe(JSON.stringify(output));
+  });
+
+  it("drops image blocks from a top-level MCP content-block array", () => {
+    const payload = chromeScreenshotPayload();
+    const imageData = chromeImageData(payload);
+    const text = extractText(payload);
+    expect(text).toContain("ss_135241jnk");
+    expect(text).toContain("1419x840");
+    expect(text).toContain("jpeg");
+    expect(text).toContain("Tab Context");
+    expect(text).not.toContain(imageData);
+  });
+
+  it("JSON.stringifies a text-only top-level content-block array (unchanged routing)", () => {
+    const payload = chromeTextOnlyPayload();
+    expect(extractText(payload)).toBe(JSON.stringify(payload));
   });
 });
 
@@ -384,6 +401,104 @@ describe("getHandler", () => {
     const csv = "col1,col2,col3\nv1,v2,v3\nv4,v5,v6\nv7,v8,v9";
     const h = getHandler("mcp__unknown__tool", csv);
     expect(h).toBe(csvHandler);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Incompressible image content blocks (#270)
+//
+// mcp__claude-in-chrome__computer returns a top-level JSON array of MCP
+// content blocks. jsonHandler does not truncate strings, so a 30KB+ JPEG
+// inside the first items compresses at ~0.3%. The fixture is that shape —
+// not a {content:…} wrapper extractText already strips, and not a truncated
+// mock jsonHandler would already shrink.
+// ---------------------------------------------------------------------------
+
+const CHROME_CAPTURE_TEXT =
+  "Successfully captured screenshot (1419x840, jpeg) - ID: ss_135241jnk";
+const CHROME_TAB_CONTEXT =
+  "\n\nTab Context:\n- https://example.com/dashboard\n- Title: Dashboard";
+
+/** JPEG SOI + APP2/ICC-shaped bytes, ≥30 KB. Base64 of an already-compressed
+ *  JPEG is incompressible; jsonHandler would keep this string verbatim. */
+function jpegShapedBase64(byteLength: number): string {
+  const raw = Buffer.alloc(byteLength);
+  raw[0] = 0xff;
+  raw[1] = 0xd8;
+  raw[2] = 0xff;
+  raw[3] = 0xe2;
+  Buffer.from("ICC_PROFILE").copy(raw, 4);
+  for (let i = 16; i < byteLength; i++) raw[i] = (i * 17 + 31) & 0xff;
+  return raw.toString("base64");
+}
+
+function chromeScreenshotPayload(): Array<Record<string, unknown>> {
+  return [
+    { type: "text", text: CHROME_CAPTURE_TEXT },
+    { type: "text", text: CHROME_TAB_CONTEXT },
+    { type: "image", mimeType: "image/jpeg", data: jpegShapedBase64(32 * 1024) },
+  ];
+}
+
+function chromeTextOnlyPayload(): Array<Record<string, unknown>> {
+  return [
+    { type: "text", text: "Scrolled down 400 pixels" },
+    { type: "text", text: "\n\nTab Context:\n- https://example.com/page\n- Title: Page" },
+  ];
+}
+
+function chromeImageData(payload: Array<Record<string, unknown>>): string {
+  const image = payload.find((b) => b["type"] === "image");
+  if (typeof image?.["data"] !== "string") throw new Error("fixture missing image data");
+  return image["data"];
+}
+
+describe("content-block image stripping (#270)", () => {
+  it("compresses a screenshot payload at >90% and keeps capture metadata", () => {
+    const payload = chromeScreenshotPayload();
+    const imageData = chromeImageData(payload);
+    const handler = getHandler("mcp__claude-in-chrome__computer", payload);
+    const { summary, originalSize } = handler("mcp__claude-in-chrome__computer", payload);
+    const summarySize = Buffer.byteLength(summary, "utf8");
+    expect(originalSize).toBeGreaterThan(30_000);
+    expect(1 - summarySize / originalSize).toBeGreaterThan(0.9);
+    expect(summary).toContain("ss_135241jnk");
+    expect(summary).toContain("1419x840");
+    expect(summary).toContain("jpeg");
+    expect(summary).toContain("Tab Context");
+    expect(summary).not.toContain(imageData);
+  });
+
+  it("counts originalSize from the pre-strip payload including image bytes", () => {
+    const payload = chromeScreenshotPayload();
+    const handler = getHandler("mcp__claude-in-chrome__computer", payload);
+    const { originalSize } = handler("mcp__claude-in-chrome__computer", payload);
+    expect(originalSize).toBe(Buffer.byteLength(JSON.stringify(payload), "utf8"));
+  });
+
+  it("leaves a text-only scroll/click payload's text intact", () => {
+    const payload = chromeTextOnlyPayload();
+    const handler = getHandler("mcp__claude-in-chrome__computer", payload);
+    const { summary } = handler("mcp__claude-in-chrome__computer", payload);
+    expect(summary).toContain("Scrolled down 400 pixels");
+    expect(summary).toContain("Tab Context");
+  });
+
+  it("routes a screenshot payload to the content-block handler, not jsonHandler", () => {
+    const payload = chromeScreenshotPayload();
+    expect(getHandler("mcp__claude-in-chrome__computer", payload)).toBe(contentBlockHandler);
+    expect(getHandler("mcp__claude-in-chrome__computer", chromeTextOnlyPayload())).toBe(jsonHandler);
+  });
+
+  it("strips a wrapped {content:[image,text]} payload and counts pre-strip originalSize", () => {
+    const inner = chromeScreenshotPayload();
+    const payload = { content: inner };
+    const handler = getHandler("mcp__unknown__tool", payload);
+    const { summary, originalSize } = handler("mcp__unknown__tool", payload);
+    expect(originalSize).toBe(Buffer.byteLength(JSON.stringify(payload), "utf8"));
+    expect(1 - Buffer.byteLength(summary, "utf8") / originalSize).toBeGreaterThan(0.9);
+    expect(summary).toContain("ss_135241jnk");
+    expect(summary).not.toContain(chromeImageData(inner));
   });
 });
 

@@ -50,7 +50,7 @@ src/
     queries.ts          Core CRUD — storeOutput, retrieveOutput, evictIfNeeded, forgetOutputs, …
     analytics.ts        Aggregation queries — getStats, getContext, getSessionSummary, getSuggestions, …
     index.ts            Re-export barrel (all db/* in one import surface)
-  handlers/             Compression handlers. The 7-step dispatch order is documented
+  handlers/             Compression handlers. The dispatch order is documented
                         canonically above getHandler() in index.ts — read it there rather
                         than trusting a paraphrase. The consequential part: user and
                         community profiles BEAT the TypeScript registry, bundled profiles

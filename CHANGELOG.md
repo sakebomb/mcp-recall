@@ -6,6 +6,19 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Fixed
+
+- **Screenshot and other image content blocks are no longer stored verbatim.**
+  `mcp__claude-in-chrome__computer` (and any unmatched tool that returns an MCP
+  content-block array) was the worst-compressing family in a 69-database store:
+  0.3% reduction, because `jsonHandler` does not truncate strings and a
+  base64 JPEG is incompressible. Non-text blocks are now dropped; the text
+  (capture ID, dimensions, format, tab context) is kept. `originalSize` still
+  counts the pre-strip payload, so the PostToolUse skip-if-not-smaller guard
+  replaces the screenshot in the model window instead of passing it through.
+  Scroll/click results in the same family, which are text-only, are unchanged.
+  (#270)
+
 ## [1.14.3] — 2026-09-09
 
 ### Fixed
