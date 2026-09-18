@@ -6,6 +6,8 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+## [1.14.5] — 2026-09-18
+
 ### Fixed
 
 - **`grep`/`ls`/`find` summaries are never larger than the generic shell fallback.**
@@ -550,7 +552,8 @@ Ten `recall__*` tools available in every Claude session:
 
 ---
 
-[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.14.4...HEAD
+[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.14.5...HEAD
+[1.14.5]: https://github.com/sakebomb/mcp-recall/compare/v1.14.4...v1.14.5
 [1.14.4]: https://github.com/sakebomb/mcp-recall/compare/v1.14.3...v1.14.4
 [1.14.3]: https://github.com/sakebomb/mcp-recall/compare/v1.14.2...v1.14.3
 [1.14.2]: https://github.com/sakebomb/mcp-recall/compare/v1.14.1...v1.14.2
