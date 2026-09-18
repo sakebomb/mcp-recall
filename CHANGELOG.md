@@ -6,6 +6,18 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Fixed
+
+- **`grep`/`ls`/`find` summaries are never larger than the generic shell fallback.**
+  `grepHandler` was compressing at 33.9% against a 69-database store while the
+  shell handler it replaced did 37.5% on the rows it still got — because
+  `MAX_SAMPLE = 40` clipped matches is a ~4 KB budget, looser than the fallback's
+  25-line cap, so the dedicated handler was a no-op (or a loss) on the 90% of
+  rows under 4 KB. The sample now shrinks until the summary fits under the
+  shell cap, and small outputs that shell already showed in full defer to it
+  so matches stay visible. `lsHandler` and `findHandler` share the same
+  budget. (#262)
+
 ## [1.14.4] — 2026-09-18
 
 ### Fixed

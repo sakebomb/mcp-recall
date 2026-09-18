@@ -6967,6 +6967,42 @@ var clip2 = (s, n = 100) => s.length > n ? s.slice(0, n) + "\u2026" : s;
 function overflowLine(total, shown, noun) {
   return total > shown ? [`  \u2026 (+${total - shown} more ${noun})`] : [];
 }
+function utf8(s) {
+  return Buffer.byteLength(s, "utf8");
+}
+function stdoutLineCount(output) {
+  const lines = extractStdout(output).split(`
+`);
+  while (lines.length > 0 && lines[lines.length - 1].trim() === "")
+    lines.pop();
+  return lines.length;
+}
+function fitUnderFallback(toolName, output, total, build) {
+  const fallback = shellHandler(toolName, output);
+  const budget = utf8(fallback.summary);
+  const maxShown = Math.min(MAX_SAMPLE, total);
+  const fits = (n) => utf8(build(n).summary) <= budget;
+  if (fits(maxShown))
+    return build(maxShown);
+  if (stdoutLineCount(output) <= HEAD_STDOUT)
+    return fallback;
+  if (!fits(0))
+    return fallback;
+  let best = 0;
+  let lo = 0;
+  let hi = maxShown;
+  while (lo <= hi) {
+    const mid = lo + hi >> 1;
+    if (fits(mid)) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  const candidate = build(best);
+  return utf8(candidate.summary) > budget ? fallback : candidate;
+}
 var GREP_LINE_RE = /^(.+?):(\d+):(.*)$/;
 var grepHandler = (toolName, output) => {
   const stdout = extractStdout(output);
@@ -6989,12 +7025,15 @@ var grepHandler = (toolName, output) => {
     return shellHandler(toolName, output);
   }
   const header = `grep \u2014 ${matches.length} match${matches.length === 1 ? "" : "es"} in ${files.size} file${files.size === 1 ? "" : "s"}`;
-  const shown = matches.slice(0, MAX_SAMPLE).map((m) => `  ${m.file}:${m.line}: ${clip2(m.text.trim())}`);
-  return {
-    summary: [header, ...shown, ...overflowLine(matches.length, MAX_SAMPLE, "matches")].join(`
+  return fitUnderFallback(toolName, output, matches.length, (shown) => ({
+    summary: [
+      header,
+      ...matches.slice(0, shown).map((m) => `  ${m.file}:${m.line}: ${clip2(m.text.trim())}`),
+      ...overflowLine(matches.length, shown, "matches")
+    ].join(`
 `),
     originalSize
-  };
+  }));
 };
 var LS_LONG_RE = /^([-dlbcps])[rwxsStT-]{9}[+@.]?\s+\d+\s/;
 var LS_RECURSIVE_HEADER_RE = /^(\.?[^\s:]*):$/;
@@ -7011,13 +7050,16 @@ var lsHandler = (toolName, output) => {
   const hasBlankSeparator = raw.some((l) => l.trim() === "");
   if (dirHeaders.length >= 2 && hasBlankSeparator) {
     const entries = nonEmpty.length - dirHeaders.length - nonEmpty.filter((l) => /^total\s+\d+$/.test(l.trim())).length;
-    const shown2 = dirHeaders.slice(0, MAX_SAMPLE).map((d) => `  ${d.trim()}`);
     const header2 = `ls -R \u2014 ${dirHeaders.length} directories, ~${entries} entries`;
-    return {
-      summary: [header2, ...shown2, ...overflowLine(dirHeaders.length, MAX_SAMPLE, "directories")].join(`
+    return fitUnderFallback(toolName, output, dirHeaders.length, (shown) => ({
+      summary: [
+        header2,
+        ...dirHeaders.slice(0, shown).map((d) => `  ${d.trim()}`),
+        ...overflowLine(dirHeaders.length, shown, "directories")
+      ].join(`
 `),
       originalSize
-    };
+    }));
   }
   const longLines = nonEmpty.filter((l) => LS_LONG_RE.test(l));
   if (longLines.length >= Math.ceil(nonEmpty.length * 0.5)) {
@@ -7033,23 +7075,29 @@ var lsHandler = (toolName, output) => {
     }
     const files = longLines.length - dirs;
     const header2 = `ls \u2014 ${longLines.length} entries (${dirs} dir${dirs === 1 ? "" : "s"}, ${files} file${files === 1 ? "" : "s"})`;
-    const shown2 = names.slice(0, MAX_SAMPLE).map((n) => `  ${clip2(n)}`);
-    return {
-      summary: [header2, ...shown2, ...overflowLine(names.length, MAX_SAMPLE, "entries")].join(`
+    return fitUnderFallback(toolName, output, names.length, (shown) => ({
+      summary: [
+        header2,
+        ...names.slice(0, shown).map((n) => `  ${clip2(n)}`),
+        ...overflowLine(names.length, shown, "entries")
+      ].join(`
 `),
       originalSize
-    };
+    }));
   }
   const tokens = nonEmpty.flatMap((l) => l.split(/\s{2,}|\t/)).map((t) => t.trim()).filter(Boolean);
   if (tokens.length < 2)
     return shellHandler(toolName, output);
   const header = `ls \u2014 ${tokens.length} entries`;
-  const shown = tokens.slice(0, MAX_SAMPLE).map((n) => `  ${clip2(n)}`);
-  return {
-    summary: [header, ...shown, ...overflowLine(tokens.length, MAX_SAMPLE, "entries")].join(`
+  return fitUnderFallback(toolName, output, tokens.length, (shown) => ({
+    summary: [
+      header,
+      ...tokens.slice(0, shown).map((n) => `  ${clip2(n)}`),
+      ...overflowLine(tokens.length, shown, "entries")
+    ].join(`
 `),
     originalSize
-  };
+  }));
 };
 var findHandler = (toolName, output) => {
   const stdout = extractStdout(output);
@@ -7064,12 +7112,15 @@ var findHandler = (toolName, output) => {
     return shellHandler(toolName, output);
   }
   const header = `find \u2014 ${paths.length} path${paths.length === 1 ? "" : "s"}`;
-  const shown = paths.slice(0, MAX_SAMPLE).map((p) => `  ${clip2(p, 120)}`);
-  return {
-    summary: [header, ...shown, ...overflowLine(paths.length, MAX_SAMPLE, "paths")].join(`
+  return fitUnderFallback(toolName, output, paths.length, (shown) => ({
+    summary: [
+      header,
+      ...paths.slice(0, shown).map((p) => `  ${clip2(p, 120)}`),
+      ...overflowLine(paths.length, shown, "paths")
+    ].join(`
 `),
     originalSize
-  };
+  }));
 };
 
 // src/handlers/bash.ts
