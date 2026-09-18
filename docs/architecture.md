@@ -109,9 +109,10 @@ function — read it there. Summarised:
 2. **User / community profiles** → beat the TypeScript handlers
 3. `HANDLER_REGISTRY` → first match wins, ordered most-specific first
 4. **Bundled profiles** → lose to the registry, for tools without a TS handler
-5. JSON content fallback
-6. CSV content fallback
-7. `genericHandler` → everything else
+5. Content-block payloads with non-text items (images, audio) → strip those, keep text
+6. JSON content fallback
+7. CSV content fallback
+8. `genericHandler` → everything else
 
 The consequential asymmetry: *user and community* profiles override the
 TypeScript registry, but *bundled* profiles sit below it. That is intentional —

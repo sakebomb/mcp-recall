@@ -662,3 +662,97 @@ describe("handlePostToolUse — debug output", () => {
     expect(output).toContain("intercepted mcp__github__list_issues");
   });
 });
+
+// ---------------------------------------------------------------------------
+// handlePostToolUse — incompressible image content blocks (#270)
+// ---------------------------------------------------------------------------
+
+/** JPEG SOI + APP2/ICC-shaped bytes, ≥30 KB. jsonHandler would keep this string. */
+function jpegShapedBase64(byteLength: number): string {
+  const raw = Buffer.alloc(byteLength);
+  raw[0] = 0xff;
+  raw[1] = 0xd8;
+  raw[2] = 0xff;
+  raw[3] = 0xe2;
+  Buffer.from("ICC_PROFILE").copy(raw, 4);
+  for (let i = 16; i < byteLength; i++) raw[i] = (i * 17 + 31) & 0xff;
+  return raw.toString("base64");
+}
+
+function chromeScreenshotPayload(): Array<Record<string, unknown>> {
+  return [
+    {
+      type: "text",
+      text: "Successfully captured screenshot (1419x840, jpeg) - ID: ss_135241jnk",
+    },
+    {
+      type: "text",
+      text: "\n\nTab Context:\n- https://example.com/dashboard\n- Title: Dashboard",
+    },
+    { type: "image", mimeType: "image/jpeg", data: jpegShapedBase64(32 * 1024) },
+  ];
+}
+
+function chromeTextOnlyPayload(): Array<Record<string, unknown>> {
+  return [
+    { type: "text", text: "Scrolled down 400 pixels" },
+    { type: "text", text: "\n\nTab Context:\n- https://example.com/page\n- Title: Page" },
+  ];
+}
+
+describe("handlePostToolUse — image content blocks (#270)", () => {
+  beforeEach(() => {
+    process.env.RECALL_DB_PATH = ":memory:";
+  });
+
+  afterEach(() => {
+    closeDb();
+    resetConfig();
+    delete process.env.RECALL_DB_PATH;
+  });
+
+  it("replaces a screenshot payload with a >90% smaller summary containing capture metadata", () => {
+    const payload = chromeScreenshotPayload();
+    const imageData = (payload.find((b) => b["type"] === "image") as { data: string }).data;
+    const result = handlePostToolUse(
+      makePostToolUseInput("mcp__claude-in-chrome__computer", payload)
+    );
+    expect(result.updatedMCPToolOutput).toBeDefined();
+    expect(result.suppressOutput).toBe(true);
+    const body = result.updatedMCPToolOutput!;
+    expect(body).toContain("ss_135241jnk");
+    expect(body).toContain("1419x840");
+    expect(body).toContain("jpeg");
+    expect(body).toContain("Tab Context");
+    expect(body).not.toContain(imageData);
+    const pctMatch = body.match(/\((\d+)% reduction\)/);
+    expect(pctMatch).not.toBeNull();
+    expect(Number(pctMatch![1])).toBeGreaterThan(90);
+  });
+
+  it("stores stripped text in full_content, not the image payload", () => {
+    const payload = chromeScreenshotPayload();
+    const imageData = (payload.find((b) => b["type"] === "image") as { data: string }).data;
+    handlePostToolUse(makePostToolUseInput("mcp__claude-in-chrome__computer", payload));
+    const db = getDb(":memory:");
+    const row = db.prepare("SELECT full_content FROM stored_outputs").get() as
+      | { full_content: string }
+      | undefined;
+    expect(row).toBeDefined();
+    expect(row!.full_content).toContain("ss_135241jnk");
+    expect(row!.full_content).not.toContain(imageData);
+  });
+
+  it("does not refuse a text-only scroll/click payload and keeps its texts", () => {
+    const payload = chromeTextOnlyPayload();
+    const result = handlePostToolUse(
+      makePostToolUseInput("mcp__claude-in-chrome__computer", payload)
+    );
+    // Pass-through ({}) is existing skip-if-not-smaller behavior, not a refusal.
+    expect(result.updatedMCPToolOutput ?? "").not.toMatch(/secret|denied|refus/i);
+    if (result.updatedMCPToolOutput) {
+      expect(result.updatedMCPToolOutput).toContain("Scrolled down 400 pixels");
+      expect(result.updatedMCPToolOutput).toContain("Tab Context");
+    }
+  });
+});

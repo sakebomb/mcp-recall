@@ -14,11 +14,13 @@ import { stripeHandler } from "./stripe";
 import { csvHandler, looksLikeCsv } from "./csv";
 import { jsonHandler } from "./json";
 import { genericHandler } from "./generic";
-import { extractText } from "./types";
+import { contentBlockHandler } from "./content-blocks";
+import { extractText, hasNonTextContentBlocks } from "./types";
 import { getProfileHandler } from "../profiles";
 
 export type { CompressionResult, Handler } from "./types";
 export { extractText } from "./types";
+export { contentBlockHandler } from "./content-blocks";
 
 // ---------------------------------------------------------------------------
 // Typed-handler registry
@@ -115,9 +117,10 @@ const HANDLER_REGISTRY: HandlerMatcher[] = [
  *   2. User / community profiles     → profile handler (beats TypeScript handlers)
  *   3. HANDLER_REGISTRY (first match wins, ordered by specificity)
  *   4. Bundled profile match         → profile handler
- *   5. JSON content fallback         → json handler
- *   6. CSV content fallback          → csv handler
- *   7. Everything else               → generic handler
+ *   5. Content blocks with non-text  → content-block handler (strip images)
+ *   6. JSON content fallback         → json handler
+ *   7. CSV content fallback          → csv handler
+ *   8. Everything else               → generic handler
  *
  * `input` (tool_input) is passed through to the Bash handler for CLI-aware routing.
  */
@@ -139,6 +142,13 @@ export function getHandler(toolName: string, output: unknown, input?: unknown): 
   // Bundled profiles — for tools without a TypeScript handler
   const bundledProfile = getProfileHandler(toolName, ["bundled"]);
   if (bundledProfile) return bundledProfile;
+
+  // Top-level (or wrapped) MCP content blocks that include images/audio:
+  // strip those before the JSON fallback, which does not truncate strings
+  // and would store the JPEG almost verbatim (#270).
+  if (hasNonTextContentBlocks(output)) {
+    return contentBlockHandler;
+  }
 
   // Content-based fallbacks
   const text = extractText(output);

@@ -6024,18 +6024,72 @@ function matchesPattern(toolName, pattern) {
 }
 
 // src/handlers/types.ts
-function extractText(output) {
-  if (typeof output === "string")
-    return output;
-  if (output !== null && typeof output === "object") {
-    const obj = output;
-    if (Array.isArray(obj["content"])) {
-      const text = obj["content"].filter((c) => typeof c === "object" && c !== null && c["type"] === "text" && typeof c["text"] === "string").map((c) => c.text).join(`
-`);
-      if (text.length > 0)
-        return text;
+var MCP_BINARY_TYPES = new Set(["image", "image_url", "audio", "resource", "resource_link"]);
+function isMcpContentBlock(c) {
+  return typeof c === "object" && c !== null && typeof c["type"] === "string";
+}
+function looksLikeMcpContentBlocks(value) {
+  if (!Array.isArray(value) || value.length === 0 || !value.every(isMcpContentBlock))
+    return false;
+  return value.some((b) => b.type === "text" && typeof b.text === "string" || MCP_BINARY_TYPES.has(b.type));
+}
+function blocksFromValue(value) {
+  if (looksLikeMcpContentBlocks(value))
+    return value;
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const content = value["content"];
+    if (looksLikeMcpContentBlocks(content))
+      return content;
+  }
+  return null;
+}
+function asMcpContentBlocks(output) {
+  const found = blocksFromValue(output);
+  if (found)
+    return found;
+  if (typeof output === "string") {
+    try {
+      return blocksFromValue(JSON.parse(output));
+    } catch {
+      return null;
     }
   }
+  return null;
+}
+function hasNonTextContentBlocks(output) {
+  const blocks = asMcpContentBlocks(output);
+  return blocks !== null && blocks.some((b) => b.type !== "text");
+}
+function joinTextBlocks(blocks) {
+  return blocks.filter((b) => b.type === "text" && typeof b.text === "string").map((b) => b.text).join(`
+`);
+}
+function payloadByteLength(output) {
+  if (typeof output === "string")
+    return Buffer.byteLength(output, "utf8");
+  return Buffer.byteLength(JSON.stringify(output), "utf8");
+}
+function isTopLevelArrayPayload(output) {
+  if (Array.isArray(output))
+    return true;
+  if (typeof output === "string") {
+    const trimmed = output.trimStart();
+    return trimmed.startsWith("[");
+  }
+  return false;
+}
+function extractText(output) {
+  const blocks = asMcpContentBlocks(output);
+  if (blocks) {
+    const text = joinTextBlocks(blocks);
+    const hasNonText = blocks.some((b) => b.type !== "text");
+    if (hasNonText)
+      return text;
+    if (text.length > 0 && !isTopLevelArrayPayload(output))
+      return text;
+  }
+  if (typeof output === "string")
+    return output;
   return JSON.stringify(output);
 }
 
@@ -8092,6 +8146,23 @@ var genericHandler = (_toolName, output) => {
   return { summary, originalSize };
 };
 
+// src/handlers/content-blocks.ts
+var contentBlockHandler = (_toolName, output) => {
+  const originalSize = payloadByteLength(output);
+  const blocks = asMcpContentBlocks(output);
+  const text = blocks ? joinTextBlocks(blocks) : extractText(output);
+  const stripped = blocks?.filter((b) => b.type !== "text") ?? [];
+  if (stripped.length === 0) {
+    return { summary: text, originalSize };
+  }
+  const types3 = [...new Set(stripped.map((b) => b.type))];
+  const label = types3.length === 1 ? types3[0] : "non-text";
+  const note = `[stripped ${stripped.length} ${label} content block${stripped.length === 1 ? "" : "s"}]`;
+  const summary = text.length > 0 ? `${text}
+${note}` : note;
+  return { summary, originalSize };
+};
+
 // src/profiles/loader.ts
 import { readdirSync as readdirSync2, readFileSync as readFileSync2, statSync as statSync3 } from "fs";
 import { join as join4 } from "path";
@@ -8474,6 +8545,9 @@ function getHandler(toolName, output, input) {
   const bundledProfile = getProfileHandler(toolName, ["bundled"]);
   if (bundledProfile)
     return bundledProfile;
+  if (hasNonTextContentBlocks(output)) {
+    return contentBlockHandler;
+  }
   const text = extractText(output);
   const trimmed = text.trimStart();
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {

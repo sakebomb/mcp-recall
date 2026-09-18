@@ -8,6 +8,17 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ### Fixed
 
+- **Screenshot and other image content blocks are no longer stored verbatim.**
+  `mcp__claude-in-chrome__computer` (and any unmatched tool that returns an MCP
+  content-block array) was the worst-compressing family in a 69-database store:
+  0.3% reduction, because `jsonHandler` does not truncate strings and a
+  base64 JPEG is incompressible. Non-text blocks are now dropped; the text
+  (capture ID, dimensions, format, tab context) is kept. `originalSize` still
+  counts the pre-strip payload, so the PostToolUse skip-if-not-smaller guard
+  replaces the screenshot in the model window instead of passing it through.
+  Scroll/click results in the same family, which are text-only, are unchanged.
+  (#270)
+
 - **Secret patterns no longer match ordinary Bearer documentation or fused Stripe slugs.**
   `Bearer [A-Za-z0-9\-._~+/]{32,}` flagged any 32+ character hyphenated or
   slash-separated phrase after the word "Bearer" — `use Bearer

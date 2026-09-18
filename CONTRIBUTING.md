@@ -111,7 +111,7 @@ export type Handler = (toolName: string, output: unknown) => CompressionResult;
 A handler receives the raw MCP `output` (which may be a `{ content: [{ type: "text", text: "..." }] }` wrapper or a plain string) and returns a compressed `summary` plus the `originalSize`.
 
 **Rules:**
-- Always call `extractText(output)` first and use its result for `originalSize`. Never measure the raw `output` object.
+- Always call `extractText(output)` first and use its result for `originalSize`. Never measure the raw `output` object. Exception: when the handler's job is to drop incompressible non-text content blocks (images), `originalSize` must be the *pre-strip* payload (`payloadByteLength`). Measuring `extractText` after the drop makes `summarySize >= originalSize`, the PostToolUse skip-guard returns `{}`, and the screenshot still reaches the model.
 - **Never throw.** If `JSON.parse()` fails, a field is missing, or the shape is unexpected — return a graceful fallback (e.g. `{ summary: raw.slice(0, 500), originalSize }`). The handler is called inside a live hook; an unhandled exception breaks the tool call for the user.
 - Return a result for every code path — no `undefined`, no `null`.
 - Keep `summary` under ~1 KB for typical inputs. The goal is to give Claude enough to reason with, not a full reproduction.
@@ -172,7 +172,7 @@ const HANDLER_REGISTRY: HandlerMatcher[] = [
 ];
 ```
 
-`match` receives the tool name and returns a boolean. The registry is only one step of a 7-step dispatch order — user and community TOML profiles are checked *before* it, and bundled profiles *after* it. That order is documented canonically in the JSDoc above `getHandler()`; read it there and keep it in sync if you change the dispatch.
+`match` receives the tool name and returns a boolean. The registry is only one step of dispatch — user and community TOML profiles are checked *before* it, and bundled profiles *after* it. That order is documented canonically in the JSDoc above `getHandler()`; read it there and keep it in sync if you change the dispatch.
 
 ### Step 3 — Capture a real fixture
 
@@ -258,7 +258,7 @@ Add a row to the Compression handlers table in `README.md` — a markdown table 
 - [ ] `bun test` passes
 - [ ] `bun run typecheck` passes
 - [ ] Handler is a named `const` export
-- [ ] `extractText` used for `originalSize`
+- [ ] `extractText` used for `originalSize` (or `payloadByteLength` when dropping incompressible non-text blocks — see Rules)
 - [ ] No throws — every code path returns a `CompressionResult`
 - [ ] ≥ 5 tests including: basic extraction, MCP wrapper, `originalSize`, fallback, dispatcher routing
 - [ ] Row added to README compression handler table

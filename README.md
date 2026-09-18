@@ -533,6 +533,7 @@ Repeated identical tool calls return a cached header instead of re-compressing:
 | Sentry | tool name contains `sentry` | Exception type + message, level, environment, release, event ID. Last 8 stack frames (innermost/most relevant). Drops breadcrumbs, SDK info, request headers. |
 | Filesystem | `mcp__filesystem__*` or tool name contains `read_file` / `get_file` | Line count header + first 50 lines + truncation notice. |
 | CSV | tool name contains `csv`, or content-based detection | Column headers + first 5 data rows as key=value pairs + row/col count. Handles quoted fields. |
+| Content blocks | Unmatched tool whose payload is an MCP content-block array with image/audio/resource items | Drops non-text blocks; keeps the text (capture ID, dimensions, tab context) and notes what was stripped. `originalSize` is the pre-strip payload so the hook replaces the screenshot rather than skipping. |
 | Generic JSON | Any unmatched tool with JSON output | 3-level depth limit, arrays capped at 3 items with overflow count. |
 | Generic text | Everything else | Structure-aware: small output kept whole; long multi-line (logs/traces) → head + tail lines with error/warn lines surfaced from the elided middle; long single-block → head + tail window. Deterministic, no LLM. |
 
