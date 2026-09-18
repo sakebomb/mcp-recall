@@ -48,7 +48,7 @@ var __export = (target, all) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "mcp-recall",
-    version: "1.14.4",
+    version: "1.14.5",
     description: "Context compression and persistent retrieval for Claude Code",
     author: {
       name: "sakebomb",
