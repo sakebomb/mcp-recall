@@ -1434,14 +1434,17 @@ describe("compilerDiagnosticsHandler", () => {
 
 describe("grepHandler", () => {
   const out = (stdout: string) => JSON.stringify({ stdout, stderr: "", exit_code: 0 });
+  const utf8 = (s: string) => Buffer.byteLength(s, "utf8");
 
   it("summarises match count + files and caps the sample without dropping the count", () => {
+    // Long match bodies so the 40×100-char sample is smaller than 25 full
+    // lines and the MAX_SAMPLE cap remains visible (#262).
     const lines = Array.from({ length: 90 }, (_, i) =>
-      `src/mod${i % 6}/file.ts:${i + 1}:  const x = doThing(${i})`);
+      `src/mod${i % 6}/file.ts:${i + 1}:  ${"x".repeat(200)} const x = doThing(${i})`);
     const { summary, originalSize } = grepHandler("Bash", out(lines.join("\n")));
     expect(summary).toMatch(/grep — 90 matches in 6 files/);
     expect(summary).toContain("+50 more matches"); // 90 - 40 cap
-    expect(Buffer.byteLength(summary, "utf8")).toBeLessThan(originalSize);
+    expect(utf8(summary)).toBeLessThan(originalSize);
   });
 
   it("reports no matches on empty output", () => {
@@ -1452,10 +1455,53 @@ describe("grepHandler", () => {
     const prose = Array.from({ length: 30 }, () => "just some prose without the colon-number shape").join("\n");
     expect(grepHandler("Bash", out(prose)).summary).toContain("[bash ·");
   });
+
+  it("summary is never larger than shellHandler for grep-shaped output", () => {
+    const counts = [1, 8, 24, 25, 26, 40, 41, 90, 200];
+    const pads = [0, 20, 80, 160];
+    for (const n of counts) {
+      for (const pad of pads) {
+        const lines = Array.from({ length: n }, (_, i) =>
+          `src/f${i}.ts:${i + 1}:${"x".repeat(pad)} match ${i}`);
+        const input = out(lines.join("\n"));
+        const specialised = grepHandler("Bash", input);
+        const fallback = shellHandler("Bash", input);
+        expect(utf8(specialised.summary)).toBeLessThanOrEqual(utf8(fallback.summary));
+      }
+    }
+  });
+
+  it("keeps the match-count header when shrinking the sample to fit the shell cap", () => {
+    const lines = Array.from({ length: 90 }, (_, i) => `src/f.ts:${i + 1}: x`);
+    const input = out(lines.join("\n"));
+    const { summary } = grepHandler("Bash", input);
+    expect(summary).toMatch(/grep — 90 matches/);
+    expect(utf8(summary)).toBeLessThanOrEqual(utf8(shellHandler("Bash", input).summary));
+  });
+
+  it("keeps every match when output is under the shell line cap", () => {
+    const lines = Array.from({ length: 8 }, (_, i) =>
+      `src/a.ts:${i + 1}: unique_token_${i}_here`);
+    const { summary } = grepHandler("Bash", out(lines.join("\n")));
+    for (let i = 0; i < 8; i++) {
+      expect(summary).toContain(`unique_token_${i}_here`);
+    }
+  });
+
+  it("keeps high reduction on a large long-line match list", () => {
+    const lines = Array.from({ length: 200 }, (_, i) =>
+      `src/mod${i % 6}/file.ts:${i + 1}: ${"body ".repeat(50)} match ${i}`);
+    const input = out(lines.join("\n"));
+    const { summary, originalSize } = grepHandler("Bash", input);
+    expect(summary).toMatch(/grep — 200 matches in 6 files/);
+    expect(utf8(summary) / originalSize).toBeLessThan(0.15);
+    expect(utf8(summary)).toBeLessThanOrEqual(utf8(shellHandler("Bash", input).summary));
+  });
 });
 
 describe("lsHandler", () => {
   const out = (stdout: string) => JSON.stringify({ stdout, stderr: "", exit_code: 0 });
+  const utf8 = (s: string) => Buffer.byteLength(s, "utf8");
 
   it("counts dirs vs files for long format", () => {
     const rows = [
@@ -1488,22 +1534,68 @@ describe("lsHandler", () => {
     expect(summary).toContain("readme.md");
     expect(summary).toContain("package.json");
   });
+
+  it("summary is never larger than shellHandler for a long plain listing", () => {
+    const counts = [2, 10, 24, 25, 40, 80];
+    for (const n of counts) {
+      const rows = Array.from({ length: n }, (_, i) => `file${i}.ts`);
+      const input = out(rows.join("\n"));
+      const specialised = lsHandler("Bash", input);
+      const fallback = shellHandler("Bash", input);
+      expect(utf8(specialised.summary)).toBeLessThanOrEqual(utf8(fallback.summary));
+    }
+  });
+
+  it("keeps every name when the listing is under the shell line cap", () => {
+    const rows = Array.from({ length: 8 }, (_, i) => `unique_ls_${i}.ts`);
+    const { summary } = lsHandler("Bash", out(rows.join("\n")));
+    for (let i = 0; i < 8; i++) {
+      expect(summary).toContain(`unique_ls_${i}.ts`);
+    }
+  });
 });
 
 describe("findHandler", () => {
   const out = (stdout: string) => JSON.stringify({ stdout, stderr: "", exit_code: 0 });
+  const utf8 = (s: string) => Buffer.byteLength(s, "utf8");
 
   it("reports path count and caps the sample", () => {
-    const paths = Array.from({ length: 120 }, (_, i) => `./src/deep/path/file${i}.ts`);
+    // Paths longer than the 120-char clip so 40 clipped samples beat 25 full
+    // lines and the MAX_SAMPLE cap remains visible (#262).
+    const paths = Array.from({ length: 120 }, (_, i) =>
+      `./src/${"deep/".repeat(40)}file${i}.ts`);
     const { summary, originalSize } = findHandler("Bash", out(paths.join("\n")));
     expect(summary).toContain("find — 120 paths");
     expect(summary).toContain("+80 more paths");
-    expect(Buffer.byteLength(summary, "utf8")).toBeLessThan(originalSize);
+    expect(utf8(summary)).toBeLessThan(originalSize);
   });
 
   it("falls back when output is mostly find errors, not paths", () => {
     const errs = Array.from({ length: 20 }, (_, i) => `find: '/root/x${i}': Permission denied`).join("\n");
     expect(findHandler("Bash", out(errs)).summary).toContain("[bash ·");
+  });
+
+  it("summary is never larger than shellHandler for path lists", () => {
+    const counts = [1, 8, 24, 25, 40, 80, 120];
+    const pads = [0, 40, 160];
+    for (const n of counts) {
+      for (const pad of pads) {
+        const paths = Array.from({ length: n }, (_, i) =>
+          `./src/${"x".repeat(pad)}/file${i}.ts`);
+        const input = out(paths.join("\n"));
+        const specialised = findHandler("Bash", input);
+        const fallback = shellHandler("Bash", input);
+        expect(utf8(specialised.summary)).toBeLessThanOrEqual(utf8(fallback.summary));
+      }
+    }
+  });
+
+  it("keeps every path when output is under the shell line cap", () => {
+    const paths = Array.from({ length: 8 }, (_, i) => `./src/unique_find_${i}.ts`);
+    const { summary } = findHandler("Bash", out(paths.join("\n")));
+    for (let i = 0; i < 8; i++) {
+      expect(summary).toContain(`unique_find_${i}.ts`);
+    }
   });
 });
 

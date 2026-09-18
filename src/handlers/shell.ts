@@ -1,6 +1,6 @@
 /**
  * Shell handler — strips ANSI escape codes and SSH banner noise, then caps
- * stdout at 50 lines / stderr at 20 lines. Handles structured
+ * stdout at 25 lines / stderr at 20 lines. Handles structured
  * `{stdout, stderr, returncode}` JSON as well as plain string output.
  * Routes bash, shell, terminal, run_command, ssh_exec, exec_command,
  * remote_exec, and container_exec tool name patterns.
@@ -9,7 +9,7 @@ import type { CompressionResult, Handler } from "./types";
 import { extractText } from "./types";
 import { jsonHandler } from "./json";
 
-const HEAD_STDOUT = 25;
+export const HEAD_STDOUT = 25;
 const HEAD_STDERR = 20;
 
 // Covers colors, cursor movement, erase sequences, and other common escapes.

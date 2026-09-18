@@ -6,10 +6,14 @@
  * they always report the total count and show a generous capped sample with an
  * explicit overflow line, and fall back to the shell handler when the output
  * doesn't match the expected shape. The full output stays retrievable via recall__*.
+ *
+ * Budget: specialised summaries are sized to the generic shell cap — the sample
+ * shrinks until it fits, and if shell already kept every line the handler defers
+ * to it. These never compress worse than the fallback they replace (#262).
  */
 import type { CompressionResult, Handler } from "./types";
 import { extractText } from "./types";
-import { shellHandler } from "./shell";
+import { HEAD_STDOUT, shellHandler } from "./shell";
 import { extractStdout } from "./bash-shared";
 
 const MAX_SAMPLE = 40;
@@ -17,6 +21,53 @@ const clip = (s: string, n = 100): string => (s.length > n ? s.slice(0, n) + "�
 
 function overflowLine(total: number, shown: number, noun: string): string[] {
   return total > shown ? [`  … (+${total - shown} more ${noun})`] : [];
+}
+
+function utf8(s: string): number {
+  return Buffer.byteLength(s, "utf8");
+}
+
+function stdoutLineCount(output: unknown): number {
+  const lines = extractStdout(output).split("\n");
+  while (lines.length > 0 && lines[lines.length - 1]!.trim() === "") lines.pop();
+  return lines.length;
+}
+
+/**
+ * Keep a specialised summary only when it is no larger than the generic shell
+ * cap. If it overshoots and shell already kept every line, defer so we do not
+ * hide items that are cheap to show. Otherwise shrink the sample until it fits.
+ */
+function fitUnderFallback(
+  toolName: string,
+  output: unknown,
+  total: number,
+  build: (shown: number) => CompressionResult,
+): CompressionResult {
+  const fallback = shellHandler(toolName, output);
+  const budget = utf8(fallback.summary);
+  const maxShown = Math.min(MAX_SAMPLE, total);
+
+  const fits = (n: number): boolean => utf8(build(n).summary) <= budget;
+
+  if (fits(maxShown)) return build(maxShown);
+  if (stdoutLineCount(output) <= HEAD_STDOUT) return fallback;
+  if (!fits(0)) return fallback;
+
+  let best = 0;
+  let lo = 0;
+  let hi = maxShown;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (fits(mid)) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  const candidate = build(best);
+  return utf8(candidate.summary) > budget ? fallback : candidate;
 }
 
 // ---------------------------------------------------------------------------
@@ -54,13 +105,14 @@ export const grepHandler: Handler = (
   }
 
   const header = `grep — ${matches.length} match${matches.length === 1 ? "" : "es"} in ${files.size} file${files.size === 1 ? "" : "s"}`;
-  const shown = matches
-    .slice(0, MAX_SAMPLE)
-    .map((m) => `  ${m.file}:${m.line}: ${clip(m.text.trim())}`);
-  return {
-    summary: [header, ...shown, ...overflowLine(matches.length, MAX_SAMPLE, "matches")].join("\n"),
+  return fitUnderFallback(toolName, output, matches.length, (shown) => ({
+    summary: [
+      header,
+      ...matches.slice(0, shown).map((m) => `  ${m.file}:${m.line}: ${clip(m.text.trim())}`),
+      ...overflowLine(matches.length, shown, "matches"),
+    ].join("\n"),
     originalSize,
-  };
+  }));
 };
 
 // ---------------------------------------------------------------------------
@@ -91,12 +143,15 @@ export const lsHandler: Handler = (
   const hasBlankSeparator = raw.some((l) => l.trim() === "");
   if (dirHeaders.length >= 2 && hasBlankSeparator) {
     const entries = nonEmpty.length - dirHeaders.length - nonEmpty.filter((l) => /^total\s+\d+$/.test(l.trim())).length;
-    const shown = dirHeaders.slice(0, MAX_SAMPLE).map((d) => `  ${d.trim()}`);
     const header = `ls -R — ${dirHeaders.length} directories, ~${entries} entries`;
-    return {
-      summary: [header, ...shown, ...overflowLine(dirHeaders.length, MAX_SAMPLE, "directories")].join("\n"),
+    return fitUnderFallback(toolName, output, dirHeaders.length, (shown) => ({
+      summary: [
+        header,
+        ...dirHeaders.slice(0, shown).map((d) => `  ${d.trim()}`),
+        ...overflowLine(dirHeaders.length, shown, "directories"),
+      ].join("\n"),
       originalSize,
-    };
+    }));
   }
 
   // Long format: perm-string lines. Count dirs vs files.
@@ -112,22 +167,28 @@ export const lsHandler: Handler = (
     }
     const files = longLines.length - dirs;
     const header = `ls — ${longLines.length} entries (${dirs} dir${dirs === 1 ? "" : "s"}, ${files} file${files === 1 ? "" : "s"})`;
-    const shown = names.slice(0, MAX_SAMPLE).map((n) => `  ${clip(n)}`);
-    return {
-      summary: [header, ...shown, ...overflowLine(names.length, MAX_SAMPLE, "entries")].join("\n"),
+    return fitUnderFallback(toolName, output, names.length, (shown) => ({
+      summary: [
+        header,
+        ...names.slice(0, shown).map((n) => `  ${clip(n)}`),
+        ...overflowLine(names.length, shown, "entries"),
+      ].join("\n"),
       originalSize,
-    };
+    }));
   }
 
   // Plain listing: names one-per-line or column-wrapped. Flatten to tokens.
   const tokens = nonEmpty.flatMap((l) => l.split(/\s{2,}|\t/)).map((t) => t.trim()).filter(Boolean);
   if (tokens.length < 2) return shellHandler(toolName, output);
   const header = `ls — ${tokens.length} entries`;
-  const shown = tokens.slice(0, MAX_SAMPLE).map((n) => `  ${clip(n)}`);
-  return {
-    summary: [header, ...shown, ...overflowLine(tokens.length, MAX_SAMPLE, "entries")].join("\n"),
+  return fitUnderFallback(toolName, output, tokens.length, (shown) => ({
+    summary: [
+      header,
+      ...tokens.slice(0, shown).map((n) => `  ${clip(n)}`),
+      ...overflowLine(tokens.length, shown, "entries"),
+    ].join("\n"),
     originalSize,
-  };
+  }));
 };
 
 // ---------------------------------------------------------------------------
@@ -153,9 +214,12 @@ export const findHandler: Handler = (
   }
 
   const header = `find — ${paths.length} path${paths.length === 1 ? "" : "s"}`;
-  const shown = paths.slice(0, MAX_SAMPLE).map((p) => `  ${clip(p, 120)}`);
-  return {
-    summary: [header, ...shown, ...overflowLine(paths.length, MAX_SAMPLE, "paths")].join("\n"),
+  return fitUnderFallback(toolName, output, paths.length, (shown) => ({
+    summary: [
+      header,
+      ...paths.slice(0, shown).map((p) => `  ${clip(p, 120)}`),
+      ...overflowLine(paths.length, shown, "paths"),
+    ].join("\n"),
     originalSize,
-  };
+  }));
 };
