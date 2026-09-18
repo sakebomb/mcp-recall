@@ -95,14 +95,33 @@ export const SECRET_PATTERNS: SecretPattern[] = [
     pattern: /(?<![A-Za-z0-9_-])sk-ant-[A-Za-z0-9\-_]{32,}/,
   },
   {
+    // Two arms. A length bound on the RFC 6750 charset is what flags ordinary
+    // documentation: "Bearer authentication-for-all-internal-endpoints",
+    // "Bearer tokens/are/documented/in/the/api/reference" (#280). Since #271 a
+    // match is a user-facing refusal.
+    //
+    // Arm 1 — JWT. `eyJ` is base64(`{"`) and is to JWTs what T3BlbkFJ is to
+    // OpenAI keys: specific enough to need no other constraint. Three
+    // dot-separated base64url segments (RFC 7519).
+    //
+    // Arm 2 — opaque. Hyphen-free, slash-free alphanumeric (plus `+` and
+    // padding). Those two separators are what the false-positive prose uses
+    // as word/path delimiters. A closed prefix list has the #276 trap; this
+    // arm is the backstop for non-JWT tokens. Residual false-negative:
+    // standard base64 that contains `/`. JWTs use base64url and are arm 1.
     name: "Generic Bearer token",
-    pattern: /Bearer [A-Za-z0-9\-._~+/]{32,}/,
+    pattern:
+      /Bearer (?:eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|[A-Za-z0-9+]{32,}={0,2})/,
   },
   {
     name: "SSH private key",
     pattern: /-----BEGIN OPENSSH PRIVATE KEY-----/,
   },
   {
+    // Matches any JSON *describing* a service account, not only a private
+    // key file. Intended conservatism (#280): the discriminator is the field
+    // every real key file carries, and a Terraform/docs snippet of the same
+    // shape is rare in MCP tool output. Leave as is.
     name: "GCP service account key",
     pattern: /"type"\s*:\s*"service_account"/,
   },
@@ -111,8 +130,12 @@ export const SECRET_PATTERNS: SecretPattern[] = [
     pattern: /DefaultEndpointsProtocol=https?;AccountName=[^;]{1,100};AccountKey=[A-Za-z0-9+/=]{32,}/,
   },
   {
+    // Same leading-boundary guard as the OpenAI/Anthropic entries (#274).
+    // Without it, `ri|sk_live_`, `netwo|rk_test_`, `wo|rk_test_` fuse inside
+    // ordinary identifiers (#280). Body stays a hyphen-free class; the
+    // defect is the missing boundary, not a permissive body.
     name: "Stripe secret/restricted key",
-    pattern: /[sr]k_(?:live|test)_[A-Za-z0-9]{24,}/,
+    pattern: /(?<![A-Za-z0-9_-])[sr]k_(?:live|test)_[A-Za-z0-9]{24,}/,
   },
   {
     name: "SendGrid API key",
@@ -123,6 +146,9 @@ export const SECRET_PATTERNS: SecretPattern[] = [
     pattern: /\bAC[0-9a-f]{32}\b/,
   },
   {
+    // Left boundary omitted deliberately (#280). A fused `npm_` needs 36
+    // consecutive alphanumerics after it, which ordinary identifiers do not
+    // produce. Same class as Stripe's missing boundary, not realistic here.
     name: "npm publish token",
     pattern: /npm_[A-Za-z0-9]{36}/,
   },

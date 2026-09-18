@@ -40,7 +40,7 @@ Before writing any tool output to disk, mcp-recall scans the content for these p
 | SendGrid API key | `SG.…` |
 | Twilio Account SID | `AC…` (+32 hex) |
 | npm publish token | `npm_…` |
-| Generic Bearer token | `Bearer …` (32+ chars) |
+| Generic Bearer token | JWT (`eyJ` + three segments) or a 32+ char hyphen-free opaque token |
 
 ### Where the scan runs
 

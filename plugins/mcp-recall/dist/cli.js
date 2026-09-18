@@ -5567,7 +5567,7 @@ var SECRET_PATTERNS = [
   },
   {
     name: "Generic Bearer token",
-    pattern: /Bearer [A-Za-z0-9\-._~+/]{32,}/
+    pattern: /Bearer (?:eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|[A-Za-z0-9+]{32,}={0,2})/
   },
   {
     name: "SSH private key",
@@ -5583,7 +5583,7 @@ var SECRET_PATTERNS = [
   },
   {
     name: "Stripe secret/restricted key",
-    pattern: /[sr]k_(?:live|test)_[A-Za-z0-9]{24,}/
+    pattern: /(?<![A-Za-z0-9_-])[sr]k_(?:live|test)_[A-Za-z0-9]{24,}/
   },
   {
     name: "SendGrid API key",
