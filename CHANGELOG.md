@@ -6,6 +6,23 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Fixed
+
+- **Secret patterns no longer match ordinary Bearer documentation or fused Stripe slugs.**
+  `Bearer [A-Za-z0-9\-._~+/]{32,}` flagged any 32+ character hyphenated or
+  slash-separated phrase after the word "Bearer" — `use Bearer
+  authentication-for-all-internal-endpoints` was refused as a credential. The
+  Stripe entry had the same missing left boundary #274 closed for `sk-`, so
+  `risk_live_…` / `network_test_…` / `work_test_…` fused into `sk_live_` /
+  `rk_test_`. Since #271 a match is a user-facing refusal. Bearer now has two
+  arms: a JWT discriminator (`eyJ` + three base64url segments — the analogue of
+  the OpenAI `T3BlbkFJ` watermark) and a hyphen-free, slash-free opaque token.
+  Stripe gets the proven `(?<![A-Za-z0-9_-])` lookbehind; its body was already
+  hyphen-free. `npm_` and the GCP JSON shape were checked in the same pass and
+  left as is: a fused `npm_` needs 36 consecutive alphanumerics, and
+  `"type": "service_account"` is the discriminator every real key file carries.
+  (#280)
+
 ## [1.14.3] — 2026-09-09
 
 ### Fixed
