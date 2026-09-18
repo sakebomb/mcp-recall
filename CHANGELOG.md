@@ -6,6 +6,8 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+## [1.14.4] — 2026-09-18
+
 ### Fixed
 
 - **Screenshot and other image content blocks are no longer stored verbatim.**
@@ -33,6 +35,22 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   left as is: a fused `npm_` needs 36 consecutive alphanumerics, and
   `"type": "service_account"` is the discriminator every real key file carries.
   (#280)
+
+- **`mcp-recall import` withholds dump rows that contain secrets.**
+  `import` writes through its own INSERT, bypassing both the PostToolUse hook
+  and `storeOutput` — the only two places a secret scan lived after #271. A
+  matching row is withheld and the rest of the dump imports normally; the run
+  reports the count and pattern names, never matched values. `--dry-run`
+  predicts the same withhold. (#273)
+
+- **`sk-` as a standalone token in filenames and ticket names is no longer
+  treated as an OpenAI key.** #274's left boundary killed fused slugs
+  (`risk-`/`task-`/`disk-`) but not `sk-project-notes-draft-…` or
+  `sk-1042-add-retry-…`. Since #271 a match is a user-facing refusal. OpenAI
+  detection now has three arms: the `T3BlbkFJ` watermark (any prefix, including
+  unknown future ones), the known-prefix list with a permissive body, and
+  legacy hyphen-free `sk-`. The two #276 slugs store; a watermarked
+  unknown-prefix key is still caught. (#276)
 
 ## [1.14.3] — 2026-09-09
 
@@ -520,7 +538,8 @@ Ten `recall__*` tools available in every Claude session:
 
 ---
 
-[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.14.3...HEAD
+[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.14.4...HEAD
+[1.14.4]: https://github.com/sakebomb/mcp-recall/compare/v1.14.3...v1.14.4
 [1.14.3]: https://github.com/sakebomb/mcp-recall/compare/v1.14.2...v1.14.3
 [1.14.2]: https://github.com/sakebomb/mcp-recall/compare/v1.14.1...v1.14.2
 [1.14.1]: https://github.com/sakebomb/mcp-recall/compare/v1.14.0...v1.14.1
