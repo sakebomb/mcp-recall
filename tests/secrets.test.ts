@@ -198,6 +198,45 @@ describe("containsSecret", () => {
   it("does not flag short Bearer values", () => {
     expect(containsSecret("Authorization: Bearer short")).toBe(false);
   });
+
+  // #280 negative controls. The six strings from the issue's evidence table,
+  // verbatim. #274/#276 closed two defect classes on the sk- patterns (missing
+  // left boundary; permissive body with only a length bound) and left both
+  // alive in Bearer and Stripe. Since #271 a match is a user-facing refusal,
+  // so each of these rejects a legitimate recall__note.
+  it.each([
+    "use Bearer authentication-for-all-internal-endpoints",
+    "Bearer tokens/are/documented/in/the/api/reference",
+    "see docs/Bearer token-refresh-and-rotation-policy.md",
+    "risk_live_assessmentdocumentationandreview",
+    "network_test_configurationandvalidationdata",
+    "work_test_dataconfigurationvaluesforstaging",
+  ])("does not flag the ordinary string %s", (text) => {
+    expect(findSecrets(text)).toEqual([]);
+    expect(containsSecret(text)).toBe(false);
+  });
+
+  // #280 false-NEGATIVE controls. The JWT fixture is built so its first
+  // segment is shorter than the opaque arm's 32-char floor — otherwise the
+  // header alone would satisfy arm 2 and a test labelled "JWT" would not
+  // actually require the JWT arm (the #279 window-fixture class of miss).
+  const JWT_HEADER = "eyJhbGciOiJIUzI1NiJ9"; // {"alg":"HS256"} — 20 chars
+  const JWT_PAYLOAD = "eyJzdWIiOiIxIn0"; // {"sub":"1"}
+  const JWT_SIG = "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+  const jwtBearer = `Bearer ${JWT_HEADER}.${JWT_PAYLOAD}.${JWT_SIG}`;
+  const opaqueBearer = "Bearer 7f3a9c2E1b8d4F6a0c5E9b1d3A7f2c8e";
+
+  it("the JWT fixture is shorter than the opaque arm in its first segment", () => {
+    expect(JWT_HEADER.length).toBeLessThan(32);
+  });
+
+  it("detects a JWT Bearer token", () => {
+    expect(findSecrets(`Authorization: ${jwtBearer}`)).toContain("Generic Bearer token");
+  });
+
+  it("detects an opaque Bearer token", () => {
+    expect(findSecrets(`Authorization: ${opaqueBearer}`)).toContain("Generic Bearer token");
+  });
 });
 
 describe("containsSecret — new patterns", () => {
@@ -233,6 +272,11 @@ describe("containsSecret — new patterns", () => {
   it("detects Stripe test secret key (sk_test_)", () => {
     const key = "sk_test_" + "A".repeat(24);
     expect(containsSecret(key)).toBe(true);
+  });
+
+  it("detects Stripe test restricted key (rk_test_)", () => {
+    const key = "rk_test_" + "A".repeat(24);
+    expect(findSecrets(key)).toContain("Stripe secret/restricted key");
   });
 
   it("does not flag Stripe publishable keys (pk_)", () => {
