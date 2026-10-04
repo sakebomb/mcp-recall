@@ -1,0 +1,26 @@
+name: Question / support
+description: Ask a question or get help
+title: "[Question]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ask your question below. **Please do not paste secrets, tokens, or personal data** into this issue.
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to do
+      description: Describe your goal.
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What have you tried
+      description: Steps, commands, or approaches you have already tried.
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Anything else that helps, such as version, environment, links, or screenshots.

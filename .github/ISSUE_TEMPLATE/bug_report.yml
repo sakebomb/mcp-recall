@@ -1,0 +1,78 @@
+name: Bug report
+description: Report something that is broken or not working as expected
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. **Please do not paste secrets, tokens, passwords, API keys, or personal data** into this issue. Redact anything sensitive from logs and screenshots.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: A short description of the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the steps needed to see the problem.
+      placeholder: |
+        1. Go to ...
+        2. Click on ...
+        3. See the error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead?
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment / version or URL / page
+      description: Version, commit, OS, browser, device, or the URL/page where this happens.
+      placeholder: "e.g. v1.2.3, Ubuntu 24.04, Firefox 130, or https://example.com/page"
+  - type: input
+    id: claude_version
+    attributes:
+      label: "Claude Code version"
+      description: "Output of `claude --version`."
+  - type: input
+    id: bun_version
+    attributes:
+      label: "Bun version"
+      description: "Output of `bun --version`."
+  - type: input
+    id: os
+    attributes:
+      label: "OS"
+      description: "Operating system and version."
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: "Run Claude Code with `--debug` and paste relevant output, or check stderr from the hook. Redact secrets and personal data first."
+      render: shell
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: How badly does this affect you?
+      options:
+        - Blocks use
+        - Major
+        - Minor
+        - Cosmetic
