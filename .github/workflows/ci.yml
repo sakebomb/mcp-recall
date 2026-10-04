@@ -111,6 +111,13 @@ jobs:
             fi
           done
 
+      # `--version` only proves the binary launches. This drives store, skip and
+      # import through the installed package and reads the resulting SQLite file,
+      # so a CLI that launches but misbehaves fails here and not only in `bun test`
+      # (#281). Synthetic fixtures only; no secrets.
+      - name: Exercise store, skip and import against a real database
+        run: bash "$GITHUB_WORKSPACE/scripts/packaged-cli-smoke.sh" /tmp/consumer
+
       - name: Exercise the documented onboarding path
         run: |
           cd /tmp/consumer
