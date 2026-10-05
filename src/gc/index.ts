@@ -21,7 +21,7 @@
 import { Database } from "bun:sqlite";
 import { readdirSync, existsSync, statSync, rmSync } from "fs";
 import { join, basename, dirname, resolve, isAbsolute } from "path";
-import { dataDir, defaultDbPath, migrateFtsToExternalContent, verifyFtsIndex } from "../db/schema";
+import { dataDir, defaultDbPath, migrateFtsToExternalContent, truncateWal, verifyFtsIndex } from "../db/schema";
 import { getMeta } from "../db/queries";
 import { getProjectKey } from "../project-key";
 import { formatBytes, formatRelativeTime } from "../format";
@@ -296,6 +296,7 @@ export function vacuumFile(file: string): VacuumResult {
     db.run("PRAGMA auto_vacuum=INCREMENTAL");
     db.run("VACUUM");
     verifyFtsIndex(db);
+    truncateWal(db);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     // VACUUM is atomic — a failure leaves the DB intact. Log the real cause; the

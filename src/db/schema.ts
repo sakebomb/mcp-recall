@@ -112,6 +112,22 @@ function applyMigrations(db: Database): void {
   }
 }
 
+/**
+ * Folds the WAL into the database and truncates it to zero bytes. Call after any
+ * page reclaim: stores run in WAL mode, a WAL is reused rather than shrunk, and it
+ * is deleted only when the last connection closes, which a session's MCP server
+ * never does. Without this, reclaimed pages sit in a WAL as large as the database
+ * (#292). Works with other connections open; a busy reader just leaves the WAL in
+ * place until the next call. Never throws.
+ */
+export function truncateWal(db: Database): void {
+  try {
+    db.run("PRAGMA wal_checkpoint(TRUNCATE)");
+  } catch (e) {
+    log.warn(`wal_checkpoint(TRUNCATE) failed — ${e instanceof Error ? e.message : e}`);
+  }
+}
+
 /** True when outputs_fts is the pre-#263 form that keeps its own copy of the text. */
 function hasLegacyFts(db: Database): boolean {
   return (
@@ -158,6 +174,7 @@ export function migrateFtsToExternalContent(db: Database): FtsMigrationResult {
   } catch (e) {
     log.warn(`incremental_vacuum after FTS migration failed — ${e instanceof Error ? e.message : e}`);
   }
+  truncateWal(db);
   log.debug("FTS index migrated to external content (#263)");
   return "migrated";
 }
