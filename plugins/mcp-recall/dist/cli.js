@@ -5133,6 +5133,20 @@ import { Database } from "bun:sqlite";
 import { join as join2, dirname } from "path";
 import { homedir as homedir2 } from "os";
 import { mkdirSync } from "fs";
+var FTS_TABLE_DDL = `
+  CREATE VIRTUAL TABLE IF NOT EXISTS outputs_fts USING fts5(
+    id UNINDEXED,
+    tool_name,
+    summary,
+    full_content,
+    content='stored_outputs',
+    content_rowid='rowid'
+  )`;
+var FTS_DELETE_TRIGGER_DDL = `
+  CREATE TRIGGER IF NOT EXISTS outputs_ad AFTER DELETE ON stored_outputs BEGIN
+    INSERT INTO outputs_fts(outputs_fts, rowid, id, tool_name, summary, full_content)
+    VALUES ('delete', old.rowid, old.id, old.tool_name, old.summary, old.full_content);
+  END`;
 var SCHEMA = `
   CREATE TABLE IF NOT EXISTS stored_outputs (
     id TEXT PRIMARY KEY,
@@ -5155,21 +5169,14 @@ var SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_so_tool_name   ON stored_outputs(tool_name);
   CREATE INDEX IF NOT EXISTS idx_so_input_hash  ON stored_outputs(project_key, input_hash);
 
-  CREATE VIRTUAL TABLE IF NOT EXISTS outputs_fts USING fts5(
-    id UNINDEXED,
-    tool_name,
-    summary,
-    full_content
-  );
+  ${FTS_TABLE_DDL};
 
   CREATE TRIGGER IF NOT EXISTS outputs_ai AFTER INSERT ON stored_outputs BEGIN
     INSERT INTO outputs_fts(rowid, id, tool_name, summary, full_content)
     VALUES (new.rowid, new.id, new.tool_name, new.summary, new.full_content);
   END;
 
-  CREATE TRIGGER IF NOT EXISTS outputs_ad AFTER DELETE ON stored_outputs BEGIN
-    DELETE FROM outputs_fts WHERE rowid = old.rowid;
-  END;
+  ${FTS_DELETE_TRIGGER_DDL};
 
   CREATE VIRTUAL TABLE IF NOT EXISTS content_chunks USING fts5(
     output_id UNINDEXED,
@@ -5212,6 +5219,54 @@ function applyMigrations(db) {
     }
   }
 }
+function hasLegacyFts(db) {
+  return db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'outputs_fts_content'").get() !== null;
+}
+function migrateFtsToExternalContent(db) {
+  if (!hasLegacyFts(db))
+    return "current";
+  try {
+    const migrated = db.transaction(() => {
+      if (!hasLegacyFts(db))
+        return false;
+      db.run("DROP TRIGGER IF EXISTS outputs_ad");
+      db.run("DROP TABLE outputs_fts");
+      db.run(FTS_TABLE_DDL);
+      db.run(FTS_DELETE_TRIGGER_DDL);
+      db.run("INSERT INTO outputs_fts(outputs_fts) VALUES('rebuild')");
+      db.run("INSERT INTO outputs_fts(outputs_fts, rank) VALUES('integrity-check', 1)");
+      return true;
+    }).immediate();
+    if (!migrated)
+      return "current";
+  } catch (e) {
+    log.warn(`FTS migration failed, keeping the existing index \u2014 ${e instanceof Error ? e.message : e}`);
+    return "failed";
+  }
+  try {
+    db.run("PRAGMA incremental_vacuum");
+  } catch (e) {
+    log.warn(`incremental_vacuum after FTS migration failed \u2014 ${e instanceof Error ? e.message : e}`);
+  }
+  log.debug("FTS index migrated to external content (#263)");
+  return "migrated";
+}
+function verifyFtsIndex(db) {
+  if (db.query("SELECT 1 FROM sqlite_master WHERE name = 'outputs_fts'").get() === null)
+    return false;
+  try {
+    db.run("INSERT INTO outputs_fts(outputs_fts, rank) VALUES('integrity-check', 1)");
+    return false;
+  } catch {
+    try {
+      db.run("INSERT INTO outputs_fts(outputs_fts) VALUES('rebuild')");
+      log.warn("FTS index disagreed with stored_outputs; rebuilt");
+    } catch (e) {
+      log.warn(`FTS rebuild failed \u2014 ${e instanceof Error ? e.message : e}`);
+    }
+    return true;
+  }
+}
 var instance = null;
 function defaultDbPath(projectKey) {
   return process.env.RECALL_DB_PATH ?? join2(homedir2(), ".local", "share", "mcp-recall", `${projectKey}.db`);
@@ -5235,6 +5290,7 @@ function getDb(path) {
   instance.run("PRAGMA auto_vacuum=INCREMENTAL");
   instance.run(SCHEMA);
   applyMigrations(instance);
+  migrateFtsToExternalContent(instance);
   return instance;
 }
 // src/db/chunking.ts
@@ -5833,8 +5889,10 @@ function vacuumFile(file) {
   try {
     db = new Database2(file);
     db.run("PRAGMA busy_timeout=5000");
+    migrateFtsToExternalContent(db);
     db.run("PRAGMA auto_vacuum=INCREMENTAL");
     db.run("VACUUM");
+    verifyFtsIndex(db);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     log.warn(`vacuum failed for ${basename(file)} \u2014 ${message}`);

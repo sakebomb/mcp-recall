@@ -21,7 +21,7 @@
 import { Database } from "bun:sqlite";
 import { readdirSync, existsSync, statSync, rmSync } from "fs";
 import { join, basename, dirname, resolve, isAbsolute } from "path";
-import { dataDir, defaultDbPath } from "../db/schema";
+import { dataDir, defaultDbPath, migrateFtsToExternalContent, verifyFtsIndex } from "../db/schema";
 import { getMeta } from "../db/queries";
 import { getProjectKey } from "../project-key";
 import { formatBytes, formatRelativeTime } from "../format";
@@ -281,15 +281,21 @@ function reportLine(e: DbEntry, nowMs: number): string {
 
 export type VacuumResult = { before: number; after: number } | { error: string };
 
-/** Full VACUUM: reclaims free pages and upgrades legacy DBs to incremental auto-vacuum. */
+/**
+ * Full VACUUM: reclaims free pages and upgrades legacy DBs to incremental auto-vacuum.
+ * Also migrates a legacy FTS index first (#263), so stores that are rarely opened
+ * still shed their duplicate copy, and checks the index afterwards (verifyFtsIndex).
+ */
 export function vacuumFile(file: string): VacuumResult {
   const before = dbFootprint(file);
   let db: Database | null = null;
   try {
     db = new Database(file);
     db.run("PRAGMA busy_timeout=5000");
+    migrateFtsToExternalContent(db);
     db.run("PRAGMA auto_vacuum=INCREMENTAL");
     db.run("VACUUM");
+    verifyFtsIndex(db);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     // VACUUM is atomic — a failure leaves the DB intact. Log the real cause; the

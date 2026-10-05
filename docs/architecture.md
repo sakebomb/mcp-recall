@@ -141,7 +141,11 @@ Tables (`db/schema.ts`):
   sizes, `pinned`, `access_count`, `last_accessed`, `input_hash`, `output_hash`,
   scoped by `project_key`.
 - **`outputs_fts`** (FTS5) — full-text index over `tool_name`/`summary`/`full_content`;
-  powers `recall__search`. Kept in sync by insert/delete triggers.
+  powers `recall__search`. External content (`content='stored_outputs'`): it holds only
+  the inverted index and reads text through from `stored_outputs` by rowid, so the text
+  is stored once (#263). Kept in sync by insert/delete triggers; there is no update
+  trigger, so no `UPDATE` may touch an indexed column (a test enforces this). Stores
+  from before #263 are migrated once on open, or by `gc --vacuum`.
 - **`content_chunks`** (FTS5) — `full_content` split into chunks (`db/chunking.ts`);
   powers the bounded `peek` window and graduated retrieval. Populated programmatically
   by `storeChunks` on write and cleaned up by a delete trigger (unlike `outputs_fts`,
