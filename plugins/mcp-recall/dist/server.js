@@ -19719,6 +19719,13 @@ function applyMigrations(db) {
     }
   }
 }
+function truncateWal(db) {
+  try {
+    db.run("PRAGMA wal_checkpoint(TRUNCATE)");
+  } catch (e) {
+    log.warn(`wal_checkpoint(TRUNCATE) failed \u2014 ${e instanceof Error ? e.message : e}`);
+  }
+}
 function hasLegacyFts(db) {
   return db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'outputs_fts_content'").get() !== null;
 }
@@ -19748,6 +19755,7 @@ function migrateFtsToExternalContent(db) {
   } catch (e) {
     log.warn(`incremental_vacuum after FTS migration failed \u2014 ${e instanceof Error ? e.message : e}`);
   }
+  truncateWal(db);
   log.debug("FTS index migrated to external content (#263)");
   return "migrated";
 }
@@ -19828,6 +19836,7 @@ function reclaimPages(db, deleted) {
   } catch (e) {
     log.warn(`incremental_vacuum failed \u2014 ${e instanceof Error ? e.message : e}`);
   }
+  truncateWal(db);
 }
 function storeOutput(db, input) {
   const id = generateId();

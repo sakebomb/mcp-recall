@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Database } from "bun:sqlite";
-import { readdirSync, readFileSync, rmSync, statSync } from "fs";
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { getDb, closeDb, initSchema, migrateFtsToExternalContent, verifyFtsIndex } from "../src/db/schema";
@@ -129,6 +129,29 @@ describe("external-content FTS (#263)", () => {
     expect(setup.query("SELECT id FROM outputs_fts WHERE outputs_fts MATCH 'walrus'").all()).toEqual([{ id: "a" }]);
     const trigger = setup.query("SELECT sql FROM sqlite_master WHERE name = 'outputs_ad'").get() as { sql: string };
     expect(trigger.sql).toContain("DELETE FROM outputs_fts");
+    setup.close();
+  });
+
+  test("migration truncates the WAL while another connection holds the store (#292)", () => {
+    const path = tmpDb();
+    const setup = new Database(path);
+    setup.run("PRAGMA auto_vacuum=INCREMENTAL");
+    setup.run("PRAGMA journal_mode=WAL");
+    initSchema(setup);
+    convertToLegacyFts(setup);
+    const body = "lorem ipsum dolor sit amet ".repeat(400);
+    setup.transaction(() => {
+      for (let i = 0; i < 150; i++) storeOutput(setup, input({ full_content: `${body} item${i}` }));
+    })();
+    setup.run("PRAGMA wal_checkpoint(TRUNCATE)");
+    const server = new Database(path); // stands in for a session's MCP server
+    server.query("SELECT count(*) FROM stored_outputs").get();
+
+    expect(migrateFtsToExternalContent(setup)).toBe("migrated");
+
+    const wal = `${path}-wal`;
+    expect(existsSync(wal) ? statSync(wal).size : 0).toBe(0);
+    server.close();
     setup.close();
   });
 

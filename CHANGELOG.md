@@ -6,6 +6,17 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Fixed
+
+- **`gc --vacuum` and the 1.15.0 migration now actually free the disk while a
+  session is running.** Stores run in WAL mode, and a session's MCP server keeps
+  its store open, so the WAL is never deleted. Every page reclaim (`gc --vacuum`,
+  the #263 migration, and the reclaim after bulk deletes) wrote the compacted
+  pages into a WAL as large as the database: on a 107-database store, 423.5 MB
+  of database sat behind 427.6 MB of WAL, and `gc --vacuum` reported `reclaimed
+  0B` for every store. Each reclaim now ends with a truncating WAL checkpoint,
+  which works with other connections open. (#292)
+
 ## [1.15.0] — 2026-10-05
 
 ### Changed

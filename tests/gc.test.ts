@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from "fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, statSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { initSchema, setMeta, storeOutput, forgetOutputs } from "../src/db/index";
@@ -401,6 +401,64 @@ describe("gc vacuumFile (full VACUUM)", () => {
     expect((check.query("PRAGMA auto_vacuum").get() as { auto_vacuum: number }).auto_vacuum).toBe(2);
     expect((check.query("PRAGMA freelist_count").get() as { freelist_count: number }).freelist_count).toBe(0);
     check.close();
+  });
+});
+
+describe("WAL truncation after reclaim (#292)", () => {
+  // A session's MCP server holds its store open, so the WAL is never deleted on
+  // close; without a TRUNCATE checkpoint the reclaimed pages sit in a WAL as large
+  // as the database and the disk is not freed.
+  const walSize = (file: string) => (existsSync(`${file}-wal`) ? statSync(`${file}-wal`).size : 0);
+
+  function bloatedWalStore(file: string): Database {
+    const db = new Database(file);
+    db.run("PRAGMA auto_vacuum=INCREMENTAL");
+    db.run("PRAGMA journal_mode=WAL");
+    initSchema(db);
+    const big = "w".repeat(4096);
+    db.transaction(() => {
+      for (let i = 0; i < 120; i++) {
+        storeOutput(db, { project_key: "p", session_id: "2026-01-01", tool_name: "t", summary: "s", full_content: big, original_size: big.length });
+      }
+    })();
+    return db;
+  }
+
+  beforeEach(() => {
+    workDir = mkdtempSync(join(tmpdir(), "recall-wal-"));
+  });
+  afterEach(() => {
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  it("vacuumFile truncates the WAL and reports a real reclaim while another connection is open", () => {
+    const file = join(workDir, "store.db");
+    const db = bloatedWalStore(file);
+    db.prepare("DELETE FROM stored_outputs").run();
+    db.run("PRAGMA wal_checkpoint(TRUNCATE)"); // start from an empty WAL
+    const server = new Database(file); // stands in for a session's MCP server
+    server.query("SELECT count(*) FROM stored_outputs").get();
+
+    const result = vacuumFile(file);
+
+    expect(walSize(file)).toBe(0);
+    expect("after" in result && result.after < result.before).toBe(true);
+    server.close();
+    db.close();
+  });
+
+  it("reclaimPages truncates the WAL while another connection is open", () => {
+    const file = join(workDir, "store.db");
+    const db = bloatedWalStore(file);
+    db.run("PRAGMA wal_checkpoint(TRUNCATE)");
+    const server = new Database(file);
+    server.query("SELECT count(*) FROM stored_outputs").get();
+
+    expect(forgetOutputs(db, "p", { all: true, force: true })).toBe(120);
+
+    expect(walSize(file)).toBe(0);
+    server.close();
+    db.close();
   });
 });
 

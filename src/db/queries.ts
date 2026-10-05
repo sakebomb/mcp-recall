@@ -3,6 +3,7 @@ import { randomBytes, createHash } from "crypto";
 import { log } from "../log";
 import type { StoredOutput, StoreInput, SearchOptions, ListOptions, ForgetOptions } from "./types";
 import { chunkText, sanitizeFtsQuery } from "./chunking";
+import { truncateWal } from "./schema";
 
 /**
  * SQL expression for a row's *effective* stored size — the bytes it actually
@@ -57,6 +58,7 @@ export function reclaimPages(db: Database, deleted: number): void {
   } catch (e) {
     log.warn(`incremental_vacuum failed — ${e instanceof Error ? e.message : e}`);
   }
+  truncateWal(db);
 }
 
 /** Upserts a key/value pair into the per-project `meta` table. */
