@@ -11,7 +11,7 @@
 
 **Your context window is finite. MCP tool outputs aren't. mcp-recall bridges the gap.**
 
-MCP tool outputs — Playwright snapshots, GitHub API responses, Linear queries — can consume tens of kilobytes of context per call. A 200K token context window fills up in ~30 minutes of active MCP use. mcp-recall intercepts those outputs, stores them in full locally, and delivers compressed summaries to Claude instead. When Claude needs more detail, it retrieves exactly what it needs via FTS search — without re-running the tool.
+MCP tool outputs — Playwright snapshots, GitHub API responses, Linear queries — can consume tens of kilobytes of context per call, and a busy session fills even a large context window long before the work is done. mcp-recall intercepts those outputs, stores them in full locally, and delivers compressed summaries to Claude instead. When Claude needs more detail, it retrieves exactly what it needs via FTS search — without re-running the tool.
 
 Sessions that used to hit context limits in 30 minutes routinely run for 3+ hours.
 
@@ -116,7 +116,17 @@ flowchart TD
 
 ## Results
 
-Real numbers from actual tool calls:
+Measured on 2026-10-05 across one developer's real store: 107 project stores, 95 projects, 39,064 intercepted calls dated 2026-07-21 to 2026-10-05 (older calls had expired). Reproduce on your own store with `bun run measure`, which opens every store read-only and prints aggregates only.
+
+| Figure | Calls | Original | Delivered | Reduction |
+|---|---|---|---|---|
+| All intercepted calls, as recorded | 39,064 | 68.9 MB | 29.5 MB | **57.2%** |
+| Bash, as recorded | 38,870 | 63.8 MB | 26.5 MB | 58.5% |
+| MCP, replayed through current handlers | 194 | 5.1 MB | 0.2 MB | **95.3%** |
+
+"As recorded" is what the installed versions actually delivered, using the same accounting as `recall__stats` (notes excluded): 39.5 MB saved, about 10.3M tokens. The MCP row re-compresses every stored MCP call with today's handlers, because most of those calls were stored by an older release that predated image-block stripping; as recorded they show 40.6%. This is one person's workload, dominated by Bash, so your mix will differ.
+
+Individual MCP calls:
 
 | Tool | Original | Delivered | Reduction |
 |---|---|---|---|
@@ -132,16 +142,16 @@ Command-aware Bash compression, per-output on representative fixtures (regenerat
 
 | Command | Original | Delivered | Reduction |
 |---|---|---|---|
+| `find` (400 paths) | 19.0 KB | 1.2 KB | 93.7% |
 | `tsc --noEmit` (60 errors) | 28.5 KB | 2.2 KB | 92.4% |
-| `find` (400 paths) | 19.0 KB | 2.0 KB | 89.6% |
-| `rg` (240 matches, 6 files) | 13.6 KB | 2.3 KB | 83.1% |
-| `ls -R` (deep tree) | 1.5 KB | 403 B | 73.8% |
-| `cargo build` (12 errors) | 1.9 KB | 581 B | 69.8% |
+| `rg` (240 matches, 6 files) | 13.6 KB | 1.4 KB | 89.7% |
+| `ls -R` (deep tree) | 1.5 KB | 207 B | 86.5% |
+| `cargo build` (typical failure) | 1.9 KB | 581 B | 69.8% |
 | `git --no-pager diff` (18 files) | 4.1 KB | 1.3 KB | 68.0% |
 
-These are per-output compression ratios, not a whole-session token figure — most outputs are smaller and the generic fallback already caps long output. For real session savings, read `recall__stats` (which counts intercepted output only).
+These are per-output compression ratios, not a whole-session token figure — most outputs are smaller and the generic fallback already caps long output. That is why the measured Bash figure above (58.5%) is lower. For your own session savings, read `recall__stats` (which counts intercepted output only).
 
-Used daily in development of this project since the first release in March 2026, across 13 releases. No broken sessions, no data loss.
+Used daily in development of this project since the first release in March 2026. No broken sessions, no data loss.
 
 ---
 
