@@ -2,6 +2,30 @@ import { Database } from "bun:sqlite";
 import { join, dirname } from "path";
 import { homedir } from "os";
 import { mkdirSync } from "fs";
+import { log } from "../log";
+
+// External-content FTS5 (#263): the index reads text through from stored_outputs by
+// rowid instead of keeping its own verbatim copy (formerly ~34% of store bytes).
+// Not contentless (content=''), which would break snippet() in searchOutputs.
+// Reading through by rowid makes stored_outputs' implicit rowid load-bearing; see
+// verifyFtsIndex for the guard after VACUUM.
+const FTS_TABLE_DDL = `
+  CREATE VIRTUAL TABLE IF NOT EXISTS outputs_fts USING fts5(
+    id UNINDEXED,
+    tool_name,
+    summary,
+    full_content,
+    content='stored_outputs',
+    content_rowid='rowid'
+  )`;
+
+// An external-content index must be told the deleted row's old values; a plain
+// DELETE would look them up in stored_outputs, where the row is already gone.
+const FTS_DELETE_TRIGGER_DDL = `
+  CREATE TRIGGER IF NOT EXISTS outputs_ad AFTER DELETE ON stored_outputs BEGIN
+    INSERT INTO outputs_fts(outputs_fts, rowid, id, tool_name, summary, full_content)
+    VALUES ('delete', old.rowid, old.id, old.tool_name, old.summary, old.full_content);
+  END`;
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS stored_outputs (
@@ -25,21 +49,14 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_so_tool_name   ON stored_outputs(tool_name);
   CREATE INDEX IF NOT EXISTS idx_so_input_hash  ON stored_outputs(project_key, input_hash);
 
-  CREATE VIRTUAL TABLE IF NOT EXISTS outputs_fts USING fts5(
-    id UNINDEXED,
-    tool_name,
-    summary,
-    full_content
-  );
+  ${FTS_TABLE_DDL};
 
   CREATE TRIGGER IF NOT EXISTS outputs_ai AFTER INSERT ON stored_outputs BEGIN
     INSERT INTO outputs_fts(rowid, id, tool_name, summary, full_content)
     VALUES (new.rowid, new.id, new.tool_name, new.summary, new.full_content);
   END;
 
-  CREATE TRIGGER IF NOT EXISTS outputs_ad AFTER DELETE ON stored_outputs BEGIN
-    DELETE FROM outputs_fts WHERE rowid = old.rowid;
-  END;
+  ${FTS_DELETE_TRIGGER_DDL};
 
   CREATE VIRTUAL TABLE IF NOT EXISTS content_chunks USING fts5(
     output_id UNINDEXED,
@@ -95,6 +112,79 @@ function applyMigrations(db: Database): void {
   }
 }
 
+/** True when outputs_fts is the pre-#263 form that keeps its own copy of the text. */
+function hasLegacyFts(db: Database): boolean {
+  return (
+    db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'outputs_fts_content'").get() !==
+    null
+  );
+}
+
+export type FtsMigrationResult = "migrated" | "current" | "failed";
+
+/**
+ * One-time conversion of a legacy self-contained `outputs_fts` to external content
+ * (#263). Runs in a single IMMEDIATE transaction that ends with a content-aware
+ * integrity-check, so an interruption or a failed check rolls back to the old,
+ * working index — never a half-built or silently-wrong one. The legacy check is
+ * repeated inside the transaction because two processes (hook + server) can open
+ * the same store at once. Never throws: a store that cannot migrate keeps working
+ * on the old schema and retries on its next open.
+ */
+export function migrateFtsToExternalContent(db: Database): FtsMigrationResult {
+  if (!hasLegacyFts(db)) return "current";
+  try {
+    const migrated = db
+      .transaction(() => {
+        if (!hasLegacyFts(db)) return false;
+        db.run("DROP TRIGGER IF EXISTS outputs_ad");
+        db.run("DROP TABLE outputs_fts");
+        db.run(FTS_TABLE_DDL);
+        db.run(FTS_DELETE_TRIGGER_DDL);
+        db.run("INSERT INTO outputs_fts(outputs_fts) VALUES('rebuild')");
+        db.run("INSERT INTO outputs_fts(outputs_fts, rank) VALUES('integrity-check', 1)");
+        return true;
+      })
+      .immediate();
+    if (!migrated) return "current";
+  } catch (e) {
+    log.warn(`FTS migration failed, keeping the existing index — ${e instanceof Error ? e.message : e}`);
+    return "failed";
+  }
+  // The dropped copy's pages are free but still in the file. A no-op on stores
+  // created without auto_vacuum=INCREMENTAL; `gc --vacuum` reclaims those.
+  try {
+    db.run("PRAGMA incremental_vacuum");
+  } catch (e) {
+    log.warn(`incremental_vacuum after FTS migration failed — ${e instanceof Error ? e.message : e}`);
+  }
+  log.debug("FTS index migrated to external content (#263)");
+  return "migrated";
+}
+
+/**
+ * Checks that outputs_fts agrees with stored_outputs and rebuilds it if not.
+ * stored_outputs has no INTEGER PRIMARY KEY, and SQLite documents that VACUUM may
+ * renumber implicit rowids; current SQLite preserves them, but an external-content
+ * index keyed on rowid would silently return wrong rows if one ever did. Call after
+ * VACUUM. Returns true when a rebuild was needed. Never throws.
+ */
+export function verifyFtsIndex(db: Database): boolean {
+  if (db.query("SELECT 1 FROM sqlite_master WHERE name = 'outputs_fts'").get() === null) return false;
+  try {
+    db.run("INSERT INTO outputs_fts(outputs_fts, rank) VALUES('integrity-check', 1)");
+    return false;
+  } catch {
+    try {
+      db.run("INSERT INTO outputs_fts(outputs_fts) VALUES('rebuild')");
+      log.warn("FTS index disagreed with stored_outputs; rebuilt");
+    } catch (e) {
+      log.warn(`FTS rebuild failed — ${e instanceof Error ? e.message : e}`);
+    }
+    return true;
+  }
+}
+
 let instance: Database | null = null;
 
 /**
@@ -142,6 +232,7 @@ export function getDb(path: string): Database {
   instance.run("PRAGMA auto_vacuum=INCREMENTAL");
   instance.run(SCHEMA);
   applyMigrations(instance);
+  migrateFtsToExternalContent(instance);
   return instance;
 }
 
@@ -154,6 +245,7 @@ export function getDb(path: string): Database {
 export function initSchema(db: Database): void {
   db.run(SCHEMA);
   applyMigrations(db);
+  migrateFtsToExternalContent(db);
 }
 
 /** Closes the singleton database connection and resets the instance. Call in tests after each case. */

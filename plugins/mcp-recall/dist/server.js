@@ -19605,6 +19605,48 @@ import { Database } from "bun:sqlite";
 import { join, dirname } from "path";
 import { homedir } from "os";
 import { mkdirSync } from "fs";
+
+// src/log.ts
+var _configDebugEnabled = false;
+function setDebugEnabled(enabled) {
+  _configDebugEnabled = enabled;
+}
+var log = {
+  info: (msg) => {
+    process.stderr.write(`[mcp-recall] info: ${msg}
+`);
+  },
+  warn: (msg) => {
+    process.stderr.write(`[mcp-recall] warn: ${msg}
+`);
+  },
+  error: (msg) => {
+    process.stderr.write(`[mcp-recall] error: ${msg}
+`);
+  },
+  debug: (msg) => {
+    if (process.env.RECALL_DEBUG === "1" || _configDebugEnabled) {
+      process.stderr.write(`[mcp-recall] debug: ${msg}
+`);
+    }
+  }
+};
+
+// src/db/schema.ts
+var FTS_TABLE_DDL = `
+  CREATE VIRTUAL TABLE IF NOT EXISTS outputs_fts USING fts5(
+    id UNINDEXED,
+    tool_name,
+    summary,
+    full_content,
+    content='stored_outputs',
+    content_rowid='rowid'
+  )`;
+var FTS_DELETE_TRIGGER_DDL = `
+  CREATE TRIGGER IF NOT EXISTS outputs_ad AFTER DELETE ON stored_outputs BEGIN
+    INSERT INTO outputs_fts(outputs_fts, rowid, id, tool_name, summary, full_content)
+    VALUES ('delete', old.rowid, old.id, old.tool_name, old.summary, old.full_content);
+  END`;
 var SCHEMA = `
   CREATE TABLE IF NOT EXISTS stored_outputs (
     id TEXT PRIMARY KEY,
@@ -19627,21 +19669,14 @@ var SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_so_tool_name   ON stored_outputs(tool_name);
   CREATE INDEX IF NOT EXISTS idx_so_input_hash  ON stored_outputs(project_key, input_hash);
 
-  CREATE VIRTUAL TABLE IF NOT EXISTS outputs_fts USING fts5(
-    id UNINDEXED,
-    tool_name,
-    summary,
-    full_content
-  );
+  ${FTS_TABLE_DDL};
 
   CREATE TRIGGER IF NOT EXISTS outputs_ai AFTER INSERT ON stored_outputs BEGIN
     INSERT INTO outputs_fts(rowid, id, tool_name, summary, full_content)
     VALUES (new.rowid, new.id, new.tool_name, new.summary, new.full_content);
   END;
 
-  CREATE TRIGGER IF NOT EXISTS outputs_ad AFTER DELETE ON stored_outputs BEGIN
-    DELETE FROM outputs_fts WHERE rowid = old.rowid;
-  END;
+  ${FTS_DELETE_TRIGGER_DDL};
 
   CREATE VIRTUAL TABLE IF NOT EXISTS content_chunks USING fts5(
     output_id UNINDEXED,
@@ -19684,6 +19719,38 @@ function applyMigrations(db) {
     }
   }
 }
+function hasLegacyFts(db) {
+  return db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'outputs_fts_content'").get() !== null;
+}
+function migrateFtsToExternalContent(db) {
+  if (!hasLegacyFts(db))
+    return "current";
+  try {
+    const migrated = db.transaction(() => {
+      if (!hasLegacyFts(db))
+        return false;
+      db.run("DROP TRIGGER IF EXISTS outputs_ad");
+      db.run("DROP TABLE outputs_fts");
+      db.run(FTS_TABLE_DDL);
+      db.run(FTS_DELETE_TRIGGER_DDL);
+      db.run("INSERT INTO outputs_fts(outputs_fts) VALUES('rebuild')");
+      db.run("INSERT INTO outputs_fts(outputs_fts, rank) VALUES('integrity-check', 1)");
+      return true;
+    }).immediate();
+    if (!migrated)
+      return "current";
+  } catch (e) {
+    log.warn(`FTS migration failed, keeping the existing index \u2014 ${e instanceof Error ? e.message : e}`);
+    return "failed";
+  }
+  try {
+    db.run("PRAGMA incremental_vacuum");
+  } catch (e) {
+    log.warn(`incremental_vacuum after FTS migration failed \u2014 ${e instanceof Error ? e.message : e}`);
+  }
+  log.debug("FTS index migrated to external content (#263)");
+  return "migrated";
+}
 var instance = null;
 function defaultDbPath(projectKey) {
   return process.env.RECALL_DB_PATH ?? join(homedir(), ".local", "share", "mcp-recall", `${projectKey}.db`);
@@ -19701,6 +19768,7 @@ function getDb(path) {
   instance.run("PRAGMA auto_vacuum=INCREMENTAL");
   instance.run(SCHEMA);
   applyMigrations(instance);
+  migrateFtsToExternalContent(instance);
   return instance;
 }
 function closeDb() {
@@ -19733,34 +19801,6 @@ function sanitizeFtsQuery(query) {
 }
 // src/db/queries.ts
 import { randomBytes, createHash as createHash2 } from "crypto";
-
-// src/log.ts
-var _configDebugEnabled = false;
-function setDebugEnabled(enabled) {
-  _configDebugEnabled = enabled;
-}
-var log = {
-  info: (msg) => {
-    process.stderr.write(`[mcp-recall] info: ${msg}
-`);
-  },
-  warn: (msg) => {
-    process.stderr.write(`[mcp-recall] warn: ${msg}
-`);
-  },
-  error: (msg) => {
-    process.stderr.write(`[mcp-recall] error: ${msg}
-`);
-  },
-  debug: (msg) => {
-    if (process.env.RECALL_DEBUG === "1" || _configDebugEnabled) {
-      process.stderr.write(`[mcp-recall] debug: ${msg}
-`);
-    }
-  }
-};
-
-// src/db/queries.ts
 var EFFECTIVE_SIZE_EXPR = "CASE WHEN full_retained = 1 THEN original_size ELSE summary_size END";
 function generateId() {
   return `recall_${randomBytes(8).toString("hex")}`;

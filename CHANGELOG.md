@@ -6,6 +6,21 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Changed
+
+- **Stores are about a third smaller: the search index no longer keeps a second
+  copy of every stored output.** `outputs_fts` was a self-contained FTS5 table,
+  so SQLite kept a verbatim copy of all indexed text alongside `stored_outputs`:
+  34% of the bytes across a 69-database store. It is now an external-content
+  table that reads the text through from `stored_outputs`. Search results and
+  excerpts are unchanged. Existing stores migrate once, the first time they are
+  opened: about 1 s on a 120 MB store, which then shrinks to about 80 MB. The
+  migration runs in one transaction and ends with an integrity check, so an
+  interrupted or failed migration leaves the store on its old, working index and
+  retries on the next open. Stores created without incremental auto-vacuum, and
+  stores you no longer open, are migrated and shrunk by `mcp-recall gc --vacuum`,
+  which now also checks the index after vacuuming. (#263)
+
 ## [1.14.5] — 2026-09-18
 
 ### Fixed
