@@ -8784,6 +8784,13 @@ function shouldRetainFullBody(level, toolName, command) {
 }
 
 // src/hooks/post-tool-use.ts
+function replaceOutput(text) {
+  return {
+    hookSpecificOutput: { hookEventName: "PostToolUse", updatedToolOutput: text },
+    updatedMCPToolOutput: text,
+    suppressOutput: true
+  };
+}
 function handlePostToolUse(raw) {
   let parsed;
   try {
@@ -8817,11 +8824,8 @@ function handlePostToolUse(raw) {
   const cachedResponse = (cached2) => {
     const cachedDate = new Date(cached2.created_at * 1000).toISOString().slice(0, 10);
     log.debug(`CACHE HIT \xB7 ${tool_name} \xB7 id=${cached2.id} \xB7 cached ${cachedDate}`);
-    return {
-      updatedMCPToolOutput: `[recall:${cached2.id} \xB7 cached \xB7 ${cachedDate}]
-${cached2.summary}`,
-      suppressOutput: true
-    };
+    return replaceOutput(`[recall:${cached2.id} \xB7 cached \xB7 ${cachedDate}]
+${cached2.summary}`);
   };
   const byInput = input_hash ? checkDedup(db, projectKey, input_hash) : null;
   if (byInput)
@@ -8860,11 +8864,8 @@ ${cached2.summary}`,
   const hints = extractHints(fullContent);
   const hintStr = hints.length ? ` \xB7 search: ${hints.map((h) => `"${h}"`).join(", ")}` : "";
   const header = `[recall:${stored.id} \xB7 ${formatBytes(originalSize)}\u2192${formatBytes(summarySize)} (${reduction}% reduction)${hintStr}]`;
-  return {
-    updatedMCPToolOutput: `${header}
-${summary}`,
-    suppressOutput: true
-  };
+  return replaceOutput(`${header}
+${summary}`);
 }
 
 // src/learn/retrain.ts
