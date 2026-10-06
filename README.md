@@ -116,17 +116,17 @@ flowchart TD
 
 ## Results
 
-> **Before 1.15.1, these savings did not reach Claude's context on current Claude Code.** The hook returned its summary in a field Claude Code no longer reads, so outputs were stored and searchable but Claude still received them in full ([#298](https://github.com/sakebomb/mcp-recall/issues/298)). 1.15.1 uses the documented field, and MCP summaries were verified live. Built-in Bash output was not replaced in a live test on Claude Code 2.1.289 and is being re-verified on newer versions. The figures below measure what the compression produces.
+> **Before 1.15.1, these savings did not reach Claude's context on current Claude Code.** The hook returned its summary in a field Claude Code no longer reads, so outputs were stored and searchable but Claude still received them in full ([#298](https://github.com/sakebomb/mcp-recall/issues/298)). 1.15.1 uses the documented field, and MCP summaries were verified live. **Bash summaries are not yet delivered:** in live tests on Claude Code 2.1.289 and 2.1.291, the hook stored and summarized Bash output but Claude Code still passed the full output to Claude. Bash output is stored and searchable with `recall__search`, but it does not save context yet. The figures below measure what the compression produces.
 
-Measured on 2026-10-05 across one developer's real store: 107 project stores, 95 projects, 39,064 intercepted calls dated 2026-07-21 to 2026-10-05 (older calls had expired). Reproduce on your own store with `bun run measure`, which opens every store read-only and prints aggregates only.
+Measured on 2026-10-06 across one developer's real store: 108 project stores, 96 projects, 38,662 intercepted calls dated 2026-07-21 to 2026-10-06 (older calls had expired). Reproduce on your own store with `bun run measure`, which opens every store read-only and prints aggregates only.
 
 | Figure | Calls | Original | Delivered | Reduction |
 |---|---|---|---|---|
-| All intercepted calls, as recorded | 39,064 | 68.9 MB | 29.5 MB | **57.2%** |
-| Bash, as recorded | 38,870 | 63.8 MB | 26.5 MB | 58.5% |
-| MCP, replayed through current handlers | 194 | 5.1 MB | 0.2 MB | **95.3%** |
+| All intercepted calls, as recorded | 38,662 | 68.7 MB | 29.2 MB | **57.4%** |
+| Bash, as recorded | 38,473 | 63.7 MB | 26.3 MB | 58.8% |
+| MCP, replayed through current handlers | 189 | 5.0 MB | 0.1 MB | **97.0%** |
 
-"As recorded" is what the installed versions' compression produced, using the same accounting as `recall__stats` (notes excluded): 39.5 MB, about 10.3M tokens. Because of #298 that reduction was stored, not delivered to context. The MCP row re-compresses every stored MCP call with today's handlers, because most of those calls were stored by an older release that predated image-block stripping; as recorded they show 40.6%. The 95.3% still counts 10 Context7 calls whose summaries were empty ([#299](https://github.com/sakebomb/mcp-recall/issues/299)); it will be recomputed with the fixed profiles for 1.15.1. This is one person's workload, dominated by Bash, so your mix will differ.
+"As recorded" is what the installed versions' compression produced, using the same accounting as `recall__stats` (notes excluded): 39.5 MB, about 10.3M tokens. Because of #298 that reduction was stored, not delivered to context. The MCP row re-compresses every stored MCP call with today's handlers, because most of those calls were stored by an older release that predated image-block stripping; as recorded they show 40.1%. The replay applies the hook's own rules: a summary that is not smaller passes the output through, and an empty summary falls back to the generic handler. It uses the 1.15.1 profiles, so Context7 calls are no longer counted as empty summaries ([#299](https://github.com/sakebomb/mcp-recall/issues/299)). This is one person's workload, dominated by Bash, so your mix will differ.
 
 ### What compresses well, and what doesn't
 
@@ -165,7 +165,7 @@ Command-aware Bash compression, per-output on representative fixtures (regenerat
 | `cargo build` (typical failure) | 1.9 KB | 581 B | 69.8% |
 | `git --no-pager diff` (18 files) | 4.1 KB | 1.3 KB | 68.0% |
 
-These are per-output compression ratios, not a whole-session token figure — most outputs are smaller and the generic fallback already caps long output. That is why the measured Bash figure above (58.5%) is lower. For your own session savings, read `recall__stats` (which counts intercepted output only).
+These are per-output compression ratios, not a whole-session token figure — most outputs are smaller and the generic fallback already caps long output. That is why the measured Bash figure above (58.8%) is lower. For your own session savings, read `recall__stats` (which counts intercepted output only).
 
 Used daily in development of this project since the first release in March 2026. No broken sessions, no data loss.
 
@@ -354,7 +354,7 @@ mcp-recall completions zsh > ~/.zfunc/_mcp-recall
 
 ## Profiles
 
-Profiles teach mcp-recall how to compress output from specific MCPs. Four profiles ship built in (Jira, Gmail, Context7, Docker). **[26 community profiles](https://github.com/sakebomb/mcp-recall-profiles)** cover Grafana, Shopify, Notion, and more.
+Profiles teach mcp-recall how to compress output from specific MCPs. Five profiles ship built in (Jira, Gmail, Context7, Docker, Cloudflare docs). **[26 community profiles](https://github.com/sakebomb/mcp-recall-profiles)** cover Grafana, Shopify, Notion, and more.
 
 ```bash
 # Install profiles for all your connected MCPs
@@ -614,7 +614,7 @@ mcp-recall never breaks a tool call. Every failure mode — hook crash, SQLite e
 
 ## Profile system
 
-Declarative TOML profiles extend compression to any MCP — no TypeScript required. Four profiles ship built in (Jira, Gmail, Context7, Docker), and **[26 community profiles](https://github.com/sakebomb/mcp-recall-profiles)** cover Stripe, Grafana, Shopify, Datadog, Notion, Teams, and more.
+Declarative TOML profiles extend compression to any MCP — no TypeScript required. Five profiles ship built in (Jira, Gmail, Context7, Docker, Cloudflare docs), and **[26 community profiles](https://github.com/sakebomb/mcp-recall-profiles)** cover Stripe, Grafana, Shopify, Datadog, Notion, Teams, and more.
 
 ```bash
 mcp-recall learn                         # auto-generate profiles from your installed MCPs
