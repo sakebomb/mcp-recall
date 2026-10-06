@@ -6,6 +6,14 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Added
+
+- **Bundled profile for Cloudflare docs search (`mcp__cloudflare__docs`).** It was
+  the worst-compressing MCP tool in a measured store: 36.8% across 14 real calls,
+  because the generic JSON handler kept most of each result's 1.4-5 KB text. The
+  profile keeps title, URL and a 200-character excerpt per result; on the same 14
+  calls it reaches 89.4%, with the full text still retrievable.
+
 ### Fixed
 
 - **`gc --vacuum` and the 1.15.0 migration now actually free the disk while a
