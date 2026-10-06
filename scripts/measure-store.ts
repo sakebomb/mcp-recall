@@ -24,6 +24,7 @@ import { join } from "path";
 import { dataDir } from "../src/db/schema";
 import { getStats } from "../src/db/analytics";
 import { getHandler } from "../src/handlers/index";
+import { genericHandler } from "../src/handlers/generic";
 
 interface Totals {
   original: number;
@@ -76,11 +77,15 @@ function replayMcp(db: Database, replay: Totals, byTool: Map<string, Totals>): v
     } catch {
       // stored as plain text
     }
-    const { summary } = getHandler(row.tool_name, output)(row.tool_name, output);
-    const delivered = Buffer.byteLength(summary, "utf8");
-    // An empty summary is a handler failure, not perfect compression: Claude
-    // would see nothing. Count it so it cannot pass as a 100% row.
-    if (summary.trim() === "") emptySummaries.set(row.tool_name, (emptySummaries.get(row.tool_name) ?? 0) + 1);
+    let { summary } = getHandler(row.tool_name, output)(row.tool_name, output);
+    // An empty summary is a handler failure. The hook falls back to the generic
+    // handler (#296), so measure what that delivers, and still report the handler.
+    if (summary.trim() === "") {
+      emptySummaries.set(row.tool_name, (emptySummaries.get(row.tool_name) ?? 0) + 1);
+      ({ summary } = genericHandler(row.tool_name, output));
+    }
+    // The hook passes output through unchanged when the summary is not smaller.
+    const delivered = Math.min(Buffer.byteLength(summary, "utf8"), row.original_size);
     add(replay, row.original_size, delivered, 1);
     tally(byTool, row.tool_name, row.original_size, delivered, 1);
   }
@@ -180,7 +185,7 @@ console.log(`\nRecorded savings: ${mb(recorded.original - recorded.summary)} (~$
 printRanked("MCP by tool, replayed through current handlers (best first)", byTool, 1, 25);
 printRanked("Bash by command family, as recorded (15 largest by bytes, best first)", byCommand, 1, 15);
 if (emptySummaries.size > 0) {
-  console.log("\nWARNING: handlers returned an EMPTY summary (Claude sees nothing) for:");
-  for (const [tool, n] of emptySummaries) console.log(`  ${tool}: ${n} call(s). Its reduction above is not real.`);
+  console.log("\nWARNING: handlers returned an EMPTY summary for these; measured with the hook's generic fallback:");
+  for (const [tool, n] of emptySummaries) console.log(`  ${tool}: ${n} call(s). Its handler does not recognize this output.`);
 }
 console.log("\nOne machine's store is one user's workload. Regenerate with `bun run measure`.");

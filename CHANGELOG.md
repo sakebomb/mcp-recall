@@ -6,6 +6,8 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+## [1.15.1] — 2026-10-06
+
 ### Added
 
 - **Bundled profile for Cloudflare docs search (`mcp__cloudflare__docs`).** It was
@@ -16,6 +18,15 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ### Fixed
 
+- **MCP summaries now reach Claude's context.** The hook returned its summary in
+  a top-level `updatedMCPToolOutput` field that current Claude Code no longer
+  reads, so every output was stored and searchable but Claude still received it
+  in full: no context was saved. The hook now returns
+  `hookSpecificOutput.updatedToolOutput`, and keeps the legacy field. MCP
+  summaries were verified live on Claude Code 2.1.291. **Bash summaries are not
+  yet delivered:** in the same live test the hook stored and summarized Bash
+  output, but Claude Code still passed the full output to Claude. Bash output
+  remains stored and searchable. (#298)
 - **`gc --vacuum` and the 1.15.0 migration now actually free the disk while a
   session is running.** Stores run in WAL mode, and a session's MCP server keeps
   its store open, so the WAL is never deleted. Every page reclaim (`gc --vacuum`,
@@ -605,7 +616,8 @@ Ten `recall__*` tools available in every Claude session:
 
 ---
 
-[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.15.0...HEAD
+[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.15.1...HEAD
+[1.15.1]: https://github.com/sakebomb/mcp-recall/compare/v1.15.0...v1.15.1
 [1.15.0]: https://github.com/sakebomb/mcp-recall/compare/v1.14.5...v1.15.0
 [1.14.5]: https://github.com/sakebomb/mcp-recall/compare/v1.14.4...v1.14.5
 [1.14.4]: https://github.com/sakebomb/mcp-recall/compare/v1.14.3...v1.14.4
