@@ -320,6 +320,12 @@ describe("applyTextTruncate", () => {
     const result = applyTextTruncate(strategy, "mcp__tool__x", "short");
     expect(result.summary).toBe("short");
   });
+
+  test("returns complete text ending in a newline unchanged", () => {
+    const strategy: ProfileStrategy = { type: "text_truncate", max_chars: 100 };
+    const result = applyTextTruncate(strategy, "mcp__tool__x", "short\n----------\n");
+    expect(result.summary).toBe("short\n----------\n");
+  });
 });
 
 // ── integration: getProfileHandler ───────────────────────────────────────────

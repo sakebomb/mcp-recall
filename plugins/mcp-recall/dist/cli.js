@@ -8433,9 +8433,10 @@ function profileText(output) {
   return extractText(output);
 }
 function excerpt(raw, maxChars) {
-  const head = raw.slice(0, maxChars).trimEnd();
-  return head.length < raw.length ? `${head}
-\u2026` : head;
+  if (raw.length <= maxChars)
+    return raw;
+  return `${raw.slice(0, maxChars).trimEnd()}
+\u2026`;
 }
 function resolvePath(obj, path) {
   if (path === "" || path === ".")

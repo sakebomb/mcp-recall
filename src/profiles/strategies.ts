@@ -20,8 +20,10 @@ function profileText(output: unknown): string {
 }
 
 function excerpt(raw: string, maxChars: number): string {
-  const head = raw.slice(0, maxChars).trimEnd();
-  return head.length < raw.length ? `${head}\n…` : head;
+  // Text that fits is returned as-is, so the hook's size check passes it
+  // through; trimming it would turn a complete answer into a 1-byte "summary".
+  if (raw.length <= maxChars) return raw;
+  return `${raw.slice(0, maxChars).trimEnd()}\n…`;
 }
 
 function resolvePath(obj: unknown, path: string): unknown {
