@@ -16,6 +16,17 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   of database sat behind 427.6 MB of WAL, and `gc --vacuum` reported `reclaimed
   0B` for every store. Each reclaim now ends with a truncating WAL checkpoint,
   which works with other connections open. (#292)
+- **Context7 calls no longer compress to an empty list.** Context7 returns
+  markdown in a text block. The profile engine parsed the text blocks themselves
+  as JSON, found none of the profile's fields, and summarized every call as
+  `1 item:\n1. ` (11 bytes), dropping the library IDs Claude needs for the next
+  call. Profiles now read the text inside text blocks, and a `json_extract`
+  profile that matches no field falls back to an excerpt instead of empty items.
+  That covers any profile guessed by `mcp-recall learn` that does not fit its
+  tool. The bundled Context7 profiles keep a typical library list intact and the
+  top 2,000 characters of documentation. If `learn` generated a profile for
+  Context7 on your machine, remove it (`~/.config/mcp-recall/profiles/mcp__context7/`)
+  so the bundled one applies. (#299)
 
 ## [1.15.0] — 2026-10-05
 

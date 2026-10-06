@@ -1,15 +1,16 @@
 [profile]
 id          = "mcp__context7__resolve"
-version     = "1.0.0"
-description = "Context7 resolve-library-id — truncates library search results to top-level fields"
+version     = "2.0.0"
+description = "Context7 resolve-library-id — keeps the library list, which Claude needs for the next call"
 mcp_pattern = "mcp__context7__resolve-library-id"
 short_name  = "context7-resolve"
 author      = "sakebomb"
 mcp_url     = "https://github.com/upstash/context7"
 sample_tool = "mcp__context7__resolve-library-id"
 
+# Markdown, not JSON. The library IDs in this list are the input to query-docs,
+# so a typical response (0.4-2 KB) is left intact: an output that does not get
+# smaller passes through uncompressed. Only unusually long lists are cut.
 [strategy]
-type            = "json_truncate"
-max_depth       = 2
-max_array_items = 5
-fallback_chars  = 500
+type      = "text_truncate"
+max_chars = 2000

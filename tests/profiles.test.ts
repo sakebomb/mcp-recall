@@ -5,6 +5,7 @@ import { tmpdir } from "os";
 import { clearProfileCache, loadProfiles } from "../src/profiles/loader";
 import { resolveProfile } from "../src/profiles/index";
 import { getProfileHandler } from "../src/profiles/index";
+import { getHandler } from "../src/handlers/index";
 import { applyJsonExtract, applyJsonTruncate, applyTextTruncate } from "../src/profiles/strategies";
 import type { ProfileStrategy } from "../src/profiles/types";
 
@@ -198,6 +199,39 @@ describe("applyJsonExtract", () => {
     fallback_chars: 500,
   };
 
+  // Context7 sends markdown in a top-level text-block array; a `learn` profile
+  // guessed JSON fields for it and every summary came out as "1 item:\n1. ".
+  const guessed: ProfileStrategy = {
+    type: "json_extract",
+    items_path: ["items", "results", "data", "nodes"],
+    fields: ["id", "title", "name", "libraryId"],
+    max_items: 10,
+    max_chars_per_field: 200,
+    fallback_chars: 500,
+  };
+
+  test("summarizes markdown in a top-level text-block array instead of emitting empty items", () => {
+    const markdown = "Available Libraries:\n\n- Title: SQLite\n- Context7-compatible library ID: /websites/sqlite_docs\n" + "- Description: an embedded SQL engine\n".repeat(40);
+    const result = applyJsonExtract(guessed, "mcp__context7__resolve-library-id", [{ type: "text", text: markdown }]);
+    expect(result.summary).toContain("/websites/sqlite_docs");
+    expect(result.summary).not.toMatch(/^\d+ items?:\n1\. $/m);
+  });
+
+  test("parses a JSON body carried in a top-level text-block array", () => {
+    const body = JSON.stringify({ results: [{ id: "lib-1", title: "First" }, { id: "lib-2", title: "Second" }] });
+    const result = applyJsonExtract(guessed, "mcp__x__search", [{ type: "text", text: body }]);
+    expect(result.summary).toContain("2 items:");
+    expect(result.summary).toContain("id: lib-1");
+    expect(result.summary).toContain("title: Second");
+  });
+
+  test("falls back to an excerpt when no configured field matches any item", () => {
+    const output = JSON.stringify({ results: [{ other: "unmatched value one" }, { other: "unmatched value two" }] });
+    const result = applyJsonExtract(guessed, "mcp__x__search", output);
+    expect(result.summary).toContain("unmatched value one");
+    expect(result.summary).not.toContain("1. ");
+  });
+
   test("extracts fields from items array", () => {
     const output = JSON.stringify({
       issues: [
@@ -286,6 +320,12 @@ describe("applyTextTruncate", () => {
     const result = applyTextTruncate(strategy, "mcp__tool__x", "short");
     expect(result.summary).toBe("short");
   });
+
+  test("returns complete text ending in a newline unchanged", () => {
+    const strategy: ProfileStrategy = { type: "text_truncate", max_chars: 100 };
+    const result = applyTextTruncate(strategy, "mcp__tool__x", "short\n----------\n");
+    expect(result.summary).toBe("short\n----------\n");
+  });
 });
 
 // ── integration: getProfileHandler ───────────────────────────────────────────
@@ -333,5 +373,48 @@ describe("getProfileHandler — integration", () => {
     const result = handler!("mcp__myservice__list", "hello world this is a long response");
     expect(result.summary).toContain("hello world");
     expect(result.originalSize).toBeGreaterThan(0);
+  });
+});
+
+describe("bundled Context7 profiles", () => {
+  beforeEach(() => {
+    clearProfileCache();
+    process.env.RECALL_USER_PROFILES_PATH = join(tmpdir(), "nonexistent-user");
+    process.env.RECALL_COMMUNITY_PROFILES_PATH = join(tmpdir(), "nonexistent-community");
+    process.env.RECALL_BUNDLED_PROFILES_PATH = join(import.meta.dir, "..", "profiles");
+  });
+
+  afterEach(() => {
+    delete process.env.RECALL_USER_PROFILES_PATH;
+    delete process.env.RECALL_COMMUNITY_PROFILES_PATH;
+    delete process.env.RECALL_BUNDLED_PROFILES_PATH;
+    clearProfileCache();
+  });
+
+  // Real responses are markdown in a top-level text-block array.
+  const block = (text: string) => [{ type: "text", text }];
+
+  test("resolve-library-id leaves a typical library list intact", () => {
+    // Real lists run ~1.6 KB: long enough that a 500-char cut drops library IDs.
+    const list = "Available Libraries:\n\n" + Array.from({ length: 5 }, (_, i) =>
+      `- Title: Lib ${i}\n- Context7-compatible library ID: /org/lib-${i}\n- Description: ${"An embedded library for testing. ".repeat(6)}\n- Code Snippets: ${i * 10}\n----------\n`).join("");
+    expect(list.length).toBeGreaterThan(1200);
+    const output = block(list);
+    const handler = getHandler("mcp__context7__resolve-library-id", output);
+    const { summary, originalSize } = handler("mcp__context7__resolve-library-id", output);
+    for (let i = 0; i < 5; i++) expect(summary).toContain(`/org/lib-${i}`);
+    expect(Buffer.byteLength(summary)).toBeGreaterThanOrEqual(originalSize); // the hook passes it through
+  });
+
+  test("query-docs keeps the top of the documentation", () => {
+    const docs = "### useEffect cleanup\n\nReturn a function from the effect.\n" + "More reference text. ".repeat(70) +
+      "MID_MARKER " + "More reference text. ".repeat(400) + "BOTTOM_MARKER";
+    expect(docs.indexOf("MID_MARKER")).toBeGreaterThan(1000);
+    const output = block(docs);
+    const { summary } = getHandler("mcp__context7__query-docs", output)("mcp__context7__query-docs", output);
+    expect(summary.startsWith("### useEffect cleanup")).toBe(true);
+    expect(summary).toContain("MID_MARKER"); // more than a 500-char excerpt
+    expect(summary).not.toContain("BOTTOM_MARKER");
+    expect(summary.length).toBeLessThan(2100);
   });
 });
