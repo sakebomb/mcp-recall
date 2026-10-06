@@ -1,0 +1,26 @@
+[profile]
+id          = "mcp__cloudflare__docs"
+version     = "1.0.0"
+description = "Cloudflare docs search — extracts title, URL and a short excerpt per result"
+mcp_pattern = "mcp__cloudflare__docs"
+short_name  = "cloudflare-docs"
+author      = "sakebomb"
+mcp_url     = "https://mcp.cloudflare.com/mcp"
+sample_tool = "mcp__cloudflare__docs"
+
+# Results arrive as { results: [{ similarity, id, url, title, text }] } with a
+# 1.4-5 KB text per result. Title + URL + a 200-char excerpt keeps each hit
+# identifiable; the full text stays retrievable via recall__retrieve. Measured
+# on 14 real calls (192 KB): 36.8% with the generic JSON handler, 89.4% here.
+[strategy]
+type                = "json_extract"
+items_path          = ["results"]
+fields              = ["title", "url", "text"]
+max_items           = 5
+max_chars_per_field = 200
+fallback_chars      = 500
+
+[strategy.labels]
+"title" = "Title"
+"url"   = "URL"
+"text"  = "Excerpt"

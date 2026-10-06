@@ -418,3 +418,55 @@ describe("bundled Context7 profiles", () => {
     expect(summary.length).toBeLessThan(2100);
   });
 });
+
+describe("bundled mcp__cloudflare__docs profile", () => {
+  beforeEach(() => {
+    clearProfileCache();
+    process.env.RECALL_USER_PROFILES_PATH = join(tmpdir(), "nonexistent-user");
+    process.env.RECALL_COMMUNITY_PROFILES_PATH = join(tmpdir(), "nonexistent-community");
+    process.env.RECALL_BUNDLED_PROFILES_PATH = join(import.meta.dir, "..", "profiles");
+  });
+
+  afterEach(() => {
+    delete process.env.RECALL_USER_PROFILES_PATH;
+    delete process.env.RECALL_COMMUNITY_PROFILES_PATH;
+    delete process.env.RECALL_BUNDLED_PROFILES_PATH;
+    clearProfileCache();
+  });
+
+  // Same shape as real responses: { results: [{ similarity, id, url, title, text }] }.
+  const results = Array.from({ length: 7 }, (_, i) => ({
+    similarity: 0.9 - i / 100,
+    id: "f".repeat(64),
+    url: `https://developers.cloudflare.com/workers/page-${i}/`,
+    title: `Workers page ${i}`,
+    text: `Section ${i} intro. ` + "Durable Objects coordinate state across requests. ".repeat(60) + `TAIL_MARKER_${i}`,
+  }));
+  const json = JSON.stringify({ results });
+  // Stored rows begin `{"results":[`, so the hook receives the standard
+  // { content: [...] } wrapper or a plain string; both extract to this JSON.
+  const shapes: [string, unknown][] = [
+    ["content-wrapped", { content: [{ type: "text", text: json }] }],
+    ["plain string", json],
+  ];
+
+  for (const [label, output] of shapes) {
+    test(`routes through the dispatcher and keeps title and URL per result (${label})`, () => {
+      const handler = getHandler("mcp__cloudflare__docs", output);
+      expect(handler.name).toBe("profile:mcp__cloudflare__docs");
+
+      const { summary, originalSize } = handler("mcp__cloudflare__docs", output);
+      for (let i = 0; i < 5; i++) {
+        expect(summary).toContain(`Workers page ${i}`);
+        expect(summary).toContain(`https://developers.cloudflare.com/workers/page-${i}/`);
+      }
+      expect(summary).toContain("Section 0 intro.");
+      expect(summary).not.toContain("TAIL_MARKER_0");
+      expect(1 - Buffer.byteLength(summary) / originalSize).toBeGreaterThan(0.8);
+    });
+  }
+
+  test("does not claim other Cloudflare tools", () => {
+    expect(getProfileHandler("mcp__cloudflare__execute")).toBeNull();
+  });
+});
