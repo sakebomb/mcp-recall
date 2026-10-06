@@ -11,7 +11,7 @@
 
 **Your context window is finite. MCP tool outputs aren't. mcp-recall bridges the gap.**
 
-MCP tool outputs — Playwright snapshots, GitHub API responses, Linear queries — can consume tens of kilobytes of context per call. A 200K token context window fills up in ~30 minutes of active MCP use. mcp-recall intercepts those outputs, stores them in full locally, and delivers compressed summaries to Claude instead. When Claude needs more detail, it retrieves exactly what it needs via FTS search — without re-running the tool.
+MCP tool outputs — Playwright snapshots, GitHub API responses, Linear queries — can consume tens of kilobytes of context per call, and a busy session fills even a large context window long before the work is done. mcp-recall intercepts those outputs, stores them in full locally, and delivers compressed summaries to Claude instead. When Claude needs more detail, it retrieves exactly what it needs via FTS search — without re-running the tool.
 
 Sessions that used to hit context limits in 30 minutes routinely run for 3+ hours.
 
@@ -116,7 +116,33 @@ flowchart TD
 
 ## Results
 
-Real numbers from actual tool calls:
+> **Before 1.15.1, these savings did not reach Claude's context on current Claude Code.** The hook returned its summary in a field Claude Code no longer reads, so outputs were stored and searchable but Claude still received them in full ([#298](https://github.com/sakebomb/mcp-recall/issues/298)). 1.15.1 uses the documented field, and MCP summaries were verified live. Built-in Bash output was not replaced in a live test on Claude Code 2.1.289 and is being re-verified on newer versions. The figures below measure what the compression produces.
+
+Measured on 2026-10-05 across one developer's real store: 107 project stores, 95 projects, 39,064 intercepted calls dated 2026-07-21 to 2026-10-05 (older calls had expired). Reproduce on your own store with `bun run measure`, which opens every store read-only and prints aggregates only.
+
+| Figure | Calls | Original | Delivered | Reduction |
+|---|---|---|---|---|
+| All intercepted calls, as recorded | 39,064 | 68.9 MB | 29.5 MB | **57.2%** |
+| Bash, as recorded | 38,870 | 63.8 MB | 26.5 MB | 58.5% |
+| MCP, replayed through current handlers | 194 | 5.1 MB | 0.2 MB | **95.3%** |
+
+"As recorded" is what the installed versions' compression produced, using the same accounting as `recall__stats` (notes excluded): 39.5 MB, about 10.3M tokens. Because of #298 that reduction was stored, not delivered to context. The MCP row re-compresses every stored MCP call with today's handlers, because most of those calls were stored by an older release that predated image-block stripping; as recorded they show 40.6%. The 95.3% still counts 10 Context7 calls whose summaries were empty ([#299](https://github.com/sakebomb/mcp-recall/issues/299)); it will be recomputed with the fixed profiles for 1.15.1. This is one person's workload, dominated by Bash, so your mix will differ.
+
+### What compresses well, and what doesn't
+
+The reduction depends on the shape of the output, not on how large it is. Long, structured, repetitive output compresses well. Short or one-off output has little to remove.
+
+| | Examples (from the measurement above) | Why |
+|---|---|---|
+| **Excellent, 95–100%** | Tavily extract, Hugging Face, Playwright snapshots, browser screenshots (image blocks stripped) | A dedicated handler or profile keeps only the fields that matter; images carry no searchable text |
+| **Good, 75–93%** | Tavily search (85%), Gmail search (91%), `git diff` (93%), `git show` (80%), `cat` of large files (74%) | Structured enough for a handler to summarize; the full text stays retrievable |
+| **Moderate, 50–70%** | `sed`, `python3`, `gh`, shell loops, Mermaid rendering (69%) | Mixed output with no dedicated handler; the generic fallback trims the head and tail |
+| **Weak, 30–45%** | `grep` (38%), `ssh` (37%), `timeout` (31%), `cd …` chains (45%) | Usually short output, or a wrapper that hides the real command from command-aware routing |
+| **Fixed in 1.15.1** | Cloudflare docs search: 37% before, 89% with the new bundled profile | No handler matched it; a profile now extracts title, URL and an excerpt |
+
+Bash rows in this table are as recorded, mostly by releases before 1.14.5, so `grep` (improved in 1.14.5) is likely better today. Small tools with very few calls (for example, three Vikunja calls) are too little data to judge. If a tool you use lands in the weak rows, a [profile](docs/profiles-quickstart.md) is usually the fix.
+
+Individual MCP calls:
 
 | Tool | Original | Delivered | Reduction |
 |---|---|---|---|
@@ -132,16 +158,16 @@ Command-aware Bash compression, per-output on representative fixtures (regenerat
 
 | Command | Original | Delivered | Reduction |
 |---|---|---|---|
+| `find` (400 paths) | 19.0 KB | 1.2 KB | 93.7% |
 | `tsc --noEmit` (60 errors) | 28.5 KB | 2.2 KB | 92.4% |
-| `find` (400 paths) | 19.0 KB | 2.0 KB | 89.6% |
-| `rg` (240 matches, 6 files) | 13.6 KB | 2.3 KB | 83.1% |
-| `ls -R` (deep tree) | 1.5 KB | 403 B | 73.8% |
-| `cargo build` (12 errors) | 1.9 KB | 581 B | 69.8% |
+| `rg` (240 matches, 6 files) | 13.6 KB | 1.4 KB | 89.7% |
+| `ls -R` (deep tree) | 1.5 KB | 207 B | 86.5% |
+| `cargo build` (typical failure) | 1.9 KB | 581 B | 69.8% |
 | `git --no-pager diff` (18 files) | 4.1 KB | 1.3 KB | 68.0% |
 
-These are per-output compression ratios, not a whole-session token figure — most outputs are smaller and the generic fallback already caps long output. For real session savings, read `recall__stats` (which counts intercepted output only).
+These are per-output compression ratios, not a whole-session token figure — most outputs are smaller and the generic fallback already caps long output. That is why the measured Bash figure above (58.5%) is lower. For your own session savings, read `recall__stats` (which counts intercepted output only).
 
-Used daily in development of this project since the first release in March 2026, across 13 releases. No broken sessions, no data loss.
+Used daily in development of this project since the first release in March 2026. No broken sessions, no data loss.
 
 ---
 
