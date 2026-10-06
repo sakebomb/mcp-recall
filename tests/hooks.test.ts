@@ -272,6 +272,20 @@ describe("handlePostToolUse", () => {
     expect(result.suppressOutput).toBe(true);
   });
 
+  // Claude Code reads hookSpecificOutput.updatedToolOutput; the top-level field
+  // alone was ignored, so no compressed output ever reached context (#298).
+  it("returns the replacement in hookSpecificOutput.updatedToolOutput, stored and cached", () => {
+    const input = makePostToolUseInput("mcp__github__list_issues", {
+      content: [{ type: "text", text: LARGE_GITHUB_RESPONSE }],
+    }, { tool_input: { owner: "org", repo: "repo" } });
+
+    for (const result of [handlePostToolUse(input), handlePostToolUse(input)]) {
+      expect(result.hookSpecificOutput?.hookEventName).toBe("PostToolUse");
+      expect(result.hookSpecificOutput?.updatedToolOutput).toMatch(/^\[recall:recall_[0-9a-f]{16}/);
+      expect(result.hookSpecificOutput?.updatedToolOutput).toBe(result.updatedMCPToolOutput!);
+    }
+  });
+
   it("updatedMCPToolOutput contains recall ID header", () => {
     const result = handlePostToolUse(
       makePostToolUseInput("mcp__github__list_issues", {

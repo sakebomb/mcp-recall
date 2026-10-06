@@ -21,8 +21,23 @@ interface PostToolUseInput {
 }
 
 export interface HookOutput {
+  hookSpecificOutput?: { hookEventName: "PostToolUse"; updatedToolOutput: string };
+  /** Legacy field from before Claude Code documented updatedToolOutput; current versions ignore it (#298). */
   updatedMCPToolOutput?: string;
   suppressOutput?: boolean;
+}
+
+/**
+ * Replaces the tool's output with `text`. Claude Code reads
+ * hookSpecificOutput.updatedToolOutput, for built-in and MCP tools alike; the
+ * top-level field alone was silently ignored, so nothing reached context (#298).
+ */
+function replaceOutput(text: string): HookOutput {
+  return {
+    hookSpecificOutput: { hookEventName: "PostToolUse", updatedToolOutput: text },
+    updatedMCPToolOutput: text,
+    suppressOutput: true,
+  };
 }
 
 export function handlePostToolUse(raw: string): HookOutput {
@@ -74,10 +89,7 @@ export function handlePostToolUse(raw: string): HookOutput {
   const cachedResponse = (cached: { id: string; created_at: number; summary: string }): HookOutput => {
     const cachedDate = new Date(cached.created_at * 1000).toISOString().slice(0, 10);
     log.debug(`CACHE HIT · ${tool_name} · id=${cached.id} · cached ${cachedDate}`);
-    return {
-      updatedMCPToolOutput: `[recall:${cached.id} · cached · ${cachedDate}]\n${cached.summary}`,
-      suppressOutput: true,
-    };
+    return replaceOutput(`[recall:${cached.id} · cached · ${cachedDate}]\n${cached.summary}`);
   };
 
   const byInput = input_hash ? checkDedup(db, projectKey, input_hash) : null;
@@ -146,8 +158,5 @@ export function handlePostToolUse(raw: string): HookOutput {
   const hints = extractHints(fullContent);
   const hintStr = hints.length ? ` · search: ${hints.map((h) => `"${h}"`).join(", ")}` : "";
   const header = `[recall:${stored.id} · ${formatBytes(originalSize)}→${formatBytes(summarySize)} (${reduction}% reduction)${hintStr}]`;
-  return {
-    updatedMCPToolOutput: `${header}\n${summary}`,
-    suppressOutput: true,
-  };
+  return replaceOutput(`${header}\n${summary}`);
 }
