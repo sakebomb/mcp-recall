@@ -116,6 +116,8 @@ flowchart TD
 
 ## Results
 
+> **Before 1.15.1, these savings did not reach Claude's context on current Claude Code.** The hook returned its summary in a field Claude Code no longer reads, so outputs were stored and searchable but Claude still received them in full ([#298](https://github.com/sakebomb/mcp-recall/issues/298)). 1.15.1 uses the documented field, and MCP summaries were verified live. Built-in Bash output was not replaced in a live test on Claude Code 2.1.289 and is being re-verified on newer versions. The figures below measure what the compression produces.
+
 Measured on 2026-10-05 across one developer's real store: 107 project stores, 95 projects, 39,064 intercepted calls dated 2026-07-21 to 2026-10-05 (older calls had expired). Reproduce on your own store with `bun run measure`, which opens every store read-only and prints aggregates only.
 
 | Figure | Calls | Original | Delivered | Reduction |
@@ -124,7 +126,7 @@ Measured on 2026-10-05 across one developer's real store: 107 project stores, 95
 | Bash, as recorded | 38,870 | 63.8 MB | 26.5 MB | 58.5% |
 | MCP, replayed through current handlers | 194 | 5.1 MB | 0.2 MB | **95.3%** |
 
-"As recorded" is what the installed versions actually delivered, using the same accounting as `recall__stats` (notes excluded): 39.5 MB saved, about 10.3M tokens. The MCP row re-compresses every stored MCP call with today's handlers, because most of those calls were stored by an older release that predated image-block stripping; as recorded they show 40.6%. This is one person's workload, dominated by Bash, so your mix will differ.
+"As recorded" is what the installed versions' compression produced, using the same accounting as `recall__stats` (notes excluded): 39.5 MB, about 10.3M tokens. Because of #298 that reduction was stored, not delivered to context. The MCP row re-compresses every stored MCP call with today's handlers, because most of those calls were stored by an older release that predated image-block stripping; as recorded they show 40.6%. The 95.3% still counts 10 Context7 calls whose summaries were empty ([#299](https://github.com/sakebomb/mcp-recall/issues/299)); it will be recomputed with the fixed profiles for 1.15.1. This is one person's workload, dominated by Bash, so your mix will differ.
 
 ### What compresses well, and what doesn't
 
@@ -132,7 +134,7 @@ The reduction depends on the shape of the output, not on how large it is. Long, 
 
 | | Examples (from the measurement above) | Why |
 |---|---|---|
-| **Excellent, 95–100%** | Context7, Tavily extract, Hugging Face, Playwright snapshots, browser screenshots (image blocks stripped) | A dedicated handler or profile keeps only the fields that matter; images carry no searchable text |
+| **Excellent, 95–100%** | Tavily extract, Hugging Face, Playwright snapshots, browser screenshots (image blocks stripped) | A dedicated handler or profile keeps only the fields that matter; images carry no searchable text |
 | **Good, 75–93%** | Tavily search (85%), Gmail search (91%), `git diff` (93%), `git show` (80%), `cat` of large files (74%) | Structured enough for a handler to summarize; the full text stays retrievable |
 | **Moderate, 50–70%** | `sed`, `python3`, `gh`, shell loops, Mermaid rendering (69%) | Mixed output with no dedicated handler; the generic fallback trims the head and tail |
 | **Weak, 30–45%** | `grep` (38%), `ssh` (37%), `timeout` (31%), `cd …` chains (45%) | Usually short output, or a wrapper that hides the real command from command-aware routing |
