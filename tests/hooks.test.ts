@@ -286,6 +286,32 @@ describe("handlePostToolUse", () => {
     }
   });
 
+  // Claude Code validates a built-in tool's replacement against that tool's
+  // output shape and silently delivers the original on a mismatch, so a string
+  // replacement never reached context for Bash.
+  const bashResponse = {
+    stdout: Array.from({ length: 600 }, (_, i) => `probe line ${i + 1}`).join("\n"),
+    stderr: "warning: probe",
+    interrupted: false,
+    isImage: false,
+    noOutputExpected: false,
+  };
+  for (const [label, response] of [["object", bashResponse], ["JSON string", JSON.stringify(bashResponse)]] as const) {
+    it(`returns Bash's own output shape with stdout replaced, stored and cached (${label})`, () => {
+      const input = makePostToolUseInput("Bash", response, { tool_input: { command: `seq 600 # ${label}` } });
+
+      for (const result of [handlePostToolUse(input), handlePostToolUse(input)]) {
+        const replaced = result.hookSpecificOutput?.updatedToolOutput as Record<string, unknown>;
+        expect(typeof replaced).toBe("object");
+        expect(Object.keys(replaced).sort()).toEqual(Object.keys(bashResponse).sort());
+        expect(replaced.stdout).toMatch(/^\[recall:recall_[0-9a-f]{16}/);
+        expect(replaced.stdout).toBe(result.updatedMCPToolOutput!);
+        expect(replaced.stderr).toBe("");
+        expect(replaced.interrupted).toBe(false);
+      }
+    });
+  }
+
   it("updatedMCPToolOutput contains recall ID header", () => {
     const result = handlePostToolUse(
       makePostToolUseInput("mcp__github__list_issues", {
