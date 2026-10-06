@@ -8835,7 +8835,11 @@ ${cached2.summary}`);
     return cachedResponse(byOutput);
   const handler = getHandler(tool_name, tool_response, tool_input);
   log.debug(`handler: ${handler.name} \xB7 ${tool_name}`);
-  const { summary, originalSize } = handler(tool_name, tool_response);
+  let { summary, originalSize } = handler(tool_name, tool_response);
+  if (summary.trim() === "" && originalSize > 0) {
+    log.debug(`empty summary from ${handler.name} \xB7 ${tool_name} \xB7 falling back to genericHandler`);
+    ({ summary, originalSize } = genericHandler(tool_name, tool_response));
+  }
   const summarySize = Buffer.byteLength(summary, "utf8");
   if (summarySize >= originalSize) {
     log.debug(`SKIP no-compression \xB7 ${tool_name} \xB7 ${formatBytes(summarySize)} \u2265 ${formatBytes(originalSize)}`);

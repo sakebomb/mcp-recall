@@ -27,6 +27,12 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   top 2,000 characters of documentation. If `learn` generated a profile for
   Context7 on your machine, remove it (`~/.config/mcp-recall/profiles/mcp__context7/`)
   so the bundled one applies. (#299)
+- **A handler that does not recognize an output can no longer deliver an empty
+  summary.** The claude.ai Sentry connector returns markdown, which the Sentry
+  handler (built for JSON events) turned into an empty string. Because an empty
+  summary is always "smaller", the hook stored it, and Claude received only the
+  recall header: every Sentry call in a 39k-call store was affected. An empty or
+  whitespace summary now falls back to the generic handler. (#296)
 
 ## [1.15.0] — 2026-10-05
 

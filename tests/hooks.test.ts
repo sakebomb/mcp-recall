@@ -770,3 +770,48 @@ describe("handlePostToolUse — image content blocks (#270)", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// handlePostToolUse — empty summaries (#296)
+// ---------------------------------------------------------------------------
+
+/** Body after the `[recall:…]` header line: what Claude actually reads. */
+const deliveredBody = (result: { updatedMCPToolOutput?: string }) =>
+  (result.updatedMCPToolOutput ?? "").split("\n").slice(1).join("\n");
+
+describe("handlePostToolUse — empty summaries (#296)", () => {
+  beforeEach(() => {
+    process.env.RECALL_DB_PATH = ":memory:";
+  });
+
+  afterEach(() => {
+    closeDb();
+    resetConfig();
+    delete process.env.RECALL_DB_PATH;
+  });
+
+  it("summarizes a Sentry markdown response instead of delivering nothing", () => {
+    // The claude.ai Sentry connector returns markdown in a top-level text block array.
+    const markdown =
+      "# Issue PROJ-4F2 in **checkout-api**\n\n**Description**: TypeError reading 'id' of undefined\n" +
+      "**First Seen**: 2026-09-30T10:00:00Z\n\n## Stack\n" +
+      "  at handler (src/routes/checkout.ts:88)\n".repeat(60);
+    const result = handlePostToolUse(
+      makePostToolUseInput("mcp__claude_ai_Sentry__get_sentry_resource", [{ type: "text", text: markdown }])
+    );
+    expect(deliveredBody(result)).toContain("# Issue PROJ-4F2");
+  });
+
+  it("falls back when a handler returns an empty summary for non-empty output", () => {
+    // A Sentry-named tool returning an object with no Sentry event fields makes
+    // sentryHandler return "". The hook must not store or deliver that.
+    const unrelated = JSON.stringify({ report: "quarterly-numbers ".repeat(200) });
+    const result = handlePostToolUse(
+      makePostToolUseInput("mcp__sentry__get_report", { content: [{ type: "text", text: unrelated }] })
+    );
+    expect(deliveredBody(result).trim()).not.toBe("");
+    const db = getDb(":memory:");
+    const row = db.prepare("SELECT summary FROM stored_outputs").get() as { summary: string };
+    expect(row.summary.trim()).not.toBe("");
+  });
+});
