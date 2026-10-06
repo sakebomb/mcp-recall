@@ -126,6 +126,20 @@ Measured on 2026-10-05 across one developer's real store: 107 project stores, 95
 
 "As recorded" is what the installed versions actually delivered, using the same accounting as `recall__stats` (notes excluded): 39.5 MB saved, about 10.3M tokens. The MCP row re-compresses every stored MCP call with today's handlers, because most of those calls were stored by an older release that predated image-block stripping; as recorded they show 40.6%. This is one person's workload, dominated by Bash, so your mix will differ.
 
+### What compresses well, and what doesn't
+
+The reduction depends on the shape of the output, not on how large it is. Long, structured, repetitive output compresses well. Short or one-off output has little to remove.
+
+| | Examples (from the measurement above) | Why |
+|---|---|---|
+| **Excellent, 95–100%** | Context7, Tavily extract, Hugging Face, Playwright snapshots, browser screenshots (image blocks stripped) | A dedicated handler or profile keeps only the fields that matter; images carry no searchable text |
+| **Good, 75–93%** | Tavily search (85%), Gmail search (91%), `git diff` (93%), `git show` (80%), `cat` of large files (74%) | Structured enough for a handler to summarize; the full text stays retrievable |
+| **Moderate, 50–70%** | `sed`, `python3`, `gh`, shell loops, Mermaid rendering (69%) | Mixed output with no dedicated handler; the generic fallback trims the head and tail |
+| **Weak, 30–45%** | `grep` (38%), `ssh` (37%), `timeout` (31%), `cd …` chains (45%) | Usually short output, or a wrapper that hides the real command from command-aware routing |
+| **Fixed in 1.15.1** | Cloudflare docs search: 37% before, 89% with the new bundled profile | No handler matched it; a profile now extracts title, URL and an excerpt |
+
+Bash rows in this table are as recorded, mostly by releases before 1.14.5, so `grep` (improved in 1.14.5) is likely better today. Small tools with very few calls (for example, three Vikunja calls) are too little data to judge. If a tool you use lands in the weak rows, a [profile](docs/profiles-quickstart.md) is usually the fix.
+
 Individual MCP calls:
 
 | Tool | Original | Delivered | Reduction |

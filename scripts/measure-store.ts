@@ -57,7 +57,15 @@ function projectTotals(db: Database, projectKey: string) {
   }
 }
 
-function replayMcp(db: Database, replay: Totals): void {
+const emptySummaries = new Map<string, number>();
+
+const tally = (map: Map<string, Totals>, key: string, original: number, summary: number, calls: number) => {
+  const t = map.get(key) ?? empty();
+  add(t, original, summary, calls);
+  map.set(key, t);
+};
+
+function replayMcp(db: Database, replay: Totals, byTool: Map<string, Totals>): void {
   const rows = db
     .query("SELECT tool_name, full_content, original_size FROM stored_outputs WHERE tool_name LIKE 'mcp__%' AND length(full_content) > 0")
     .all() as { tool_name: string; full_content: string; original_size: number }[];
@@ -69,7 +77,46 @@ function replayMcp(db: Database, replay: Totals): void {
       // stored as plain text
     }
     const { summary } = getHandler(row.tool_name, output)(row.tool_name, output);
-    add(replay, row.original_size, Buffer.byteLength(summary, "utf8"), 1);
+    const delivered = Buffer.byteLength(summary, "utf8");
+    // An empty summary is a handler failure, not perfect compression: Claude
+    // would see nothing. Count it so it cannot pass as a 100% row.
+    if (summary.trim() === "") emptySummaries.set(row.tool_name, (emptySummaries.get(row.tool_name) ?? 0) + 1);
+    add(replay, row.original_size, delivered, 1);
+    tally(byTool, row.tool_name, row.original_size, delivered, 1);
+  }
+}
+
+/**
+ * Recorded Bash savings per command family. `command_fp` is the first word of
+ * the command line, so wrappers (cd, timeout, for, ssh) hide the real command.
+ */
+function tallyBash(db: Database, byCommand: Map<string, Totals>): void {
+  let rows: { fp: string; o: number; s: number; n: number }[];
+  try {
+    rows = db
+      .query(`SELECT COALESCE(command_fp, 'unknown') AS fp, SUM(original_size) AS o,
+                     SUM(summary_size) AS s, COUNT(*) AS n
+              FROM stored_outputs WHERE tool_name = 'Bash' GROUP BY fp`)
+      .all() as typeof rows;
+  } catch {
+    return; // store predates command_fp
+  }
+  for (const r of rows) tally(byCommand, r.fp, r.o, r.s, r.n);
+}
+
+const size = (b: number) => (b >= 1048576 ? mb(b) : b >= 1024 ? `${(b / 1024).toFixed(0)} KB` : `${b} B`);
+
+function printRanked(title: string, map: Map<string, Totals>, minCalls: number, limit: number): void {
+  const ranked = [...map]
+    .filter(([, t]) => t.calls >= minCalls)
+    .sort(([, a], [, b]) => b.original - a.original)
+    .slice(0, limit)
+    .sort(([, a], [, b]) => a.summary / a.original - b.summary / b.original);
+  console.log(`\n${title}\n`);
+  console.log("| Name | Calls | Original | Delivered | Reduction |");
+  console.log("| --- | --- | --- | --- | --- |");
+  for (const [name, t] of ranked) {
+    console.log(`| \`${name}\` | ${t.calls.toLocaleString("en-US")} | ${size(t.original)} | ${size(t.summary)} | ${pct(t)} |`);
   }
 }
 
@@ -77,6 +124,8 @@ const dir = dataDir();
 const recorded = empty();
 const families: Record<string, Totals> = { Bash: empty(), MCP: empty() };
 const replay = empty();
+const byTool = new Map<string, Totals>();
+const byCommand = new Map<string, Totals>();
 let stores = 0;
 let projects = 0;
 let first = Infinity;
@@ -108,7 +157,8 @@ for (const file of readdirSync(dir).filter((f) => f.endsWith(".db"))) {
     first = Math.min(first, r.lo);
     last = Math.max(last, r.hi);
   }
-  replayMcp(db, replay);
+  replayMcp(db, replay, byTool);
+  tallyBash(db, byCommand);
   db.close();
 }
 
@@ -127,4 +177,10 @@ row("Recorded, Bash", families.Bash!);
 row("Recorded, MCP", families.MCP!);
 row("MCP replayed through current handlers", replay);
 console.log(`\nRecorded savings: ${mb(recorded.original - recorded.summary)} (~${((recorded.original - recorded.summary) / 4 / 1e6).toFixed(1)}M tokens at 4 bytes/token).`);
-console.log("One machine's store is one user's workload. Regenerate with `bun run measure`.");
+printRanked("MCP by tool, replayed through current handlers (best first)", byTool, 1, 25);
+printRanked("Bash by command family, as recorded (15 largest by bytes, best first)", byCommand, 1, 15);
+if (emptySummaries.size > 0) {
+  console.log("\nWARNING: handlers returned an EMPTY summary (Claude sees nothing) for:");
+  for (const [tool, n] of emptySummaries) console.log(`  ${tool}: ${n} call(s). Its reduction above is not real.`);
+}
+console.log("\nOne machine's store is one user's workload. Regenerate with `bun run measure`.");
