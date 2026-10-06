@@ -2,10 +2,27 @@
  * Strategy implementations for TOML-defined compression profiles.
  */
 import type { CompressionResult } from "../handlers/types";
-import { extractText } from "../handlers/types";
+import { asMcpContentBlocks, extractText, joinTextBlocks } from "../handlers/types";
 import type { ProfileStrategy } from "./types";
 
 // ── shared helpers ────────────────────────────────────────────────────────────
+
+/**
+ * The text a profile should work on. extractText keeps a text-only top-level
+ * block array as JSON (for jsonHandler routing), so a profile would parse the
+ * blocks themselves and find none of its fields. Context7 and Sentry send that
+ * shape: unwrap it so a JSON body parses and markdown takes the fallback path.
+ */
+function profileText(output: unknown): string {
+  const blocks = asMcpContentBlocks(output);
+  if (blocks?.some((b) => b.type === "text")) return joinTextBlocks(blocks);
+  return extractText(output);
+}
+
+function excerpt(raw: string, maxChars: number): string {
+  const head = raw.slice(0, maxChars).trimEnd();
+  return head.length < raw.length ? `${head}\n…` : head;
+}
 
 function resolvePath(obj: unknown, path: string): unknown {
   if (path === "" || path === ".") return obj;
@@ -48,7 +65,7 @@ export function applyJsonExtract(
   _toolName: string,
   output: unknown
 ): CompressionResult {
-  const raw = extractText(output);
+  const raw = profileText(output);
   const originalSize = Buffer.byteLength(raw, "utf8");
   const fallbackChars = strategy.fallback_chars ?? 500;
 
@@ -56,12 +73,12 @@ export function applyJsonExtract(
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return { summary: raw.slice(0, fallbackChars), originalSize };
+    return { summary: excerpt(raw, fallbackChars), originalSize };
   }
 
   const items = resolveItems(parsed, strategy.items_path ?? []);
   if (!items || items.length === 0) {
-    return { summary: raw.slice(0, fallbackChars), originalSize };
+    return { summary: excerpt(raw, fallbackChars), originalSize };
   }
 
   const fields = strategy.fields ?? [];
@@ -70,15 +87,19 @@ export function applyJsonExtract(
   const labels = strategy.labels;
   const count = items.length;
 
-  const lines = items.slice(0, maxItems).map((item, i) => {
-    const parts = fields
-      .map((f) => {
-        const val = fieldValue(item, f, maxCharsPerField);
-        return val ? `${getLabel(f, labels)}: ${val}` : null;
-      })
-      .filter(Boolean);
-    return `${i + 1}. ${parts.join(" · ")}`;
-  });
+  const extracted = items.slice(0, maxItems).map((item) =>
+    fields.flatMap((f) => {
+      const val = fieldValue(item, f, maxCharsPerField);
+      return val ? [`${getLabel(f, labels)}: ${val}`] : [];
+    })
+  );
+  // No configured field matched anything: the profile does not fit this output
+  // (a guessed `learn` profile, or an API that changed shape). An excerpt beats
+  // "1. " lines that tell Claude nothing.
+  if (extracted.every((parts) => parts.length === 0)) {
+    return { summary: excerpt(raw, fallbackChars), originalSize };
+  }
+  const lines = extracted.map((parts, i) => `${i + 1}. ${parts.join(" · ")}`);
 
   const more = count > maxItems ? `\n…and ${count - maxItems} more` : "";
   const summary = `${count} item${count === 1 ? "" : "s"}:\n${lines.join("\n")}${more}`;
@@ -109,7 +130,7 @@ export function applyJsonTruncate(
   _toolName: string,
   output: unknown
 ): CompressionResult {
-  const raw = extractText(output);
+  const raw = profileText(output);
   const originalSize = Buffer.byteLength(raw, "utf8");
   const fallbackChars = strategy.fallback_chars ?? 500;
   const maxDepth = strategy.max_depth ?? 3;
@@ -119,11 +140,7 @@ export function applyJsonTruncate(
   try {
     parsed = JSON.parse(raw);
   } catch {
-    const excerpt = raw.slice(0, fallbackChars).trimEnd();
-    return {
-      summary: excerpt.length < raw.length ? `${excerpt}\n…` : excerpt,
-      originalSize,
-    };
+    return { summary: excerpt(raw, fallbackChars), originalSize };
   }
 
   const truncated = truncateJson(parsed, 0, maxDepth, maxArrayItems);
@@ -137,12 +154,6 @@ export function applyTextTruncate(
   _toolName: string,
   output: unknown
 ): CompressionResult {
-  const raw = extractText(output);
-  const originalSize = Buffer.byteLength(raw, "utf8");
-  const maxChars = strategy.max_chars ?? 500;
-  const excerpt = raw.slice(0, maxChars).trimEnd();
-  return {
-    summary: raw.length > maxChars ? `${excerpt}\n…` : excerpt,
-    originalSize,
-  };
+  const raw = profileText(output);
+  return { summary: excerpt(raw, strategy.max_chars ?? 500), originalSize: Buffer.byteLength(raw, "utf8") };
 }

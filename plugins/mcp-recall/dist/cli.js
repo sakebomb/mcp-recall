@@ -8426,6 +8426,17 @@ function getShortName(spec) {
 }
 
 // src/profiles/strategies.ts
+function profileText(output) {
+  const blocks = asMcpContentBlocks(output);
+  if (blocks?.some((b) => b.type === "text"))
+    return joinTextBlocks(blocks);
+  return extractText(output);
+}
+function excerpt(raw, maxChars) {
+  const head = raw.slice(0, maxChars).trimEnd();
+  return head.length < raw.length ? `${head}
+\u2026` : head;
+}
 function resolvePath(obj, path) {
   if (path === "" || path === ".")
     return obj;
@@ -8464,31 +8475,32 @@ function resolveItems(parsed, itemsPaths) {
   return null;
 }
 function applyJsonExtract(strategy, _toolName, output) {
-  const raw = extractText(output);
+  const raw = profileText(output);
   const originalSize = Buffer.byteLength(raw, "utf8");
   const fallbackChars = strategy.fallback_chars ?? 500;
   let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return { summary: raw.slice(0, fallbackChars), originalSize };
+    return { summary: excerpt(raw, fallbackChars), originalSize };
   }
   const items = resolveItems(parsed, strategy.items_path ?? []);
   if (!items || items.length === 0) {
-    return { summary: raw.slice(0, fallbackChars), originalSize };
+    return { summary: excerpt(raw, fallbackChars), originalSize };
   }
   const fields = strategy.fields ?? [];
   const maxItems = strategy.max_items ?? 10;
   const maxCharsPerField = strategy.max_chars_per_field ?? 200;
   const labels = strategy.labels;
   const count = items.length;
-  const lines = items.slice(0, maxItems).map((item, i) => {
-    const parts = fields.map((f) => {
-      const val = fieldValue(item, f, maxCharsPerField);
-      return val ? `${getLabel(f, labels)}: ${val}` : null;
-    }).filter(Boolean);
-    return `${i + 1}. ${parts.join(" \xB7 ")}`;
-  });
+  const extracted = items.slice(0, maxItems).map((item) => fields.flatMap((f) => {
+    const val = fieldValue(item, f, maxCharsPerField);
+    return val ? [`${getLabel(f, labels)}: ${val}`] : [];
+  }));
+  if (extracted.every((parts) => parts.length === 0)) {
+    return { summary: excerpt(raw, fallbackChars), originalSize };
+  }
+  const lines = extracted.map((parts, i) => `${i + 1}. ${parts.join(" \xB7 ")}`);
   const more = count > maxItems ? `
 \u2026and ${count - maxItems} more` : "";
   const summary = `${count} item${count === 1 ? "" : "s"}:
@@ -8515,7 +8527,7 @@ function truncateJson(value, depth, maxDepth, maxArrayItems) {
   return value;
 }
 function applyJsonTruncate(strategy, _toolName, output) {
-  const raw = extractText(output);
+  const raw = profileText(output);
   const originalSize = Buffer.byteLength(raw, "utf8");
   const fallbackChars = strategy.fallback_chars ?? 500;
   const maxDepth = strategy.max_depth ?? 3;
@@ -8524,26 +8536,14 @@ function applyJsonTruncate(strategy, _toolName, output) {
   try {
     parsed = JSON.parse(raw);
   } catch {
-    const excerpt = raw.slice(0, fallbackChars).trimEnd();
-    return {
-      summary: excerpt.length < raw.length ? `${excerpt}
-\u2026` : excerpt,
-      originalSize
-    };
+    return { summary: excerpt(raw, fallbackChars), originalSize };
   }
   const truncated = truncateJson(parsed, 0, maxDepth, maxArrayItems);
   return { summary: JSON.stringify(truncated, null, 2), originalSize };
 }
 function applyTextTruncate(strategy, _toolName, output) {
-  const raw = extractText(output);
-  const originalSize = Buffer.byteLength(raw, "utf8");
-  const maxChars = strategy.max_chars ?? 500;
-  const excerpt = raw.slice(0, maxChars).trimEnd();
-  return {
-    summary: raw.length > maxChars ? `${excerpt}
-\u2026` : excerpt,
-    originalSize
-  };
+  const raw = profileText(output);
+  return { summary: excerpt(raw, strategy.max_chars ?? 500), originalSize: Buffer.byteLength(raw, "utf8") };
 }
 
 // src/profiles/index.ts
