@@ -1,7 +1,6 @@
 import type { CompressionResult, Handler } from "./types";
-import { extractText } from "./types";
 import { shellHandler } from "./shell";
-import { extractStdout, MAX_DOCKER_CONTAINERS } from "./bash-shared";
+import { bashOutputText, extractStdout, MAX_DOCKER_CONTAINERS } from "./bash-shared";
 
 // ---------------------------------------------------------------------------
 // docker ps / docker compose ps
@@ -12,7 +11,7 @@ export const dockerPsHandler: Handler = (
   output: unknown
 ): CompressionResult => {
   const stdout = extractStdout(output);
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
 
   const lines = stdout.trim().split("\n").filter(l => l.trim());
   if (lines.length === 0) {

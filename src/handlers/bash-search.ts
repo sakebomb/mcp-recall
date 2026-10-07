@@ -12,9 +12,8 @@
  * to it. These never compress worse than the fallback they replace (#262).
  */
 import type { CompressionResult, Handler } from "./types";
-import { extractText } from "./types";
 import { HEAD_STDOUT, shellHandler } from "./shell";
-import { extractStdout } from "./bash-shared";
+import { bashOutputText, extractStdout } from "./bash-shared";
 
 const MAX_SAMPLE = 40;
 const clip = (s: string, n = 100): string => (s.length > n ? s.slice(0, n) + "…" : s);
@@ -81,7 +80,7 @@ export const grepHandler: Handler = (
   output: unknown
 ): CompressionResult => {
   const stdout = extractStdout(output);
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
 
   const lines = stdout.split("\n").filter((l) => l.length > 0);
   if (lines.length === 0) {
@@ -127,7 +126,7 @@ export const lsHandler: Handler = (
   output: unknown
 ): CompressionResult => {
   const stdout = extractStdout(output);
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
 
   const raw = stdout.split("\n");
   const nonEmpty = raw.filter((l) => l.trim().length > 0);
@@ -200,7 +199,7 @@ export const findHandler: Handler = (
   output: unknown
 ): CompressionResult => {
   const stdout = extractStdout(output);
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
 
   const paths = stdout.split("\n").map((l) => l.trimEnd()).filter((l) => l.length > 0);
   if (paths.length === 0) {

@@ -1,7 +1,6 @@
 import type { CompressionResult, Handler } from "./types";
-import { extractText } from "./types";
 import { shellHandler } from "./shell";
-import { extractStdout, MAX_LOG_COMMITS } from "./bash-shared";
+import { bashOutputText, extractStdout, MAX_LOG_COMMITS } from "./bash-shared";
 
 // ---------------------------------------------------------------------------
 // git diff / git show
@@ -43,7 +42,7 @@ export const gitDiffHandler: Handler = (
   output: unknown
 ): CompressionResult => {
   const stdout = extractStdout(output);
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
 
   if (!stdout.trim()) {
     return { summary: "[git diff — no changes]", originalSize };
@@ -78,7 +77,7 @@ export const gitLogHandler: Handler = (
   output: unknown
 ): CompressionResult => {
   const stdout = extractStdout(output);
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
 
   const lines = stdout.trim().split("\n").filter((l) => l.trim());
   if (lines.length === 0) {
@@ -149,7 +148,7 @@ export const gitStatusHandler: Handler = (
   output: unknown
 ): CompressionResult => {
   const stdout = extractStdout(output);
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
 
   if (!stdout.trim()) {
     return { summary: "[git status — clean working tree]", originalSize };
@@ -221,7 +220,7 @@ export const gitRefsHandler: Handler = (
   output: unknown
 ): CompressionResult => {
   const stdout = extractStdout(output);
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
   const lines = stdout.split("\n").filter((l) => l.trim());
   if (lines.length === 0) return shellHandler(toolName, output);
 

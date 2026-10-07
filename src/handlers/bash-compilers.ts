@@ -13,9 +13,9 @@
  * The full original output remains retrievable via recall__* regardless.
  */
 import type { CompressionResult, Handler } from "./types";
-import { extractText } from "./types";
 import { shellHandler } from "./shell";
 import {
+  bashOutputText,
   extractStdout,
   extractStderr,
   extractExitCode,
@@ -67,7 +67,7 @@ export const compilerDiagnosticsHandler: Handler = (
   const stdout = extractStdout(output);
   const stderr = extractStderr(output);
   const combined = `${stdout}\n${stderr}`;
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
   const exitCode = extractExitCode(output);
 
   const diagnostics: Diagnostic[] = [];

@@ -6455,8 +6455,10 @@ function parseStructured(raw) {
 }
 var shellHandler = (_toolName, output) => {
   const raw = extractText(output);
-  const originalSize = Buffer.byteLength(raw, "utf8");
   const structured = parseStructured(raw);
+  const measured = structured ? [structured.stdout ?? structured.output ?? "", structured.stderr ?? ""].filter((s) => s.length > 0).join(`
+`) : raw;
+  const originalSize = Buffer.byteLength(measured, "utf8");
   if (structured) {
     const stdout = stripSshNoise(stripAnsi(structured.stdout ?? structured.output ?? ""));
     const stderr = stripSshNoise(stripAnsi(structured.stderr ?? ""));
@@ -6547,6 +6549,28 @@ function extractStderr(output) {
   } catch {}
   return "";
 }
+function bashOutputText(output) {
+  const read = (o) => {
+    if (o === null || typeof o !== "object" || Array.isArray(o))
+      return null;
+    const obj = o;
+    if (typeof obj.stdout !== "string")
+      return null;
+    const stderr = typeof obj.stderr === "string" ? obj.stderr : "";
+    return [obj.stdout, stderr].filter((s) => s.length > 0).join(`
+`);
+  };
+  const direct = read(output);
+  if (direct !== null)
+    return direct;
+  const text = extractText(output);
+  try {
+    const parsed = read(JSON.parse(text));
+    if (parsed !== null)
+      return parsed;
+  } catch {}
+  return text;
+}
 function extractCommand(input) {
   if (input !== null && typeof input === "object") {
     const obj = input;
@@ -6604,7 +6628,7 @@ function parseGitDiff(text) {
 }
 var gitDiffHandler = (toolName, output) => {
   const stdout = extractStdout(output);
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
   if (!stdout.trim()) {
     return { summary: "[git diff \u2014 no changes]", originalSize };
   }
@@ -6625,7 +6649,7 @@ var gitDiffHandler = (toolName, output) => {
 };
 var gitLogHandler = (_toolName, output) => {
   const stdout = extractStdout(output);
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
   const lines = stdout.trim().split(`
 `).filter((l) => l.trim());
   if (lines.length === 0) {
@@ -6672,7 +6696,7 @@ var gitLogHandler = (_toolName, output) => {
 };
 var gitStatusHandler = (toolName, output) => {
   const stdout = extractStdout(output);
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
   if (!stdout.trim()) {
     return { summary: "[git status \u2014 clean working tree]", originalSize };
   }
@@ -6741,7 +6765,7 @@ var gitStatusHandler = (toolName, output) => {
 var MAX_REFS = 25;
 var gitRefsHandler = (toolName, output) => {
   const stdout = extractStdout(output);
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
   const lines = stdout.split(`
 `).filter((l) => l.trim());
   if (lines.length === 0)
@@ -6788,7 +6812,7 @@ var testRunnerHandler = (toolName, output) => {
   const stderr = extractStderr(output);
   const combined = `${stdout}
 ${stderr}`.trim();
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
   const failureLines = [];
   for (const line of combined.split(`
 `)) {
@@ -6871,7 +6895,7 @@ ${stderr}`.trim();
 // src/handlers/bash-docker.ts
 var dockerPsHandler = (toolName, output) => {
   const stdout = extractStdout(output);
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
   const lines = stdout.trim().split(`
 `).filter((l) => l.trim());
   if (lines.length === 0) {
@@ -6934,7 +6958,7 @@ var compilerDiagnosticsHandler = (toolName, output) => {
   const stderr = extractStderr(output);
   const combined = `${stdout}
 ${stderr}`;
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
   const exitCode = extractExitCode(output);
   const diagnostics = [];
   let summaryErrors = null;
@@ -7075,7 +7099,7 @@ function fitUnderFallback(toolName, output, total, build) {
 var GREP_LINE_RE = /^(.+?):(\d+):(.*)$/;
 var grepHandler = (toolName, output) => {
   const stdout = extractStdout(output);
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
   const lines = stdout.split(`
 `).filter((l) => l.length > 0);
   if (lines.length === 0) {
@@ -7108,7 +7132,7 @@ var LS_LONG_RE = /^([-dlbcps])[rwxsStT-]{9}[+@.]?\s+\d+\s/;
 var LS_RECURSIVE_HEADER_RE = /^(\.?[^\s:]*):$/;
 var lsHandler = (toolName, output) => {
   const stdout = extractStdout(output);
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
   const raw = stdout.split(`
 `);
   const nonEmpty = raw.filter((l) => l.trim().length > 0);
@@ -7170,7 +7194,7 @@ var lsHandler = (toolName, output) => {
 };
 var findHandler = (toolName, output) => {
   const stdout = extractStdout(output);
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
   const paths = stdout.split(`
 `).map((l) => l.trimEnd()).filter((l) => l.length > 0);
   if (paths.length === 0) {
@@ -7203,7 +7227,7 @@ var TERRAFORM_SYMBOL = {
 };
 var terraformPlanHandler = (toolName, output) => {
   const stdout = extractStdout(output);
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
   const summaryMatch = stdout.match(TERRAFORM_PLAN_SUMMARY_RE);
   const summaryLine = summaryMatch ? summaryMatch[0] : null;
   const resources = [];
@@ -7234,7 +7258,7 @@ var packageInstallHandler = (toolName, output) => {
   const stderr = extractStderr(output);
   const combined = `${stdout}
 ${stderr}`.trim();
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
   const warnings = [];
   const errors2 = [];
   for (const line of combined.split(`
@@ -7284,7 +7308,7 @@ var buildToolHandler = (toolName, output) => {
   const stderr = extractStderr(output);
   const combined = `${stdout}
 ${stderr}`.trim();
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
   const errorLines = [];
   const targetLines = [];
   for (const line of combined.split(`
@@ -7329,7 +7353,7 @@ ${stderr}`.trim();
 };
 var ghHandler = (toolName, output) => {
   const stdout = extractStdout(output);
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
   const lines = stdout.trim().split(`
 `).filter((l) => l.trim());
   if (lines.length <= 5)
@@ -8828,7 +8852,7 @@ function handlePostToolUse(raw) {
     log.debug(`SKIP denylist \xB7 ${tool_name}`);
     return {};
   }
-  const fullContent = extractText(tool_response);
+  const fullContent = tool_name === "Bash" ? bashOutputText(tool_response) : extractText(tool_response);
   log.debug(`intercepted ${tool_name} \xB7 ${formatBytes(Buffer.byteLength(fullContent, "utf8"))}`);
   const secretNames = findSecrets(fullContent);
   if (secretNames.length > 0) {

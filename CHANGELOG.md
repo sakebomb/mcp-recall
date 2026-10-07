@@ -17,6 +17,16 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   live on Claude Code 2.1.292: a 23.4 KB output was delivered as a 989 B
   summary. Bash is about 99% of intercepted calls, so this is most of the
   savings. (#304)
+- **Bash output is stored, sized and searched as the command's output, not its
+  response object** (#306). The hook stringified Claude Code's whole Bash result,
+  so field names such as `isImage` and `noOutputExpected` crowded out real search
+  hints, escaped newlines produced words like `nshape`, and `originalSize` counted
+  the wrapper. When a command edited files, the result also carried a
+  `bashEditDiff` of those edits, which was stored and hinted as if the command had
+  printed it: a `git switch` with one line of output was recorded as 24.4 KB. Bash
+  now stores, hints and sizes stdout followed by stderr, in both the object and
+  JSON-string shapes. Recorded Bash savings drop to honest figures from this
+  release on; earlier rows are unchanged.
 
 ## [1.15.1] — 2026-10-06
 

@@ -2591,3 +2591,30 @@ describe("stripeHandler", () => {
     expect(getHandler("mcp__stripe__retrieve_balance", "{}")).toBe(stripeHandler);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Bash originalSize counts the command output, not the response envelope (#306)
+// ---------------------------------------------------------------------------
+
+describe("Bash handlers size the output, not the envelope (#306)", () => {
+  const stdout = Array.from({ length: 200 }, (_, i) => `src/file${i}.ts:${i}: shape value ${i}`).join("\n");
+  const stderr = "warning: something went sideways";
+  const envelope = { stdout, stderr, interrupted: false, isImage: false, noOutputExpected: false };
+  const expected = Buffer.byteLength(`${stdout}\n${stderr}`, "utf8");
+
+  const commands = [
+    "git grep shape", "git diff HEAD", "git log -20", "git status", "git branch -a",
+    "terraform plan", "bun install", "bun test", "docker ps", "make build", "gh pr list",
+    "tsc --noEmit", "grep -rn shape src", "ls -la", "find . -name x", "echo unrouted",
+  ];
+
+  for (const shape of ["object", "JSON string"] as const) {
+    const response = shape === "object" ? envelope : JSON.stringify(envelope);
+    for (const command of commands) {
+      it(`${command} (${shape}) reports originalSize as stdout + stderr bytes`, () => {
+        const { originalSize } = getHandler("Bash", response, { command })("Bash", response);
+        expect(originalSize).toBe(expected);
+      });
+    }
+  }
+});

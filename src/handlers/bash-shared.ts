@@ -51,6 +51,34 @@ export function extractStderr(output: unknown): string {
   return "";
 }
 
+/**
+ * The text a native Bash response actually carries — stdout, then stderr —
+ * without the `{stdout, stderr, interrupted, isImage, noOutputExpected}`
+ * envelope. Accepts the object and the JSON-string shape. This is what the
+ * hook stores, hints and searches, and what Bash `originalSize` measures; the
+ * envelope's field names and escaped newlines are not output (#306). Falls
+ * back to extractText for anything that is not Bash-shaped.
+ */
+export function bashOutputText(output: unknown): string {
+  const read = (o: unknown): string | null => {
+    if (o === null || typeof o !== "object" || Array.isArray(o)) return null;
+    const obj = o as Record<string, unknown>;
+    if (typeof obj.stdout !== "string") return null;
+    const stderr = typeof obj.stderr === "string" ? obj.stderr : "";
+    return [obj.stdout, stderr].filter((s) => s.length > 0).join("\n");
+  };
+  const direct = read(output);
+  if (direct !== null) return direct;
+  const text = extractText(output);
+  try {
+    const parsed = read(JSON.parse(text));
+    if (parsed !== null) return parsed;
+  } catch {
+    /* not a structured JSON response */
+  }
+  return text;
+}
+
 export function extractCommand(input: unknown): string | null {
   if (input !== null && typeof input === "object") {
     const obj = input as Record<string, unknown>;

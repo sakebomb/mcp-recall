@@ -9,6 +9,7 @@ import { extractHints } from "../hints";
 import { getDb, defaultDbPath, storeOutput, checkDedup, checkOutputDedup, hashContent, evictIfNeeded } from "../db/index";
 import { shouldRetainFullBody } from "../retention";
 import { commandFingerprint, normalizeCommand } from "../handlers/bash";
+import { bashOutputText } from "../handlers/bash-shared";
 import { formatBytes } from "../format";
 import { log } from "../log";
 
@@ -84,8 +85,10 @@ export function handlePostToolUse(raw: string): HookOutput {
     return {};
   }
 
-  // 2. Extract text and check for secrets
-  const fullContent = extractText(tool_response);
+  // 2. Extract text and check for secrets. For Bash that is stdout + stderr:
+  //    the envelope's field names and escaped newlines are not output, so they
+  //    must not reach the store, the hints or FTS (#306).
+  const fullContent = tool_name === "Bash" ? bashOutputText(tool_response) : extractText(tool_response);
   log.debug(`intercepted ${tool_name} · ${formatBytes(Buffer.byteLength(fullContent, "utf8"))}`);
   const secretNames = findSecrets(fullContent);
   if (secretNames.length > 0) {
