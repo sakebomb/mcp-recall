@@ -4,7 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { handleSessionStart } from "../src/hooks/session-start";
 import { handlePostToolUse } from "../src/hooks/post-tool-use";
-import { getDb, closeDb, listOutputs, getSessionDays, retrieveOutput, storeOutput, pinOutput, getMeta } from "../src/db/index";
+import { getDb, closeDb, listOutputs, getSessionDays, retrieveOutput, storeOutput, pinOutput, getMeta, hashContent } from "../src/db/index";
 import { resetConfig } from "../src/config";
 import { getProjectKey, getProjectPath } from "../src/project-key";
 
@@ -260,6 +260,62 @@ describe("handlePostToolUse", () => {
       })
     );
     expect(result).toEqual({});
+  });
+
+  // The header is part of what Claude receives. Sizing only the summary let a
+  // 373 B output go out as 450 B while reporting a 15% reduction (#319).
+  const longName = "handlePostToolUse — Bash output cut at ~50 KB (#316) > sizes, stores and summarises the persisted output for the";
+  const grepped = [
+    "- Expected  - 1", "+ Received  + 2", `(fail) ${longName} object shape [0.11ms]`,
+    "- Expected  - 1", "+ Received  + 2", `(fail) ${longName} JSON string shape [0.01ms]`,
+    " 4 pass", " 2 fail",
+  ].join("\n");
+  const bashOf = (stdout: string) => ({ stdout, stderr: "", interrupted: false, isImage: false, noOutputExpected: false });
+
+  it("passes output through when the summary plus its header is not smaller", () => {
+    const result = handlePostToolUse(
+      makePostToolUseInput("Bash", bashOf(grepped), { tool_input: { command: "bun test | grep fail" } })
+    );
+    expect(result).toEqual({});
+    expect((getDb(":memory:").prepare("SELECT COUNT(*) AS n FROM stored_outputs").get() as { n: number }).n).toBe(0);
+  });
+
+  it("passes output through when a cached summary plus its header is not smaller", () => {
+    // A row stored before #319 can hold a summary that only beat the original
+    // without its header. Replaying it from the cache must not grow the output.
+    const db = getDb(":memory:");
+    storeOutput(db, {
+      project_key: getProjectKey(TEST_CWD),
+      session_id: SESSION_ID,
+      tool_name: "Bash",
+      summary: grepped.slice(0, grepped.length - 40),
+      full_content: grepped,
+      original_size: Buffer.byteLength(grepped, "utf8"),
+      input_hash: undefined,
+      output_hash: hashContent(grepped),
+      full_retained: 1,
+      command_fp: null,
+    });
+    const result = handlePostToolUse(
+      makePostToolUseInput("Bash", bashOf(grepped), { tool_input: { command: "bun test | grep fail" } })
+    );
+    expect(result).toEqual({});
+  });
+
+  it("never delivers more bytes than the original output", () => {
+    const outputs: Array<[string, string]> = [
+      ["bun test | grep fail", grepped],
+      ["cat probe.log", Array.from({ length: 600 }, (_, i) => `probe line ${i + 1}`).join("\n")],
+    ];
+    for (const [command, stdout] of outputs) {
+      const result = handlePostToolUse(makePostToolUseInput("Bash", bashOf(stdout), { tool_input: { command } }));
+      const delivered = (result.hookSpecificOutput?.updatedToolOutput as { stdout?: string } | undefined)?.stdout;
+      if (delivered !== undefined) {
+        expect(Buffer.byteLength(delivered, "utf8")).toBeLessThan(Buffer.byteLength(stdout, "utf8"));
+      }
+    }
+    // Control: the long output is replaced, so the assertion above ran at least once.
+    expect((getDb(":memory:").prepare("SELECT COUNT(*) AS n FROM stored_outputs").get() as { n: number }).n).toBe(1);
   });
 
   it("compresses large output and returns updatedMCPToolOutput", () => {

@@ -6,6 +6,17 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Fixed
+
+- **A summary is used only when it is smaller than the output, header
+  included** (#319). The hook compared the summary alone with the original, then
+  added the `[recall:…]` header (60–140 B). Since 1.15.2 delivers Bash
+  summaries, small outputs could reach Claude larger than they were: a 373 B
+  test-runner output arrived as 450 B, with the header reporting a 15%
+  reduction. The check now sizes what Claude receives, and the dedup cache,
+  which can replay rows stored under the old rule, applies the same check.
+  `bun run measure` uses the same rule.
+
 ## [1.15.2] — 2026-10-07
 
 ### Security
