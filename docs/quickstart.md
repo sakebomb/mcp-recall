@@ -82,4 +82,4 @@ The `<!-- BEGIN mcp-recall -->` / `<!-- END mcp-recall -->` markers let `mcp-rec
 
 ---
 
-→ [Configuration](../README.md#configuration) · [Tools](tools.md) · [Profiles quickstart](profiles-quickstart.md) · [Troubleshooting](troubleshooting.md)
+→ [All install options](install.md) · [Configuration](configuration.md) · [Tools](tools.md) · [Profiles quickstart](profiles-quickstart.md) · [Troubleshooting](troubleshooting.md)
