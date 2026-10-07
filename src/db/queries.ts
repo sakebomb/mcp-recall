@@ -97,17 +97,20 @@ export function storeOutput(db: Database, input: StoreInput): StoredOutput {
   const full_retained = input.full_retained ?? 1;
   const bodyToStore = full_retained ? input.full_content : "";
   const command_fp = input.command_fp ?? null;
+  const delivered_size = input.delivered_size ?? null;
 
   const insertAndChunk = db.transaction(() => {
     db.prepare(`
       INSERT INTO stored_outputs
         (id, project_key, session_id, tool_name, summary, full_content,
-         original_size, summary_size, created_at, input_hash, output_hash, full_retained, command_fp)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         original_size, summary_size, created_at, input_hash, output_hash, full_retained, command_fp,
+         delivered_size)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, input.project_key, input.session_id, input.tool_name,
       input.summary, bodyToStore, input.original_size,
-      summary_size, created_at, input_hash, output_hash, full_retained, command_fp
+      summary_size, created_at, input_hash, output_hash, full_retained, command_fp,
+      delivered_size
     );
 
     if (full_retained) storeChunks(db, id, input.full_content);
@@ -122,6 +125,7 @@ export function storeOutput(db: Database, input: StoreInput): StoredOutput {
     output_hash,
     full_retained,
     command_fp,
+    delivered_size,
   };
 }
 

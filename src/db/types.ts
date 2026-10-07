@@ -18,6 +18,8 @@ export interface StoredOutput {
   full_retained: number;
   /** Privacy-safe command family fingerprint (Bash rows only; NULL otherwise or pre-migration). See #251. */
   command_fp: string | null;
+  /** Bytes Claude received: header, newline, summary (#319). NULL for notes and pre-migration rows. */
+  delivered_size: number | null;
 }
 
 /** Input required to persist a new compressed tool output. */
@@ -40,6 +42,8 @@ export interface StoreInput {
   full_retained?: number;
   /** Privacy-safe command family fingerprint (Bash only); omitted/undefined stores NULL. See #251. */
   command_fp?: string | null;
+  /** Bytes Claude received for this output (#319); omitted stores NULL. */
+  delivered_size?: number | null;
 }
 
 /** Options for full-text search across stored outputs. */

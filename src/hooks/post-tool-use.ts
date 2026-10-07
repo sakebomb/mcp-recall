@@ -217,6 +217,7 @@ export function handlePostToolUse(raw: string): HookOutput {
     output_hash, // reuse the hash computed above for the dedup check
     full_retained,
     command_fp,
+    delivered_size: deliveredSize,
   });
 
   // 8. Evict if store exceeds size limit

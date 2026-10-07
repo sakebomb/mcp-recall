@@ -96,6 +96,10 @@ const MIGRATIONS = [
   // (reported as "unknown"). See commandFingerprint in handlers/bash.ts.
   "ALTER TABLE stored_outputs ADD COLUMN command_fp TEXT",
   "CREATE INDEX IF NOT EXISTS idx_so_command_fp ON stored_outputs(project_key, command_fp)",
+  // Bytes Claude received: header, newline, summary (#319). NULL for notes and
+  // for rows written before this migration; savings figures then fall back to
+  // summary_size. summary_size stays the stored size of a summary-only row.
+  "ALTER TABLE stored_outputs ADD COLUMN delivered_size INTEGER",
 ];
 
 function applyMigrations(db: Database): void {

@@ -153,6 +153,27 @@ describe("import round-trip", () => {
     }
   });
 
+  test("round-trips delivered_size across export/import (#319)", async () => {
+    storeOutput(sourceDb, makeInput({ tool_name: "Bash", summary: "d", delivered_size: 140 }));
+
+    const dumpFile = makeTmpPath();
+    const targetDbPath = makeTmpPath(".db");
+    exportToFile(dumpFile);
+
+    process.env.RECALL_DB_PATH = targetDbPath;
+    try {
+      await handleImportCommand([dumpFile]);
+      const targetDb = new Database(targetDbPath);
+      const row = targetDb
+        .prepare(`SELECT delivered_size FROM stored_outputs WHERE tool_name = 'Bash'`)
+        .get() as { delivered_size: number | null };
+      targetDb.close();
+      expect(row.delivered_size).toBe(140);
+    } finally {
+      delete process.env.RECALL_DB_PATH;
+    }
+  });
+
   test("drops the body of a summary-only row from a malformed dump (full_retained=0 invariant)", async () => {
     const bigBody = "x".repeat(10000);
     const dump = [{

@@ -24,6 +24,15 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   to four `Expected`/`Received` or `-`/`+` diff lines are kept after a bun
   `error:` or a jest `●` failure. When the 20-line list is full, failure names
   take priority over detail.
+- **Savings figures count the header Claude receives** (#319). `recall__stats`,
+  the session summary, the per-tool and per-command breakdowns, and
+  `bun run measure` counted only the summary as delivered, leaving out the
+  `[recall:…]` header (60–140 B per call). New rows record the bytes Claude
+  received in a new `delivered_size` column, an additive migration applied
+  when a store is next opened. Rows stored earlier have no such figure and
+  still count the summary alone; `measure` reports how many rows have the
+  exact figure. Its MCP replay now includes the header too, which lowers that
+  figure from 97.0% to 96.5% on the maintainer's store.
 
 ## [1.15.2] — 2026-10-07
 
