@@ -19,6 +19,7 @@ import { testRunnerHandler } from "./bash-test";
 import { dockerPsHandler } from "./bash-docker";
 import { compilerDiagnosticsHandler } from "./bash-compilers";
 import { grepHandler, lsHandler, findHandler } from "./bash-search";
+import { summarizeLineWindow } from "./generic";
 
 export { gitDiffHandler, gitLogHandler, gitStatusHandler, gitRefsHandler } from "./bash-git";
 export { testRunnerHandler } from "./bash-test";
@@ -404,6 +405,66 @@ export function commandFingerprint(command: string): string {
 }
 
 /**
+ * True when `command` runs more than one command in sequence: a `;`, `&&`, `||`
+ * or newline outside quotes, escapes and `( … )`/`$( … )`, with a command after
+ * it. A pipe is not a separator: it yields one output stream.
+ */
+export function isCompoundCommand(command: string): boolean {
+  let quote: string | null = null;
+  let depth = 0;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i]!;
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      continue;
+    }
+    if (ch === "\\") {
+      i++;
+      continue;
+    }
+    if (quote) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === "`") quote = ch;
+    else if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    else if (depth === 0) {
+      const pair = command.slice(i, i + 2);
+      const width = pair === "&&" || pair === "||" ? 2 : ch === ";" || ch === "\n" ? 1 : 0;
+      if (width > 0 && command.slice(i + width).trim() !== "") return true;
+    }
+  }
+  return false;
+}
+
+// Compound-command windows: wide enough that a typical multi-command diagnostic
+// (a few short sections) passes through whole, since every section is a
+// separate answer and any one may be the one needed.
+const COMPOUND_HEAD_LINES = 30;
+const COMPOUND_TAIL_LINES = 15;
+
+/**
+ * Several commands produce several outputs, so no single command's handler
+ * fits (#308): an `ls` handler on `ls …; git diff | wc -c` dropped the second
+ * result. Short output is returned whole (the hook then passes it through
+ * unstored); long output keeps head, tail and the error lines between.
+ */
+export const compoundHandler: Handler = (
+  _toolName: string,
+  output: unknown
+): CompressionResult => {
+  const text = bashOutputText(output);
+  const originalSize = Buffer.byteLength(text, "utf8");
+  const lines = text.split("\n");
+  if (lines.length <= COMPOUND_HEAD_LINES + COMPOUND_TAIL_LINES) {
+    return { summary: text, originalSize };
+  }
+  const window = summarizeLineWindow(lines, COMPOUND_HEAD_LINES, COMPOUND_TAIL_LINES);
+  return { summary: `[bash · compound command · ${lines.length} lines]\n${window}`, originalSize };
+};
+
+/**
  * Returns the appropriate handler for a native Bash tool call based on the
  * command string in `tool_input`. Falls back to the shell handler when no
  * CLI-specific handler matches.
@@ -412,6 +473,8 @@ export function getBashHandler(input: unknown): Handler {
   const rawCommand = extractCommand(input);
   if (!rawCommand) return shellHandler;
   const command = normalizeCommand(rawCommand);
+
+  if (isCompoundCommand(command)) return compoundHandler;
 
   if (/^git\s+grep(\s|$)/.test(command)) return grepHandler;
   if (/^git\s+(diff|show)(\s|$)/.test(command)) return gitDiffHandler;

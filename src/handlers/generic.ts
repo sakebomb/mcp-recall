@@ -39,9 +39,18 @@ function summarizeBlock(raw: string): string {
 const plural = (n: number): string => (n === 1 ? "" : "s");
 
 function summarizeLines(lines: string[]): string {
-  const head = lines.slice(0, HEAD_LINES);
-  const tail = lines.slice(lines.length - TAIL_LINES);
-  const middle = lines.slice(HEAD_LINES, lines.length - TAIL_LINES);
+  return summarizeLineWindow(lines, HEAD_LINES, TAIL_LINES);
+}
+
+/**
+ * First `headLines` and last `tailLines` lines, with a count of the elided
+ * middle and any error/warn lines surfaced from it. Callers keep
+ * `lines.length > headLines + tailLines` so the windows never overlap.
+ */
+export function summarizeLineWindow(lines: string[], headLines: number, tailLines: number): string {
+  const head = lines.slice(0, headLines);
+  const tail = lines.slice(lines.length - tailLines);
+  const middle = lines.slice(headLines, lines.length - tailLines);
   const matches = middle.filter((l) => MATCH_RE.test(l)).slice(0, MAX_MATCH_LINES);
 
   const note = matches.length
