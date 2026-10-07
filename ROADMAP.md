@@ -9,7 +9,7 @@ the system, [docs/architecture.md](docs/architecture.md).
 ## The bet
 
 mcp-recall occupies one specific gap: **layer ③ of the context stack** (see the
-[README](README.md#the-full-context-stack)). Claude Code's native microcompaction
+[README](README.md#how-it-compares)). Claude Code's native microcompaction
 offloads *built-in* tool output, but **MCP** tool output is truncated at a
 25k-token ceiling and discarded. mcp-recall intercepts MCP (and Bash) output
 *before* it reaches the window, stores the full payload locally, and keeps it
