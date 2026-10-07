@@ -2049,6 +2049,81 @@ describe("testRunnerHandler", () => {
     const { originalSize } = testRunnerHandler("Bash", output);
     expect(originalSize).toBeGreaterThan(0);
   });
+
+  // #308 dogfooding: these summaries dropped or misstated what a follow-up needed.
+  describe("keeps what a failing run needs (#308)", () => {
+    const BUN_TEST_FAIL = [
+      "bun test v1.3.14 (0d9b296a)",
+      "",
+      "tests/hooks.test.ts:",
+      "851 |       expect(run(shape).row?.full_content).toBe(text);",
+      "                                                 ^",
+      "error: expect(received).toBe(expected)",
+      "",
+      'Expected: "shape value 0"',
+      'Received: ""',
+      "",
+      "      at <anonymous> (tests/hooks.test.ts:851:44)",
+      "(fail) Bash envelope > stores stdout + stderr for the object shape [2.26ms]",
+      "",
+      " 4 pass",
+      " 54 filtered out",
+      " 1 fail",
+      " 12 expect() calls",
+      "Ran 5 tests across 1 file. [68.00ms]",
+    ].join("\n");
+
+    it("keeps a bun failure's error message next to its name", () => {
+      const { summary } = testRunnerHandler("Bash", { stdout: "", stderr: BUN_TEST_FAIL });
+      expect(summary).toContain("error: expect(received).toBe(expected)");
+      expect(summary).toContain("(fail) Bash envelope > stores stdout + stderr for the object shape");
+    });
+
+    it("takes bun's total from its Ran line, not from the counts it happened to see", () => {
+      // `| tail -4` cut the pass line: the old summary said "1 failed (1 total)".
+      const tail = " 1 fail\n 12 expect() calls\nRan 5 tests across 1 file. [68.00ms]";
+      const { summary } = testRunnerHandler("Bash", { stdout: tail, stderr: "" });
+      expect(summary).toContain("(5 total)");
+      expect(summary).not.toContain("(1 total)");
+    });
+
+    it("never reports pass while it lists failures", () => {
+      const failLines = "(fail) a > one [1ms]\n(fail) a > two [1ms]";
+      const { summary } = testRunnerHandler("Bash", { stdout: failLines, stderr: "" });
+      expect(summary).toStartWith("test runner — FAIL");
+      expect(summary).toContain("2 failed");
+      // A runner without per-test count lines: only the failure name says FAIL.
+      const jest = testRunnerHandler("Bash", { stdout: "  ✕ adds numbers (3 ms)", stderr: "" });
+      expect(jest.summary).toStartWith("test runner — FAIL: no counts in output");
+    });
+
+    it("reads pytest's failed-first summary line", () => {
+      // pytest prints "1 failed, 2 passed in 0.12s"; the old parser kept only "2 passed".
+      const { summary } = testRunnerHandler("Bash", { stdout: "1 failed, 2 passed, 1 skipped in 0.12s", stderr: "" });
+      expect(summary).toStartWith("test runner — FAIL");
+      expect(summary).toContain("2 passed, 1 failed, 1 skipped");
+    });
+
+    it("counts (pass) lines when no count line is present", () => {
+      const lines = "(pass) a > one [1ms]\n(pass) a > two [1ms]\n(fail) a > three [1ms]";
+      const { summary } = testRunnerHandler("Bash", { stdout: lines, stderr: "" });
+      expect(summary).toContain("2 passed");
+      expect(summary).toContain("1 failed");
+    });
+
+    it("does not turn console noise in a passing run into failures", () => {
+      const out = "error: retrying connection (expected in this test)\n\n 12 pass\n 0 fail\nRan 12 tests across 1 file.";
+      const { summary } = testRunnerHandler("Bash", { stdout: out, stderr: "" });
+      expect(summary).toStartWith("test runner — pass");
+      expect(summary).not.toContain("failures:");
+    });
+
+    it("keeps pytest assertion lines", () => {
+      const out = "FAILED tests/test_x.py::test_add - assert 3 == 4\nE       assert 3 == 4\n1 failed, 2 passed in 0.12s";
+      const { summary } = testRunnerHandler("Bash", { stdout: out, stderr: "" });
+      expect(summary).toContain("E       assert 3 == 4");
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
