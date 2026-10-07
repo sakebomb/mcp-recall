@@ -190,7 +190,11 @@ describe("external-content FTS (#263)", () => {
     initSchema(db);
     convertToLegacyFts(db);
     const body = "lorem ipsum dolor sit amet ".repeat(400);
-    for (let i = 0; i < 200; i++) storeOutput(db, input({ full_content: `${body} item${i}` }));
+    // One transaction, as the sibling setups do: 200 separate commits measured
+    // 7.5 s on a loaded machine (vs 92 ms), past bun's 5 s default timeout.
+    db.transaction(() => {
+      for (let i = 0; i < 200; i++) storeOutput(db, input({ full_content: `${body} item${i}` }));
+    })();
     db.close();
     const before = statSync(path).size;
 
