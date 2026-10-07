@@ -73,6 +73,13 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   summary: up to 45 lines pass through whole, and longer output keeps its first
   30 and last 15 lines plus the error lines between. Pipes still route by their
   first command, since a pipe yields one output.
+- **Bash output over about 50 KB is summarised whole, not from its first 50 KB**
+  (#316). Claude Code hands the hook a cut copy of a large output, with no
+  marker in it, and saves the full output to a file it names alongside. The
+  summary described only the cut: `git log --stat -60` read as "38 commits" at
+  48.8 KB, inside Claude Code's own notice that the output was 108 KB. The hook
+  now reads that file back, so the summary, the stored size and body, and the
+  secret scan all cover the real output. Files over 20 MB are left cut.
 
 ## [1.15.1] — 2026-10-06
 
