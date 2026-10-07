@@ -46,7 +46,7 @@ The pre-commit hook (`bun install` wires it automatically) detects staged `src/`
 
 ## Error contract
 
-mcp-recall must never break a tool call under any failure condition. Every new code path that can fail must degrade gracefully to the original uncompressed output. See the Error contract section in the README.
+mcp-recall must never break a tool call under any failure condition. Every new code path that can fail must degrade gracefully to the original uncompressed output. See the [Error contract](README.md#error-contract) in the README.
 
 ## PR checklist
 
@@ -245,9 +245,9 @@ describe("jiraHandler", () => {
 });
 ```
 
-### Step 5 — Update the README
+### Step 5 — Update the handler reference
 
-Add a row to the Compression handlers table in `README.md` — a markdown table with three columns (handler name, what it matches, and the compression strategy):
+Add a row to the handler table in [`docs/handlers.md`](docs/handlers.md) — a markdown table with three columns (handler name, what it matches, and the compression strategy):
 
 ```markdown
 | Jira | tool name contains `jira` | Key, summary, status, assignee, priority. Lists: first 10 + overflow count. |
@@ -261,5 +261,5 @@ Add a row to the Compression handlers table in `README.md` — a markdown table 
 - [ ] `extractText` used for `originalSize` (or `payloadByteLength` when dropping incompressible non-text blocks — see Rules)
 - [ ] No throws — every code path returns a `CompressionResult`
 - [ ] ≥ 5 tests including: basic extraction, MCP wrapper, `originalSize`, fallback, dispatcher routing
-- [ ] Row added to README compression handler table
+- [ ] Row added to the handler table in `docs/handlers.md`
 - [ ] Issue number referenced in PR title (e.g. `feat: Jira compression handler (#49)`)
