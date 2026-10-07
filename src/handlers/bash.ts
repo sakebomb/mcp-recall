@@ -4,9 +4,9 @@
  * Falls back to the shell handler for unrecognised commands.
  */
 import type { CompressionResult, Handler } from "./types";
-import { extractText } from "./types";
 import { shellHandler } from "./shell";
 import {
+  bashOutputText,
   extractStdout,
   extractStderr,
   extractCommand,
@@ -45,7 +45,7 @@ export const terraformPlanHandler: Handler = (
   output: unknown
 ): CompressionResult => {
   const stdout = extractStdout(output);
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
 
   const summaryMatch = stdout.match(TERRAFORM_PLAN_SUMMARY_RE);
   const summaryLine = summaryMatch ? summaryMatch[0] : null;
@@ -86,7 +86,7 @@ export const packageInstallHandler: Handler = (
   const stdout = extractStdout(output);
   const stderr = extractStderr(output);
   const combined = `${stdout}\n${stderr}`.trim();
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
 
   const warnings: string[] = [];
   const errors: string[] = [];
@@ -150,7 +150,7 @@ export const buildToolHandler: Handler = (
   const stdout = extractStdout(output);
   const stderr = extractStderr(output);
   const combined = `${stdout}\n${stderr}`.trim();
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
 
   const errorLines: string[] = [];
   const targetLines: string[] = [];
@@ -213,7 +213,7 @@ export const ghHandler: Handler = (
   output: unknown
 ): CompressionResult => {
   const stdout = extractStdout(output);
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
 
   const lines = stdout.trim().split("\n").filter((l) => l.trim());
 

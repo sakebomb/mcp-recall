@@ -1,7 +1,6 @@
 import type { CompressionResult, Handler } from "./types";
-import { extractText } from "./types";
 import { shellHandler } from "./shell";
-import { extractStdout, extractStderr, MAX_BUILD_ERRORS } from "./bash-shared";
+import { bashOutputText, extractStdout, extractStderr, MAX_BUILD_ERRORS } from "./bash-shared";
 
 // ---------------------------------------------------------------------------
 // Test runners: pytest, jest, bun test, vitest, go test
@@ -15,7 +14,7 @@ export const testRunnerHandler: Handler = (
   const stdout = extractStdout(output);
   const stderr = extractStderr(output);
   const combined = `${stdout}\n${stderr}`.trim();
-  const originalSize = Buffer.byteLength(extractText(output), "utf8");
+  const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
 
   // Collect failure blocks — lines that look like test failures/errors
   const failureLines: string[] = [];

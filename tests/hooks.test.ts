@@ -841,3 +841,61 @@ describe("handlePostToolUse — empty summaries (#296)", () => {
     expect(row.summary.trim()).not.toBe("");
   });
 });
+
+describe("handlePostToolUse — Bash envelope is not output (#306)", () => {
+  const stdout = Array.from({ length: 300 }, (_, i) => `shape value ${i} from the build log`).join("\n");
+  const stderr = "warning: deprecated flag";
+  // Claude Code adds bashEditDiff when the command edited files: those edits,
+  // not anything the command printed.
+  const bashEditDiff = "diff --git a/x.ts b/x.ts\n" + "+zebrafish quokka axolotl\n".repeat(400);
+  const envelope = { stdout, stderr, interrupted: false, isImage: false, noOutputExpected: false, bashEditDiff };
+  const text = `${stdout}\n${stderr}`;
+  let tempDir: string;
+
+  beforeEach(() => {
+    process.env.RECALL_DB_PATH = ":memory:";
+    // The default "balanced" retention keeps no body for a local Bash command.
+    tempDir = mkdtempSync(join(tmpdir(), "recall-hooks-306-"));
+    const configPath = join(tempDir, "config.toml");
+    writeFileSync(configPath, '[store]\nretention = "full"\n');
+    process.env.RECALL_CONFIG_PATH = configPath;
+    resetConfig();
+  });
+
+  afterEach(() => {
+    closeDb();
+    resetConfig();
+    delete process.env.RECALL_DB_PATH;
+    delete process.env.RECALL_CONFIG_PATH;
+    rmSync(tempDir, { recursive: true });
+  });
+
+  const run = (shape: "object" | "JSON string") => {
+    const response = shape === "object" ? envelope : JSON.stringify(envelope);
+    const delivered = handlePostToolUse(
+      makePostToolUseInput("Bash", response, { tool_input: { command: "cat build.log" } })
+    ).updatedMCPToolOutput ?? "";
+    const db = getDb(":memory:");
+    const id = delivered.match(/recall_[0-9a-f]+/)?.[0] ?? "";
+    return { header: delivered.split("\n")[0], row: retrieveOutput(db, id) };
+  };
+
+  for (const shape of ["object", "JSON string"] as const) {
+    it(`sizes stdout + stderr for the ${shape} shape`, () => {
+      expect(run(shape).row?.original_size).toBe(Buffer.byteLength(text, "utf8"));
+    });
+
+    it(`stores stdout + stderr for the ${shape} shape`, () => {
+      expect(run(shape).row?.full_content).toBe(text);
+    });
+
+    it(`hints from the output, not the envelope, for the ${shape} shape`, () => {
+      const { header } = run(shape);
+      expect(header).toContain("search:");
+      expect(header).not.toContain("isImage");
+      expect(header).not.toContain("noOutputExpected");
+      expect(header).not.toMatch(/zebrafish|quokka|axolotl/);
+      expect(header).not.toMatch(/"n(shape|warning)"/);
+    });
+  }
+});

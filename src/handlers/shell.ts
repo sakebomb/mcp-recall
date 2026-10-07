@@ -99,9 +99,12 @@ export const shellHandler: Handler = (
   output: unknown
 ): CompressionResult => {
   const raw = extractText(output);
-  const originalSize = Buffer.byteLength(raw, "utf8");
-
   const structured = parseStructured(raw);
+  // Size the output itself, not the JSON envelope around it (#306).
+  const measured = structured
+    ? [structured.stdout ?? structured.output ?? "", structured.stderr ?? ""].filter((s) => s.length > 0).join("\n")
+    : raw;
+  const originalSize = Buffer.byteLength(measured, "utf8");
 
   if (structured) {
     const stdout = stripSshNoise(stripAnsi(structured.stdout ?? structured.output ?? ""));
