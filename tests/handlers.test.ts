@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { playwrightHandler } from "../src/handlers/playwright";
 import { githubHandler } from "../src/handlers/github";
+import type { Handler } from "../src/handlers/types";
 import { gitlabHandler } from "../src/handlers/gitlab";
 import { filesystemHandler } from "../src/handlers/filesystem";
 import { shellHandler, stripAnsi, stripSshNoise } from "../src/handlers/shell";
@@ -1119,6 +1120,65 @@ describe("getBashHandler", () => {
   it("unwraps multi-hop `cd` prefixes across mixed separators (#260)", () => {
     expect(normalizeCommand("cd /a && cd /b\ngit diff")).toBe("git diff");
     expect(normalizeCommand("cd /a\ncd /b && git log")).toBe("git log");
+  });
+
+  // #302: a `timeout 30` prefix hid the command from routing, so a grep fell to
+  // shellHandler (76.3% vs 89.7% in the corpus). Sibling wrappers had the same gap.
+  describe("unwraps leading wrappers before routing (#302)", () => {
+    const wrapped: [string, string][] = [
+      ["timeout 30 ", "timeout"],
+      ["timeout 2.5m ", "fractional duration"],
+      ["timeout -s KILL 30 ", "timeout -s"],
+      ["timeout --kill-after=5 --preserve-status 30s ", "timeout long options"],
+      ["time ", "time"],
+      ["time -p ", "time -p"],
+      ["nice ", "nice"],
+      ["nice -n 10 ", "nice -n"],
+      ["env ", "env"],
+      ["env FOO=1 BAR=x ", "env with assignments"],
+      ["FOO=1 ", "assignment"],
+      ['FOO="a b" BAR=\'c d\' ', "quoted assignments"],
+      ["sudo ", "sudo"],
+      ["doas ", "doas"],
+      ["cd /repo && timeout 60 ", "cd then timeout"],
+      ["timeout 60 env CI=1 ", "chained wrappers"],
+    ];
+    const targets: [string, Handler][] = [
+      ["grep -rn foo src/", grepHandler],
+      ["git diff HEAD", gitDiffHandler],
+      ["git log --stat", gitLogHandler],
+    ];
+
+    for (const [prefix, label] of wrapped) {
+      it(`routes through ${label}`, () => {
+        for (const [command, handler] of targets) {
+          expect(getBashHandler({ command: prefix + command })).toBe(handler);
+          expect(normalizeCommand(prefix + command)).toBe(command);
+        }
+      });
+    }
+
+    it("fingerprints the wrapped command, not the wrapper", () => {
+      expect(commandFingerprint(normalizeCommand("timeout 30 git diff"))).toBe("git diff");
+      expect(commandFingerprint(normalizeCommand("env CI=1 bun test"))).toBe("bun test");
+    });
+
+    it("leaves a wrapper with nothing to wrap alone", () => {
+      for (const command of ["timeout 30", "env", "env | grep PATH", "time", "nice", "FOO=1"]) {
+        expect(normalizeCommand(command)).toBe(command);
+      }
+    });
+
+    it("leaves a flagged sudo alone: its argument span is not safely parseable", () => {
+      expect(normalizeCommand("sudo -u www git diff")).toBe("sudo -u www git diff");
+    });
+
+    it("disproves a long unterminated assignment run without backtracking", () => {
+      const input = "A=1 ".repeat(200) + 'B="unterminated';
+      const t0 = performance.now();
+      normalizeCommand(input);
+      expect(performance.now() - t0).toBeLessThan(250);
+    });
   });
 
   it("routes gh commands to ghHandler", () => {

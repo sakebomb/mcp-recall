@@ -27,6 +27,14 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   now stores, hints and sizes stdout followed by stderr, in both the object and
   JSON-string shapes. Recorded Bash savings drop to honest figures from this
   release on; earlier rows are unchanged.
+- **Wrapped Bash commands route to their real handler** (#302). A leading
+  `timeout 30` hid the command from routing, so `timeout 30 grep -rn …` got the
+  generic shell summary (76.3% vs 89.7% for a plain grep across 2,620 real
+  outputs). The same gap covered `time`, `nice`, `env`, `VAR=value`, `sudo` and
+  `doas`. They are now unwrapped alongside `cd … &&`, so routing, per-command
+  savings attribution and retention (`timeout 30 curl …` keeps its body) all see
+  the wrapped command. A wrapper whose arguments are not safely parseable, such
+  as `sudo -u www …` or `env | grep`, is left as it is.
 
 ## [1.15.1] — 2026-10-06
 

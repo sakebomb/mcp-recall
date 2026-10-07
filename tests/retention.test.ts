@@ -62,6 +62,12 @@ describe("shouldRetainFullBody", () => {
       expect(shouldRetainFullBody("balanced", "Bash", "cd /a; cd /b; git diff")).toBe(false);
     });
 
+    it("unwraps leading wrappers before classifying (#302)", () => {
+      expect(shouldRetainFullBody("balanced", "Bash", "timeout 30 curl https://x")).toBe(true);
+      expect(shouldRetainFullBody("balanced", "Bash", "env CI=1 gh api /x")).toBe(true);
+      expect(shouldRetainFullBody("balanced", "Bash", "timeout 30 git diff")).toBe(false);
+    });
+
     it("keeps unknown intercepted tools (never silently drop the unrecognised)", () => {
       expect(shouldRetainFullBody("balanced", "SomeFutureTool")).toBe(true);
     });
