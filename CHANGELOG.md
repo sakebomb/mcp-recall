@@ -15,10 +15,14 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   OpenRouter, Stripe and Twilio keys that began a line, and GCP service-account
   key files, were stored** instead of skipped: in the summary, the search hints,
   and the body where retention kept it. Patterns without a boundary guard, such
-  as GitHub tokens and private-key headers, were still caught. Existing stores
-  are not rescanned. If a Bash command may have printed one of those keys, drop
-  the old Bash rows with `recall__forget` (`tool: "Bash"`, per project) and
-  rotate the key.
+  as GitHub tokens and private-key headers, were still caught. These copies sit
+  in the local store and left it only on request: before 1.15.2 a Bash summary
+  never replaced the output Claude saw (#304), but `recall__search`,
+  `recall__retrieve` and `recall__export` return stored rows. Claude saw the
+  printed key in the command's own output either way; what recall added is a
+  copy that outlives the session. Existing stores are not rescanned. If a Bash
+  command may have printed one of those keys, drop the old Bash rows with
+  `recall__forget` (`tool: "Bash"`, per project) and rotate the key.
 
 ### Fixed
 
