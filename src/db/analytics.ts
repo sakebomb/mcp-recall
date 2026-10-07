@@ -14,6 +14,13 @@ import type {
 import { getSessionDays, EFFECTIVE_SIZE_EXPR } from "./queries";
 
 /**
+ * Bytes Claude received for a row: its delivered size (header included, #319),
+ * or for rows written before that was recorded, the summary alone. The
+ * `*summary_bytes` savings figures below sum this.
+ */
+const DELIVERED_EXPR = "COALESCE(delivered_size, summary_size)";
+
+/**
  * Returns aggregate storage stats for a project. The savings figures
  * (`total_*`, `compression_ratio`) cover intercepted tool output only —
  * `recall__note` memory is excluded and reported separately as `note_*`, so a
@@ -26,7 +33,7 @@ export function getStats(db: Database, project_key: string): Stats {
     SELECT
       COALESCE(SUM(CASE WHEN tool_name != 'recall__note' THEN 1 ELSE 0 END), 0) as total_items,
       COALESCE(SUM(CASE WHEN tool_name != 'recall__note' THEN original_size ELSE 0 END), 0) as total_original_bytes,
-      COALESCE(SUM(CASE WHEN tool_name != 'recall__note' THEN summary_size ELSE 0 END), 0) as total_summary_bytes,
+      COALESCE(SUM(CASE WHEN tool_name != 'recall__note' THEN ${DELIVERED_EXPR} ELSE 0 END), 0) as total_summary_bytes,
       COALESCE(SUM(pinned), 0) as pinned_items,
       COALESCE(SUM(CASE WHEN pinned = 1 THEN ${EFFECTIVE_SIZE_EXPR} ELSE 0 END), 0) as pinned_bytes,
       COALESCE(SUM(CASE WHEN tool_name = 'recall__note' THEN 1 ELSE 0 END), 0) as note_items,
@@ -56,7 +63,7 @@ export function getBashCommandBreakdown(db: Database, project_key: string): Comm
       COALESCE(command_fp, 'unknown') AS command_fp,
       COUNT(*)                       AS items,
       COALESCE(SUM(original_size),0) AS original_bytes,
-      COALESCE(SUM(summary_size),0)  AS summary_bytes
+      COALESCE(SUM(${DELIVERED_EXPR}),0) AS summary_bytes
     FROM stored_outputs
     WHERE project_key = ? AND tool_name = 'Bash'
     GROUP BY COALESCE(command_fp, 'unknown')
@@ -71,7 +78,7 @@ export function getToolBreakdown(db: Database, project_key: string): ToolBreakdo
       tool_name,
       COUNT(*)                       AS items,
       COALESCE(SUM(original_size),0) AS original_bytes,
-      COALESCE(SUM(summary_size),0)  AS summary_bytes
+      COALESCE(SUM(${DELIVERED_EXPR}),0) AS summary_bytes
     FROM stored_outputs
     WHERE project_key = ?
     GROUP BY tool_name
@@ -162,7 +169,7 @@ export function getSessionSummary(
     SELECT
       COUNT(*) as stored_count,
       COALESCE(SUM(original_size), 0) as total_original_bytes,
-      COALESCE(SUM(summary_size), 0) as total_summary_bytes,
+      COALESCE(SUM(${DELIVERED_EXPR}), 0) as total_summary_bytes,
       COUNT(CASE WHEN access_count > 0 THEN 1 END) as accessed_count,
       COALESCE(SUM(access_count), 0) as total_accesses
     FROM stored_outputs ${base}

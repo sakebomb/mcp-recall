@@ -44,8 +44,18 @@ const mb = (b: number) => `${(b / 1048576).toFixed(1)} MB`;
 const pct = (t: Totals) => (t.original > 0 ? `${(100 * (1 - t.summary / t.original)).toFixed(1)}%` : "n/a");
 const day = (s: number) => new Date(s * 1000).toISOString().slice(0, 10);
 
-// Same note-excluding totals as getStats, for stores that predate the
-// full_retained column getStats reads (never reopened since that migration).
+/**
+ * Bytes Claude received per row, as getStats counts them: delivered_size where
+ * recorded (#319), else the summary alone. Stores are opened read-only and
+ * never migrated, so a store not reopened since #319 has no such column.
+ */
+function deliveredExpr(db: Database): string {
+  const cols = db.query("PRAGMA table_info(stored_outputs)").all() as { name: string }[];
+  return cols.some((c) => c.name === "delivered_size") ? "COALESCE(delivered_size, summary_size)" : "summary_size";
+}
+
+// Same note-excluding totals as getStats, for stores that predate a column
+// getStats reads (full_retained, delivered_size; never reopened since).
 const LEGACY_TOTALS = `
   SELECT COALESCE(SUM(original_size), 0) AS total_original_bytes,
          COALESCE(SUM(summary_size), 0) AS total_summary_bytes,
@@ -86,11 +96,10 @@ function replayMcp(db: Database, replay: Totals, byTool: Map<string, Totals>): v
       emptySummaries.set(row.tool_name, (emptySummaries.get(row.tool_name) ?? 0) + 1);
       ({ summary } = genericHandler(row.tool_name, output));
     }
-    // The hook passes output through unchanged when the summary plus its header
-    // is not smaller (#319). Summary bytes stay the delivered figure, matching
-    // the recorded rows' summary_size.
-    const passesThrough = deliveredBytes(summary, row.original_size, extractHints(row.full_content)) >= row.original_size;
-    const delivered = passesThrough ? row.original_size : Buffer.byteLength(summary, "utf8");
+    // What Claude receives: the header plus the summary, or the output itself
+    // when that is not smaller (#319).
+    const sized = deliveredBytes(summary, row.original_size, extractHints(row.full_content));
+    const delivered = Math.min(sized, row.original_size);
     add(replay, row.original_size, delivered, 1);
     tally(byTool, row.tool_name, row.original_size, delivered, 1);
   }
@@ -105,7 +114,7 @@ function tallyBash(db: Database, byCommand: Map<string, Totals>): void {
   try {
     rows = db
       .query(`SELECT COALESCE(command_fp, 'unknown') AS fp, SUM(original_size) AS o,
-                     SUM(summary_size) AS s, COUNT(*) AS n
+                     SUM(${deliveredExpr(db)}) AS s, COUNT(*) AS n
               FROM stored_outputs WHERE tool_name = 'Bash' GROUP BY fp`)
       .all() as typeof rows;
   } catch {
@@ -138,6 +147,7 @@ const byTool = new Map<string, Totals>();
 const byCommand = new Map<string, Totals>();
 let stores = 0;
 let projects = 0;
+let exactDelivered = 0;
 let first = Infinity;
 let last = 0;
 
@@ -157,13 +167,15 @@ for (const file of readdirSync(dir).filter((f) => f.endsWith(".db"))) {
   }
   const familyRows = db
     .query(`SELECT CASE WHEN tool_name = 'Bash' THEN 'Bash' ELSE 'MCP' END AS fam,
-                   SUM(original_size) AS o, SUM(summary_size) AS s, COUNT(*) AS n,
+                   SUM(original_size) AS o, SUM(${deliveredExpr(db)}) AS s, COUNT(*) AS n,
+                   ${deliveredExpr(db) === "summary_size" ? "0" : "COUNT(delivered_size)"} AS exact,
                    MIN(created_at) AS lo, MAX(created_at) AS hi
             FROM stored_outputs WHERE tool_name != 'recall__note'
               AND (tool_name = 'Bash' OR tool_name LIKE 'mcp__%') GROUP BY fam`)
-    .all() as { fam: string; o: number; s: number; n: number; lo: number; hi: number }[];
+    .all() as { fam: string; o: number; s: number; n: number; exact: number; lo: number; hi: number }[];
   for (const r of familyRows) {
     add(families[r.fam]!, r.o, r.s, r.n);
+    exactDelivered += r.exact;
     first = Math.min(first, r.lo);
     last = Math.max(last, r.hi);
   }
@@ -187,6 +199,11 @@ row("Recorded, Bash", families.Bash!);
 row("Recorded, MCP", families.MCP!);
 row("MCP replayed through current handlers", replay);
 console.log(`\nRecorded savings: ${mb(recorded.original - recorded.summary)} (~${((recorded.original - recorded.summary) / 4 / 1e6).toFixed(1)}M tokens at 4 bytes/token).`);
+const recordedCalls = families.Bash!.calls + families.MCP!.calls;
+console.log(
+  `Delivered bytes include the header for ${exactDelivered.toLocaleString("en-US")} of ${recordedCalls.toLocaleString("en-US")} recorded calls; ` +
+  "older rows count the summary alone (#319). The replay always includes it."
+);
 printRanked("MCP by tool, replayed through current handlers (best first)", byTool, 1, 25);
 printRanked("Bash by command family, as recorded (15 largest by bytes, best first)", byCommand, 1, 15);
 if (emptySummaries.size > 0) {

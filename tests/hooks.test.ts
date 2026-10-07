@@ -302,6 +302,14 @@ describe("handlePostToolUse", () => {
     expect(result).toEqual({});
   });
 
+  it("records exactly the bytes it delivered (#319)", () => {
+    const stdout = Array.from({ length: 600 }, (_, i) => `probe line ${i + 1}`).join("\n");
+    const result = handlePostToolUse(makePostToolUseInput("Bash", bashOf(stdout), { tool_input: { command: "cat probe.log" } }));
+    const delivered = (result.hookSpecificOutput?.updatedToolOutput as { stdout: string }).stdout;
+    const row = getDb(":memory:").prepare("SELECT delivered_size FROM stored_outputs").get() as { delivered_size: number };
+    expect(row.delivered_size).toBe(Buffer.byteLength(delivered, "utf8"));
+  });
+
   it("never delivers more bytes than the original output", () => {
     const outputs: Array<[string, string]> = [
       ["bun test | grep fail", grepped],

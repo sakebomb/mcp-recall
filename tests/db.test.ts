@@ -17,6 +17,8 @@ import {
   forgetOutputs,
   getStats,
   getBashCommandBreakdown,
+  getToolBreakdown,
+  getSessionSummary,
   setMeta,
   getMeta,
   pruneExpired,
@@ -686,6 +688,48 @@ describe("db", () => {
       const cols = (raw.prepare("PRAGMA table_info(stored_outputs)").all() as { name: string }[]).map((c) => c.name);
       expect(cols).toContain("output_hash");
       raw.close();
+    });
+
+    it("adds delivered_size to a store created before it, leaving old rows NULL (#319)", () => {
+      const raw = new Database(":memory:");
+      raw.run(`CREATE TABLE stored_outputs (
+        id TEXT PRIMARY KEY, project_key TEXT NOT NULL, session_id TEXT NOT NULL,
+        tool_name TEXT NOT NULL, summary TEXT NOT NULL, full_content TEXT NOT NULL,
+        original_size INTEGER NOT NULL, summary_size INTEGER NOT NULL, created_at INTEGER NOT NULL,
+        pinned INTEGER NOT NULL DEFAULT 0, access_count INTEGER NOT NULL DEFAULT 0, last_accessed INTEGER,
+        input_hash TEXT, output_hash TEXT, full_retained INTEGER NOT NULL DEFAULT 1, command_fp TEXT)`);
+      raw.run(`INSERT INTO stored_outputs (id, project_key, session_id, tool_name, summary, full_content,
+        original_size, summary_size, created_at) VALUES ('recall_old', 'p', 's', 'Bash', 'sum', 'body', 900, 3, 1)`);
+      initSchema(raw);
+      const row = raw.prepare("SELECT delivered_size FROM stored_outputs WHERE id = 'recall_old'").get() as { delivered_size: number | null };
+      expect(row.delivered_size).toBeNull();
+      raw.close();
+    });
+  });
+
+  describe("delivered size (#319)", () => {
+    it("persists delivered_size, and stores NULL when omitted", () => {
+      const s = storeOutput(db, makeInput({ delivered_size: 140 }));
+      expect(s.delivered_size).toBe(140);
+      expect(retrieveOutput(db, s.id)!.delivered_size).toBe(140);
+      const n = storeOutput(db, makeInput({ full_content: "other body" }));
+      expect(retrieveOutput(db, n.id)!.delivered_size).toBeNull();
+    });
+
+    it("counts delivered bytes in every savings figure, falling back to summary_size for old rows", () => {
+      // New row: 4 B summary delivered as 104 B. Old row: summary_size only.
+      storeOutput(db, makeInput({ tool_name: "Bash", command_fp: "ls", original_size: 1000, summary: "abcd", delivered_size: 104, full_content: "a" }));
+      storeOutput(db, makeInput({ tool_name: "Bash", command_fp: "ls", original_size: 1000, summary: "efgh", full_content: "b" }));
+      const delivered = 104 + 4;
+      expect(getStats(db, PROJECT_KEY).total_summary_bytes).toBe(delivered);
+      expect(getToolBreakdown(db, PROJECT_KEY).find((r) => r.tool_name === "Bash")!.summary_bytes).toBe(delivered);
+      expect(getBashCommandBreakdown(db, PROJECT_KEY)[0]!.summary_bytes).toBe(delivered);
+      expect(getSessionSummary(db, PROJECT_KEY).total_summary_bytes).toBe(delivered);
+    });
+
+    it("keeps summary_size as the stored size of a summary-only row", () => {
+      const s = storeOutput(db, makeInput({ summary: "abcd", delivered_size: 104, full_retained: 0 }));
+      expect(retrieveOutput(db, s.id)!.summary_size).toBe(4);
     });
   });
 

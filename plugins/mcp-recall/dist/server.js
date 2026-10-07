@@ -19707,7 +19707,8 @@ var MIGRATIONS = [
   "CREATE INDEX IF NOT EXISTS idx_so_output_hash ON stored_outputs(project_key, output_hash)",
   "ALTER TABLE stored_outputs ADD COLUMN full_retained INTEGER NOT NULL DEFAULT 1",
   "ALTER TABLE stored_outputs ADD COLUMN command_fp TEXT",
-  "CREATE INDEX IF NOT EXISTS idx_so_command_fp ON stored_outputs(project_key, command_fp)"
+  "CREATE INDEX IF NOT EXISTS idx_so_command_fp ON stored_outputs(project_key, command_fp)",
+  "ALTER TABLE stored_outputs ADD COLUMN delivered_size INTEGER"
 ];
 function applyMigrations(db) {
   for (const sql of MIGRATIONS) {
@@ -19848,13 +19849,15 @@ function storeOutput(db, input) {
   const full_retained = input.full_retained ?? 1;
   const bodyToStore = full_retained ? input.full_content : "";
   const command_fp = input.command_fp ?? null;
+  const delivered_size = input.delivered_size ?? null;
   const insertAndChunk = db.transaction(() => {
     db.prepare(`
       INSERT INTO stored_outputs
         (id, project_key, session_id, tool_name, summary, full_content,
-         original_size, summary_size, created_at, input_hash, output_hash, full_retained, command_fp)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, input.project_key, input.session_id, input.tool_name, input.summary, bodyToStore, input.original_size, summary_size, created_at, input_hash, output_hash, full_retained, command_fp);
+         original_size, summary_size, created_at, input_hash, output_hash, full_retained, command_fp,
+         delivered_size)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, input.project_key, input.session_id, input.tool_name, input.summary, bodyToStore, input.original_size, summary_size, created_at, input_hash, output_hash, full_retained, command_fp, delivered_size);
     if (full_retained)
       storeChunks(db, id, input.full_content);
   });
@@ -19871,7 +19874,8 @@ function storeOutput(db, input) {
     input_hash,
     output_hash,
     full_retained,
-    command_fp
+    command_fp,
+    delivered_size
   };
 }
 function hashContent(content) {
@@ -20014,12 +20018,13 @@ function getSessionDays(db) {
   return db.prepare(`SELECT date FROM sessions ORDER BY date DESC`).all().map((r) => r.date);
 }
 // src/db/analytics.ts
+var DELIVERED_EXPR = "COALESCE(delivered_size, summary_size)";
 function getStats(db, project_key) {
   const row = db.prepare(`
     SELECT
       COALESCE(SUM(CASE WHEN tool_name != 'recall__note' THEN 1 ELSE 0 END), 0) as total_items,
       COALESCE(SUM(CASE WHEN tool_name != 'recall__note' THEN original_size ELSE 0 END), 0) as total_original_bytes,
-      COALESCE(SUM(CASE WHEN tool_name != 'recall__note' THEN summary_size ELSE 0 END), 0) as total_summary_bytes,
+      COALESCE(SUM(CASE WHEN tool_name != 'recall__note' THEN ${DELIVERED_EXPR} ELSE 0 END), 0) as total_summary_bytes,
       COALESCE(SUM(pinned), 0) as pinned_items,
       COALESCE(SUM(CASE WHEN pinned = 1 THEN ${EFFECTIVE_SIZE_EXPR} ELSE 0 END), 0) as pinned_bytes,
       COALESCE(SUM(CASE WHEN tool_name = 'recall__note' THEN 1 ELSE 0 END), 0) as note_items,
@@ -20036,7 +20041,7 @@ function getBashCommandBreakdown(db, project_key) {
       COALESCE(command_fp, 'unknown') AS command_fp,
       COUNT(*)                       AS items,
       COALESCE(SUM(original_size),0) AS original_bytes,
-      COALESCE(SUM(summary_size),0)  AS summary_bytes
+      COALESCE(SUM(${DELIVERED_EXPR}),0) AS summary_bytes
     FROM stored_outputs
     WHERE project_key = ? AND tool_name = 'Bash'
     GROUP BY COALESCE(command_fp, 'unknown')
@@ -20049,7 +20054,7 @@ function getToolBreakdown(db, project_key) {
       tool_name,
       COUNT(*)                       AS items,
       COALESCE(SUM(original_size),0) AS original_bytes,
-      COALESCE(SUM(summary_size),0)  AS summary_bytes
+      COALESCE(SUM(${DELIVERED_EXPR}),0) AS summary_bytes
     FROM stored_outputs
     WHERE project_key = ?
     GROUP BY tool_name
@@ -20097,7 +20102,7 @@ function getSessionSummary(db, project_key, opts = {}) {
     SELECT
       COUNT(*) as stored_count,
       COALESCE(SUM(original_size), 0) as total_original_bytes,
-      COALESCE(SUM(summary_size), 0) as total_summary_bytes,
+      COALESCE(SUM(${DELIVERED_EXPR}), 0) as total_summary_bytes,
       COUNT(CASE WHEN access_count > 0 THEN 1 END) as accessed_count,
       COALESCE(SUM(access_count), 0) as total_accesses
     FROM stored_outputs ${base}
