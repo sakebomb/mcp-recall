@@ -16,6 +16,14 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   reduction. The check now sizes what Claude receives, and the dedup cache,
   which can replay rows stored under the old rule, applies the same check.
   `bun run measure` uses the same rule.
+- **Test-runner summaries keep what a failure differs by** (#320). Failing test
+  names were cut at 120 characters from the end, and bun names run
+  `describe > it`, so parameterised cases came out as identical lines. Only
+  bun's generic `error: expect(received).toBe(expected)` line was kept, not the
+  diff after it. Long names are now clipped in the middle, keeping the end. Up
+  to four `Expected`/`Received` or `-`/`+` diff lines are kept after a bun
+  `error:` or a jest `●` failure. When the 20-line list is full, failure names
+  take priority over detail.
 
 ## [1.15.2] — 2026-10-07
 

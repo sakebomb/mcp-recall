@@ -2171,6 +2171,72 @@ describe("testRunnerHandler", () => {
       expect(summary).not.toContain("failures:");
     });
 
+    // #320: bun names are `describe > it`, so a cut from the end removed what
+    // told parameterised cases apart, and the diff after `error:` was dropped.
+    const longSuite = "handlePostToolUse — Bash output cut at ~50 KB (#316) > sizes, stores and summarises the persisted output for the";
+    const bunDiffFailure = (shape: string) => [
+      "5 |       expect(a).toBe(b);",
+      "                ^",
+      "error: expect(received).toBe(expected)",
+      "",
+      '  "persisted row 1',
+      '- persisted row 2"',
+      "+ persisted row 2",
+      '+ "',
+      "",
+      "- Expected  - 1",
+      "+ Received  + 2",
+      "",
+      "      at <anonymous> (tests/hooks.test.ts:957:52)",
+      `(fail) ${longSuite} ${shape} shape [0.11ms]`,
+    ];
+    const BUN_TWO_DIFFS = [...bunDiffFailure("object"), ...bunDiffFailure("JSON string"), "", " 4 pass", " 2 fail"].join("\n");
+
+    it("keeps the end of a long failure name, where cases differ", () => {
+      const { summary } = testRunnerHandler("Bash", { stdout: BUN_TWO_DIFFS, stderr: "" });
+      expect(summary).toContain("for the object shape");
+      expect(summary).toContain("for the JSON string shape");
+      // Past the line limit the middle goes, not the end.
+      const deep = `(fail) ${"outer suite > ".repeat(20)}case for the JSON string shape [3ms]`;
+      const clipped = testRunnerHandler("Bash", { stdout: `${deep}\n 0 pass\n 1 fail`, stderr: "" }).summary;
+      const nameLine = clipped.split("\n").find(l => l.includes("(fail)"))!;
+      expect(nameLine).toContain(" … ");
+      expect(nameLine).toContain("case for the JSON string shape");
+      expect(nameLine.trim().length).toBeLessThanOrEqual(160);
+    });
+
+    it("keeps a bun failure's diff lines, not the diff legend", () => {
+      const { summary } = testRunnerHandler("Bash", { stdout: BUN_TWO_DIFFS, stderr: "" });
+      expect(summary).toContain('- persisted row 2"');
+      expect(summary).toContain("+ persisted row 2");
+      expect(summary).not.toContain("- Expected  - 1");
+    });
+
+    it("keeps bun's Expected and Received lines", () => {
+      const { summary } = testRunnerHandler("Bash", { stdout: "", stderr: BUN_TEST_FAIL });
+      expect(summary).toContain('Expected: "shape value 0"');
+      expect(summary).toContain('Received: ""');
+    });
+
+    it("keeps jest's Expected and Received lines after the failure name", () => {
+      const out = "  ● math › adds\n\n    expect(received).toBe(expected)\n\n    Expected: 4\n    Received: 3\n\nTests: 1 failed, 2 passed, 3 total";
+      const { summary } = testRunnerHandler("Bash", { stdout: out, stderr: "" });
+      expect(summary).toContain("● math › adds");
+      expect(summary).toContain("Expected: 4");
+      expect(summary).toContain("Received: 3");
+    });
+
+    it("lists every failure name before spending the cap on detail", () => {
+      const many = Array.from({ length: 12 }, (_, i) => [
+        "error: expect(received).toBe(expected)", "", `Expected: ${i}`, `Received: ${i + 1}`, "",
+        `(fail) suite > case ${i} [1ms]`,
+      ].join("\n")).join("\n") + "\n 0 pass\n 12 fail";
+      const { summary } = testRunnerHandler("Bash", { stdout: many, stderr: "" });
+      for (let i = 0; i < 12; i++) expect(summary).toContain(`(fail) suite > case ${i}`);
+      expect(summary).toContain("Expected: 0");
+      expect(summary.split("\n").length).toBeLessThanOrEqual(24);
+    });
+
     it("keeps pytest assertion lines", () => {
       const out = "FAILED tests/test_x.py::test_add - assert 3 == 4\nE       assert 3 == 4\n1 failed, 2 passed in 0.12s";
       const { summary } = testRunnerHandler("Bash", { stdout: out, stderr: "" });
