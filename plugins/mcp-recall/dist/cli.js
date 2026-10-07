@@ -7233,6 +7233,47 @@ var findHandler = (toolName, output) => {
   }));
 };
 
+// src/handlers/generic.ts
+var MAX_CHARS = 500;
+var HEAD_CHARS = 380;
+var TAIL_CHARS = 100;
+var HEAD_LINES2 = 5;
+var TAIL_LINES = 5;
+var LINE_MODE_MIN_LINES = HEAD_LINES2 + TAIL_LINES + 1;
+var MAX_MATCH_LINES = 8;
+var MATCH_RE = /\b(error|errors|warn|warning|fail|failed|failure|exception|fatal|panic|denied|refused|timeout)\b/i;
+function summarizeBlock(raw) {
+  const head = raw.slice(0, HEAD_CHARS).trimEnd();
+  const tail = raw.slice(-TAIL_CHARS).trimStart();
+  return `${head}
+\u2026
+${tail}`;
+}
+var plural = (n) => n === 1 ? "" : "s";
+function summarizeLines(lines) {
+  return summarizeLineWindow(lines, HEAD_LINES2, TAIL_LINES);
+}
+function summarizeLineWindow(lines, headLines, tailLines) {
+  const head = lines.slice(0, headLines);
+  const tail = lines.slice(lines.length - tailLines);
+  const middle = lines.slice(headLines, lines.length - tailLines);
+  const matches = middle.filter((l) => MATCH_RE.test(l)).slice(0, MAX_MATCH_LINES);
+  const note = matches.length ? `\u2026(${middle.length} middle line${plural(middle.length)} elided; ${matches.length} error/warn shown)\u2026` : `\u2026(${middle.length} middle line${plural(middle.length)} elided)\u2026`;
+  return [...head, note, ...matches, ...tail].join(`
+`);
+}
+var genericHandler = (_toolName, output) => {
+  const raw = extractText(output);
+  const originalSize = Buffer.byteLength(raw, "utf8");
+  if (raw.length <= MAX_CHARS) {
+    return { summary: raw, originalSize };
+  }
+  const lines = raw.split(`
+`);
+  const summary = lines.length >= LINE_MODE_MIN_LINES ? summarizeLines(lines) : summarizeBlock(raw);
+  return { summary, originalSize };
+};
+
 // src/handlers/bash.ts
 var TERRAFORM_RESOURCE_RE = /^\s+#\s+(.+?)\s+will\s+be\s+(created|destroyed|updated in-place|replaced)/;
 var TERRAFORM_PLAN_SUMMARY_RE = /^Plan:\s+.+$/m;
@@ -7473,11 +7514,62 @@ function commandFingerprint(command) {
   const second = c.slice(verb.length).trimStart().match(BARE_TOKEN);
   return second ? `${verb} ${second[1]}` : verb;
 }
+function isCompoundCommand(command) {
+  let quote = null;
+  let depth = 0;
+  for (let i = 0;i < command.length; i++) {
+    const ch = command[i];
+    if (quote === "'") {
+      if (ch === "'")
+        quote = null;
+      continue;
+    }
+    if (ch === "\\") {
+      i++;
+      continue;
+    }
+    if (quote) {
+      if (ch === quote)
+        quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === "`")
+      quote = ch;
+    else if (ch === "(")
+      depth++;
+    else if (ch === ")")
+      depth = Math.max(0, depth - 1);
+    else if (depth === 0) {
+      const pair = command.slice(i, i + 2);
+      const width = pair === "&&" || pair === "||" ? 2 : ch === ";" || ch === `
+` ? 1 : 0;
+      if (width > 0 && command.slice(i + width).trim() !== "")
+        return true;
+    }
+  }
+  return false;
+}
+var COMPOUND_HEAD_LINES = 30;
+var COMPOUND_TAIL_LINES = 15;
+var compoundHandler = (_toolName, output) => {
+  const text = bashOutputText(output);
+  const originalSize = Buffer.byteLength(text, "utf8");
+  const lines = text.split(`
+`);
+  if (lines.length <= COMPOUND_HEAD_LINES + COMPOUND_TAIL_LINES) {
+    return { summary: text, originalSize };
+  }
+  const window = summarizeLineWindow(lines, COMPOUND_HEAD_LINES, COMPOUND_TAIL_LINES);
+  return { summary: `[bash \xB7 compound command \xB7 ${lines.length} lines]
+${window}`, originalSize };
+};
 function getBashHandler(input) {
   const rawCommand = extractCommand(input);
   if (!rawCommand)
     return shellHandler;
   const command = normalizeCommand(rawCommand);
+  if (isCompoundCommand(command))
+    return compoundHandler;
   if (/^git\s+grep(\s|$)/.test(command))
     return grepHandler;
   if (/^git\s+(diff|show)(\s|$)/.test(command))
@@ -8283,44 +8375,6 @@ function looksLikeCsv(text) {
   const firstLineCommas = (lines[0].match(/,/g) ?? []).length;
   return firstLineCommas >= 2;
 }
-
-// src/handlers/generic.ts
-var MAX_CHARS = 500;
-var HEAD_CHARS = 380;
-var TAIL_CHARS = 100;
-var HEAD_LINES2 = 5;
-var TAIL_LINES = 5;
-var LINE_MODE_MIN_LINES = HEAD_LINES2 + TAIL_LINES + 1;
-var MAX_MATCH_LINES = 8;
-var MATCH_RE = /\b(error|errors|warn|warning|fail|failed|failure|exception|fatal|panic|denied|refused|timeout)\b/i;
-function summarizeBlock(raw) {
-  const head = raw.slice(0, HEAD_CHARS).trimEnd();
-  const tail = raw.slice(-TAIL_CHARS).trimStart();
-  return `${head}
-\u2026
-${tail}`;
-}
-var plural = (n) => n === 1 ? "" : "s";
-function summarizeLines(lines) {
-  const head = lines.slice(0, HEAD_LINES2);
-  const tail = lines.slice(lines.length - TAIL_LINES);
-  const middle = lines.slice(HEAD_LINES2, lines.length - TAIL_LINES);
-  const matches = middle.filter((l) => MATCH_RE.test(l)).slice(0, MAX_MATCH_LINES);
-  const note = matches.length ? `\u2026(${middle.length} middle line${plural(middle.length)} elided; ${matches.length} error/warn shown)\u2026` : `\u2026(${middle.length} middle line${plural(middle.length)} elided)\u2026`;
-  return [...head, note, ...matches, ...tail].join(`
-`);
-}
-var genericHandler = (_toolName, output) => {
-  const raw = extractText(output);
-  const originalSize = Buffer.byteLength(raw, "utf8");
-  if (raw.length <= MAX_CHARS) {
-    return { summary: raw, originalSize };
-  }
-  const lines = raw.split(`
-`);
-  const summary = lines.length >= LINE_MODE_MIN_LINES ? summarizeLines(lines) : summarizeBlock(raw);
-  return { summary, originalSize };
-};
 
 // src/handlers/content-blocks.ts
 var contentBlockHandler = (_toolName, output) => {

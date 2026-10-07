@@ -47,6 +47,14 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   bun's total from its `Ran N tests` line, counts `(pass)`/`(fail)` lines when
   no count line is present, and reads pytest's counts in any order. Error lines
   printed by a passing run are not reported as failures.
+- **Several commands in one Bash call no longer lose all but the first result**
+  (#308). A call such as `ls -la x; git check-ignore -v y; git diff | wc -c` was
+  summarised by the first command's handler, so only the `ls` result survived
+  and the other two vanished. Commands joined by `;`, `&&`, `||` or a newline
+  (outside quotes and `$( … )`, after `cd` unwrapping) now get a compound
+  summary: up to 45 lines pass through whole, and longer output keeps its first
+  30 and last 15 lines plus the error lines between. Pipes still route by their
+  first command, since a pipe yields one output.
 
 ## [1.15.1] — 2026-10-06
 

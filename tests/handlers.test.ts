@@ -12,7 +12,7 @@ import { jsonHandler } from "../src/handlers/json";
 import { genericHandler } from "../src/handlers/generic";
 import { contentBlockHandler } from "../src/handlers/content-blocks";
 import { getHandler, extractText } from "../src/handlers/index";
-import { getBashHandler, normalizeCommand, commandFingerprint, gitDiffHandler, gitLogHandler, terraformPlanHandler, gitStatusHandler, gitRefsHandler, packageInstallHandler, testRunnerHandler, dockerPsHandler, buildToolHandler, ghHandler, compilerDiagnosticsHandler, grepHandler, lsHandler, findHandler } from "../src/handlers/bash";
+import { getBashHandler, normalizeCommand, commandFingerprint, compoundHandler, gitDiffHandler, gitLogHandler, terraformPlanHandler, gitStatusHandler, gitRefsHandler, packageInstallHandler, testRunnerHandler, dockerPsHandler, buildToolHandler, ghHandler, compilerDiagnosticsHandler, grepHandler, lsHandler, findHandler } from "../src/handlers/bash";
 import { tavilyHandler } from "../src/handlers/tavily";
 import { databaseHandler } from "../src/handlers/database";
 import { sentryHandler } from "../src/handlers/sentry";
@@ -1190,6 +1190,59 @@ describe("getBashHandler", () => {
   it("getHandler routes Bash tool name to bash dispatcher", () => {
     const handler = getHandler("Bash", "output", { command: "git diff HEAD" });
     expect(handler).toBe(gitDiffHandler);
+  });
+
+  // #308 dogfooding: `ls …; git check-ignore …; git diff | wc -c` got an ls
+  // summary and the other two results vanished. Several commands mean several
+  // outputs, so no single command's handler fits them.
+  describe("routes compound commands to compoundHandler (#308)", () => {
+    it.each([
+      "ls -la .claude/; git check-ignore -v x; git diff | wc -c",
+      "grep -n a f && grep -n b g",
+      "bun test x | tail -4; bun run typecheck | tail -3",
+      "git diff\ngit status",
+      "make || echo failed",
+      "cd /repo && git diff; git status",
+    ])("%p", (command) => {
+      expect(getBashHandler({ command })).toBe(compoundHandler);
+    });
+
+    it.each([
+      ["cd /repo && git diff", gitDiffHandler],
+      ["git log --oneline | head -5", gitLogHandler],
+      ["grep 'a; b' file", grepHandler],
+      ['grep "a && b" file', grepHandler],
+      ["grep -rn $(echo a; echo b) src", grepHandler],
+      ["grep -rn a\\;b src", grepHandler],
+      ["git diff HEAD;", gitDiffHandler],
+      ["git diff 2>&1 | tail -20", gitDiffHandler],
+    ] as [string, Handler][])("not compound: %p", (command, handler) => {
+      expect(getBashHandler({ command })).toBe(handler);
+    });
+  });
+});
+
+describe("compoundHandler (#308)", () => {
+  const sections = (n: number) =>
+    Array.from({ length: n }, (_, i) => `== section ${i}\nresult line for section ${i}`).join("\n");
+
+  it("passes a modest multi-command output through whole", () => {
+    const text = sections(20); // 40 lines: every section's result survives
+    const { summary, originalSize } = compoundHandler("Bash", { stdout: text, stderr: "" });
+    expect(summary).toBe(text);
+    expect(originalSize).toBe(Buffer.byteLength(text, "utf8"));
+  });
+
+  it("keeps head, tail and middle errors of a long one", () => {
+    const lines = Array.from({ length: 300 }, (_, i) => `line ${i}`);
+    lines[150] = "error: build failed in the middle";
+    const { summary } = compoundHandler("Bash", { stdout: lines.join("\n"), stderr: "" });
+    expect(summary).toContain("line 0");
+    expect(summary).toContain("line 29");
+    expect(summary).toContain("line 299");
+    expect(summary).toContain("line 285");
+    expect(summary).toContain("error: build failed in the middle");
+    expect(summary).not.toContain("line 100\n");
   });
 });
 
