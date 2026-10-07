@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
-import { mkdtempSync, writeFileSync, rmSync } from "fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { handleSessionStart } from "../src/hooks/session-start";
@@ -945,4 +945,87 @@ describe("handlePostToolUse — secrets in Bash output (#313)", () => {
       });
     }
   }
+});
+
+describe("handlePostToolUse — Bash output cut at ~50 KB (#316)", () => {
+  // Claude Code hands the hook stdout cut at about 50 KB, with no marker in it,
+  // and saves the whole output (stdout, then stderr) to persistedOutputPath.
+  const full = Array.from({ length: 3000 }, (_, i) => `persisted row ${i + 1} of the build log`).join("\n") +
+    "\nwarning: printed on stderr\n";
+  const cut = full.slice(0, 50_000);
+  let tempDir: string;
+  let persistedPath: string;
+
+  const envelope = (overrides: Record<string, unknown> = {}) => ({
+    stdout: cut,
+    stderr: "",
+    interrupted: false,
+    isImage: false,
+    noOutputExpected: false,
+    persistedOutputPath: persistedPath,
+    persistedOutputSize: Buffer.byteLength(full, "utf8"),
+    ...overrides,
+  });
+
+  const run = (response: unknown) => {
+    const result = handlePostToolUse(
+      makePostToolUseInput("Bash", response, { tool_input: { command: "cat build.log" } })
+    );
+    const delivered = result.updatedMCPToolOutput ?? "";
+    const id = delivered.match(/recall_[0-9a-f]+/)?.[0] ?? "";
+    return { result, delivered, row: retrieveOutput(getDb(":memory:"), id) };
+  };
+
+  beforeEach(() => {
+    process.env.RECALL_DB_PATH = ":memory:";
+    tempDir = mkdtempSync(join(tmpdir(), "recall-hooks-316-"));
+    const configPath = join(tempDir, "config.toml");
+    writeFileSync(configPath, '[store]\nretention = "full"\n');
+    process.env.RECALL_CONFIG_PATH = configPath;
+    resetConfig();
+    mkdirSync(join(tempDir, "tool-results"));
+    persistedPath = join(tempDir, "tool-results", "b907gnz67.txt");
+    writeFileSync(persistedPath, full);
+  });
+
+  afterEach(() => {
+    closeDb();
+    resetConfig();
+    delete process.env.RECALL_DB_PATH;
+    delete process.env.RECALL_CONFIG_PATH;
+    rmSync(tempDir, { recursive: true });
+  });
+
+  for (const shape of ["object", "JSON string"] as const) {
+    it(`sizes, stores and summarises the persisted output for the ${shape} shape`, () => {
+      const response = shape === "object" ? envelope() : JSON.stringify(envelope());
+      const { delivered, row } = run(response);
+      expect(row?.original_size).toBe(Buffer.byteLength(full, "utf8"));
+      expect(row?.full_content).toBe(full);
+      // The cut holds about 1,200 of the 3,001 lines.
+      expect(delivered).toContain("[bash · 3001 lines stdout]");
+    });
+  }
+
+  it("scans the persisted output for secrets, not just the cut", () => {
+    const withKey = full + "sk-ant-api03-" + "A".repeat(95) + "\n";
+    writeFileSync(persistedPath, withKey);
+    const response = envelope({ persistedOutputSize: Buffer.byteLength(withKey, "utf8") });
+    expect(run(response).result).toEqual({});
+  });
+
+  it("falls back to the cut when the persisted file is missing", () => {
+    rmSync(persistedPath);
+    expect(run(envelope()).row?.original_size).toBe(Buffer.byteLength(cut, "utf8"));
+  });
+
+  it("ignores a persisted file whose size does not match persistedOutputSize", () => {
+    expect(run(envelope({ persistedOutputSize: 123 })).row?.original_size).toBe(Buffer.byteLength(cut, "utf8"));
+  });
+
+  it("ignores a persisted path outside a tool-results directory", () => {
+    const elsewhere = join(tempDir, "elsewhere.txt");
+    writeFileSync(elsewhere, full);
+    expect(run(envelope({ persistedOutputPath: elsewhere })).row?.original_size).toBe(Buffer.byteLength(cut, "utf8"));
+  });
 });

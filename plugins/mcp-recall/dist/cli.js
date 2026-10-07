@@ -6045,6 +6045,8 @@ function handleSessionStart(raw) {
 
 // src/hooks/post-tool-use.ts
 import { createHash as createHash3 } from "crypto";
+import { readFileSync as readFileSync3, statSync as statSync4 } from "fs";
+import { basename as basename2, dirname as dirname3, isAbsolute as isAbsolute2 } from "path";
 
 // src/denylist.ts
 var BUILTIN_PATTERNS = [
@@ -8908,6 +8910,25 @@ function asBashResponse(toolResponse) {
     return null;
   return typeof value.stdout === "string" ? value : null;
 }
+var MAX_PERSISTED_BYTES = 20 * 1024 * 1024;
+function withPersistedOutput(toolResponse) {
+  const bash = asBashResponse(toolResponse);
+  const path = bash?.persistedOutputPath;
+  const size = bash?.persistedOutputSize;
+  if (!bash || typeof path !== "string" || typeof size !== "number")
+    return toolResponse;
+  if (!isAbsolute2(path) || basename2(dirname3(path)) !== "tool-results" || size > MAX_PERSISTED_BYTES) {
+    return toolResponse;
+  }
+  try {
+    if (statSync4(path).size !== size)
+      return toolResponse;
+    return { ...bash, stdout: readFileSync3(path, "utf8"), stderr: "" };
+  } catch (err) {
+    log.debug(`persisted output unreadable \xB7 ${path} \xB7 ${String(err)}`);
+    return toolResponse;
+  }
+}
 function replaceOutput(text, toolResponse) {
   const bash = asBashResponse(toolResponse);
   return {
@@ -8934,11 +8955,12 @@ function handlePostToolUse(raw) {
   const input = parsed;
   const { tool_name, tool_input, tool_response, cwd, session_id } = input;
   const config = loadConfig();
+  const response = tool_name === "Bash" ? withPersistedOutput(tool_response) : tool_response;
   if (isDenied(tool_name, config)) {
     log.debug(`SKIP denylist \xB7 ${tool_name}`);
     return {};
   }
-  const fullContent = tool_name === "Bash" ? bashOutputText(tool_response) : extractText(tool_response);
+  const fullContent = tool_name === "Bash" ? bashOutputText(response) : extractText(response);
   log.debug(`intercepted ${tool_name} \xB7 ${formatBytes(Buffer.byteLength(fullContent, "utf8"))}`);
   const secretNames = findSecrets(fullContent);
   if (secretNames.length > 0) {
@@ -8961,12 +8983,12 @@ ${cached2.summary}`, tool_response);
   const byOutput = checkOutputDedup(db, projectKey, output_hash);
   if (byOutput)
     return cachedResponse(byOutput);
-  const handler = getHandler(tool_name, tool_response, tool_input);
+  const handler = getHandler(tool_name, response, tool_input);
   log.debug(`handler: ${handler.name} \xB7 ${tool_name}`);
-  let { summary, originalSize } = handler(tool_name, tool_response);
+  let { summary, originalSize } = handler(tool_name, response);
   if (summary.trim() === "" && originalSize > 0) {
     log.debug(`empty summary from ${handler.name} \xB7 ${tool_name} \xB7 falling back to genericHandler`);
-    ({ summary, originalSize } = genericHandler(tool_name, tool_response));
+    ({ summary, originalSize } = genericHandler(tool_name, response));
   }
   const summarySize = Buffer.byteLength(summary, "utf8");
   if (summarySize >= originalSize) {
@@ -9001,7 +9023,7 @@ ${summary}`, tool_response);
 }
 
 // src/learn/retrain.ts
-import { readFileSync as readFileSync3, writeFileSync } from "fs";
+import { readFileSync as readFileSync4, writeFileSync } from "fs";
 var MIN_SAMPLES = 3;
 var MAX_SAMPLES = 5;
 var DEFAULT_DEPTH = 3;
@@ -9194,7 +9216,7 @@ function applyResult(result, date) {
     return;
   let toml;
   try {
-    toml = readFileSync3(result.profileFilePath, "utf8");
+    toml = readFileSync4(result.profileFilePath, "utf8");
   } catch (e) {
     console.log(`  \u2717 Could not read ${result.profileFilePath}: ${e instanceof Error ? e.message : String(e)}`);
     return;
@@ -9272,11 +9294,11 @@ ${"\u2500".repeat(54)}`);
 }
 
 // src/profiles/cmd-local.ts
-import { readFileSync as readFileSync5, readdirSync as readdirSync4, rmSync as rmSync2 } from "fs";
+import { readFileSync as readFileSync6, readdirSync as readdirSync4, rmSync as rmSync2 } from "fs";
 import { join as join6 } from "path";
 
 // src/profiles/shared.ts
-import { readFileSync as readFileSync4, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync3, unlinkSync } from "fs";
+import { readFileSync as readFileSync5, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync3, unlinkSync } from "fs";
 import { join as join5 } from "path";
 import { homedir as homedir4, tmpdir } from "os";
 import { createHash as createHash4 } from "crypto";
@@ -9414,7 +9436,7 @@ function installedCommunityMap() {
   for (const entry of entries) {
     const toml = join5(communityDir(), entry, "default.toml");
     try {
-      const p = parse(readFileSync4(toml, "utf8"));
+      const p = parse(readFileSync5(toml, "utf8"));
       const version = p["profile"]["version"];
       map.set(entry, version ?? "0.0.0");
     } catch {}
@@ -9559,7 +9581,7 @@ Your local profiles:`);
   }
   let content;
   try {
-    content = readFileSync5(profilePath, "utf8");
+    content = readFileSync6(profilePath, "utf8");
   } catch {
     console.error(`Cannot read: ${profilePath}`);
     process.exit(1);
@@ -9647,7 +9669,7 @@ ${conflicts.length} conflict(s):
 }
 
 // src/profiles/cmd-catalog.ts
-import { readFileSync as readFileSync6 } from "fs";
+import { readFileSync as readFileSync7 } from "fs";
 import { join as join7 } from "path";
 import { homedir as homedir5 } from "os";
 async function cmdInstall(args) {
@@ -9737,7 +9759,7 @@ ${installCount} profile(s) installed (${alreadyCount} already installed, ${entri
   }
   let serverKeys = [];
   try {
-    const raw = JSON.parse(readFileSync6(join7(homedir5(), ".claude.json"), "utf8"));
+    const raw = JSON.parse(readFileSync7(join7(homedir5(), ".claude.json"), "utf8"));
     const mcpServers = raw["mcpServers"];
     serverKeys = Object.keys(mcpServers ?? {}).filter((k) => k !== "recall");
   } catch {
@@ -9854,7 +9876,7 @@ ${entries.length} available, ${installedCount} installed
 }
 
 // src/profiles/cmd-test.ts
-import { readFileSync as readFileSync7 } from "fs";
+import { readFileSync as readFileSync8 } from "fs";
 function testProfile(toolName, content) {
   const profiles = loadProfiles();
   const matchedProfile = resolveProfile(toolName, profiles);
@@ -9905,7 +9927,7 @@ Examples:`);
     contentSource = `stored:${storedId}`;
   } else {
     try {
-      content = readFileSync7(inputFile, "utf8");
+      content = readFileSync8(inputFile, "utf8");
     } catch {
       console.error(`Cannot read: ${inputFile}`);
       process.exit(1);
@@ -10002,7 +10024,7 @@ async function handleProfilesCommand(args) {
 }
 
 // src/learn/index.ts
-import { readFileSync as readFileSync8, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3 } from "fs";
+import { readFileSync as readFileSync9, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3 } from "fs";
 import { join as join8 } from "path";
 import { homedir as homedir6 } from "os";
 
@@ -10433,7 +10455,7 @@ function userProfilesDir() {
 }
 function readClaudeJson() {
   const path = join8(homedir6(), ".claude.json");
-  const raw = JSON.parse(readFileSync8(path, "utf8"));
+  const raw = JSON.parse(readFileSync9(path, "utf8"));
   return raw["mcpServers"] ?? {};
 }
 async function handleLearnCommand(args) {
@@ -10518,7 +10540,7 @@ Next steps:`);
 }
 
 // src/import/index.ts
-import { readFileSync as readFileSync9, statSync as statSync4, existsSync as existsSync2 } from "fs";
+import { readFileSync as readFileSync10, statSync as statSync5, existsSync as existsSync2 } from "fs";
 import { resolve as resolve3 } from "path";
 import { Database as Database3 } from "bun:sqlite";
 var LARGE_FILE_BYTES = 50 * 1024 * 1024;
@@ -10637,18 +10659,18 @@ async function handleImportCommand(args) {
   let raw;
   if (filePath) {
     try {
-      const size = statSync4(filePath).size;
+      const size = statSync5(filePath).size;
       if (size > LARGE_FILE_BYTES) {
         console.error(`Warning: file is ${Math.round(size / 1024 / 1024)} MB \u2014 this may take a while.`);
       }
-      raw = readFileSync9(filePath, "utf8");
+      raw = readFileSync10(filePath, "utf8");
     } catch {
       console.error(`Cannot read file: ${filePath}`);
       process.exit(1);
     }
   } else {
     try {
-      raw = readFileSync9("/dev/stdin", "utf8");
+      raw = readFileSync10("/dev/stdin", "utf8");
     } catch {
       console.error("No file specified and stdin is not readable.");
       console.error("Usage: mcp-recall import <file.json> [--overwrite] [--dry-run]");

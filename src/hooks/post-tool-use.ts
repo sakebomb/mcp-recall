@@ -1,4 +1,6 @@
 import { createHash } from "crypto";
+import { readFileSync, statSync } from "fs";
+import { basename, dirname, isAbsolute } from "path";
 import { loadConfig } from "../config";
 import { getProjectKey } from "../project-key";
 import { isDenied } from "../denylist";
@@ -43,6 +45,34 @@ function asBashResponse(toolResponse: unknown): Record<string, unknown> | null {
   return typeof (value as { stdout?: unknown }).stdout === "string" ? (value as Record<string, unknown>) : null;
 }
 
+/** Upper bound on a persisted Bash output read back from disk; a larger one stays cut. */
+const MAX_PERSISTED_BYTES = 20 * 1024 * 1024;
+
+/**
+ * Claude Code cuts Bash stdout at about 50 KB before this hook sees it, with no
+ * marker in it, and saves the whole output (stdout, then stderr) to
+ * persistedOutputPath. Summarising the cut misstates every total (#316), so
+ * read the file back when it is plainly the one Claude Code wrote: absolute,
+ * in a tool-results directory, and exactly persistedOutputSize bytes. Anything
+ * else leaves the received response as it is.
+ */
+function withPersistedOutput(toolResponse: unknown): unknown {
+  const bash = asBashResponse(toolResponse);
+  const path = bash?.persistedOutputPath;
+  const size = bash?.persistedOutputSize;
+  if (!bash || typeof path !== "string" || typeof size !== "number") return toolResponse;
+  if (!isAbsolute(path) || basename(dirname(path)) !== "tool-results" || size > MAX_PERSISTED_BYTES) {
+    return toolResponse;
+  }
+  try {
+    if (statSync(path).size !== size) return toolResponse;
+    return { ...bash, stdout: readFileSync(path, "utf8"), stderr: "" };
+  } catch (err) {
+    log.debug(`persisted output unreadable · ${path} · ${String(err)}`);
+    return toolResponse;
+  }
+}
+
 /**
  * Replaces the tool's output with `text` via hookSpecificOutput.updatedToolOutput;
  * the top-level field alone was silently ignored (#298). For a built-in tool the
@@ -78,6 +108,8 @@ export function handlePostToolUse(raw: string): HookOutput {
   const input = parsed as PostToolUseInput;
   const { tool_name, tool_input, tool_response, cwd, session_id } = input;
   const config = loadConfig();
+  // The whole output, not the cut Claude Code hands over above ~50 KB (#316).
+  const response = tool_name === "Bash" ? withPersistedOutput(tool_response) : tool_response;
 
   // 1. Denylist check
   if (isDenied(tool_name, config)) {
@@ -88,7 +120,7 @@ export function handlePostToolUse(raw: string): HookOutput {
   // 2. Extract text and check for secrets. For Bash that is stdout + stderr:
   //    the envelope's field names and escaped newlines are not output, so they
   //    must not reach the store, the hints or FTS (#306).
-  const fullContent = tool_name === "Bash" ? bashOutputText(tool_response) : extractText(tool_response);
+  const fullContent = tool_name === "Bash" ? bashOutputText(response) : extractText(response);
   log.debug(`intercepted ${tool_name} · ${formatBytes(Buffer.byteLength(fullContent, "utf8"))}`);
   const secretNames = findSecrets(fullContent);
   if (secretNames.length > 0) {
@@ -126,14 +158,14 @@ export function handlePostToolUse(raw: string): HookOutput {
   if (byOutput) return cachedResponse(byOutput);
 
   // 5. Compress
-  const handler = getHandler(tool_name, tool_response, tool_input);
+  const handler = getHandler(tool_name, response, tool_input);
   log.debug(`handler: ${handler.name} · ${tool_name}`);
-  let { summary, originalSize } = handler(tool_name, tool_response);
+  let { summary, originalSize } = handler(tool_name, response);
   // An empty summary always passes the size check below, yet delivers nothing:
   // the handler did not recognize this shape. Fall back rather than store it (#296).
   if (summary.trim() === "" && originalSize > 0) {
     log.debug(`empty summary from ${handler.name} · ${tool_name} · falling back to genericHandler`);
-    ({ summary, originalSize } = genericHandler(tool_name, tool_response));
+    ({ summary, originalSize } = genericHandler(tool_name, response));
   }
   const summarySize = Buffer.byteLength(summary, "utf8");
 
