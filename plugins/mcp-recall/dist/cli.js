@@ -6896,7 +6896,7 @@ ${stderr}`.trim();
     parts.push(`${failed} failed`);
   if (skipped > 0)
     parts.push(`${skipped} skipped`);
-  const summaryStr = parts.length > 0 ? parts.join(", ") : "no results";
+  const summaryStr = parts.length > 0 ? parts.join(", ") : "no counts in output";
   const lines = [`test runner \u2014 ${status}: ${summaryStr}${total > 0 ? ` (${total} total)` : ""}`];
   if (isFail && failureLines.length > 0) {
     lines.push(`  failures:`);

@@ -35,6 +35,8 @@ export const testRunnerHandler: Handler = (
       /^\(fail\)\s/.test(t) ||
       /^--- FAIL:/.test(t);
     // bun's `error: …` precedes its (fail) line; pytest's `E   assert …` follows FAILED.
+    // The pytest marker is tested on the untrimmed line: it is always flush-left,
+    // and requiring that keeps indented prose starting with "E  " out.
     const isMessage = /^error:\s/.test(t) || /^E\s{2,}\S/.test(line);
     if (isName) failureNames++;
     if (isName || isMessage) failureLines.push(t.slice(0, 120));
@@ -99,7 +101,9 @@ export const testRunnerHandler: Handler = (
   if (passed > 0) parts.push(`${passed} passed`);
   if (failed > 0) parts.push(`${failed} failed`);
   if (skipped > 0) parts.push(`${skipped} skipped`);
-  const summaryStr = parts.length > 0 ? parts.join(", ") : "no results";
+  // No count survived (e.g. a cut-off jest run): say so, rather than claim the
+  // run produced no results.
+  const summaryStr = parts.length > 0 ? parts.join(", ") : "no counts in output";
 
   const lines = [`test runner — ${status}: ${summaryStr}${total > 0 ? ` (${total} total)` : ""}`];
   if (isFail && failureLines.length > 0) {

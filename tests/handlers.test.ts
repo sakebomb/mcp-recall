@@ -2094,7 +2094,7 @@ describe("testRunnerHandler", () => {
       expect(summary).toContain("2 failed");
       // A runner without per-test count lines: only the failure name says FAIL.
       const jest = testRunnerHandler("Bash", { stdout: "  ✕ adds numbers (3 ms)", stderr: "" });
-      expect(jest.summary).toStartWith("test runner — FAIL");
+      expect(jest.summary).toStartWith("test runner — FAIL: no counts in output");
     });
 
     it("reads pytest's failed-first summary line", () => {
