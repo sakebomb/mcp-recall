@@ -7400,13 +7400,28 @@ ${meta.join(`
   return shellHandler(toolName, output);
 };
 var CD_PREFIX = /^cd\s+(?:"[^"]*"|'[^']*'|(?:\\[\s\S]|[^\s\\&;|<>])+)[ \t]*(?:&&|;|\r?\n)\s*(.+)$/s;
+var ASSIGN = String.raw`[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|[^\s"']*)`;
+var NEXT = String.raw`(?=[A-Za-z_./~])`;
+var WRAPPER_PREFIXES = [
+  new RegExp(String.raw`^timeout\s+(?:(?:-[sk]\s+\S+|--[a-z-]+(?:=\S+)?|-v)\s+)*\d+(?:\.\d+)?[smhd]?\s+${NEXT}`),
+  new RegExp(String.raw`^time(?:\s+-p)?\s+${NEXT}`),
+  new RegExp(String.raw`^nice(?:\s+(?:-n\s*-?\d+|--adjustment=-?\d+|-\d+))?\s+${NEXT}`),
+  new RegExp(String.raw`^env(?:\s+-i)?(?:\s+${ASSIGN})*\s+${NEXT}`),
+  new RegExp(String.raw`^(?:${ASSIGN}\s+)+${NEXT}`),
+  new RegExp(String.raw`^(?:sudo|doas)\s+${NEXT}`)
+];
 function normalizeCommand(command) {
   let c = command.trim();
-  for (let i = 0;i < 4; i++) {
+  for (let i = 0;i < 8; i++) {
     const cd = c.match(CD_PREFIX);
-    if (!cd)
+    if (cd) {
+      c = cd[1].trim();
+      continue;
+    }
+    const wrapper = WRAPPER_PREFIXES.map((re) => c.match(re)).find((m) => m !== null);
+    if (!wrapper)
       break;
-    c = cd[1].trim();
+    c = c.slice(wrapper[0].length);
   }
   c = c.replace(/^git\s+(?:(?:--no-pager|--paginate|-P)\s+|-[cC]\s+\S+\s+)+/, "git ");
   return c;

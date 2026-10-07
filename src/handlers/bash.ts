@@ -300,6 +300,26 @@ export const ghHandler: Handler = (
 // alternatives non-overlapping.
 const CD_PREFIX = /^cd\s+(?:"[^"]*"|'[^']*'|(?:\\[\s\S]|[^\s\\&;|<>])+)[ \t]*(?:&&|;|\r?\n)\s*(.+)$/s;
 
+// A `VAR=value` assignment. The value alternatives are disjoint (a quoted span,
+// or a run with no whitespace or quote), for the same backtracking reason as
+// CD_PREFIX: an unterminated quote must fail fast, not explore partitions.
+const ASSIGN = String.raw`[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|[^\s"']*)`;
+// What must follow a stripped wrapper: the start of a command word. A flag, an
+// operator or end-of-string means the wrapper is not wrapping anything we can
+// parse (`env | grep`, `sudo -u www …`, `timeout 30`), so it is left in place.
+const NEXT = String.raw`(?=[A-Za-z_./~])`;
+
+// Leading wrappers that run another command unchanged (#302). Each is stripped
+// only in a shape whose argument span is unambiguous.
+const WRAPPER_PREFIXES = [
+  new RegExp(String.raw`^timeout\s+(?:(?:-[sk]\s+\S+|--[a-z-]+(?:=\S+)?|-v)\s+)*\d+(?:\.\d+)?[smhd]?\s+${NEXT}`),
+  new RegExp(String.raw`^time(?:\s+-p)?\s+${NEXT}`),
+  new RegExp(String.raw`^nice(?:\s+(?:-n\s*-?\d+|--adjustment=-?\d+|-\d+))?\s+${NEXT}`),
+  new RegExp(String.raw`^env(?:\s+-i)?(?:\s+${ASSIGN})*\s+${NEXT}`),
+  new RegExp(String.raw`^(?:${ASSIGN}\s+)+${NEXT}`),
+  new RegExp(String.raw`^(?:sudo|doas)\s+${NEXT}`),
+];
+
 /**
  * Normalises a Bash command so routing sees the real subcommand: unwraps leading
  * `cd <dir>` prefixes (see {@link CD_PREFIX} for the separator and quoting shapes
@@ -307,17 +327,26 @@ const CD_PREFIX = /^cd\s+(?:"[^"]*"|'[^']*'|(?:\\[\s\S]|[^\s\\&;|<>])+)[ \t]*(?:
  * `--paginate`, `-P`) that would otherwise push `git diff` output to the generic
  * shell fallback.
  *
- * Chained prefixes are unwrapped across mixed separators (`cd /a && cd /b\ngit
- * diff`) under a bounded loop.
+ * Also strips leading wrappers that run the real command unchanged (`timeout 30`,
+ * `time`, `nice -n 10`, `env A=1`, `A=1`, `sudo`; see {@link WRAPPER_PREFIXES}),
+ * so routing, the fingerprint and retention all see the wrapped command (#302).
+ *
+ * Chained prefixes are unwrapped across mixed separators and wrappers (`cd /a &&
+ * timeout 60 git diff`) under a bounded loop.
  */
 export function normalizeCommand(command: string): string {
   let c = command.trim();
-  // Bounded: chained `cd` hops are rare, and a bound keeps a pathological input
-  // from looping. Stops as soon as the prefix no longer matches.
-  for (let i = 0; i < 4; i++) {
+  // Bounded: chained prefixes are rare, and a bound keeps a pathological input
+  // from looping. Stops as soon as no prefix matches.
+  for (let i = 0; i < 8; i++) {
     const cd = c.match(CD_PREFIX);
-    if (!cd) break;
-    c = cd[1]!.trim();
+    if (cd) {
+      c = cd[1]!.trim();
+      continue;
+    }
+    const wrapper = WRAPPER_PREFIXES.map((re) => c.match(re)).find((m) => m !== null);
+    if (!wrapper) break;
+    c = c.slice(wrapper[0].length);
   }
   c = c.replace(/^git\s+(?:(?:--no-pager|--paginate|-P)\s+|-[cC]\s+\S+\s+)+/, "git ");
   return c;
