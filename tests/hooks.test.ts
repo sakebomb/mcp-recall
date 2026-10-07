@@ -899,3 +899,50 @@ describe("handlePostToolUse — Bash envelope is not output (#306)", () => {
     });
   }
 });
+
+describe("handlePostToolUse — secrets in Bash output (#313)", () => {
+  // Scanning the JSON envelope turned each newline into `\n`, so a key at the
+  // start of a line followed an `n` and failed its left-boundary guard, and
+  // `"` became `\"`, so the GCP pattern never matched. Those outputs were stored.
+  const filler = Array.from({ length: 300 }, (_, i) => `deploy step ${i} ok`);
+  const secrets: Record<string, string> = {
+    anthropic: "sk-ant-" + "a".repeat(40),
+    openrouter: "sk-or-v1-" + "b".repeat(30),
+    stripe: "sk_live_" + "c".repeat(30),
+    twilio: "AC" + "d".repeat(32),
+    gcp: '{\n  "type": "service_account",\n  "project_id": "demo"\n}',
+  };
+  const envelope = (stdout: string) => ({ stdout, stderr: "", interrupted: false, isImage: false, noOutputExpected: false });
+  const storedRows = () => (getDb(":memory:").prepare("SELECT COUNT(*) AS n FROM stored_outputs").get() as { n: number }).n;
+
+  beforeEach(() => {
+    process.env.RECALL_DB_PATH = ":memory:";
+  });
+
+  afterEach(() => {
+    closeDb();
+    resetConfig();
+    delete process.env.RECALL_DB_PATH;
+  });
+
+  for (const shape of ["object", "JSON string"] as const) {
+    const respond = (stdout: string) => {
+      const response = shape === "object" ? envelope(stdout) : JSON.stringify(envelope(stdout));
+      return handlePostToolUse(makePostToolUseInput("Bash", response, { tool_input: { command: "cat deploy.log" } }));
+    };
+
+    it(`stores the same output without a secret (control, ${shape})`, () => {
+      expect(respond(filler.join("\n"))).not.toEqual({});
+      expect(storedRows()).toBe(1);
+    });
+
+    for (const [name, secret] of Object.entries(secrets)) {
+      it(`skips a line-start ${name} key (${shape})`, () => {
+        const lines = [...filler];
+        lines.splice(150, 0, secret);
+        expect(respond(lines.join("\n"))).toEqual({});
+        expect(storedRows()).toBe(0);
+      });
+    }
+  }
+});

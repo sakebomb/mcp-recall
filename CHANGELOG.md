@@ -6,6 +6,20 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Security
+
+- **The secret scan now sees Bash output as printed** (#313). Up to 1.15.1 it
+  ran on the JSON-escaped Bash result (#306), where each newline is the two
+  characters `\n` and each `"` is `\"`. A key at the start of a line then
+  followed an `n` and failed its left-boundary guard, so **Anthropic,
+  OpenRouter, Stripe and Twilio keys that began a line, and GCP service-account
+  key files, were stored** instead of skipped: in the summary, the search hints,
+  and the body where retention kept it. Patterns without a boundary guard, such
+  as GitHub tokens and private-key headers, were still caught. Existing stores
+  are not rescanned. If a Bash command may have printed one of those keys, drop
+  the old Bash rows with `recall__forget` (`tool: "Bash"`, per project) and
+  rotate the key.
+
 ### Fixed
 
 - **Bash summaries now reach Claude's context.** 1.15.1 delivered MCP summaries,
