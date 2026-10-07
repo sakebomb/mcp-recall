@@ -6,6 +6,18 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Fixed
+
+- **Bash summaries now reach Claude's context.** 1.15.1 delivered MCP summaries,
+  but Bash output still arrived in full. Claude Code checks a built-in tool's
+  replacement against that tool's output shape and, on a mismatch, silently
+  delivers the original. The hook returned a plain string, which never matches
+  Bash's output object. It now returns the Bash response with `stdout` replaced
+  by the summary (stderr is already in the summary, so it is cleared). Verified
+  live on Claude Code 2.1.292: a 23.4 KB output was delivered as a 989 B
+  summary. Bash is about 99% of intercepted calls, so this is most of the
+  savings. (#304)
+
 ## [1.15.1] — 2026-10-06
 
 ### Added

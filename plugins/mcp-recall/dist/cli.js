@@ -8785,9 +8785,26 @@ function shouldRetainFullBody(level, toolName, command) {
 }
 
 // src/hooks/post-tool-use.ts
-function replaceOutput(text) {
+function asBashResponse(toolResponse) {
+  let value = toolResponse;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    return null;
+  return typeof value.stdout === "string" ? value : null;
+}
+function replaceOutput(text, toolResponse) {
+  const bash = asBashResponse(toolResponse);
   return {
-    hookSpecificOutput: { hookEventName: "PostToolUse", updatedToolOutput: text },
+    hookSpecificOutput: {
+      hookEventName: "PostToolUse",
+      updatedToolOutput: bash ? { ...bash, stdout: text, stderr: "" } : text
+    },
     updatedMCPToolOutput: text,
     suppressOutput: true
   };
@@ -8826,7 +8843,7 @@ function handlePostToolUse(raw) {
     const cachedDate = new Date(cached2.created_at * 1000).toISOString().slice(0, 10);
     log.debug(`CACHE HIT \xB7 ${tool_name} \xB7 id=${cached2.id} \xB7 cached ${cachedDate}`);
     return replaceOutput(`[recall:${cached2.id} \xB7 cached \xB7 ${cachedDate}]
-${cached2.summary}`);
+${cached2.summary}`, tool_response);
   };
   const byInput = input_hash ? checkDedup(db, projectKey, input_hash) : null;
   if (byInput)
@@ -8870,7 +8887,7 @@ ${cached2.summary}`);
   const hintStr = hints.length ? ` \xB7 search: ${hints.map((h) => `"${h}"`).join(", ")}` : "";
   const header = `[recall:${stored.id} \xB7 ${formatBytes(originalSize)}\u2192${formatBytes(summarySize)} (${reduction}% reduction)${hintStr}]`;
   return replaceOutput(`${header}
-${summary}`);
+${summary}`, tool_response);
 }
 
 // src/learn/retrain.ts

@@ -22,20 +22,41 @@ interface PostToolUseInput {
 }
 
 export interface HookOutput {
-  hookSpecificOutput?: { hookEventName: "PostToolUse"; updatedToolOutput: string };
+  hookSpecificOutput?: { hookEventName: "PostToolUse"; updatedToolOutput: string | Record<string, unknown> };
   /** Legacy field from before Claude Code documented updatedToolOutput; current versions ignore it (#298). */
   updatedMCPToolOutput?: string;
   suppressOutput?: boolean;
 }
 
+/** The Bash tool's response object, which may arrive serialized as a JSON string. */
+function asBashResponse(toolResponse: unknown): Record<string, unknown> | null {
+  let value = toolResponse;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  return typeof (value as { stdout?: unknown }).stdout === "string" ? (value as Record<string, unknown>) : null;
+}
+
 /**
- * Replaces the tool's output with `text`. Claude Code reads
- * hookSpecificOutput.updatedToolOutput, for built-in and MCP tools alike; the
- * top-level field alone was silently ignored, so nothing reached context (#298).
+ * Replaces the tool's output with `text` via hookSpecificOutput.updatedToolOutput;
+ * the top-level field alone was silently ignored (#298). For a built-in tool the
+ * replacement must match that tool's output shape, or Claude Code logs a mismatch
+ * and delivers the original output. A plain string never matches Bash's object,
+ * so Bash summaries were dropped: return the response with stdout replaced. The
+ * summary already carries stderr, so it is cleared rather than shown twice.
  */
-function replaceOutput(text: string): HookOutput {
+function replaceOutput(text: string, toolResponse?: unknown): HookOutput {
+  const bash = asBashResponse(toolResponse);
   return {
-    hookSpecificOutput: { hookEventName: "PostToolUse", updatedToolOutput: text },
+    hookSpecificOutput: {
+      hookEventName: "PostToolUse",
+      updatedToolOutput: bash ? { ...bash, stdout: text, stderr: "" } : text,
+    },
     updatedMCPToolOutput: text,
     suppressOutput: true,
   };
@@ -90,7 +111,7 @@ export function handlePostToolUse(raw: string): HookOutput {
   const cachedResponse = (cached: { id: string; created_at: number; summary: string }): HookOutput => {
     const cachedDate = new Date(cached.created_at * 1000).toISOString().slice(0, 10);
     log.debug(`CACHE HIT · ${tool_name} · id=${cached.id} · cached ${cachedDate}`);
-    return replaceOutput(`[recall:${cached.id} · cached · ${cachedDate}]\n${cached.summary}`);
+    return replaceOutput(`[recall:${cached.id} · cached · ${cachedDate}]\n${cached.summary}`, tool_response);
   };
 
   const byInput = input_hash ? checkDedup(db, projectKey, input_hash) : null;
@@ -165,5 +186,5 @@ export function handlePostToolUse(raw: string): HookOutput {
   const hints = extractHints(fullContent);
   const hintStr = hints.length ? ` · search: ${hints.map((h) => `"${h}"`).join(", ")}` : "";
   const header = `[recall:${stored.id} · ${formatBytes(originalSize)}→${formatBytes(summarySize)} (${reduction}% reduction)${hintStr}]`;
-  return replaceOutput(`${header}\n${summary}`);
+  return replaceOutput(`${header}\n${summary}`, tool_response);
 }
