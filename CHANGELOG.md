@@ -35,6 +35,18 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   savings attribution and retention (`timeout 30 curl …` keeps its body) all see
   the wrapped command. A wrapper whose arguments are not safely parseable, such
   as `sudo -u www …` or `env | grep`, is left as it is.
+- **Test-runner summaries keep why a test failed, and no longer misreport the
+  result** (#308). The summary listed failing test names but not the bun
+  `error: …` or pytest `E   assert …` line that says why. It could also print
+  `pass` beside a list of failures when no count line survived (output cut by
+  `tail`, or grepped), and it invented a total from whichever counts it saw.
+  pytest's own summary line puts failures first (`1 failed, 2 passed in 0.12s`),
+  and the parser read only the passes, so a failing pytest run was reported as
+  passing; a warning was also counted as a skipped test. The summary now keeps
+  those message lines, reports FAIL whenever a failing test is named, takes
+  bun's total from its `Ran N tests` line, counts `(pass)`/`(fail)` lines when
+  no count line is present, and reads pytest's counts in any order. Error lines
+  printed by a passing run are not reported as failures.
 
 ## [1.15.1] — 2026-10-06
 

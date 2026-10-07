@@ -6814,22 +6814,32 @@ var testRunnerHandler = (toolName, output) => {
 ${stderr}`.trim();
   const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
   const failureLines = [];
+  let failureNames = 0, passLines = 0, failLines = 0;
   for (const line of combined.split(`
 `)) {
     const t = line.trim();
     if (!t)
       continue;
-    if (/^(FAILED|FAIL)\s+/.test(t) || /^[\u2715\u2717\u00D7\u25CF]\s/.test(t) || /^\(fail\)\s/.test(t) || /^--- FAIL:/.test(t)) {
+    if (/^\(pass\)\s/.test(t))
+      passLines++;
+    if (/^\(fail\)\s/.test(t))
+      failLines++;
+    const isName = /^(FAILED|FAIL)\s+/.test(t) || /^[\u2715\u2717\u00D7\u25CF]\s/.test(t) || /^\(fail\)\s/.test(t) || /^--- FAIL:/.test(t);
+    const isMessage = /^error:\s/.test(t) || /^E\s{2,}\S/.test(line);
+    if (isName)
+      failureNames++;
+    if (isName || isMessage)
       failureLines.push(t.slice(0, 120));
-    }
   }
   let passed = 0, failed = 0, skipped = 0;
+  let ranTotal;
   let foundSummary = false;
   for (const line of combined.split(`
 `)) {
     const t = line.trim();
     const bunPass = t.match(/^(\d+)\s+pass$/);
     const bunFail = t.match(/^(\d+)\s+fail$/);
+    const bunRan = t.match(/^Ran\s+(\d+)\s+tests?\s+across\b/);
     if (bunPass) {
       passed = parseInt(bunPass[1]);
       foundSummary = true;
@@ -6838,13 +6848,15 @@ ${stderr}`.trim();
       failed = parseInt(bunFail[1]);
       foundSummary = true;
     }
-    const pytestMatch = t.match(/(\d+)\s+passed(?:,\s+(\d+)\s+failed)?(?:,\s+(\d+)\s+(?:skipped|warning))?/);
-    if (pytestMatch) {
-      passed = parseInt(pytestMatch[1]);
-      if (pytestMatch[2])
-        failed = parseInt(pytestMatch[2]);
-      if (pytestMatch[3])
-        skipped = parseInt(pytestMatch[3]);
+    if (bunRan) {
+      ranTotal = parseInt(bunRan[1]);
+      foundSummary = true;
+    }
+    if (/\b\d+\s+(?:passed|failed)\b.*\bin\s+\d+(?:\.\d+)?s\b/.test(t)) {
+      const count = (word) => parseInt(t.match(new RegExp(String.raw`(\d+)\s+${word}\b`))?.[1] ?? "0");
+      passed = count("passed");
+      failed = count("failed");
+      skipped = count("skipped");
       foundSummary = true;
     }
     const jestMatch = t.match(/Tests:\s+(?:(\d+)\s+failed,\s+)?(\d+)\s+passed(?:,\s+(\d+)\s+skipped)?/);
@@ -6867,11 +6879,16 @@ ${stderr}`.trim();
       foundSummary = true;
     }
   }
-  if (!foundSummary && failureLines.length === 0) {
+  if (!foundSummary && failureNames === 0) {
     return shellHandler(toolName, output);
   }
-  const total = passed + failed + skipped;
-  const status = failed > 0 ? "FAIL" : "pass";
+  if (passed === 0)
+    passed = passLines;
+  if (failed === 0)
+    failed = failLines;
+  const total = ranTotal ?? passed + failed + skipped;
+  const isFail = failed > 0 || failureNames > 0;
+  const status = isFail ? "FAIL" : "pass";
   const parts = [];
   if (passed > 0)
     parts.push(`${passed} passed`);
@@ -6881,7 +6898,7 @@ ${stderr}`.trim();
     parts.push(`${skipped} skipped`);
   const summaryStr = parts.length > 0 ? parts.join(", ") : "no results";
   const lines = [`test runner \u2014 ${status}: ${summaryStr}${total > 0 ? ` (${total} total)` : ""}`];
-  if (failureLines.length > 0) {
+  if (isFail && failureLines.length > 0) {
     lines.push(`  failures:`);
     lines.push(...failureLines.slice(0, MAX_BUILD_ERRORS).map((l) => `    ${l}`));
     if (failureLines.length > MAX_BUILD_ERRORS) {
