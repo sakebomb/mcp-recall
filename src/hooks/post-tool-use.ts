@@ -145,8 +145,15 @@ export function handlePostToolUse(raw: string): HookOutput {
 
   const cachedResponse = (cached: { id: string; created_at: number; summary: string }): HookOutput => {
     const cachedDate = new Date(cached.created_at * 1000).toISOString().slice(0, 10);
+    const text = `[recall:${cached.id} · cached · ${cachedDate}]\n${cached.summary}`;
+    // A row stored before #319 may only have beaten the original without its
+    // header; replaying it must not deliver more than the output itself.
+    if (Buffer.byteLength(text, "utf8") >= Buffer.byteLength(fullContent, "utf8")) {
+      log.debug(`SKIP cached-not-smaller · ${tool_name} · id=${cached.id}`);
+      return {};
+    }
     log.debug(`CACHE HIT · ${tool_name} · id=${cached.id} · cached ${cachedDate}`);
-    return replaceOutput(`[recall:${cached.id} · cached · ${cachedDate}]\n${cached.summary}`, tool_response);
+    return replaceOutput(text, tool_response);
   };
 
   const byInput = input_hash ? checkDedup(db, projectKey, input_hash) : null;
@@ -169,9 +176,13 @@ export function handlePostToolUse(raw: string): HookOutput {
   }
   const summarySize = Buffer.byteLength(summary, "utf8");
 
-  // 6. Only store when compression is meaningful
-  if (summarySize >= originalSize) {
-    log.debug(`SKIP no-compression · ${tool_name} · ${formatBytes(summarySize)} ≥ ${formatBytes(originalSize)}`);
+  // 6. Only store when what Claude receives, header included, is smaller than
+  //    the original: sizing the summary alone delivered small outputs larger
+  //    while reporting a reduction (#319).
+  const hints = extractHints(fullContent);
+  const deliveredSize = deliveredBytes(summary, originalSize, hints);
+  if (deliveredSize >= originalSize) {
+    log.debug(`SKIP no-compression · ${tool_name} · ${formatBytes(deliveredSize)} ≥ ${formatBytes(originalSize)}`);
     return {};
   }
 
@@ -212,14 +223,31 @@ export function handlePostToolUse(raw: string): HookOutput {
   evictIfNeeded(db, projectKey, config.store.max_size_mb, config.store.eviction_half_life_days);
 
   // 9. Return compressed output to Claude
-  const reduction = ((1 - summarySize / originalSize) * 100).toFixed(0);
-  log.debug(`STORED · ${tool_name} · id=${stored.id} · ${formatBytes(originalSize)}→${formatBytes(summarySize)} (${reduction}% reduction)`);
-  // Retrieval hints: a few salient terms from the full content so Claude's
-  // first recall__search lands. The content already passed the upstream secret
-  // scan (step 2), which matches known credential formats — hints are not a
-  // separate secret filter and are visible to Claude, same as the summary.
-  const hints = extractHints(fullContent);
+  log.debug(`STORED · ${tool_name} · id=${stored.id} · ${formatBytes(originalSize)}→${formatBytes(summarySize)} (${reductionPercent(summarySize, originalSize)}% reduction)`);
+  return replaceOutput(`${recallHeader(stored.id, originalSize, summarySize, hints)}\n${summary}`, tool_response);
+}
+
+function reductionPercent(summarySize: number, originalSize: number): string {
+  return ((1 - summarySize / originalSize) * 100).toFixed(0);
+}
+
+/**
+ * The line above every delivered summary. Retrieval hints are a few salient
+ * terms from the full content so Claude's first recall__search lands. The
+ * content already passed the upstream secret scan (step 2), which matches known
+ * credential formats — hints are not a separate secret filter and are visible
+ * to Claude, same as the summary.
+ */
+export function recallHeader(id: string, originalSize: number, summarySize: number, hints: string[]): string {
   const hintStr = hints.length ? ` · search: ${hints.map((h) => `"${h}"`).join(", ")}` : "";
-  const header = `[recall:${stored.id} · ${formatBytes(originalSize)}→${formatBytes(summarySize)} (${reduction}% reduction)${hintStr}]`;
-  return replaceOutput(`${header}\n${summary}`, tool_response);
+  return `[recall:${id} · ${formatBytes(originalSize)}→${formatBytes(summarySize)} (${reductionPercent(summarySize, originalSize)}% reduction)${hintStr}]`;
+}
+
+/** Same length as every stored id (`recall_` + 16 hex), so the header can be sized before storing. */
+const ID_PLACEHOLDER = `recall_${"0".repeat(16)}`;
+
+/** Bytes Claude receives for a summary: its header, a newline, then the summary (#319). */
+export function deliveredBytes(summary: string, originalSize: number, hints: string[]): number {
+  const summarySize = Buffer.byteLength(summary, "utf8");
+  return Buffer.byteLength(recallHeader(ID_PLACEHOLDER, originalSize, summarySize, hints), "utf8") + 1 + summarySize;
 }

@@ -8973,9 +8973,14 @@ function handlePostToolUse(raw) {
   const output_hash = hashContent(fullContent);
   const cachedResponse = (cached2) => {
     const cachedDate = new Date(cached2.created_at * 1000).toISOString().slice(0, 10);
+    const text = `[recall:${cached2.id} \xB7 cached \xB7 ${cachedDate}]
+${cached2.summary}`;
+    if (Buffer.byteLength(text, "utf8") >= Buffer.byteLength(fullContent, "utf8")) {
+      log.debug(`SKIP cached-not-smaller \xB7 ${tool_name} \xB7 id=${cached2.id}`);
+      return {};
+    }
     log.debug(`CACHE HIT \xB7 ${tool_name} \xB7 id=${cached2.id} \xB7 cached ${cachedDate}`);
-    return replaceOutput(`[recall:${cached2.id} \xB7 cached \xB7 ${cachedDate}]
-${cached2.summary}`, tool_response);
+    return replaceOutput(text, tool_response);
   };
   const byInput = input_hash ? checkDedup(db, projectKey, input_hash) : null;
   if (byInput)
@@ -8991,8 +8996,10 @@ ${cached2.summary}`, tool_response);
     ({ summary, originalSize } = genericHandler(tool_name, response));
   }
   const summarySize = Buffer.byteLength(summary, "utf8");
-  if (summarySize >= originalSize) {
-    log.debug(`SKIP no-compression \xB7 ${tool_name} \xB7 ${formatBytes(summarySize)} \u2265 ${formatBytes(originalSize)}`);
+  const hints = extractHints(fullContent);
+  const deliveredSize = deliveredBytes(summary, originalSize, hints);
+  if (deliveredSize >= originalSize) {
+    log.debug(`SKIP no-compression \xB7 ${tool_name} \xB7 ${formatBytes(deliveredSize)} \u2265 ${formatBytes(originalSize)}`);
     return {};
   }
   const command = tool_input !== null && typeof tool_input === "object" && typeof tool_input.command === "string" ? tool_input.command : undefined;
@@ -9013,13 +9020,21 @@ ${cached2.summary}`, tool_response);
     command_fp
   });
   evictIfNeeded(db, projectKey, config.store.max_size_mb, config.store.eviction_half_life_days);
-  const reduction = ((1 - summarySize / originalSize) * 100).toFixed(0);
-  log.debug(`STORED \xB7 ${tool_name} \xB7 id=${stored.id} \xB7 ${formatBytes(originalSize)}\u2192${formatBytes(summarySize)} (${reduction}% reduction)`);
-  const hints = extractHints(fullContent);
-  const hintStr = hints.length ? ` \xB7 search: ${hints.map((h) => `"${h}"`).join(", ")}` : "";
-  const header = `[recall:${stored.id} \xB7 ${formatBytes(originalSize)}\u2192${formatBytes(summarySize)} (${reduction}% reduction)${hintStr}]`;
-  return replaceOutput(`${header}
+  log.debug(`STORED \xB7 ${tool_name} \xB7 id=${stored.id} \xB7 ${formatBytes(originalSize)}\u2192${formatBytes(summarySize)} (${reductionPercent(summarySize, originalSize)}% reduction)`);
+  return replaceOutput(`${recallHeader(stored.id, originalSize, summarySize, hints)}
 ${summary}`, tool_response);
+}
+function reductionPercent(summarySize, originalSize) {
+  return ((1 - summarySize / originalSize) * 100).toFixed(0);
+}
+function recallHeader(id, originalSize, summarySize, hints) {
+  const hintStr = hints.length ? ` \xB7 search: ${hints.map((h) => `"${h}"`).join(", ")}` : "";
+  return `[recall:${id} \xB7 ${formatBytes(originalSize)}\u2192${formatBytes(summarySize)} (${reductionPercent(summarySize, originalSize)}% reduction)${hintStr}]`;
+}
+var ID_PLACEHOLDER = `recall_${"0".repeat(16)}`;
+function deliveredBytes(summary, originalSize, hints) {
+  const summarySize = Buffer.byteLength(summary, "utf8");
+  return Buffer.byteLength(recallHeader(ID_PLACEHOLDER, originalSize, summarySize, hints), "utf8") + 1 + summarySize;
 }
 
 // src/learn/retrain.ts

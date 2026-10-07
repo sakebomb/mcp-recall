@@ -71,7 +71,7 @@ plugins/mcp-recall/     Marketplace-installable plugin bundle
   dist/                 Bundled server.js + cli.js (bun build --target bun)
 ```
 
-**Hook flow** (`src/hooks/post-tool-use.ts`, whose numbered steps are the source of truth): `PostToolUse` intercepts `mcp__*` (except `mcp__recall__*`) and `Bash` → denylist check → secret scan → dedup check (by `input_hash`, then `output_hash`) → compress → **skip unless the summary is actually smaller than the original** → store in SQLite → evict if over `store.max_size_mb` → return summary to Claude.
+**Hook flow** (`src/hooks/post-tool-use.ts`, whose numbered steps are the source of truth): `PostToolUse` intercepts `mcp__*` (except `mcp__recall__*`) and `Bash` → denylist check → secret scan → dedup check (by `input_hash`, then `output_hash`) → compress → **skip unless what Claude receives — the `[recall:…]` header plus the summary — is smaller than the original** (#319; the dedup cache applies the same rule) → store in SQLite → evict if over `store.max_size_mb` → return summary to Claude.
 
 That skip guard matters when reasoning about behaviour: output which does not compress usefully — a short, error-dense log, for instance — passes through untouched rather than being stored.
 

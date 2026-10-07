@@ -25,6 +25,8 @@ import { dataDir } from "../src/db/schema";
 import { getStats } from "../src/db/analytics";
 import { getHandler } from "../src/handlers/index";
 import { genericHandler } from "../src/handlers/generic";
+import { extractHints } from "../src/hints";
+import { deliveredBytes } from "../src/hooks/post-tool-use";
 
 interface Totals {
   original: number;
@@ -84,8 +86,11 @@ function replayMcp(db: Database, replay: Totals, byTool: Map<string, Totals>): v
       emptySummaries.set(row.tool_name, (emptySummaries.get(row.tool_name) ?? 0) + 1);
       ({ summary } = genericHandler(row.tool_name, output));
     }
-    // The hook passes output through unchanged when the summary is not smaller.
-    const delivered = Math.min(Buffer.byteLength(summary, "utf8"), row.original_size);
+    // The hook passes output through unchanged when the summary plus its header
+    // is not smaller (#319). Summary bytes stay the delivered figure, matching
+    // the recorded rows' summary_size.
+    const passesThrough = deliveredBytes(summary, row.original_size, extractHints(row.full_content)) >= row.original_size;
+    const delivered = passesThrough ? row.original_size : Buffer.byteLength(summary, "utf8");
     add(replay, row.original_size, delivered, 1);
     tally(byTool, row.tool_name, row.original_size, delivered, 1);
   }
