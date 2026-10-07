@@ -6,6 +6,8 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+## [1.15.2] — 2026-10-07
+
 ### Security
 
 - **The secret scan now sees Bash output as printed** (#313). Up to 1.15.1 it
@@ -691,7 +693,8 @@ Ten `recall__*` tools available in every Claude session:
 
 ---
 
-[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.15.1...HEAD
+[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.15.2...HEAD
+[1.15.2]: https://github.com/sakebomb/mcp-recall/compare/v1.15.1...v1.15.2
 [1.15.1]: https://github.com/sakebomb/mcp-recall/compare/v1.15.0...v1.15.1
 [1.15.0]: https://github.com/sakebomb/mcp-recall/compare/v1.14.5...v1.15.0
 [1.14.5]: https://github.com/sakebomb/mcp-recall/compare/v1.14.4...v1.14.5
