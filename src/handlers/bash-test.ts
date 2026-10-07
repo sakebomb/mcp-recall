@@ -20,8 +20,10 @@ export const testRunnerHandler: Handler = (
   // message lines that say why (#308): a name alone does not tell Claude what to fix.
   // Message lines alone never decide the status: a passing run can print
   // `error: …` from the code under test.
-  const failureLines: string[] = [];
+  const failureLines: FailureLine[] = [];
   let failureNames = 0, passLines = 0, failLines = 0;
+  // Detail lines still to take after a bun `error:` or a jest `●` line (#320).
+  let detailBudget = 0;
   for (const line of combined.split("\n")) {
     const t = line.trim();
     if (!t) continue;
@@ -38,8 +40,17 @@ export const testRunnerHandler: Handler = (
     // The pytest marker is tested on the untrimmed line: it is always flush-left,
     // and requiring that keeps indented prose starting with "E  " out.
     const isMessage = /^error:\s/.test(t) || /^E\s{2,}\S/.test(line);
-    if (isName) failureNames++;
-    if (isName || isMessage) failureLines.push(t.slice(0, 120));
+    if (isName) {
+      failureNames++;
+      failureLines.push({ text: clipName(t), isName: true });
+      detailBudget = t.startsWith("●") ? MAX_DETAIL_LINES : 0;
+    } else if (isMessage) {
+      failureLines.push({ text: t.slice(0, MAX_LINE), isName: false });
+      if (/^error:\s/.test(t)) detailBudget = MAX_DETAIL_LINES;
+    } else if (detailBudget > 0 && isDetail(t)) {
+      failureLines.push({ text: t.slice(0, MAX_LINE), isName: false });
+      detailBudget--;
+    }
   }
 
   // Try to find a summary line
@@ -107,12 +118,56 @@ export const testRunnerHandler: Handler = (
 
   const lines = [`test runner — ${status}: ${summaryStr}${total > 0 ? ` (${total} total)` : ""}`];
   if (isFail && failureLines.length > 0) {
+    const kept = selectFailureLines(failureLines, MAX_BUILD_ERRORS);
     lines.push(`  failures:`);
-    lines.push(...failureLines.slice(0, MAX_BUILD_ERRORS).map(l => `    ${l}`));
-    if (failureLines.length > MAX_BUILD_ERRORS) {
-      lines.push(`    … (+${failureLines.length - MAX_BUILD_ERRORS} more)`);
+    lines.push(...kept.map(l => `    ${l.text}`));
+    if (failureLines.length > kept.length) {
+      lines.push(`    … (+${failureLines.length - kept.length} more)`);
     }
   }
 
   return { summary: lines.join("\n"), originalSize };
 };
+
+interface FailureLine {
+  text: string;
+  isName: boolean;
+}
+
+/** Detail lines kept after one bun `error:` or jest `●` line (#320). */
+const MAX_DETAIL_LINES = 4;
+const MAX_LINE = 160;
+const NAME_HEAD = 60;
+
+/** Expected/Received values and `-`/`+` diff lines; not the `- Expected  - 1` diff legend. */
+function isDetail(t: string): boolean {
+  if (/^[-+]\s+(Expected|Received)\s+[-+]\s*\d+$/.test(t)) return false;
+  return /^(Expected|Received)\b/.test(t) || /^[-+]\s/.test(t);
+}
+
+/**
+ * bun names are `describe > it`, so parameterised cases differ at the end:
+ * drop the timing, then clip from the middle so the end survives (#320).
+ */
+function clipName(t: string): string {
+  const name = t.replace(/\s+\[\d+(?:\.\d+)?m?s\]$/, "");
+  if (name.length <= MAX_LINE) return name;
+  return `${name.slice(0, NAME_HEAD)} … ${name.slice(-(MAX_LINE - NAME_HEAD - 3))}`;
+}
+
+/**
+ * Up to `max` lines in their original order. Every failure name comes first in
+ * priority, so detail never pushes a later failure out of the list; the room
+ * left goes to the earliest failures' messages.
+ */
+function selectFailureLines(entries: FailureLine[], max: number): FailureLine[] {
+  if (entries.length <= max) return entries;
+  const names = entries.filter(e => e.isName).length;
+  let detailRoom = Math.max(0, max - names);
+  let nameRoom = max;
+  return entries.filter(e => {
+    if (e.isName) return nameRoom-- > 0;
+    if (detailRoom > 0 && nameRoom > 0) { detailRoom--; nameRoom--; return true; }
+    return false;
+  });
+}

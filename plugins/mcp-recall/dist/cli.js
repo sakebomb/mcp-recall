@@ -6817,6 +6817,7 @@ ${stderr}`.trim();
   const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
   const failureLines = [];
   let failureNames = 0, passLines = 0, failLines = 0;
+  let detailBudget = 0;
   for (const line of combined.split(`
 `)) {
     const t = line.trim();
@@ -6828,10 +6829,18 @@ ${stderr}`.trim();
       failLines++;
     const isName = /^(FAILED|FAIL)\s+/.test(t) || /^[\u2715\u2717\u00D7\u25CF]\s/.test(t) || /^\(fail\)\s/.test(t) || /^--- FAIL:/.test(t);
     const isMessage = /^error:\s/.test(t) || /^E\s{2,}\S/.test(line);
-    if (isName)
+    if (isName) {
       failureNames++;
-    if (isName || isMessage)
-      failureLines.push(t.slice(0, 120));
+      failureLines.push({ text: clipName(t), isName: true });
+      detailBudget = t.startsWith("\u25CF") ? MAX_DETAIL_LINES : 0;
+    } else if (isMessage) {
+      failureLines.push({ text: t.slice(0, MAX_LINE), isName: false });
+      if (/^error:\s/.test(t))
+        detailBudget = MAX_DETAIL_LINES;
+    } else if (detailBudget > 0 && isDetail(t)) {
+      failureLines.push({ text: t.slice(0, MAX_LINE), isName: false });
+      detailBudget--;
+    }
   }
   let passed = 0, failed = 0, skipped = 0;
   let ranTotal;
@@ -6901,15 +6910,47 @@ ${stderr}`.trim();
   const summaryStr = parts.length > 0 ? parts.join(", ") : "no counts in output";
   const lines = [`test runner \u2014 ${status}: ${summaryStr}${total > 0 ? ` (${total} total)` : ""}`];
   if (isFail && failureLines.length > 0) {
+    const kept = selectFailureLines(failureLines, MAX_BUILD_ERRORS);
     lines.push(`  failures:`);
-    lines.push(...failureLines.slice(0, MAX_BUILD_ERRORS).map((l) => `    ${l}`));
-    if (failureLines.length > MAX_BUILD_ERRORS) {
-      lines.push(`    \u2026 (+${failureLines.length - MAX_BUILD_ERRORS} more)`);
+    lines.push(...kept.map((l) => `    ${l.text}`));
+    if (failureLines.length > kept.length) {
+      lines.push(`    \u2026 (+${failureLines.length - kept.length} more)`);
     }
   }
   return { summary: lines.join(`
 `), originalSize };
 };
+var MAX_DETAIL_LINES = 4;
+var MAX_LINE = 160;
+var NAME_HEAD = 60;
+function isDetail(t) {
+  if (/^[-+]\s+(Expected|Received)\s+[-+]\s*\d+$/.test(t))
+    return false;
+  return /^(Expected|Received)\b/.test(t) || /^[-+]\s/.test(t);
+}
+function clipName(t) {
+  const name = t.replace(/\s+\[\d+(?:\.\d+)?m?s\]$/, "");
+  if (name.length <= MAX_LINE)
+    return name;
+  return `${name.slice(0, NAME_HEAD)} \u2026 ${name.slice(-(MAX_LINE - NAME_HEAD - 3))}`;
+}
+function selectFailureLines(entries, max) {
+  if (entries.length <= max)
+    return entries;
+  const names = entries.filter((e) => e.isName).length;
+  let detailRoom = Math.max(0, max - names);
+  let nameRoom = max;
+  return entries.filter((e) => {
+    if (e.isName)
+      return nameRoom-- > 0;
+    if (detailRoom > 0 && nameRoom > 0) {
+      detailRoom--;
+      nameRoom--;
+      return true;
+    }
+    return false;
+  });
+}
 
 // src/handlers/bash-docker.ts
 var dockerPsHandler = (toolName, output) => {
