@@ -9,47 +9,32 @@
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-**Your context window is finite. MCP tool outputs aren't. mcp-recall bridges the gap.**
 
-MCP tool outputs — Playwright snapshots, GitHub API responses, Linear queries — can consume tens of kilobytes of context per call, and a busy session fills even a large context window long before the work is done. mcp-recall intercepts those outputs, stores them in full locally, and delivers compressed summaries to Claude instead. When Claude needs more detail, it retrieves exactly what it needs via FTS search — without re-running the tool.
+**Your context window is finite. Tool outputs aren't. mcp-recall bridges the gap.**
 
-Sessions that used to hit context limits in 30 minutes routinely run for 3+ hours.
+MCP tool outputs (Playwright snapshots, GitHub API responses, Linear queries) and long Bash output can consume tens of kilobytes of context per call, and a busy session fills even a large context window long before the work is done. mcp-recall intercepts those outputs, stores them in full locally, and delivers compressed summaries to Claude instead. When Claude needs more detail, it retrieves exactly what it needs via full-text search, without re-running the tool.
+
+The goal is sessions that run for hours instead of hitting the context limit in minutes. [Results](#results) shows what is measured today.
 
 ![mcp-recall demo](demo/demo.gif)
 
 ---
 
-## The full context stack
+## Quick start
 
-Context pressure builds at four distinct layers. Native Claude tooling now covers most of them for **built-in** tools — but leaves **MCP** tool output largely unhandled. That's the gap mcp-recall fills.
+You need [Claude Code](https://claude.ai/claude-code) and [Bun](https://bun.sh) (`curl -fsSL https://bun.sh/install | bash`).
 
-```mermaid
-flowchart TD
-    A(["Claude session begins"]) --> B
-
-    B["① Tool definitions loaded into context\n~500 tokens × every connected tool"]
-    B -->|"Claude Code Tool Search · Switchboard\ndefer unused schemas"| C
-
-    C["② Claude calls tools in sequence"]
-    C -->|"Code Mode · FastMCP 3.1\nrun script in sandbox, no intermediate results"| D
-
-    D["③ MCP tool returns large output\n50–85 KB per call"]
-    D -->|"mcp-recall\nintercepts pre-context · ~300 B summary · full copy in SQLite"| E
-
-    E["④ Session ends"]
-    E -->|"mcp-recall\npersists across sessions via FTS index"| F(["Next session: clean context"])
+```bash
+bun add -g mcp-recall    # or: npm i -g mcp-recall
+mcp-recall install       # register the hooks and MCP server in Claude Code
+mcp-recall profiles seed # optional: compression profiles for the MCPs you use
 ```
 
-| Layer | Problem | Solution |
-|---|---|---|
-| **① Tool definitions** | Every connected MCP loads its full schema upfront (~500 tokens/tool) | [Claude Code Tool Search](https://code.claude.com/docs/en/mcp#scale-with-mcp-tool-search) (built-in) · Switchboard |
-| **② Intermediate results** | Multi-step workflows pass each result back through context | [Code Mode](https://blog.cloudflare.com/code-mode/) · [FastMCP 3.1](https://www.jlowin.dev/blog/fastmcp-3-1-code-mode) |
-| **③ MCP tool outputs** | Claude Code truncates MCP output at a 25k-token ceiling and discards the rest; native microcompaction only offloads *built-in* tools (Read/Grep/Glob/…) | **mcp-recall** |
-| **④ Cross-session memory** | Context vanishes when the session ends; the API memory tool is a model-managed summary, not a searchable verbatim archive | **mcp-recall** |
+Restart Claude Code, then run `mcp-recall status`: every check should be green. That's it. Claude now receives summaries, and uses the `recall__*` tools when it needs the full output.
 
-Layers ① and ② have solid first-party and community solutions. For layer ③, Claude Code's [microcompaction](https://decodeclaude.com/compaction-deep-dive/) already offloads *built-in* tool output to disk — but **MCP** tool output is instead [truncated at a 25k-token ceiling](https://github.com/anthropics/claude-code/issues/2638) and discarded. mcp-recall fills exactly that gap: it intercepts MCP output *before* it reaches the window, stores the full payload locally, and keeps it retrievable.
+`mcp-recall install` writes the MCP server entry and hooks to `~/.claude.json` and `~/.claude/settings.json`, and adds a short instruction block to `~/.claude/CLAUDE.md`. It is idempotent, so re-run it after every update.
 
-**How this compares to Claude's native context tools:** API-level [context editing](https://platform.claude.com/docs/en/build-with-claude/context-editing) (beta), [compaction](https://platform.claude.com/docs/en/build-with-claude/compaction) (beta), and the [memory tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool) all reduce context — but through lossy eviction or model-authored summaries, with no verbatim retrieval or full-text search of the original tool output. mcp-recall is complementary, not competing: it captures MCP output automatically (skipping denylisted tools and secrets), stores it verbatim with an FTS index, and sits *ahead of* native compaction in the pipeline as the MCP-output layer. All layers stack — run them together for maximum efficiency.
+→ [Quickstart](docs/quickstart.md) · [All install options, updating and uninstalling](docs/install.md) (plugin marketplace, from source)
 
 ---
 
@@ -63,46 +48,7 @@ flowchart LR
     D <-->|"recall__retrieve · recall__search"| C
 ```
 
-<details>
-<summary>Detailed pipeline</summary>
-
-```mermaid
-flowchart TD
-    A["MCP tool response<br/>(e.g. 56 KB snapshot)"] --> B[PostToolUse hook]
-
-    subgraph SEC["Security checks"]
-        DENY[denylist match?]
-        SCRT[secret detected?]
-    end
-
-    B --> DENY
-    DENY -- yes --> P1([skip: passes through unchanged])
-    DENY -- no --> SCRT
-    SCRT -- yes --> P2([skip + warn: passes through unchanged])
-    SCRT -- no --> DEDUP_N
-
-    subgraph DEDUP["Dedup check"]
-        DEDUP_N["sha256(name+input)<br/>or sha256(content)"]
-    end
-
-    DEDUP_N -- "cache hit" --> CACHED(["[cached] header"])
-    DEDUP_N -- miss --> HAND_N
-
-    subgraph HANDLER["Compression handler (TOML profile first)"]
-        HAND_N["Bash · Playwright · GitHub · GitLab<br/>Stripe · Shell · Linear · Slack · Tavily<br/>Database · Sentry · Filesystem · CSV<br/>JSON · Text"]
-    end
-
-    HAND_N --> CTX["Context<br/>299 B summary + recall header"]
-    HAND_N --> DB_N
-
-    subgraph DB["SQLite store"]
-        DB_N["full content (56 KB) · summary (299 B)<br/>FTS index · access tracking · session days"]
-    end
-
-    DB_N --> TOOLS["recall__* tools<br/>retrieve · search · pin · note<br/>stats · session_summary · list · forget<br/>export · context · suggest"]
-```
-
-</details>
+The [architecture guide](docs/architecture.md#the-capture-pipeline) walks through the full pipeline step by step.
 
 **Two hooks, one MCP server.**
 
@@ -111,6 +57,40 @@ flowchart TD
 - `recall` MCP server — exposes eleven tools for retrieval, search, memory, and management
 
 > **Scope**: Compression applies to MCP tools and the native `Bash` built-in. The remaining built-ins (Read, Grep, Glob) pass through unchanged. See [Scope](#scope) for details.
+
+---
+
+## Using it
+
+Each compressed output starts with a header line that names the stored item, its sizes, and a few `search:` hints, which are salient terms from the full content so Claude's first `recall__search` lands without guessing keywords:
+
+```
+[recall:recall_abc12345 · 56.2KB→299B (99% reduction) · search: "checkout", "sessionToken", "orderId"]
+```
+
+Repeated identical tool calls return a cached header instead of re-compressing:
+
+```
+[recall:recall_abc12345 · cached · 2026-03-01]
+```
+
+Eleven `recall__*` tools are available to Claude in every session. The `recall__` prefix is the MCP naming convention — it namespaces the tools so Claude knows which plugin owns them. You don't call these yourself; Claude uses them automatically.
+
+| Tool | Use when |
+|---|---|
+| `recall__context` | Start of session — get pinned items, notes, and recent activity |
+| `recall__retrieve(id, query?, mode?)` | Need detail from a prior tool call — `summary` / `peek` / `full` tiers |
+| `recall__search(query, tool?)` | Find stored output by content, no ID needed |
+| `recall__pin(id)` | Protect an item from expiry and eviction |
+| `recall__note(text, title?)` | Store a conclusion or decision as project memory |
+| `recall__stats()` | Session efficiency report with savings and suggestions |
+| `recall__session_summary(date?)` | Digest of a specific session's activity |
+| `recall__list_stored(sort?, tool?)` | Browse stored items |
+| `recall__forget(...)` | Delete by id, tool, session, age, or all |
+| `recall__export()` | JSON dump of all stored items |
+| `recall__suggest()` | Surface pin candidates and stale items, with the command to act on each |
+
+→ [Full tool reference](docs/tools.md)
 
 ---
 
@@ -170,179 +150,63 @@ These are per-output compression ratios, not a whole-session token figure — mo
 Used daily in development of this project since the first release in March 2026. No broken sessions, no data loss.
 
 ---
+## Profiles
 
-## Install
-
-→ **[Quickstart guide](docs/quickstart.md)** — get up and running in 2 minutes.
-
-### Prerequisites
-
-- [Claude Code](https://claude.ai/claude-code) installed
-- [Bun](https://bun.sh) installed — `curl -fsSL https://bun.sh/install | bash`
-
-### Option A — npm (recommended)
-
-No global install required — run directly with npx or bunx:
+Profiles teach mcp-recall how to compress output from specific MCPs, as declarative TOML with no TypeScript required. Five profiles ship built in (Jira, Gmail, Context7, Docker, Cloudflare docs), and **[26 community profiles](https://github.com/sakebomb/mcp-recall-profiles)** cover Stripe, Grafana, Shopify, Datadog, Notion, Teams, and more.
 
 ```bash
-npx mcp-recall install   # or: bunx mcp-recall install
+mcp-recall profiles seed                 # install community profiles for your connected MCPs
+mcp-recall profiles seed --all           # or install the full community catalog
+mcp-recall profiles available            # browse the catalog (add --verbose for MCP URLs)
+mcp-recall profiles list                 # what's installed (short names work: "grafana")
+mcp-recall profiles info <name>          # full metadata (installed first, else catalog)
+mcp-recall profiles install <name>       # install one by short name
+mcp-recall profiles update               # keep installed profiles up to date
+mcp-recall learn                         # generate profiles from your installed MCPs
+mcp-recall profiles retrain              # suggest field additions using your stored data
+mcp-recall profiles test <tool>          # apply a profile and show the compression result
 ```
 
-Or install globally for faster subsequent runs:
-
-```bash
-bun add -g mcp-recall    # or: npm i -g mcp-recall
-mcp-recall install       # register hooks + MCP server in Claude Code
-mcp-recall status        # verify
-```
-
-`mcp-recall install` writes the MCP server entry and hooks to `~/.claude.json` and `~/.claude/settings.json`, and adds a short instruction block to `~/.claude/CLAUDE.md` so Claude knows how to use the recall tools. It's idempotent — safe to re-run after updates.
-
-Update: `bun update -g mcp-recall && mcp-recall install`
-
-Uninstall: `mcp-recall uninstall && bun remove -g mcp-recall`
-
-### Option B — Claude Code plugin marketplace
-
-```bash
-claude plugin marketplace add mcp-recall https://github.com/sakebomb/mcp-recall
-claude plugin install mcp-recall@mcp-recall
-```
-
-Both hooks and the MCP server register automatically. Verify with `claude --debug`.
-
-### Option C — from source
-
-```bash
-git clone https://github.com/sakebomb/mcp-recall
-cd mcp-recall
-bun install
-bun run build
-./bin/recall install
-```
-
-The `mcp-recall` binary is not on PATH for source installs. Add an alias so the CLI works everywhere:
-
-```bash
-echo 'alias mcp-recall="bun /path/to/mcp-recall/plugins/mcp-recall/dist/cli.js"' >> ~/.zshrc
-source ~/.zshrc
-```
-
-Or symlink it:
-
-```bash
-ln -sf /path/to/mcp-recall/plugins/mcp-recall/dist/cli.js ~/.local/bin/mcp-recall
-```
+→ [Profiles quickstart](docs/profiles-quickstart.md) · [Profile schema](docs/profile-schema.md) · [retrain guide](docs/retrain.md) · [AI profile guide](docs/ai-profile-guide.md) · [Contributing a profile](CONTRIBUTING.md#contributing-a-profile)
 
 ---
 
-## Updating
+## Configuration
 
-### Option A — npm / bun global install
+mcp-recall works out of the box. To customize it, create `~/.config/mcp-recall/config.toml`. The settings most people change:
 
-```bash
-bun update -g mcp-recall && mcp-recall install
-```
-
-`mcp-recall install` is idempotent — it updates hook paths and the MCP server entry in place without touching your stored data or config.
-
-### Option B — Claude Code plugin marketplace
-
-```bash
-claude plugin update mcp-recall@mcp-recall
-```
-
-### Option C — from source
-
-```bash
-git pull
-bun install
-bun run build
-mcp-recall install   # re-registers hooks with the new binary path
-```
-
-### After updating
-
-Run `mcp-recall status` to confirm the new version is active and hooks are registered correctly. Then update community profiles to pick up any new or revised ones:
-
-```bash
-mcp-recall profiles update
-```
-
----
-
-## Maintenance
-
-mcp-recall keeps a separate SQLite database per project under `~/.local/share/mcp-recall/`. Over time, projects you delete leave their databases behind, and databases accumulate free pages. `mcp-recall gc` reclaims both:
-
-```bash
-# Review what would be reclaimed — dry run, deletes nothing
-mcp-recall gc
-
-# Actually delete orphaned + stale databases
-mcp-recall gc --force
-
-# Also compact the databases you keep (reclaims free pages;
-# rewrites each file, so it can take a moment on a large store)
-mcp-recall gc --force --vacuum
-```
-
-Each database is classified by whether its recorded project path still exists on disk. Only databases untouched past the stale window, or a project directory confirmed deleted, are ever removed:
-
-| Status | Meaning | `--force` deletes? |
+| Setting | Default | What it does |
 |---|---|---|
-| **current** | The active project's database | never |
-| **active** | Recorded project path still exists | never |
-| **orphaned** | Project directory gone, but its parent survives — a real deletion | **yes** |
-| **legacy-fresh** | No recorded project path, touched within `--stale-days` | never |
-| **legacy-stale** | No recorded project path, untouched longer than `--stale-days N` (default 90) | **yes** |
-| **unrooted-fresh** | Un-rootable relative recorded path, touched within `--stale-days` | never |
-| **unrooted-stale** | Un-rootable relative recorded path, untouched longer than `--stale-days N` | **yes** |
-| **unverifiable** | Absolute path whose parent directory is also missing — usually an unmounted volume, not a deleted project | never |
-| **unreadable** | Not a readable recall database | never |
+| `store.expire_after_session_days` | `30` | Days you **actively use** Claude Code on a project before stored items expire. Calendar time away doesn't count |
+| `store.max_size_mb` | `500` | Target store size; past it, unpinned items are evicted lowest-value first |
+| `store.retention` | `"balanced"` | Which outputs keep a retrievable full body: `full`, `balanced` (reproducible Bash is stored summary-only), or `minimal` |
+| `denylist.additional` / `denylist.allowlist` | empty | Extra tool patterns never to store, or tools to store despite a deny pattern |
+| `debug.enabled` | `false` | Diagnostic logging to stderr (same as `RECALL_DEBUG=1`) |
 
-The `orphaned` rule requires the *parent* directory to survive, so an absolute path on an unmounted volume reads as `unverifiable` — the volume may return with its project intact, so it is never deleted regardless of age. A database with a *relative* recorded path can't be rooted against any directory, so it is never deleted on a deleted-project inference; instead it falls through to the same "untouched for `--stale-days`" rule as pathless legacy databases (`unrooted-fresh` before the window, `unrooted-stale` after).
-
-A database has no recorded project path either because it predates path tracking, or because its path never resolved to a real directory when a session started — session start records a path only once it confirms one exists, so it never overwrites good evidence with a guess. Either way the `legacy-*` and `unrooted-*` classifications rest solely on "untouched for `--stale-days`", never on inferring that a project was deleted.
-
-The active project's database is always protected. When the store grows past `store.gc_reminder_mb` (default 2 GB), session start injects a one-line reminder to run `gc`, and `mcp-recall status` shows the store's size. There's no automatic deletion — reclaiming is always an explicit command.
+→ [Full configuration reference](docs/configuration.md): every key with its trade-offs, environment variables, and how session days work.
 
 ---
 
-## CLI reference
+## Maintenance and CLI
 
 ```bash
 mcp-recall install              # register hooks + MCP server in Claude Code
 mcp-recall uninstall            # remove hooks + MCP server
 mcp-recall status               # report install health and store size
-mcp-recall gc [--force]         # reclaim disk (see Maintenance above)
+mcp-recall gc [--force]         # reclaim disk (dry run unless --force)
 mcp-recall learn                # generate profiles from your installed MCPs
-mcp-recall profiles <cmd>       # manage compression profiles (see Profiles below)
+mcp-recall profiles <cmd>       # manage compression profiles (see Profiles above)
 mcp-recall import <file>        # restore items from a recall__export dump
 mcp-recall completions <shell>  # print a bash / zsh / fish completion script
 ```
 
-`mcp-recall --help` lists every subcommand.
+`mcp-recall --help` lists every subcommand. Update with `bun update -g mcp-recall && mcp-recall install`.
 
-**Restoring an export.** `recall__export()` produces a JSON dump; `import` reads it back:
+**Reclaiming disk.** Each project gets its own SQLite database under `~/.local/share/mcp-recall/`. `mcp-recall gc` lists databases left behind by deleted projects or untouched for a long time, and `--force` deletes them. It is a dry run by default, never touches the active project, and never deletes a database whose project might still exist (for example, on an unmounted volume). Add `--vacuum` to compact the databases you keep. Session start reminds you once the store passes `store.gc_reminder_mb` (default 2 GB).
 
-```bash
-mcp-recall import dump.json                  # skips items whose IDs already exist
-mcp-recall import dump.json --overwrite      # replace existing items instead
-mcp-recall import dump.json --dry-run        # report what would be imported
-```
+**Restoring an export.** `mcp-recall import dump.json` reads a `recall__export()` dump into the current project's store. Rows containing a credential are withheld, not imported.
 
-Items are imported into the **current** project's store — run `import` from the project you want them in.
-
-Rows carrying a credential are **withheld, not imported** ([#273](https://github.com/sakebomb/mcp-recall/issues/273)). `import` writes through its own INSERT, bypassing the PostToolUse hook that scans intercepted tool output, so it runs the same [secret patterns](#scope) over each row's summary and body itself. A match withholds that row and the run reports the count and the pattern names — never the matched value:
-
-```
-Withheld 2 row(s) containing secrets (AWS access key ID, GitHub PAT (classic)). They were NOT imported.
-```
-
-Clean rows in the same dump import normally — one bad row does not fail a restore — and `--dry-run` reports what *would* be withheld. This matters most when restoring a dump taken before a credential was purged from your store: without the scan, the purge would be silently undone.
-
-> **`--keep-project-key` was removed** ([#226](https://github.com/sakebomb/mcp-recall/issues/226)). It retained the dump's original project key on each row but still wrote them to the *current* project's database, where almost everything is scoped by project key. `recall__retrieve` looks an item up by id alone, but everything else is scoped — so rows imported with the flag were readable if you still knew their id and otherwise inert: absent from `search`, `list_stored`, `stats`, `context`, `session_summary`, `suggest` and `export`; impossible to delete via `recall__forget`, even with `all: true`; not pinnable; never expired; and invisible to the `store.max_size_mb` accounting. The flag now exits with an error naming this. Import **without** it — the items land in the current project and behave normally. To recover rows already stranded by the old flag, see [Recovering rows stranded by the old import flag](docs/troubleshooting.md#recovering-rows-stranded-by-the-old-import-flag).
+→ [Maintenance details](docs/maintenance.md): what `gc` deletes and why, and import options.
 
 **Shell completions.** Add to your shell profile once:
 
@@ -352,237 +216,19 @@ mcp-recall completions zsh > ~/.zfunc/_mcp-recall
 
 ---
 
-## Profiles
+## What it touches
 
-Profiles teach mcp-recall how to compress output from specific MCPs. Five profiles ship built in (Jira, Gmail, Context7, Docker, Cloudflare docs). **[26 community profiles](https://github.com/sakebomb/mcp-recall-profiles)** cover Grafana, Shopify, Notion, and more.
+### Scope
 
-```bash
-# Install profiles for all your connected MCPs
-mcp-recall profiles seed
+**Compression applies to MCP tools and the native Bash built-in.** MCP tools (`mcp__*`, except mcp-recall's own) go through a dedicated handler, a profile, or a structure-aware fallback. Bash output is routed on the command: `git diff`, test runners, compilers and linters, `grep`, `ls` and more each get a summary that keeps what matters, such as failures and errors first. The [handler reference](docs/handlers.md) lists every handler and what it keeps.
 
-# Or install the full community catalog at once
-mcp-recall profiles seed --all
+The remaining built-in tools — `Read`, `Grep`, `Glob` — pass through unchanged, and their full output enters context directly. If large file reads are your biggest context consumer, consider the [filesystem MCP server](https://github.com/modelcontextprotocol/servers) instead of the built-in Read tool.
 
-# See what's available in the community catalog (add --verbose for MCP URLs)
-mcp-recall profiles available
-
-# See what's installed (accepts short names: "grafana" not "mcp__grafana")
-mcp-recall profiles list
-
-# Get full metadata for a profile (installed data first, community catalog otherwise)
-mcp-recall profiles info grafana
-
-# Keep profiles up to date
-mcp-recall profiles update
-```
-
-→ [Profiles quickstart](docs/profiles-quickstart.md) · [Profile schema](docs/profile-schema.md) · [Community catalog](https://github.com/sakebomb/mcp-recall-profiles)
-
----
-
-## Configuration
-
-mcp-recall works out of the box. To customize, create `~/.config/mcp-recall/config.toml`:
-
-```toml
-[store]
-# Days of actual Claude Code use before stored items expire.
-# Vacations and context switches to other projects don't count —
-# only days you actively used Claude Code on this project.
-# See "Session days" below.
-expire_after_session_days = 30
-
-# How to identify a project.
-# "git_root" is recommended — stable regardless of launch directory.
-# Falls back to "cwd" if not inside a git repo.
-key = "git_root"
-
-# Target store size in megabytes. When exceeded, non-pinned items are evicted
-# lowest-value-first by the decay score described under eviction_half_life_days.
-# This bounds unpinned content only — pinned items are never evicted, so a store
-# of mostly-pinned data can exceed it. recall__stats reports when it does.
-max_size_mb = 500
-
-# Bound on pinned data in megabytes. Pinned items are exempt from eviction, so
-# without a separate cap an unbounded number of pins would silently void
-# max_size_mb. recall__pin enforces this at pin time: a pin that would push total
-# pinned bytes over the cap is refused with an actionable message, so the bound
-# holds even if the caller ignores it. Must not exceed max_size_mb (a config that
-# sets it higher is rejected). If you set max_size_mb but leave this unset, it
-# defaults to half of max_size_mb rather than the 250 shown here, so lowering the
-# total cap alone never creates a contradiction. Existing over-cap pins are never
-# auto-deleted — unpin or recall__forget to reclaim.
-max_pinned_mb = 250
-
-# Access count threshold for pin suggestions in recall__stats.
-# Items accessed at least this many times will appear as pin candidates.
-pin_recommendation_threshold = 5
-
-# Days since creation before a never-accessed item appears as a stale candidate
-# in recall__stats. Helps identify stored output that was never retrieved.
-stale_item_days = 3
-
-# Half-life (in days) for eviction scoring when the store exceeds max_size_mb.
-# Eviction ranks items by a recency-weighted access frequency, so a steadily
-# used recent item outranks one accessed many times but long ago. Lower =
-# recency matters more; higher = frequency dominates. Pinned items are exempt.
-eviction_half_life_days = 7
-
-# When the on-disk store (all project databases combined) grows past this many
-# megabytes, session start injects a one-line reminder to run `mcp-recall gc`.
-# Set to 0 to disable the reminder. Detection is cheap (no databases are opened).
-gc_reminder_mb = 2048
-
-# Which intercepted outputs keep a retrievable verbatim body vs. summary-only:
-#   full     = keep every intercepted body (most retrievable, most disk)
-#   balanced = keep MCP/web/API results + network Bash (curl/wget/gh api);
-#              store reproducible Bash (git, tests, ls, grep, cat, docker ps,
-#              build/lint) summary-only — an old copy is either trivially
-#              reproducible or misleadingly stale, so it isn't worth keeping
-#   minimal  = drop every intercepted body (summary-only for all)
-# Notes stored via recall__note always keep their body, regardless of this.
-# Only affects future writes; existing bodies are untouched. When a body was
-# not retained, recall__retrieve returns the summary and says to re-run.
-# max_size_mb / eviction and the max_pinned_mb pin budget count each item's
-# EFFECTIVE size (a summary-only row costs its summary size, not the original),
-# so lowering retention both reduces bytes-on-disk and raises the number of
-# items the store holds before eviction fires.
-retention = "balanced"
-
-[retrieve]
-# Max bytes returned by recall__retrieve(mode: "full").
-# Claude can override this per-call via the max_bytes parameter.
-default_max_bytes = 8192
-
-[denylist]
-# Additional tool name glob patterns to never store.
-# These extend the built-in defaults — they don't replace them.
-additional = [
-  # "*myserver*secret*",
-]
-
-# Allowlist — tools matching these patterns are always stored,
-# even if they match a deny pattern. Use when a legitimate tool
-# is blocked by a keyword pattern (e.g. *token* blocking your
-# analytics tool).
-allowlist = [
-  # "mcp__myservice__list_authors",
-]
-
-# Replace built-in defaults entirely (use sparingly).
-# Must re-specify any defaults you still want.
-override_defaults = [
-  # "mcp__recall__*",
-  # "mcp__1password__*",
-]
-
-[profiles]
-# Manifest signature verification mode when installing/updating community profiles.
-# Requires the gh CLI. Options: "warn" (default), "error", "skip".
-verify_signature = "warn"
-
-[debug]
-# Write diagnostic logging to stderr — handler dispatch, denylist skips, profile
-# load errors. Equivalent to setting RECALL_DEBUG=1, but persistent.
-enabled = false
-```
-
-### Environment variables
-
-Every path below has a sensible default; override only when you need to relocate state (for example, to keep a project's store on a different volume).
-
-| Variable | Overrides | Default |
-|---|---|---|
-| `RECALL_CONFIG_PATH` | Config file location | `~/.config/mcp-recall/config.toml` |
-| `RECALL_DB_PATH` | SQLite store location | `~/.local/share/mcp-recall/<project-key>.db` |
-| `RECALL_DEBUG` | Set to `1` for stderr debug logging | off (same as `debug.enabled`) |
-| `RECALL_USER_PROFILES_PATH` | User profile directory | `~/.config/mcp-recall/profiles/` |
-| `RECALL_COMMUNITY_PROFILES_PATH` | Installed community profile directory | `~/.local/share/mcp-recall/profiles/community/` |
-| `RECALL_BUNDLED_PROFILES_PATH` | Built-in profile directory | the installed package's own `profiles/` directory |
-
-### Session days
-
-The `expire_after_session_days` setting counts **days you actively use Claude Code on this project** — not calendar days. If you work on a task on Monday, leave for a week, and come back the following Tuesday, your stored context is still exactly as you left it. The counter only advances when you open a session.
-
-This means a 7-day setting gives you 7 working sessions of stored context, regardless of how much calendar time passes between them.
-
----
-
-## Tools
-
-Eleven `recall__*` tools are available to Claude in every session. The `recall__` prefix is the MCP naming convention — it namespaces the tools so Claude knows which plugin owns them. You don't call these yourself; Claude uses them automatically.
-
-| Tool | Use when |
-|---|---|
-| `recall__context` | Start of session — get pinned items, notes, and recent activity |
-| `recall__retrieve(id, query?, mode?)` | Need detail from a prior tool call — `summary` / `peek` / `full` tiers |
-| `recall__search(query, tool?)` | Find stored output by content, no ID needed |
-| `recall__pin(id)` | Protect an item from expiry and eviction |
-| `recall__note(text, title?)` | Store a conclusion or decision as project memory |
-| `recall__stats()` | Session efficiency report with savings and suggestions |
-| `recall__session_summary(date?)` | Digest of a specific session's activity |
-| `recall__list_stored(sort?, tool?)` | Browse stored items |
-| `recall__forget(...)` | Delete by id, tool, session, age, or all |
-| `recall__export()` | JSON dump of all stored items |
-| `recall__suggest()` | Surface pin candidates and stale items, with the command to act on each |
-
-→ [Full tool reference](docs/tools.md)
-
----
-
-## Compression handlers
-
-Handlers are selected by tool name, with content-based fallback. Every compressed result includes a header line, ending with a few `search:` hints — salient terms pulled from the stored content so Claude's first `recall__search` lands without guessing keywords:
-
-```
-[recall:recall_abc12345 · 56.2KB→299B (99% reduction) · search: "checkout", "sessionToken", "orderId"]
-```
-
-Repeated identical tool calls return a cached header instead of re-compressing:
-
-```
-[recall:recall_abc12345 · cached · 2026-03-01]
-```
-
-| Handler | Matches | Strategy |
-|---|---|---|
-| Bash | native `Bash` tool | CLI-aware routing on `tool_input.command`: `git diff`/`git show` → changed-files summary with per-file +/- stats; `git log` → 20-commit cap; `terraform plan` → resource action symbols + Plan: summary; `git status` → staged/unstaged counts + branch info; `npm`/`bun`/`yarn`/`pip install` → success or error summary (pnpm → shell compression); `pytest`/`jest`/`bun test`/`vitest`/`go test` → pass/fail counts + failure names; `docker ps` → container name/image/status/ports; `make`/`just` → target + outcome; `gh` → list output compressed to count + first 10 rows, check output to pass/fail summary, view output to key-value metadata; `cargo build`/`check`/`clippy`, `go build`/`vet`, `tsc`, `eslint`, `ruff`, and `npm`/`pnpm`/`yarn`/`bun run typecheck`/`lint`/`build` → error/warning count + individual diagnostics (errors first, capped), never reporting success on a non-zero exit; `grep`/`rg`/`git grep` → match count + files + capped sample; `ls` (`-l`/`-R`) → entry/dir counts; `find`/`fd` → path count + sample; `git branch`/`stash list`/`remote` → ref counts; JSON stdout (any command) → JSON handler; everything else → shell handler. Command routing normalises a leading `cd <dir> && …` and git global options (`--no-pager`, `-C`, `-c`) so wrapped commands still match. |
-| Playwright | tool name contains `playwright` and `snapshot` | Interactive elements (buttons, inputs, links), visible text, headings. Drops aria noise. |
-| GitHub | `mcp__github__*` | Number, title, state, body (200 chars), labels, URL. Lists: first 10 + overflow count. |
-| GitLab | `mcp__gitlab__*` | IID, title, state, description excerpt (200 chars), labels, web URL. Lists: first 10 + overflow count. |
-| Stripe | `mcp__stripe__*` | Amount formatting (smallest currency unit, zero-decimal currencies like JPY/KRW handled separately), per-tool routing: customers, invoices, payment intents, subscriptions, products, prices, disputes, payment links, balance, account. |
-| Shell | tool name contains `bash`, `shell`, `terminal`, `run_command`, `ssh_exec`, `exec_command`, `remote_exec`, or `container_exec` | Strips ANSI escape codes and SSH post-quantum advisory noise. Parses structured `{stdout, stderr, returncode}` JSON; falls back to plain text. JSON stdout is routed through the JSON handler. Stdout: first 25 lines + overflow count. Stderr: first 20 lines, shown in a separate section. Exit code in header. |
-| Linear | tool name contains `linear` | Identifier, title, state, priority (numeric → label), description excerpt (200 chars), URL. Handles single, array, GraphQL, and Relay shapes. |
-| Slack | tool name contains `slack` | Channel, formatted timestamp, user/display name, message text (200 chars). Handles `{ok, messages}` wrappers and bare arrays. Lists: first 10 + overflow count. |
-| Tavily | tool name contains `tavily` | Query header, synthesized answer in full, per-result title + URL + 150-char content snippet. Drops `raw_content`, `score`, `response_time`. Lists: first 10 + overflow count. |
-| Database | tool name contains `postgres`, `mysql`, `sqlite`, or `database` | Row/column count header, column names, first 10 rows as col=value pairs. Handles node-postgres `{rows, fields}`, bare array, and `{results}` wrapper shapes. |
-| Sentry | tool name contains `sentry` | Exception type + message, level, environment, release, event ID. Last 8 stack frames (innermost/most relevant). Drops breadcrumbs, SDK info, request headers. |
-| Filesystem | `mcp__filesystem__*` or tool name contains `read_file` / `get_file` | Line count header + first 50 lines + truncation notice. |
-| CSV | tool name contains `csv`, or content-based detection | Column headers + first 5 data rows as key=value pairs + row/col count. Handles quoted fields. |
-| Content blocks | Unmatched tool whose payload is an MCP content-block array with image/audio/resource items | Drops non-text blocks; keeps the text (capture ID, dimensions, tab context) and notes what was stripped. `originalSize` is the pre-strip payload so the hook replaces the screenshot rather than skipping. |
-| Generic JSON | Any unmatched tool with JSON output | 3-level depth limit, arrays capped at 3 items with overflow count. |
-| Generic text | Everything else | Structure-aware: small output kept whole; long multi-line (logs/traces) → head + tail lines with error/warn lines surfaced from the elided middle; long single-block → head + tail window. Deterministic, no LLM. |
-
-The generic JSON handler is intentionally conservative — it keeps structure and marks what was dropped. Correctness matters more than compression ratio.
+### Credentials
 
 Credential tools are never stored. Password managers are blocked by explicit name (`mcp__1password__*`, `mcp__bitwarden__*`, `mcp__lastpass__*`, `mcp__dashlane__*`, `mcp__keeper__*`, `mcp__hashicorp_vault__*`, `mcp__vault__*`, `mcp__doppler__*`, `mcp__infisical__*`) because their tool names — `get_item`, `list_logins`, `vault read` — don't contain obvious credential keywords. Keyword patterns catch remaining credential-adjacent names: `*secret*`, `*token*`, `*password*`, `*credential*`, `*api_key*`, `*access_key*`, `*private_key*`, `*signing_key*`, `*oauth*`, `*auth_token*`, `*authenticate*`, `*env_var*`, `*dotenv*`. Output is also scanned for secret patterns (PEM headers, GitHub PATs, AWS keys, etc.) before any write. If a legitimate tool is blocked by a keyword pattern, add it to `denylist.allowlist` in your config. See [SECURITY.md](SECURITY.md) for details.
 
----
-
-## Scope
-
-**Compression applies to MCP tools and the native Bash built-in.**
-
-Claude Code's `PostToolUse` hook supports output replacement for MCP tools and the `Bash` tool. mcp-recall intercepts both:
-
-- **MCP tools** (`mcp__*`) — all compression handlers apply (Playwright, GitHub, GitLab, Stripe, filesystem, shell/remote-exec, Linear, Slack, Tavily, database query results, Sentry events, CSV, JSON, generic text)
-- **Bash** — CLI-aware handlers: `git diff`/`git show` → file-level summary; `git log` → 20-commit cap; `terraform plan` → resource action summary; `git status` → staged/unstaged counts; package install (npm/bun/yarn/pip) → success/error summary; test runners (pytest/jest/bun test/vitest/go test) → pass/fail counts; `docker ps` → container list; `make`/`just` → target + outcome; compilers/linters (cargo build/check/clippy, go build/vet, tsc, eslint, ruff, `*run typecheck/lint/build`) → error/warning counts + diagnostics; search/listing (grep/rg, ls, find, git branch/stash/remote) → count + capped sample; everything else → 25-line shell cap with ANSI stripping
-
-The remaining built-in tools — `Read`, `Grep`, `Glob` — do not support output replacement. Their full output enters context directly. If large file reads are your biggest context consumer, consider the [filesystem MCP server](https://github.com/modelcontextprotocol/servers) instead of the built-in Read tool.
-
----
-
-## Privacy
+### Privacy
 
 All stored data lives locally on your machine at `~/.local/share/mcp-recall/`. Nothing is sent to any external service. The SQLite database contains full tool outputs — treat it accordingly.
 
@@ -598,36 +244,32 @@ Or delete the directory directly:
 rm -rf ~/.local/share/mcp-recall/
 ```
 
----
-
-## Error contract
+### Error contract
 
 mcp-recall never breaks a tool call. Every failure mode — hook crash, SQLite error, handler exception, timeout, secret detected — degrades gracefully to the original uncompressed output passing through unchanged. The session gets slightly worse context efficiency. It never gets broken.
+
+---
+
+## How it compares
+
+Context pressure builds at four distinct layers. Native Claude tooling now covers most of them for **built-in** tools — but leaves **MCP** tool output largely unhandled. That's the gap mcp-recall fills.
+
+| Layer | Problem | Solution |
+|---|---|---|
+| **① Tool definitions** | Every connected MCP loads its full schema upfront (~500 tokens/tool) | [Claude Code Tool Search](https://code.claude.com/docs/en/mcp#scale-with-mcp-tool-search) (built-in) · Switchboard |
+| **② Intermediate results** | Multi-step workflows pass each result back through context | [Code Mode](https://blog.cloudflare.com/code-mode/) · [FastMCP 3.1](https://www.jlowin.dev/blog/fastmcp-3-1-code-mode) |
+| **③ MCP tool outputs** | Claude Code truncates MCP output at a 25k-token ceiling and discards the rest; native microcompaction only offloads *built-in* tools (Read/Grep/Glob/…) | **mcp-recall** |
+| **④ Cross-session memory** | Context vanishes when the session ends; the API memory tool is a model-managed summary, not a searchable verbatim archive | **mcp-recall** |
+
+Layers ① and ② have solid first-party and community solutions. For layer ③, Claude Code's [microcompaction](https://decodeclaude.com/compaction-deep-dive/) already offloads *built-in* tool output to disk — but **MCP** tool output is instead [truncated at a 25k-token ceiling](https://github.com/anthropics/claude-code/issues/2638) and discarded. mcp-recall fills exactly that gap: it intercepts MCP output *before* it reaches the window, stores the full payload locally, and keeps it retrievable.
+
+**How this compares to Claude's native context tools:** API-level [context editing](https://platform.claude.com/docs/en/build-with-claude/context-editing) (beta), [compaction](https://platform.claude.com/docs/en/build-with-claude/compaction) (beta), and the [memory tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool) all reduce context — but through lossy eviction or model-authored summaries, with no verbatim retrieval or full-text search of the original tool output. mcp-recall is complementary, not competing: it captures MCP output automatically (skipping denylisted tools and secrets), stores it verbatim with an FTS index, and sits *ahead of* native compaction in the pipeline as the MCP-output layer. All layers stack — run them together for maximum efficiency.
 
 ---
 
 ## Troubleshooting
 
 → [Troubleshooting guide](docs/troubleshooting.md)
-
----
-
-## Profile system
-
-Declarative TOML profiles extend compression to any MCP — no TypeScript required. Five profiles ship built in (Jira, Gmail, Context7, Docker, Cloudflare docs), and **[26 community profiles](https://github.com/sakebomb/mcp-recall-profiles)** cover Stripe, Grafana, Shopify, Datadog, Notion, Teams, and more.
-
-```bash
-mcp-recall learn                         # auto-generate profiles from your installed MCPs
-mcp-recall profiles seed                 # install community profiles for detected MCPs
-mcp-recall profiles available            # browse the community catalog with install status
-mcp-recall profiles info <name>          # full metadata (installed first, else catalog)
-mcp-recall profiles install <name>       # install by short name, e.g. "grafana"
-mcp-recall profiles retrain              # suggest field additions using your stored data
-mcp-recall profiles test <tool>          # apply a profile and show compression result
-mcp-recall profiles list                 # show all installed profiles
-```
-
-→ [Profiles quickstart](docs/profiles-quickstart.md) · [Profile schema](docs/profile-schema.md) · [retrain guide](docs/retrain.md) · [AI profile guide](docs/ai-profile-guide.md) · [Contributing a profile](CONTRIBUTING.md#contributing-a-profile)
 
 ---
 

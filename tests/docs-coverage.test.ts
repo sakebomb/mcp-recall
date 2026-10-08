@@ -19,14 +19,16 @@ import { printHelp } from "../src/cli";
 // the sentence claims) stays a review concern and is deliberately out of scope.
 
 const readme = readFileSync("README.md", "utf8");
+// Full config reference, env-var table included; the README keeps a summary.
+const configDoc = readFileSync("docs/configuration.md", "utf8");
 
 // ── Markdown structure helpers ──────────────────────────────────────────────
 
-/** Body of a README `## <header>` section, up to the next `## ` heading. */
+/** Body of a `## <header>` section, up to the next `## ` heading. */
 function section(md: string, header: string): string {
   const lines = md.split("\n");
   const start = lines.findIndex((l) => l.trim() === `## ${header}`);
-  if (start === -1) throw new Error(`README section "## ${header}" not found`);
+  if (start === -1) throw new Error(`section "## ${header}" not found`);
   let end = lines.length;
   for (let i = start + 1; i < lines.length; i++) {
     if (/^## /.test(lines[i])) {
@@ -64,8 +66,8 @@ describe("docs coverage: recall__* tools", () => {
   const registered = [...serverSrc.matchAll(/server\.tool\(\s*"(recall__\w+)"/g)].map((m) => m[1]);
 
   test("every registered tool appears in the README tool table", () => {
-    const rows = [...section(readme, "Tools").matchAll(/^\|\s*`(recall__\w+)/gm)].map((m) => m[1]);
-    assertAllDocumented(registered, rows, "the README `## Tools` table");
+    const rows = [...section(readme, "Using it").matchAll(/^\|\s*`(recall__\w+)/gm)].map((m) => m[1]);
+    assertAllDocumented(registered, rows, "the README `## Using it` tool table");
   });
 
   test("every registered tool has a heading in docs/tools.md", () => {
@@ -86,10 +88,10 @@ describe("docs coverage: config keys", () => {
     }
   }
 
-  test("every schema key appears as a key = line in the README config block", () => {
-    const toml = firstFence(section(readme, "Configuration"), "toml");
+  test("every schema key appears as a key = line in the docs/configuration.md config block", () => {
+    const toml = firstFence(configDoc, "toml");
     const documented = [...toml.matchAll(/^\s*([a-z_]+)\s*=/gm)].map((m) => m[1]);
-    assertAllDocumented(leafKeys, documented, "the README `## Configuration` TOML block");
+    assertAllDocumented(leafKeys, documented, "the docs/configuration.md TOML block");
   });
 });
 
@@ -101,7 +103,7 @@ describe("docs coverage: environment variables", () => {
   // record rather than silence.
   const INTERNAL_ENV_VARS = new Set<string>([]);
 
-  test("every RECALL_* env var read by source is in the README env-var table", () => {
+  test("every RECALL_* env var read by source is in the docs/configuration.md env-var table", () => {
     let source = readFileSync("bin/recall", "utf8");
     for (const file of new Glob("**/*.ts").scanSync("src")) {
       source += readFileSync(join("src", file), "utf8");
@@ -109,8 +111,8 @@ describe("docs coverage: environment variables", () => {
     const used = [...new Set([...source.matchAll(/RECALL_[A-Z_]+/g)].map((m) => m[0]))].filter(
       (v) => !INTERNAL_ENV_VARS.has(v),
     );
-    const documented = [...section(readme, "Configuration").matchAll(/^\|\s*`(RECALL_[A-Z_]+)`/gm)].map((m) => m[1]);
-    assertAllDocumented(used, documented, "the README environment-variable table");
+    const documented = [...section(configDoc, "Environment variables").matchAll(/^\|\s*`(RECALL_[A-Z_]+)`/gm)].map((m) => m[1]);
+    assertAllDocumented(used, documented, "the docs/configuration.md environment-variable table");
   });
 });
 
@@ -140,8 +142,8 @@ describe("docs coverage: CLI commands", () => {
   });
 
   test("every command appears in the README CLI reference", () => {
-    const fence = firstFence(section(readme, "CLI reference"), "bash");
+    const fence = firstFence(section(readme, "Maintenance and CLI"), "bash");
     const documented = [...new Set([...fence.matchAll(/^mcp-recall\s+([a-z]+)/gm)].map((m) => m[1]))];
-    assertAllDocumented(commands, documented, "the README `## CLI reference` block");
+    assertAllDocumented(commands, documented, "the README `## Maintenance and CLI` block");
   });
 });

@@ -67,8 +67,8 @@ Graduated retrieval across three tiers — escalate only as far as you need:
 - `peek` with a `query` falls back to full content if the item has no matching chunks (e.g. rows stored before chunking).
 - `peek` is bounded independently of `max_bytes` (a few chunks); `max_bytes` caps only `mode: "full"`.
 - Override `max_bytes` when you need more than the default 8 KB from `mode: "full"`.
-- **Summary-only rows:** under `store.retention` (default `balanced`), reproducible Bash/git/test output is stored without its verbatim body. `summary` mode is unaffected; `peek`/`full` on such a row return the summary plus a note to re-run the command for current output. See [`store.retention`](../README.md#configuration).
-- Every call records an access, which informs `sort: "accessed"` and eviction order (a recency-decayed access score, tunable via `eviction_half_life_days` in the [`[store]` config](../README.md#configuration)).
+- **Summary-only rows:** under `store.retention` (default `balanced`), reproducible Bash/git/test output is stored without its verbatim body. `summary` mode is unaffected; `peek`/`full` on such a row return the summary plus a note to re-run the command for current output. See [`store.retention`](configuration.md).
+- Every call records an access, which informs `sort: "accessed"` and eviction order (a recency-decayed access score, tunable via `eviction_half_life_days` in the [`[store]` config](configuration.md)).
 
 ---
 
@@ -253,7 +253,7 @@ recall__export()
 
 - Returns a JSON array of all stored items for the current project, ordered oldest-first
 - Useful before `forget(all: true)` to preserve data
-- Restore a dump with the [`mcp-recall import`](../README.md#cli-reference) CLI command
+- Restore a dump with the [`mcp-recall import`](maintenance.md#restoring-an-export) CLI command
 
 ---
 
