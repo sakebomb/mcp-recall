@@ -8,6 +8,14 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ### Fixed
 
+- **Re-running a command no longer returns its earlier result** (#324). The
+  dedup cache matched on input alone, so running the same command again, with
+  the same description, delivered the first run's summary even after the output
+  changed: a test run fixed in between still read `FAIL`. It also reused a
+  summary across commands whose output was byte-identical, so `git log` could be
+  answered with `[git diff — no changes]`. A cached summary is now used only for
+  identical output from the same tool and command family. Since 1.15.2 delivers
+  Bash summaries (#305), re-run tests and CI polls were the calls most exposed.
 - **A summary is used only when it is smaller than the output, header
   included** (#319). The hook compared the summary alone with the original, then
   added the `[recall:…]` header (60–140 B). Since 1.15.2 delivers Bash

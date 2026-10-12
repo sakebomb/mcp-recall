@@ -34,7 +34,7 @@ PostToolUse hook  ── mcp__* (except mcp__recall__*) and Bash
       │ clean
  3. open project DB        getProjectKey(cwd) → defaultDbPath(key)
       │
- 4. dedup: input_hash, then output_hash
+ 4. dedup: output_hash, same tool + command family
       │                    ──hit──▶ return the already-stored summary
       │ miss
  5. compress               getHandler(tool_name, response, input) → handler(…)
@@ -55,7 +55,7 @@ flowchart TD
     S1 -->|no| S2{"2. secret detected?"}
     S2 -->|yes| PASS
     S2 -->|no| S3["3. open project DB"]
-    S3 --> S4{"4. dedup hit? input_hash then output_hash"}
+    S3 --> S4{"4. dedup hit? same output, tool and command family"}
     S4 -->|yes| CACHE["return already-stored summary"]
     S4 -->|no| S5["5. compress via getHandler"]
     S5 --> S6{"6. summary ≥ original?"}
@@ -70,7 +70,9 @@ through unchanged** (`return {}`) rather than storing it. Step 6 is the one that
 surprises people — output that does not compress usefully (a short, error-dense
 log) is left alone, so not every intercepted tool call produces a stored row.
 Step 4 is the other early return: a dedup hit sends back the *existing* row's
-summary and stores nothing new.
+summary and stores nothing new. A hit needs byte-identical output from the same
+tool and, for Bash, the same command family. An identical *input* is not enough:
+a re-run exists to see changed output, and the summary names the command (#324).
 
 The `SessionStart` hook (`src/hooks/session-start.ts`) is the other half: it
 records today's date, injects an orientation snapshot, and writes the project's
@@ -189,7 +191,7 @@ changing `gc/`, build a store containing the dangerous shapes and assert what su
 ### 2. project-key scoping — writes are scoped, by-id reads are capabilities
 
 Writes and enumeration are all filtered by `project_key`: dedup
-(`checkDedup`/`checkOutputDedup`), eviction (`evictIfNeeded` totals *and* selects
+(`checkOutputDedup`), eviction (`evictIfNeeded` totals *and* selects
 per project), `searchOutputs`, `listOutputs`, `forgetOutputs` (every branch), and
 `export`. A project cannot see, evict, or delete another project's rows through
 those paths.
