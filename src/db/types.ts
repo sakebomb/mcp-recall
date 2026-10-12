@@ -78,7 +78,7 @@ export interface Stats {
   total_items: number;
   /** Original bytes of intercepted output (excludes `recall__note`). */
   total_original_bytes: number;
-  /** Summary bytes of intercepted output (excludes `recall__note`). */
+  /** Bytes Claude received for intercepted output, header included (#319; older rows count the summary alone). Excludes `recall__note`. */
   total_summary_bytes: number;
   /** Compression ratio over intercepted output only — the meaningful savings figure. */
   compression_ratio: number;
@@ -108,6 +108,7 @@ export interface ContextData {
     date: string;
     stored_count: number;
     total_original_bytes: number;
+    /** Delivered bytes, as in {@link Stats.total_summary_bytes}. */
     total_summary_bytes: number;
   } | null;
 }
@@ -123,6 +124,7 @@ export interface SessionSummaryData {
   label: string;
   stored_count: number;
   total_original_bytes: number;
+  /** Delivered bytes, as in {@link Stats.total_summary_bytes}. */
   total_summary_bytes: number;
   tool_counts: Array<{ tool_name: string; count: number }>;
   accessed_count: number;
@@ -137,6 +139,7 @@ export interface ToolBreakdownRow {
   tool_name: string;
   items: number;
   original_bytes: number;
+  /** Delivered bytes, as in {@link Stats.total_summary_bytes}. */
   summary_bytes: number;
 }
 
@@ -145,6 +148,7 @@ export interface CommandBreakdownRow {
   command_fp: string;   // "unknown" for pre-migration / untagged Bash rows
   items: number;
   original_bytes: number;
+  /** Delivered bytes, as in {@link Stats.total_summary_bytes}. */
   summary_bytes: number;
 }
 

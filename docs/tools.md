@@ -139,7 +139,7 @@ Example output:
 Session stats for current project:
   Intercepted items: 23
   Original size:     342KB
-  Compressed size:   6.1KB
+  Delivered size:    6.1KB
   Saved:             98.2% reduction
   ~Tokens saved:     ~84,000
   Session days:      4

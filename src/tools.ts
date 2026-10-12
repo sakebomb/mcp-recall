@@ -644,7 +644,7 @@ export function toolStats(
     lines.push(
       `  Intercepted items: ${stats.total_items}`,
       `  Original size:     ${formatBytes(stats.total_original_bytes)}`,
-      `  Compressed size:   ${formatBytes(stats.total_summary_bytes)}`,
+      `  Delivered size:    ${formatBytes(stats.total_summary_bytes)}`,
       `  Saved:             ${formatBytes(saved)} (${reductionPctVal}% reduction)`,
       `  ~Tokens saved:     ~${tokensSaved.toLocaleString()}`,
     );

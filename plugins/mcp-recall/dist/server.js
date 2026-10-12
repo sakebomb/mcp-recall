@@ -21622,7 +21622,7 @@ function toolStats(db, projectKey, args = {}) {
     const saved = stats.total_original_bytes - stats.total_summary_bytes;
     const reductionPctVal = ((1 - stats.compression_ratio) * 100).toFixed(1);
     const tokensSaved = Math.floor(saved / 4);
-    lines.push(`  Intercepted items: ${stats.total_items}`, `  Original size:     ${formatBytes(stats.total_original_bytes)}`, `  Compressed size:   ${formatBytes(stats.total_summary_bytes)}`, `  Saved:             ${formatBytes(saved)} (${reductionPctVal}% reduction)`, `  ~Tokens saved:     ~${tokensSaved.toLocaleString()}`);
+    lines.push(`  Intercepted items: ${stats.total_items}`, `  Original size:     ${formatBytes(stats.total_original_bytes)}`, `  Delivered size:    ${formatBytes(stats.total_summary_bytes)}`, `  Saved:             ${formatBytes(saved)} (${reductionPctVal}% reduction)`, `  ~Tokens saved:     ~${tokensSaved.toLocaleString()}`);
   } else {
     lines.push(`  Intercepted items: 0 (no tool output compressed yet)`);
   }
