@@ -201,38 +201,25 @@ export function pinOutput(
 }
 
 /**
- * Looks up the most recent stored output with a matching `input_hash` for the project.
- * Returns `null` on a miss, indicating the call should be compressed and stored normally.
- */
-export function checkDedup(
-  db: Database,
-  project_key: string,
-  input_hash: string
-): StoredOutput | null {
-  return db.prepare(`
-    SELECT * FROM stored_outputs
-    WHERE project_key = ? AND input_hash = ?
-    ORDER BY created_at DESC
-    LIMIT 1
-  `).get(project_key, input_hash) as StoredOutput | null;
-}
-
-/**
- * Looks up the most recent stored output whose *content* matches `output_hash`.
- * Catches the case the input-hash dedup misses: identical output produced by a
- * different call (or a call with no `tool_input` to hash). Returns `null` on a miss.
+ * Looks up the most recent stored output whose summary can stand in for this
+ * call: identical content (`output_hash`) from the same tool and, for Bash, the
+ * same command family. Matching on input instead served a re-run its first
+ * run's result after the output changed, and matching content across commands
+ * delivered one command's summary for another (#324). Returns `null` on a miss.
  */
 export function checkOutputDedup(
   db: Database,
   project_key: string,
-  output_hash: string
+  output_hash: string,
+  tool_name: string,
+  command_fp: string | null
 ): StoredOutput | null {
   return db.prepare(`
     SELECT * FROM stored_outputs
-    WHERE project_key = ? AND output_hash = ?
+    WHERE project_key = ? AND output_hash = ? AND tool_name = ? AND command_fp IS ?
     ORDER BY created_at DESC
     LIMIT 1
-  `).get(project_key, output_hash) as StoredOutput | null;
+  `).get(project_key, output_hash, tool_name, command_fp) as StoredOutput | null;
 }
 
 const DEFAULT_EVICTION_HALF_LIFE_DAYS = 7;

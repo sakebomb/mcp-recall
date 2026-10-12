@@ -5398,21 +5398,13 @@ function storeOutput(db, input) {
 function hashContent(content) {
   return createHash2("sha256").update(content).digest("hex");
 }
-function checkDedup(db, project_key, input_hash) {
+function checkOutputDedup(db, project_key, output_hash, tool_name, command_fp) {
   return db.prepare(`
     SELECT * FROM stored_outputs
-    WHERE project_key = ? AND input_hash = ?
+    WHERE project_key = ? AND output_hash = ? AND tool_name = ? AND command_fp IS ?
     ORDER BY created_at DESC
     LIMIT 1
-  `).get(project_key, input_hash);
-}
-function checkOutputDedup(db, project_key, output_hash) {
-  return db.prepare(`
-    SELECT * FROM stored_outputs
-    WHERE project_key = ? AND output_hash = ?
-    ORDER BY created_at DESC
-    LIMIT 1
-  `).get(project_key, output_hash);
+  `).get(project_key, output_hash, tool_name, command_fp);
 }
 var DEFAULT_EVICTION_HALF_LIFE_DAYS = 7;
 var SECONDS_PER_DAY = 86400;
@@ -9015,25 +9007,24 @@ function handlePostToolUse(raw) {
   }
   const projectKey = getProjectKey(cwd);
   const db = getDb(defaultDbPath(projectKey));
+  const command = tool_input !== null && typeof tool_input === "object" && typeof tool_input.command === "string" ? tool_input.command : undefined;
+  const command_fp = tool_name === "Bash" && command ? commandFingerprint(normalizeCommand(command)) || null : null;
   const input_hash = tool_input !== undefined ? createHash3("sha256").update(tool_name + JSON.stringify(tool_input)).digest("hex") : null;
   const output_hash = hashContent(fullContent);
-  const cachedResponse = (cached2) => {
-    const cachedDate = new Date(cached2.created_at * 1000).toISOString().slice(0, 10);
-    const text = `[recall:${cached2.id} \xB7 cached \xB7 ${cachedDate}]
-${cached2.summary}`;
+  const cachedResponse = (cached3) => {
+    const cachedDate = new Date(cached3.created_at * 1000).toISOString().slice(0, 10);
+    const text = `[recall:${cached3.id} \xB7 cached \xB7 ${cachedDate}]
+${cached3.summary}`;
     if (Buffer.byteLength(text, "utf8") >= Buffer.byteLength(fullContent, "utf8")) {
-      log.debug(`SKIP cached-not-smaller \xB7 ${tool_name} \xB7 id=${cached2.id}`);
+      log.debug(`SKIP cached-not-smaller \xB7 ${tool_name} \xB7 id=${cached3.id}`);
       return {};
     }
-    log.debug(`CACHE HIT \xB7 ${tool_name} \xB7 id=${cached2.id} \xB7 cached ${cachedDate}`);
+    log.debug(`CACHE HIT \xB7 ${tool_name} \xB7 id=${cached3.id} \xB7 cached ${cachedDate}`);
     return replaceOutput(text, tool_response);
   };
-  const byInput = input_hash ? checkDedup(db, projectKey, input_hash) : null;
-  if (byInput)
-    return cachedResponse(byInput);
-  const byOutput = checkOutputDedup(db, projectKey, output_hash);
-  if (byOutput)
-    return cachedResponse(byOutput);
+  const cached2 = checkOutputDedup(db, projectKey, output_hash, tool_name, command_fp);
+  if (cached2)
+    return cachedResponse(cached2);
   const handler = getHandler(tool_name, response, tool_input);
   log.debug(`handler: ${handler.name} \xB7 ${tool_name}`);
   let { summary, originalSize } = handler(tool_name, response);
@@ -9048,11 +9039,9 @@ ${cached2.summary}`;
     log.debug(`SKIP no-compression \xB7 ${tool_name} \xB7 ${formatBytes(deliveredSize)} \u2265 ${formatBytes(originalSize)}`);
     return {};
   }
-  const command = tool_input !== null && typeof tool_input === "object" && typeof tool_input.command === "string" ? tool_input.command : undefined;
   const full_retained = shouldRetainFullBody(config.store.retention, tool_name, command) ? 1 : 0;
   if (!full_retained)
     log.debug(`summary-only \xB7 ${tool_name} \xB7 retention=${config.store.retention}`);
-  const command_fp = tool_name === "Bash" && command ? commandFingerprint(normalizeCommand(command)) || null : null;
   const stored = storeOutput(db, {
     project_key: projectKey,
     session_id,

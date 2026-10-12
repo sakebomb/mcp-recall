@@ -8,7 +8,7 @@ import { findSecrets } from "../secrets";
 import { getHandler, extractText } from "../handlers/index";
 import { genericHandler } from "../handlers/generic";
 import { extractHints } from "../hints";
-import { getDb, defaultDbPath, storeOutput, checkDedup, checkOutputDedup, hashContent, evictIfNeeded } from "../db/index";
+import { getDb, defaultDbPath, storeOutput, checkOutputDedup, hashContent, evictIfNeeded } from "../db/index";
 import { shouldRetainFullBody } from "../retention";
 import { commandFingerprint, normalizeCommand } from "../handlers/bash";
 import { bashOutputText } from "../handlers/bash-shared";
@@ -132,9 +132,20 @@ export function handlePostToolUse(raw: string): HookOutput {
   const projectKey = getProjectKey(cwd);
   const db = getDb(defaultDbPath(projectKey));
 
-  // 4. Dedup check. input_hash catches an identical call (skipped when
-  //    tool_input is absent); output_hash catches identical *content* from any
-  //    call, so re-runs and different calls yielding the same output store once.
+  // 4. Dedup check: reuse a stored summary only for identical content from the
+  //    same tool and command family. A matching input alone is not enough, since
+  //    a re-run exists to see changed output (#324).
+  const command =
+    tool_input !== null && typeof tool_input === "object" &&
+    typeof (tool_input as { command?: unknown }).command === "string"
+      ? (tool_input as { command: string }).command
+      : undefined;
+  // Privacy-safe command family fingerprint for per-command savings attribution
+  // (#251). Bash only; a "" fingerprint (no bare verb) is stored as NULL/unknown.
+  const command_fp =
+    tool_name === "Bash" && command
+      ? commandFingerprint(normalizeCommand(command)) || null
+      : null;
   const input_hash =
     tool_input !== undefined
       ? createHash("sha256")
@@ -156,13 +167,8 @@ export function handlePostToolUse(raw: string): HookOutput {
     return replaceOutput(text, tool_response);
   };
 
-  const byInput = input_hash ? checkDedup(db, projectKey, input_hash) : null;
-  if (byInput) return cachedResponse(byInput);
-  // A content match may have been stored by a *different* tool; the cached
-  // response then carries that tool's id/summary. Attribution follows the first
-  // storer — acceptable since the full content is byte-identical.
-  const byOutput = checkOutputDedup(db, projectKey, output_hash);
-  if (byOutput) return cachedResponse(byOutput);
+  const cached = checkOutputDedup(db, projectKey, output_hash, tool_name, command_fp);
+  if (cached) return cachedResponse(cached);
 
   // 5. Compress
   const handler = getHandler(tool_name, response, tool_input);
@@ -191,20 +197,8 @@ export function handlePostToolUse(raw: string): HookOutput {
   //    balanced-tier classification for Bash; output_hash (computed above from
   //    the real content) is passed through so dedup works even when the body is
   //    dropped.
-  const command =
-    tool_input !== null && typeof tool_input === "object" &&
-    typeof (tool_input as { command?: unknown }).command === "string"
-      ? (tool_input as { command: string }).command
-      : undefined;
   const full_retained = shouldRetainFullBody(config.store.retention, tool_name, command) ? 1 : 0;
   if (!full_retained) log.debug(`summary-only · ${tool_name} · retention=${config.store.retention}`);
-
-  // Privacy-safe command family fingerprint for per-command savings attribution
-  // (#251). Bash only; a "" fingerprint (no bare verb) is stored as NULL/unknown.
-  const command_fp =
-    tool_name === "Bash" && command
-      ? commandFingerprint(normalizeCommand(command)) || null
-      : null;
 
   const stored = storeOutput(db, {
     project_key: projectKey,

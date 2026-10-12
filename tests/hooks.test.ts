@@ -294,7 +294,7 @@ describe("handlePostToolUse", () => {
       input_hash: undefined,
       output_hash: hashContent(grepped),
       full_retained: 1,
-      command_fp: null,
+      command_fp: "bun test", // must match the call below, or the cache is never consulted
     });
     const result = handlePostToolUse(
       makePostToolUseInput("Bash", bashOf(grepped), { tool_input: { command: "bun test | grep fail" } })
@@ -530,6 +530,48 @@ describe("handlePostToolUse", () => {
     const db = getDb(":memory:");
     const count = (db.prepare("SELECT COUNT(*) as n FROM stored_outputs").get() as { n: number }).n;
     expect(count).toBe(1); // second call reused the first item
+  });
+
+  describe("a cached summary must describe this call (#324)", () => {
+    const bash = (stdout: string) => ({ stdout, stderr: "", interrupted: false, isImage: false, noOutputExpected: false });
+    const passing = Array.from({ length: 300 }, (_, i) => `(pass) suite > case number ${i} [0.10ms]`).join("\n");
+    const run = (stdout: string, command: string) => {
+      const out = handlePostToolUse(makePostToolUseInput("Bash", bash(stdout), { tool_input: { command, description: "Run tests" } }));
+      return (out.hookSpecificOutput?.updatedToolOutput as { stdout: string }).stdout;
+    };
+
+    it("re-running the same command after its output changed delivers the new result", () => {
+      const failing = `${passing}\n(fail) suite > the broken one [0.2ms]\n\n 300 pass\n 1 fail\nRan 301 tests across 1 file. [1.00s]`;
+      const fixed = `${passing}\n(pass) suite > the broken one [0.2ms]\n\n 301 pass\n 0 fail\nRan 301 tests across 1 file. [1.00s]`;
+      expect(run(failing, "bun test")).toContain("1 failed");
+      const second = run(fixed, "bun test");
+      expect(second).not.toContain("· cached ·");
+      expect(second).not.toContain("failed");
+    });
+
+    it("re-running the same command with unchanged output still hits the cache", () => {
+      const output = `${passing}\n\n 300 pass\n 0 fail`;
+      const first = run(output, "bun test");
+      const id = first.match(/\[recall:(recall_[0-9a-f]{16})/)![1]!;
+      expect(run(output, "bun test")).toContain(`[recall:${id} · cached ·`);
+    });
+
+    it("identical output from another command family is summarised for this command", () => {
+      const fatal = "fatal: ambiguous argument 'a-long-enough-missing-ref-name-to-be-worth-summarising-here': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'";
+      const out = (command: string) =>
+        handlePostToolUse(makePostToolUseInput("Bash", { stdout: "", stderr: fatal, interrupted: false, isImage: false, noOutputExpected: false }, { tool_input: { command } }));
+      out("git diff missing | head -50");
+      const second = out("git log missing --oneline | head");
+      const text = (second.hookSpecificOutput?.updatedToolOutput as { stdout: string } | undefined)?.stdout ?? "";
+      expect(text).not.toContain("git diff");
+    });
+
+    it("identical output from another MCP tool is not served from its cache", () => {
+      const response = { content: [{ type: "text", text: LARGE_GITHUB_RESPONSE }] };
+      handlePostToolUse(makePostToolUseInput("mcp__github__list_issues", response));
+      const second = handlePostToolUse(makePostToolUseInput("mcp__github__search_issues", response));
+      expect(second.updatedMCPToolOutput).not.toMatch(/· cached · /);
+    });
   });
 
   // -------------------------------------------------------------------------

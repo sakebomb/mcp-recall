@@ -6,7 +6,6 @@ import {
   retrieveOutput,
   recordAccess,
   pinOutput,
-  checkDedup,
   checkOutputDedup,
   hashContent,
   evictIfNeeded,
@@ -421,7 +420,7 @@ describe("db", () => {
         tool_name: "Bash", full_content: body, original_size: body.length, full_retained: 0,
       }));
       // The dedup key is the hash of the REAL content, not the dropped body.
-      const hit = checkOutputDedup(db, PROJECT_KEY, hashContent(body));
+      const hit = checkOutputDedup(db, PROJECT_KEY, hashContent(body), "Bash", null);
       expect(hit).not.toBeNull();
     });
   });
@@ -638,46 +637,6 @@ describe("db", () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // checkDedup
-  // -------------------------------------------------------------------------
-
-  describe("checkDedup", () => {
-    it("returns null when no matching hash exists", () => {
-      expect(checkDedup(db, PROJECT_KEY, "abc123")).toBeNull();
-    });
-
-    it("returns the stored item when hash matches", () => {
-      storeOutput(db, makeInput({ input_hash: "hash1234" }));
-      const hit = checkDedup(db, PROJECT_KEY, "hash1234");
-      expect(hit).not.toBeNull();
-      expect(hit!.input_hash).toBe("hash1234");
-    });
-
-    it("returns the most recent match when multiple exist", () => {
-      const now = Math.floor(Date.now() / 1000);
-      db.prepare(`
-        INSERT INTO stored_outputs (id,project_key,session_id,tool_name,summary,full_content,original_size,summary_size,created_at,input_hash)
-        VALUES ('recall_dedup0001',?,?,?,?,?,100,3,?,?)
-      `).run(PROJECT_KEY, "2026-03-01", "mcp__tool", "old", "content", now - 10, "hash1234");
-      db.prepare(`
-        INSERT INTO stored_outputs (id,project_key,session_id,tool_name,summary,full_content,original_size,summary_size,created_at,input_hash)
-        VALUES ('recall_dedup0002',?,?,?,?,?,100,3,?,?)
-      `).run(PROJECT_KEY, "2026-03-01", "mcp__tool", "new", "content", now, "hash1234");
-      const hit = checkDedup(db, PROJECT_KEY, "hash1234");
-      expect(hit!.summary).toBe("new");
-    });
-
-    it("does not match hash from a different project", () => {
-      storeOutput(db, makeInput({ project_key: "otherproject567", input_hash: "hash1234" }));
-      expect(checkDedup(db, PROJECT_KEY, "hash1234")).toBeNull();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // checkOutputDedup / hashContent
-  // -------------------------------------------------------------------------
-
   describe("schema migrations", () => {
     it("applies migrations idempotently and adds the output_hash column", () => {
       const raw = new Database(":memory:");
@@ -739,22 +698,44 @@ describe("db", () => {
       expect(stored.output_hash).toBe(hashContent("abc123 content body"));
     });
 
-    it("finds an item with identical content stored under a different call", () => {
-      const a = storeOutput(db, makeInput({ tool_name: "mcp__x__alpha", full_content: "same body text" }));
-      // Different tool name / input hash, identical content:
-      storeOutput(db, makeInput({ tool_name: "mcp__y__beta", full_content: "unrelated body" }));
-      const found = checkOutputDedup(db, PROJECT_KEY, hashContent("same body text"));
-      expect(found?.id).toBe(a.id);
+    it("finds an item with identical content from the same tool and command family", () => {
+      const a = storeOutput(db, makeInput({ tool_name: "Bash", command_fp: "git diff", full_content: "same body text" }));
+      storeOutput(db, makeInput({ tool_name: "Bash", command_fp: "git diff", full_content: "unrelated body" }));
+      expect(checkOutputDedup(db, PROJECT_KEY, hashContent("same body text"), "Bash", "git diff")?.id).toBe(a.id);
+    });
+
+    it("returns the most recent match when several exist", () => {
+      const now = Math.floor(Date.now() / 1000);
+      for (const [id, summary, at] of [["recall_dedup0001", "old", now - 10], ["recall_dedup0002", "new", now]] as const) {
+        db.prepare(`
+          INSERT INTO stored_outputs (id,project_key,session_id,tool_name,summary,full_content,original_size,summary_size,created_at,output_hash)
+          VALUES (?,?,?,?,?,?,100,3,?,?)
+        `).run(id, PROJECT_KEY, "2026-03-01", "mcp__tool", summary, "content", at, hashContent("content"));
+      }
+      expect(checkOutputDedup(db, PROJECT_KEY, hashContent("content"), "mcp__tool", null)!.summary).toBe("new");
+    });
+
+    it("does not match identical content from another tool or command family (#324)", () => {
+      storeOutput(db, makeInput({ tool_name: "mcp__x__alpha", full_content: "same body text" }));
+      storeOutput(db, makeInput({ tool_name: "Bash", command_fp: "git diff", full_content: "shared stderr" }));
+      expect(checkOutputDedup(db, PROJECT_KEY, hashContent("same body text"), "mcp__y__beta", null)).toBeNull();
+      expect(checkOutputDedup(db, PROJECT_KEY, hashContent("shared stderr"), "Bash", "git log")).toBeNull();
+      expect(checkOutputDedup(db, PROJECT_KEY, hashContent("shared stderr"), "Bash", null)).toBeNull();
+    });
+
+    it("matches rows with no command family when the call has none", () => {
+      const a = storeOutput(db, makeInput({ tool_name: "Bash", full_content: "no verb body" }));
+      expect(checkOutputDedup(db, PROJECT_KEY, hashContent("no verb body"), "Bash", null)?.id).toBe(a.id);
     });
 
     it("returns null when no content matches", () => {
       storeOutput(db, makeInput({ full_content: "one thing" }));
-      expect(checkOutputDedup(db, PROJECT_KEY, hashContent("another thing"))).toBeNull();
+      expect(checkOutputDedup(db, PROJECT_KEY, hashContent("another thing"), "mcp__github__list_issues", null)).toBeNull();
     });
 
     it("is scoped to the project", () => {
       storeOutput(db, makeInput({ project_key: "otherproject567", full_content: "shared body" }));
-      expect(checkOutputDedup(db, PROJECT_KEY, hashContent("shared body"))).toBeNull();
+      expect(checkOutputDedup(db, PROJECT_KEY, hashContent("shared body"), "mcp__github__list_issues", null)).toBeNull();
     });
   });
 

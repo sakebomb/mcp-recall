@@ -12,7 +12,7 @@ import {
   storeOutput,
   listOutputs,
   evictIfNeeded,
-  checkDedup,
+  checkOutputDedup,
   chunkText,
   CHUNK_SIZE,
   CHUNK_OVERLAP,
@@ -101,14 +101,12 @@ describe("stress tests (set RECALL_STRESS=1 to run)", () => {
   // -------------------------------------------------------------------------
 
   stressIt("500 identical inputs — dedup keeps only one stored copy", () => {
-    const input_hash = "deadbeefdeadbeef1234";
-
     // First call: nothing in DB yet — store it
-    const first = storeOutput(db, makeInput({ input_hash, summary: "original" }));
+    const first = storeOutput(db, makeInput({ summary: "original" }));
 
     // Remaining 499 calls should all hit the dedup cache
     for (let i = 1; i < 500; i++) {
-      const hit = checkDedup(db, PROJECT_KEY, input_hash);
+      const hit = checkOutputDedup(db, PROJECT_KEY, first.output_hash!, first.tool_name, first.command_fp ?? null);
       expect(hit).not.toBeNull();
       expect(hit!.id).toBe(first.id);
     }
