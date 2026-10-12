@@ -2338,6 +2338,54 @@ describe("buildToolHandler", () => {
     const { originalSize } = buildToolHandler("Bash", output);
     expect(originalSize).toBeGreaterThan(0);
   });
+
+  describe("a recipe that runs tests keeps what the tests report (#325)", () => {
+    const failedNames = Array.from({ length: 6 }, (_, i) => `FAILED app/tests/test_api.py::test_case_${i} - AssertionError: expected ${i}`);
+    const pytestViaJust = [
+      ...Array.from({ length: 69 }, (_, i) => `app/tests/test_api.py::test_ok_${i} PASSED`),
+      ...failedNames,
+      "=================== 6 failed, 69 passed in 3.21s ===================",
+      "error: Recipe `test` failed on line 3 with exit code 1",
+    ].join("\n");
+
+    it("summarises pytest output from just as a test run with every failing name", () => {
+      const { summary } = buildToolHandler("Bash", { stdout: pytestViaJust, stderr: "" });
+      expect(summary).toContain("FAIL: 69 passed, 6 failed");
+      for (const name of failedNames) expect(summary).toContain(name.slice(0, 60));
+      expect(summary).toContain("error: Recipe `test` failed");
+    });
+
+    it("shows the recipe error once when the test summary already carries it", () => {
+      const { summary } = buildToolHandler("Bash", { stdout: pytestViaJust, stderr: "" });
+      expect(summary.split("error: Recipe `test` failed").length - 1).toBe(1);
+    });
+
+    it("summarises bun output from make, keeping make's error from stderr", () => {
+      const stdout = [
+        ...Array.from({ length: 40 }, (_, i) => `(pass) suite > case ${i} [0.10ms]`),
+        "(fail) suite > the broken one [0.20ms]",
+        "", " 40 pass", " 1 fail", "Ran 41 tests across 1 file. [1.00s]",
+      ].join("\n");
+      const payload = JSON.stringify({ stdout, stderr: "make: *** [Makefile:3: test] Error 1", interrupted: false, isImage: false });
+      const { summary } = buildToolHandler("Bash", payload);
+      expect(summary).toContain("FAIL: 40 passed, 1 failed");
+      expect(summary).toContain("(fail) suite > the broken one");
+      expect(summary).toContain("make: *** [Makefile:3: test] Error 1");
+    });
+
+    it("keeps a later step's error when the tests passed", () => {
+      const stdout = [
+        ...Array.from({ length: 40 }, (_, i) => `(pass) suite > case ${i} [0.10ms]`),
+        "", " 40 pass", " 0 fail", "Ran 40 tests across 1 file. [1.00s]",
+        "src/app.ts:3:5: error: 'unused' is declared but never read",
+        "error: Recipe `ci` failed on line 7 with exit code 1",
+      ].join("\n");
+      const { summary } = buildToolHandler("Bash", { stdout, stderr: "" });
+      expect(summary).toContain("pass: 40 passed");
+      expect(summary).toContain("src/app.ts:3:5: error: 'unused'");
+      expect(summary).toContain("error: Recipe `ci` failed");
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

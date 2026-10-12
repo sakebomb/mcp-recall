@@ -15,7 +15,7 @@ import {
   MAX_BUILD_ERRORS,
 } from "./bash-shared";
 import { gitDiffHandler, gitLogHandler, gitStatusHandler, gitRefsHandler } from "./bash-git";
-import { testRunnerHandler } from "./bash-test";
+import { testRunnerHandler, summarizeTestRun } from "./bash-test";
 import { dockerPsHandler } from "./bash-docker";
 import { compilerDiagnosticsHandler } from "./bash-compilers";
 import { grepHandler, lsHandler, findHandler } from "./bash-search";
@@ -180,6 +180,20 @@ export const buildToolHandler: Handler = (
         /^\s*\^\s*$/.test(t)) {
       errorLines.push(t.slice(0, 120));
     }
+  }
+
+  // A recipe that runs tests (`just test`, `make check`) is summarised as a test
+  // run, since the recipe error alone names no failing test (#325). Errors the
+  // test summary does not already show stay below it: a later step can fail
+  // after the tests pass.
+  const tests = summarizeTestRun(output);
+  if (tests) {
+    const extra = errorLines.filter(e => !tests.summary.includes(e));
+    if (extra.length === 0) return tests;
+    const lines = [tests.summary, `  build errors (${extra.length}):`];
+    lines.push(...extra.slice(0, MAX_BUILD_ERRORS).map(e => `    ${e}`));
+    if (extra.length > MAX_BUILD_ERRORS) lines.push(`    … (+${extra.length - MAX_BUILD_ERRORS} more)`);
+    return { summary: lines.join("\n"), originalSize };
   }
 
   if (errorLines.length === 0 && targetLines.length === 0) {

@@ -10,7 +10,13 @@ import { bashOutputText, extractStdout, extractStderr, MAX_BUILD_ERRORS } from "
 export const testRunnerHandler: Handler = (
   toolName: string,
   output: unknown
-): CompressionResult => {
+): CompressionResult => summarizeTestRun(output) ?? shellHandler(toolName, output);
+
+/**
+ * Summarises test-runner output, or returns null when it holds no test result
+ * (no count line and no failing test). Also used for make/just recipes (#325).
+ */
+export function summarizeTestRun(output: unknown): CompressionResult | null {
   const stdout = extractStdout(output);
   const stderr = extractStderr(output);
   const combined = `${stdout}\n${stderr}`.trim();
@@ -95,9 +101,7 @@ export const testRunnerHandler: Handler = (
     if (goFail) { failed++; foundSummary = true; }
   }
 
-  if (!foundSummary && failureNames === 0) {
-    return shellHandler(toolName, output);
-  }
+  if (!foundSummary && failureNames === 0) return null;
 
   // Without count lines (output cut by `tail`, or grepped), count bun's
   // per-test lines rather than report nothing.
@@ -127,7 +131,7 @@ export const testRunnerHandler: Handler = (
   }
 
   return { summary: lines.join("\n"), originalSize };
-};
+}
 
 interface FailureLine {
   text: string;

@@ -16,6 +16,12 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   answered with `[git diff — no changes]`. A cached summary is now used only for
   identical output from the same tool and command family. Since 1.15.2 delivers
   Bash summaries (#305), re-run tests and CI polls were the calls most exposed.
+- **Tests run through `just` or `make` keep their failing names and counts**
+  (#325). The make/just summary kept only recipe and compiler errors, so
+  `just test` reduced six pytest `FAILED` lines and `6 failed, 69 passed` to
+  ``error: Recipe `test` failed``. A recipe whose output holds a test result is
+  now summarised as a test run, with any other errors kept below it, since a
+  later step can fail after the tests pass.
 - **A summary is used only when it is smaller than the output, header
   included** (#319). The hook compared the summary alone with the original, then
   added the `[recall:…]` header (60–140 B). Since 1.15.2 delivers Bash

@@ -6806,7 +6806,8 @@ var gitRefsHandler = (toolName, output) => {
 };
 
 // src/handlers/bash-test.ts
-var testRunnerHandler = (toolName, output) => {
+var testRunnerHandler = (toolName, output) => summarizeTestRun(output) ?? shellHandler(toolName, output);
+function summarizeTestRun(output) {
   const stdout = extractStdout(output);
   const stderr = extractStderr(output);
   const combined = `${stdout}
@@ -6887,9 +6888,8 @@ ${stderr}`.trim();
       foundSummary = true;
     }
   }
-  if (!foundSummary && failureNames === 0) {
-    return shellHandler(toolName, output);
-  }
+  if (!foundSummary && failureNames === 0)
+    return null;
   if (passed === 0)
     passed = passLines;
   if (failed === 0)
@@ -6916,7 +6916,7 @@ ${stderr}`.trim();
   }
   return { summary: lines.join(`
 `), originalSize };
-};
+}
 var MAX_DETAIL_LINES = 4;
 var MAX_LINE = 160;
 var NAME_HEAD = 60;
@@ -7430,6 +7430,18 @@ ${stderr}`.trim();
     if (/^[^\s]+:\d+:\d*:?\s*(error|fatal error):/i.test(t) || /^error\[/.test(t) || /^\s*\^\s*$/.test(t)) {
       errorLines.push(t.slice(0, 120));
     }
+  }
+  const tests = summarizeTestRun(output);
+  if (tests) {
+    const extra = errorLines.filter((e) => !tests.summary.includes(e));
+    if (extra.length === 0)
+      return tests;
+    const lines2 = [tests.summary, `  build errors (${extra.length}):`];
+    lines2.push(...extra.slice(0, MAX_BUILD_ERRORS).map((e) => `    ${e}`));
+    if (extra.length > MAX_BUILD_ERRORS)
+      lines2.push(`    \u2026 (+${extra.length - MAX_BUILD_ERRORS} more)`);
+    return { summary: lines2.join(`
+`), originalSize };
   }
   if (errorLines.length === 0 && targetLines.length === 0) {
     return shellHandler(toolName, output);
