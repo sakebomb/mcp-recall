@@ -4,7 +4,7 @@ import { githubHandler } from "./github";
 import { gitlabHandler } from "./gitlab";
 import { filesystemHandler } from "./filesystem";
 import { shellHandler } from "./shell";
-import { getBashHandler } from "./bash";
+import { getBashHandler, keepStderrError } from "./bash";
 import { linearHandler } from "./linear";
 import { slackHandler } from "./slack";
 import { tavilyHandler } from "./tavily";
@@ -113,7 +113,8 @@ const HANDLER_REGISTRY: HandlerMatcher[] = [
  * Returns the appropriate compression handler for a given MCP tool name.
  *
  * Dispatch order:
- *   1. Native Bash tool              → bash handler (CLI-aware, routes on command)
+ *   1. Native Bash tool              → bash handler (CLI-aware, routes on command;
+ *                                      an error only on stderr goes to shell, #326)
  *   2. User / community profiles     → profile handler (beats TypeScript handlers)
  *   3. HANDLER_REGISTRY (first match wins, ordered by specificity)
  *   4. Bundled profile match         → profile handler
@@ -127,7 +128,7 @@ const HANDLER_REGISTRY: HandlerMatcher[] = [
 export function getHandler(toolName: string, output: unknown, input?: unknown): Handler {
   // Native Bash tool — inspect tool_input.command for CLI-aware routing
   if (toolName === "Bash") {
-    return getBashHandler(input);
+    return keepStderrError(getBashHandler(input), output);
   }
 
   // User and community profiles beat TypeScript handlers

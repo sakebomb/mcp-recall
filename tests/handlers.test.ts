@@ -970,6 +970,41 @@ describe("stripSshNoise", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Empty stdout with an error on stderr (#326)
+// ---------------------------------------------------------------------------
+
+describe("a command that only wrote to stderr keeps its error (#326)", () => {
+  const fatal = "fatal: ambiguous argument 'a-long-enough-missing-ref-name': unknown revision or path not in the working tree.";
+  const failed = (stderr: string) => JSON.stringify({ stdout: "", stderr, interrupted: false, isImage: false });
+
+  it("uses the shell handler instead of a stdout handler's empty result", () => {
+    for (const command of [
+      "git diff nosuchref | head -50", "git log nosuchref", "git status", "git branch -a",
+      "grep -rn foo /missing/dir", "ls /missing/dir", "find /missing/dir -name x",
+      "gh pr view 99999", "docker ps", "terraform plan",
+    ]) {
+      const handler = getHandler("Bash", failed(fatal), { command });
+      expect(handler).toBe(shellHandler);
+      expect(handler("Bash", failed(fatal)).summary).toContain("fatal: ambiguous argument");
+    }
+  });
+
+  it("keeps handlers that report on stderr themselves", () => {
+    const bunResults = "(pass) suite > a [0.1ms]\n(fail) suite > b [0.1ms]\n\n 1 pass\n 1 fail\nRan 2 tests across 1 file. [5.00ms]";
+    expect(getHandler("Bash", failed(bunResults), { command: "bun test" })).toBe(testRunnerHandler);
+    expect(getHandler("Bash", failed("make: *** [all] Error 1"), { command: "make" })).toBe(buildToolHandler);
+    expect(getHandler("Bash", failed("error[E0425]: cannot find value `x`"), { command: "cargo build" })).toBe(compilerDiagnosticsHandler);
+    expect(getHandler("Bash", failed("npm warn deprecated x@1"), { command: "npm install" })).toBe(packageInstallHandler);
+  });
+
+  it("keeps the stdout handler when stderr is empty or stdout has output", () => {
+    expect(getHandler("Bash", failed(""), { command: "grep -rn foo src" })).toBe(grepHandler);
+    const withWarning = JSON.stringify({ stdout: "src/a.ts:1:foo", stderr: "grep: src/b: Permission denied", interrupted: false, isImage: false });
+    expect(getHandler("Bash", withWarning, { command: "grep -rn foo src" })).toBe(grepHandler);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // getBashHandler dispatcher
 // ---------------------------------------------------------------------------
 

@@ -7668,6 +7668,19 @@ function getBashHandler(input) {
     return findHandler;
   return shellHandler;
 }
+var READS_STDERR = new Set([
+  shellHandler,
+  compoundHandler,
+  testRunnerHandler,
+  buildToolHandler,
+  compilerDiagnosticsHandler,
+  packageInstallHandler
+]);
+function keepStderrError(handler, output) {
+  if (READS_STDERR.has(handler))
+    return handler;
+  return !extractStdout(output).trim() && extractStderr(output).trim() ? shellHandler : handler;
+}
 
 // src/handlers/linear.ts
 var PRIORITY_LABEL = {
@@ -8816,7 +8829,7 @@ var HANDLER_REGISTRY = [
 ];
 function getHandler(toolName, output, input) {
   if (toolName === "Bash") {
-    return getBashHandler(input);
+    return keepStderrError(getBashHandler(input), output);
   }
   const highPriorityProfile = getProfileHandler(toolName, ["user", "community"]);
   if (highPriorityProfile)

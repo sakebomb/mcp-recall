@@ -524,3 +524,23 @@ export function getBashHandler(input: unknown): Handler {
 
   return shellHandler;
 }
+
+/**
+ * Handlers that read stderr themselves. Test runners, compilers and make report
+ * there (`bun test` prints its results on stderr), so empty stdout is normal.
+ */
+const READS_STDERR = new Set<Handler>([
+  shellHandler, compoundHandler, testRunnerHandler, buildToolHandler,
+  compilerDiagnosticsHandler, packageInstallHandler,
+]);
+
+/**
+ * A command with empty stdout and a non-empty stderr failed, though inside a
+ * pipeline it still exits 0. A handler that summarises stdout would report that
+ * as "no matches" or "no changes", so the shell handler, which keeps stderr, is
+ * used instead (#326). New handlers get this by default.
+ */
+export function keepStderrError(handler: Handler, output: unknown): Handler {
+  if (READS_STDERR.has(handler)) return handler;
+  return !extractStdout(output).trim() && extractStderr(output).trim() ? shellHandler : handler;
+}
