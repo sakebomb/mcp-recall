@@ -22,6 +22,14 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   ``error: Recipe `test` failed``. A recipe whose output holds a test result is
   now summarised as a test run, with any other errors kept below it, since a
   later step can fail after the tests pass.
+- **An error that went only to stderr is no longer reported as an empty
+  result** (#326). A command that fails inside a pipeline exits 0, so the hook
+  still summarises it. The grep, ls, find, git, gh, docker and terraform
+  handlers read only stdout, so `git diff nosuchref | head` came back as
+  `[git diff — no changes]`, and `git status` outside a repository as a clean
+  working tree. When stdout is empty and stderr is not, the shell summary,
+  which keeps stderr, is used instead. Test runners, compilers and `make` are
+  exempt, since they report on stderr (`bun test` prints its results there).
 - **A summary is used only when it is smaller than the output, header
   included** (#319). The hook compared the summary alone with the original, then
   added the `[recall:…]` header (60–140 B). Since 1.15.2 delivers Bash
