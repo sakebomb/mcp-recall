@@ -79,7 +79,9 @@ flowchart TD
     DENY -- yes --> P1([skip: passes through unchanged])
     DENY -- no --> SCRT
     SCRT -- yes --> P2([skip + warn: passes through unchanged])
-    SCRT -- no --> DEDUP_N
+    SCRT -- no --> BND{"Bash read bounded by the<br/>command, ≤ 8 KB?"}
+    BND -- yes --> P3([passes through whole])
+    BND -- no --> DEDUP_N
 
     subgraph DEDUP["Dedup check"]
         DEDUP_N["sha256(content)<br/>same tool + command"]
@@ -107,7 +109,7 @@ flowchart TD
 **Two hooks, one MCP server.**
 
 - `SessionStart` hook — records each active day, prunes expired items, and injects a compact context snapshot before the first message
-- `PostToolUse` hook — intercepts MCP tool outputs and native Bash commands; deduplicates identical output from the same tool and command (by content hash); compresses, stores, and returns summary
+- `PostToolUse` hook — intercepts MCP tool outputs and native Bash commands; delivers a Bash read you already bounded (`| head -40`, `sed -n 900,1000p`) whole when it is 8 KB or less; deduplicates identical output from the same tool and command (by content hash); compresses, stores, and returns summary
 - `recall` MCP server — exposes eleven tools for retrieval, search, memory, and management
 
 > **Scope**: Compression applies to MCP tools and the native `Bash` built-in. The remaining built-ins (Read, Grep, Glob) pass through unchanged. See [Scope](#scope) for details.

@@ -7566,6 +7566,17 @@ function commandFingerprint(command) {
   const second = c.slice(verb.length).trimStart().match(BARE_TOKEN);
   return second ? `${verb} ${second[1]}` : verb;
 }
+var BOUNDED_READ_MAX_BYTES = 8 * 1024;
+function isBoundedRead(command) {
+  return command.split(/\||;|&&|\n/).some((part) => {
+    const s = part.trim();
+    if (/^(head|tail)(\s|$)/.test(s))
+      return true;
+    if (/^sed\s+(?:-\S+\s+)*-n\s+['"]?\d+(?:,\s*(?:\d+|\$))?p['"]?(\s|$)/.test(s))
+      return true;
+    return /^(grep|egrep|fgrep|rg|ag|git\s+grep)\s/.test(s) && /\s(-[a-zA-Z]*[ABCm]\s*\d+|--(?:after-|before-)?context[=\s]\d+|--max-count[=\s]\d+)/.test(s);
+  });
+}
 function isCompoundCommand(command) {
   let quote = null;
   let depth = 0;
@@ -9030,9 +9041,13 @@ function handlePostToolUse(raw) {
     log.warn(`skipped ${tool_name}: detected ${secretNames.join(", ")}`);
     return {};
   }
+  const command = tool_input !== null && typeof tool_input === "object" && typeof tool_input.command === "string" ? tool_input.command : undefined;
+  if (tool_name === "Bash" && command && isBoundedRead(command) && Buffer.byteLength(fullContent, "utf8") <= BOUNDED_READ_MAX_BYTES) {
+    log.debug(`SKIP bounded-read \xB7 ${formatBytes(Buffer.byteLength(fullContent, "utf8"))}`);
+    return {};
+  }
   const projectKey = getProjectKey(cwd);
   const db = getDb(defaultDbPath(projectKey));
-  const command = tool_input !== null && typeof tool_input === "object" && typeof tool_input.command === "string" ? tool_input.command : undefined;
   const command_fp = tool_name === "Bash" && command ? commandFingerprint(normalizeCommand(command)) || null : null;
   const input_hash = tool_input !== undefined ? createHash3("sha256").update(tool_name + JSON.stringify(tool_input)).digest("hex") : null;
   const output_hash = hashContent(fullContent);

@@ -10,7 +10,7 @@ import { genericHandler } from "../handlers/generic";
 import { extractHints } from "../hints";
 import { getDb, defaultDbPath, storeOutput, checkOutputDedup, hashContent, evictIfNeeded } from "../db/index";
 import { shouldRetainFullBody } from "../retention";
-import { commandFingerprint, normalizeCommand } from "../handlers/bash";
+import { commandFingerprint, normalizeCommand, isBoundedRead, BOUNDED_READ_MAX_BYTES } from "../handlers/bash";
 import { bashOutputText } from "../handlers/bash-shared";
 import { formatBytes } from "../format";
 import { log } from "../log";
@@ -128,18 +128,28 @@ export function handlePostToolUse(raw: string): HookOutput {
     return {};
   }
 
-  // 3. Setup DB (needed for dedup check before compression)
-  const projectKey = getProjectKey(cwd);
-  const db = getDb(defaultDbPath(projectKey));
-
-  // 4. Dedup check: reuse a stored summary only for identical content from the
-  //    same tool and command family. A matching input alone is not enough, since
-  //    a re-run exists to see changed output (#324).
   const command =
     tool_input !== null && typeof tool_input === "object" &&
     typeof (tool_input as { command?: unknown }).command === "string"
       ? (tool_input as { command: string }).command
       : undefined;
+
+  // 3. A read the command bounded itself (`| head -40`, `sed -n a,bp`) returns
+  //    what Claude asked for: deliver it whole below a size floor. A summary
+  //    would drop requested lines that balanced retention cannot give back (#327).
+  if (tool_name === "Bash" && command && isBoundedRead(command) &&
+      Buffer.byteLength(fullContent, "utf8") <= BOUNDED_READ_MAX_BYTES) {
+    log.debug(`SKIP bounded-read · ${formatBytes(Buffer.byteLength(fullContent, "utf8"))}`);
+    return {};
+  }
+
+  // 4. Setup DB (needed for dedup check before compression)
+  const projectKey = getProjectKey(cwd);
+  const db = getDb(defaultDbPath(projectKey));
+
+  // 5. Dedup check: reuse a stored summary only for identical content from the
+  //    same tool and command family. A matching input alone is not enough, since
+  //    a re-run exists to see changed output (#324).
   // Privacy-safe command family fingerprint for per-command savings attribution
   // (#251). Bash only; a "" fingerprint (no bare verb) is stored as NULL/unknown.
   const command_fp =
@@ -170,7 +180,7 @@ export function handlePostToolUse(raw: string): HookOutput {
   const cached = checkOutputDedup(db, projectKey, output_hash, tool_name, command_fp);
   if (cached) return cachedResponse(cached);
 
-  // 5. Compress
+  // 6. Compress
   const handler = getHandler(tool_name, response, tool_input);
   log.debug(`handler: ${handler.name} · ${tool_name}`);
   let { summary, originalSize } = handler(tool_name, response);
@@ -182,7 +192,7 @@ export function handlePostToolUse(raw: string): HookOutput {
   }
   const summarySize = Buffer.byteLength(summary, "utf8");
 
-  // 6. Only store when what Claude receives, header included, is smaller than
+  // 7. Only store when what Claude receives, header included, is smaller than
   //    the original: sizing the summary alone delivered small outputs larger
   //    while reporting a reduction (#319).
   const hints = extractHints(fullContent);
@@ -192,7 +202,7 @@ export function handlePostToolUse(raw: string): HookOutput {
     return {};
   }
 
-  // 7. Store. Retention policy decides whether to keep the verbatim body or
+  // 8. Store. Retention policy decides whether to keep the verbatim body or
   //    store the row summary-only (store.retention). The command drives the
   //    balanced-tier classification for Bash; output_hash (computed above from
   //    the real content) is passed through so dedup works even when the body is
@@ -214,10 +224,10 @@ export function handlePostToolUse(raw: string): HookOutput {
     delivered_size: deliveredSize,
   });
 
-  // 8. Evict if store exceeds size limit
+  // 9. Evict if store exceeds size limit
   evictIfNeeded(db, projectKey, config.store.max_size_mb, config.store.eviction_half_life_days);
 
-  // 9. Return compressed output to Claude
+  // 10. Return compressed output to Claude
   log.debug(`STORED · ${tool_name} · id=${stored.id} · ${formatBytes(originalSize)}→${formatBytes(summarySize)} (${reductionPercent(summarySize, originalSize)}% reduction)`);
   return replaceOutput(`${recallHeader(stored.id, originalSize, summarySize, hints)}\n${summary}`, tool_response);
 }

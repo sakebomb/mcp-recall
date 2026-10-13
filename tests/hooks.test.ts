@@ -1053,6 +1053,55 @@ describe("handlePostToolUse — secrets in Bash output (#313)", () => {
   }
 });
 
+describe("handlePostToolUse — a read the command bounded itself (#327)", () => {
+  // The output a bounded read returns is what Claude asked for; cutting it drops
+  // requested lines, which balanced retention then cannot give back.
+  const envelope = (stdout: string) => JSON.stringify({ stdout, stderr: "", interrupted: false, isImage: false, noOutputExpected: false });
+  const storedRows = () => (getDb(":memory:").prepare("SELECT COUNT(*) AS n FROM stored_outputs").get() as { n: number }).n;
+  const run = (stdout: string, command: string) =>
+    handlePostToolUse(makePostToolUseInput("Bash", envelope(stdout), { tool_input: { command } }));
+  // 60 lines of grep context (~3.5 KB): no `file:line:` shape, so the shell handler would cut it.
+  const context = Array.from({ length: 60 }, (_, i) => `    const field${i} = this.compute(input, ${i}); // keep line ${i}`).join("\n");
+
+  beforeEach(() => {
+    process.env.RECALL_DB_PATH = ":memory:";
+  });
+
+  afterEach(() => {
+    closeDb();
+    resetConfig();
+    delete process.env.RECALL_DB_PATH;
+  });
+
+  it("summarises the same output when the command set no bound (control)", () => {
+    expect(run(context, "grep -rn compute src")).not.toEqual({});
+    expect(storedRows()).toBe(1);
+  });
+
+  it("delivers bounded output whole and stores nothing", () => {
+    for (const command of [
+      'grep -n "class X" -A 30 src/x.ts | head -40',
+      "grep -n foo src/x.ts | head -3; sed -n 900,1000p src/x.ts",
+      "tail -n 60 build.log",
+    ]) {
+      expect(run(context, command)).toEqual({});
+    }
+    expect(storedRows()).toBe(0);
+  });
+
+  it("does not serve a bounded read from the cache", () => {
+    run(context, "grep -rn compute src");
+    expect(run(context, "grep -rn compute src | head -60")).toEqual({});
+  });
+
+  it("still summarises bounded output above the size floor", () => {
+    const large = Array.from({ length: 400 }, (_, i) => `    const field${i} = this.compute(input, ${i}); // keep line ${i}`).join("\n");
+    expect(Buffer.byteLength(large)).toBeGreaterThan(8 * 1024);
+    expect(run(large, "tail -n 400 build.log")).not.toEqual({});
+    expect(storedRows()).toBe(1);
+  });
+});
+
 describe("handlePostToolUse — Bash output cut at ~50 KB (#316)", () => {
   // Claude Code hands the hook stdout cut at about 50 KB, with no marker in it,
   // and saves the whole output (stdout, then stderr) to persistedOutputPath.

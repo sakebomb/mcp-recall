@@ -32,20 +32,23 @@ PostToolUse hook  ── mcp__* (except mcp__recall__*) and Bash
  2. extract text, scan for secrets
       │                    ──hit──▶ pass through untouched
       │ clean
- 3. open project DB        getProjectKey(cwd) → defaultDbPath(key)
+ 3. Bash read bounded by the command, ≤ 8 KB?
+      │                    ──yes──▶ pass through untouched
+      │ no
+ 4. open project DB        getProjectKey(cwd) → defaultDbPath(key)
       │
- 4. dedup: output_hash, same tool + command family
+ 5. dedup: output_hash, same tool + command family
       │                    ──hit──▶ return the already-stored summary
       │ miss
- 5. compress               getHandler(tool_name, response, input) → handler(…)
+ 6. compress               getHandler(tool_name, response, input) → handler(…)
       │
- 6. summary ≥ original?    ──yes──▶ pass through untouched
+ 7. summary ≥ original?    ──yes──▶ pass through untouched
       │ no
- 7. store                  stored_outputs (+ FTS + chunks, via triggers)
+ 8. store                  stored_outputs (+ FTS + chunks, via triggers)
       │
- 8. evict if over store.max_size_mb   (decay-scored, pinned exempt)
+ 9. evict if over store.max_size_mb   (decay-scored, pinned exempt)
       │
- 9. return                 "[recall:<id> · <orig>→<sz> (NN% reduction) · search: …]\n<summary>"
+10. return                 "[recall:<id> · <orig>→<sz> (NN% reduction) · search: …]\n<summary>"
 ```
 
 ```mermaid
@@ -54,22 +57,26 @@ flowchart TD
     S1{"1. denylisted?"} -->|yes| PASS["pass through untouched"]
     S1 -->|no| S2{"2. secret detected?"}
     S2 -->|yes| PASS
-    S2 -->|no| S3["3. open project DB"]
-    S3 --> S4{"4. dedup hit? same output, tool and command family"}
-    S4 -->|yes| CACHE["return already-stored summary"]
-    S4 -->|no| S5["5. compress via getHandler"]
-    S5 --> S6{"6. summary ≥ original?"}
-    S6 -->|yes| PASS
-    S6 -->|no| S7["7. store — stored_outputs + FTS + chunks"]
-    S7 --> S8["8. evict if over max_size_mb"]
-    S8 --> S9["9. return summary + recall header to Claude"]
+    S2 -->|no| S3{"3. Bash read bounded by the command, ≤ 8 KB?"}
+    S3 -->|yes| PASS
+    S3 -->|no| S4["4. open project DB"]
+    S4 --> S5{"5. dedup hit? same output, tool and command family"}
+    S5 -->|yes| CACHE["return already-stored summary"]
+    S5 -->|no| S6["6. compress via getHandler"]
+    S6 --> S7{"7. summary ≥ original?"}
+    S7 -->|yes| PASS
+    S7 -->|no| S8["8. store — stored_outputs + FTS + chunks"]
+    S8 --> S9["9. evict if over max_size_mb"]
+    S9 --> S10["10. return summary + recall header to Claude"]
 ```
 
-Three of these steps are exits, not just filters: **1, 2, and 6 pass the output
-through unchanged** (`return {}`) rather than storing it. Step 6 is the one that
+Four of these steps are exits, not just filters: **1, 2, 3 and 7 pass the output
+through unchanged** (`return {}`) rather than storing it. Step 7 is the one that
 surprises people — output that does not compress usefully (a short, error-dense
 log) is left alone, so not every intercepted tool call produces a stored row.
-Step 4 is the other early return: a dedup hit sends back the *existing* row's
+Step 3 delivers a read the command already bounded (`| head -40`, `sed -n a,bp`,
+`grep -A 30`) whole, since a summary would drop lines Claude asked for (#327).
+Step 5 is the other early return: a dedup hit sends back the *existing* row's
 summary and stores nothing new. A hit needs byte-identical output from the same
 tool and, for Bash, the same command family. An identical *input* is not enough:
 a re-run exists to see changed output, and the summary names the command (#324).
@@ -209,7 +216,8 @@ filter; only an operation targeting a specific id may omit it.
 
 ### 3. Compress only when it shrinks
 
-Step 6 stores nothing unless `summary < original` (`post-tool-use.ts:96`). This is
+Step 7 stores nothing unless what Claude receives, header included, is smaller than
+the original (#319). This is
 why reasoning about "everything gets stored" is wrong: incompressible output passes
 through untouched. Any change to compression or storage must preserve this — a
 handler that returns a summary larger than its input simply won't be persisted, by

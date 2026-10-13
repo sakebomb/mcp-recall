@@ -12,7 +12,7 @@ import { jsonHandler } from "../src/handlers/json";
 import { genericHandler } from "../src/handlers/generic";
 import { contentBlockHandler } from "../src/handlers/content-blocks";
 import { getHandler, extractText } from "../src/handlers/index";
-import { getBashHandler, normalizeCommand, commandFingerprint, compoundHandler, gitDiffHandler, gitLogHandler, terraformPlanHandler, gitStatusHandler, gitRefsHandler, packageInstallHandler, testRunnerHandler, dockerPsHandler, buildToolHandler, ghHandler, compilerDiagnosticsHandler, grepHandler, lsHandler, findHandler } from "../src/handlers/bash";
+import { getBashHandler, normalizeCommand, commandFingerprint, isBoundedRead, compoundHandler, gitDiffHandler, gitLogHandler, terraformPlanHandler, gitStatusHandler, gitRefsHandler, packageInstallHandler, testRunnerHandler, dockerPsHandler, buildToolHandler, ghHandler, compilerDiagnosticsHandler, grepHandler, lsHandler, findHandler } from "../src/handlers/bash";
 import { tavilyHandler } from "../src/handlers/tavily";
 import { databaseHandler } from "../src/handlers/database";
 import { sentryHandler } from "../src/handlers/sentry";
@@ -1278,6 +1278,44 @@ describe("compoundHandler (#308)", () => {
     expect(summary).toContain("line 285");
     expect(summary).toContain("error: build failed in the middle");
     expect(summary).not.toContain("line 100\n");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isBoundedRead (#327)
+// ---------------------------------------------------------------------------
+
+describe("isBoundedRead", () => {
+  it("recognises a command that limits its own output", () => {
+    for (const command of [
+      'grep -n "class X" -A 30 src/x.ts | head -40',
+      "grep -B2 -A22 foo src/x.ts | head -50",
+      "grep -n foo src/x.ts | head -3; sed -n 900,1000p src/x.ts",
+      "sed -n '900,1000p' src/x.ts",
+      'sed -n "5p" src/x.ts',
+      "git log --oneline | head",
+      "bun test 2>&1 | tail -30",
+      "head -n 80 README.md",
+      "tail -20 build.log",
+      "grep -rn -C3 foo src",
+      "rg -n --context 5 foo src",
+      "grep -rnA4 foo src",
+      "grep -m 5 foo src/x.ts",
+    ]) expect(isBoundedRead(command)).toBe(true);
+  });
+
+  it("does not mistake other commands for a bound", () => {
+    for (const command of [
+      "grep -rn foo src",
+      "cat header.txt",
+      "ls -A 3",
+      "ps -A",
+      "sed 's/a/b/' src/x.ts",
+      "sed -n '/start/,/end/p' src/x.ts",
+      "git log --format=%h",
+      "./scripts/headless-run.sh",
+      "echo head -5",
+    ]) expect(isBoundedRead(command)).toBe(false);
   });
 });
 

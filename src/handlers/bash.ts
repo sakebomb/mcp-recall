@@ -418,6 +418,26 @@ export function commandFingerprint(command: string): string {
   return second ? `${verb} ${second[1]!}` : verb;
 }
 
+/** Output up to this size from a read the command bounded itself is delivered whole (#327). */
+export const BOUNDED_READ_MAX_BYTES = 8 * 1024;
+
+/**
+ * True when any command in `command` limits its own output: `head`/`tail`, a
+ * `sed -n` line range, or grep context and match limits (`-A/-B/-C N`, `-m N`).
+ * That output is what Claude asked for, so a summary would drop requested lines
+ * (#327). The split ignores quoting, so a quoted `| head` can count as a bound;
+ * BOUNDED_READ_MAX_BYTES caps what such a miss delivers.
+ */
+export function isBoundedRead(command: string): boolean {
+  return command.split(/\||;|&&|\n/).some((part) => {
+    const s = part.trim();
+    if (/^(head|tail)(\s|$)/.test(s)) return true;
+    if (/^sed\s+(?:-\S+\s+)*-n\s+['"]?\d+(?:,\s*(?:\d+|\$))?p['"]?(\s|$)/.test(s)) return true;
+    return /^(grep|egrep|fgrep|rg|ag|git\s+grep)\s/.test(s) &&
+      /\s(-[a-zA-Z]*[ABCm]\s*\d+|--(?:after-|before-)?context[=\s]\d+|--max-count[=\s]\d+)/.test(s);
+  });
+}
+
 /**
  * True when `command` runs more than one command in sequence: a `;`, `&&`, `||`
  * or newline outside quotes, escapes and `( … )`/`$( … )`, with a command after

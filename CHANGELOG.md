@@ -30,6 +30,14 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   working tree. When stdout is empty and stderr is not, the shell summary,
   which keeps stderr, is used instead. Test runners, compilers and `make` are
   exempt, since they report on stderr (`bun test` prints its results there).
+- **A read you already bounded is delivered whole** (#327). Output from
+  `grep -A 30 … | head -40` or `sed -n 900,1000p` is what Claude asked for,
+  yet a summary cut it to about 25 lines. Under `balanced` retention the cut
+  lines could not be retrieved, only re-run. A Bash command that limits its own
+  output (`head`, `tail`, a `sed -n` line range, grep `-A/-B/-C N` or `-m N`)
+  now passes through untouched when the output is 8 KB or less. In a replay of
+  80 real grep commands, the 11 outputs that were summarised were all such
+  reads; all 11 now arrive whole.
 - **A summary is used only when it is smaller than the output, header
   included** (#319). The hook compared the summary alone with the original, then
   added the `[recall:…]` header (60–140 B). Since 1.15.2 delivers Bash
