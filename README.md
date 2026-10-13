@@ -120,15 +120,17 @@ flowchart TD
 
 > **Before 1.15.1, these savings did not reach Claude's context on current Claude Code.** The hook returned its summary in a field Claude Code no longer reads, so outputs were stored and searchable but Claude still received them in full ([#298](https://github.com/sakebomb/mcp-recall/issues/298)). 1.15.1 uses the documented field, which delivered MCP summaries. Bash summaries were still dropped: Claude Code checks a built-in tool's replacement against that tool's output shape, and a plain string never matched Bash's. From 1.15.2 the hook returns Bash's own shape, and Bash summaries were verified live on Claude Code 2.1.292 ([#304](https://github.com/sakebomb/mcp-recall/issues/304)). The figures below measure what the compression produces.
 
-Measured on 2026-10-07 across one developer's real store: 111 project stores, 98 projects, 38,890 intercepted calls dated 2026-07-21 to 2026-10-07 (older calls had expired). Reproduce on your own store with `bun run measure`, which opens every store read-only and prints aggregates only.
+Measured on 2026-10-13 across one developer's real store: 121 project stores, 107 projects, 36,039 intercepted calls dated 2026-07-21 to 2026-10-13 (older calls had expired). Reproduce on your own store with `bun run measure`, which opens every store read-only and prints aggregates only.
 
 | Figure | Calls | Original | Delivered | Reduction |
 |---|---|---|---|---|
-| All intercepted calls, as recorded | 38,890 | 69.3 MB | 29.4 MB | **57.6%** |
-| Bash, as recorded | 38,704 | 64.3 MB | 26.4 MB | 58.9% |
-| MCP, replayed through current handlers | 186 | 5.0 MB | 0.1 MB | **97.0%** |
+| All intercepted calls, as recorded | 36,039 | 66.1 MB | 27.9 MB | **57.9%** |
+| Bash, as recorded | 35,857 | 61.0 MB | 24.9 MB | 59.2% |
+| MCP, replayed through current handlers | 182 | 5.1 MB | 0.2 MB | **96.6%** |
 
-"As recorded" is what the installed versions' compression produced, using the same accounting as `recall__stats` (notes excluded): 39.9 MB, about 10.5M tokens. Because of #298 that reduction was stored, not delivered to context. The MCP row re-compresses every stored MCP call with today's handlers, because most of those calls were stored by an older release that predated image-block stripping; as recorded they show 40.2%. The replay applies the hook's own rules: a summary that, with its header, saves less than 25% passes the output through, and an empty summary falls back to the generic handler. It uses the 1.15.1 profiles, so Context7 calls are no longer counted as empty summaries ([#299](https://github.com/sakebomb/mcp-recall/issues/299)). This is one person's workload, dominated by Bash, so your mix will differ.
+"As recorded" is what the installed versions' compression produced, using the same accounting as `recall__stats` (notes excluded): 38.3 MB, about 10.0M tokens. Because of #298 that reduction was stored, not delivered to context. The MCP row re-compresses every stored MCP call with today's handlers, because most of those calls were stored by an older release that predated image-block stripping; as recorded they show 41.9%. The replay applies the hook's own rules: a summary that, with its header, saves less than 25% passes the output through, and an empty summary falls back to the generic handler. It uses the 1.15.1 profiles, so Context7 calls are no longer counted as empty summaries ([#299](https://github.com/sakebomb/mcp-recall/issues/299)). This is one person's workload, dominated by Bash, so your mix will differ.
+
+**The Bash rows overstate what 1.16.0 saves.** They were recorded by earlier releases. 1.16.0 delivers more Bash output whole: content reads (`cat`, `git diff`) and reads you bounded (`| head`, `sed -n`) of 8 KB or less, and any summary that would save under 25%. Most Bash bodies are not stored, so `measure` cannot replay them under the new rules. In a replay of recorded `gh` and `cd …` results, the 25% rule alone delivered 0.3–0.5% more of the input.
 
 ### What compresses well, and what doesn't
 
@@ -136,13 +138,13 @@ The reduction depends on the shape of the output, not on how large it is. Long, 
 
 | | Examples (from the measurement above) | Why |
 |---|---|---|
-| **Excellent, 95–100%** | Tavily extract, Hugging Face, Playwright snapshots, browser screenshots (image blocks stripped) | A dedicated handler or profile keeps only the fields that matter; images carry no searchable text |
-| **Good, 75–93%** | Tavily search (85%), Gmail search (91%), `git diff` (93%), `git show` (80%), `cat` of large files (74%) | Structured enough for a handler to summarize; the full text stays retrievable |
-| **Moderate, 50–70%** | `sed`, `python3`, `gh`, shell loops, Mermaid rendering (69%) | Mixed output with no dedicated handler; the generic fallback trims the head and tail |
-| **Weak, 30–45%** | `grep` (37%), `ssh` (38%), `timeout` (32%), `cd …` chains (43%) | Usually short output, or a wrapper that hides the real command from command-aware routing |
+| **Excellent, 95–100%** | Tavily extract, Hugging Face, browser automation and screenshots (image blocks stripped) | A dedicated handler or profile keeps only the fields that matter; images carry no searchable text |
+| **Good, 73–92%** | Playwright snapshots (88%), Tavily search (84%), Gmail search (85%), `git diff` (92%), `git show` (80%), `cat` of large files (73%) | Structured enough for a handler to summarize; the full text stays retrievable |
+| **Moderate, 50–70%** | `sed`, `python3`, `gh`, shell loops, Mermaid rendering (60%) | Mixed output with no dedicated handler; the generic fallback trims the head and tail |
+| **Weak, 30–46%** | `grep` (37%), `ssh` (38%), `timeout` (32%), `cd …` chains (46%) | Usually short output, or a wrapper that hides the real command from command-aware routing |
 | **Fixed in 1.15.1** | Cloudflare docs search: 37% before, 89% with the new bundled profile | No handler matched it; a profile now extracts title, URL and an excerpt |
 
-Bash rows in this table are as recorded, mostly by releases before 1.14.5, so `grep` (improved in 1.14.5) is likely better today. Small tools with very few calls (for example, three Vikunja calls) are too little data to judge. If a tool you use lands in the weak rows, a [profile](docs/profiles-quickstart.md) is usually the fix.
+Bash rows in this table are as recorded by earlier releases; see the note above on what 1.16.0 changes. Small tools with very few calls (for example, three Vikunja calls) are too little data to judge. If a tool you use lands in the weak rows, a [profile](docs/profiles-quickstart.md) is usually the fix.
 
 Individual MCP calls:
 
@@ -167,7 +169,7 @@ Command-aware Bash compression, per-output on representative fixtures (regenerat
 | `cargo build` (typical failure) | 1.9 KB | 581 B | 69.8% |
 | `git --no-pager diff` (18 files) | 4.1 KB | 1.3 KB | 68.0% |
 
-These are per-output compression ratios, not a whole-session token figure — most outputs are smaller and the generic fallback already caps long output. That is why the measured Bash figure above (58.9%) is lower. For your own session savings, read `recall__stats` (which counts intercepted output only).
+These show what each handler produces. From 1.16.0 the hook delivers a diff or file read of 8 KB or less whole, so the `git diff` fixture above would reach Claude unsummarised. These are per-output compression ratios, not a whole-session token figure — most outputs are smaller and the generic fallback already caps long output. That is why the measured Bash figure above (59.2%) is lower. For your own session savings, read `recall__stats` (which counts intercepted output only).
 
 Used daily in development of this project since the first release in March 2026. No broken sessions, no data loss.
 

@@ -6,6 +6,40 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+## [1.16.0] — 2026-10-13
+
+### Changed
+
+Bash output Claude explicitly reads now reaches it whole, or stays
+retrievable, instead of being summarised. Expect lower Bash savings than in
+1.15.2: the bytes given up were mostly lines that could not be recovered.
+
+- **A read you already bounded is delivered whole** (#327). Output from
+  `grep -A 30 … | head -40` or `sed -n 900,1000p` is what Claude asked for,
+  yet a summary cut it to about 25 lines. Under `balanced` retention the cut
+  lines could not be retrieved, only re-run. A Bash command that limits its own
+  output (`head`, `tail`, a `sed -n` line range, grep `-A/-B/-C N` or `-m N`)
+  now passes through untouched when the output is 8 KB or less. In a replay of
+  80 real grep commands, the 11 outputs that were summarised were all such
+  reads; all 11 now arrive whole.
+- **File and diff content you read is delivered whole or kept retrievable**
+  (#332). A `git diff` summary keeps only file stats, and a `cat` summary only
+  the head and tail of the file, while `balanced` retention stored neither
+  body: a 1 KB diff arrived as `1 file changed, +6 -0` and could not be
+  retrieved. `cat`, `git diff`/`show`, `git log -p` and the bounded reads
+  above now pass through untouched at 8 KB or less. Above that they are summarised, and
+  `balanced` keeps their body so `recall__retrieve` returns the content. This
+  stores more on disk under `balanced`; `store.max_size_mb` and eviction still
+  apply. The bounded-read check also sees past `cd`, `timeout` and `sudo`
+  prefixes now.
+- **A summary must save at least 25% to replace an output** (#319 part 2).
+  Before, any saving counted, so a 1.4 KB `gh issue view` had the middle of the
+  issue body cut to save 150 B. In a replay of recorded `gh` and `cd …` chain
+  results, summaries saving under 25% were about a fifth of the replacements but
+  2–3% of the bytes saved, and most could not be retrieved. Those outputs now
+  pass through untouched. The dedup cache and `bun run measure` apply the same
+  rule.
+
 ### Fixed
 
 - **Re-running a command no longer returns its earlier result** (#324). The
@@ -30,31 +64,6 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   working tree. When stdout is empty and stderr is not, the shell summary,
   which keeps stderr, is used instead. Test runners, compilers and `make` are
   exempt, since they report on stderr (`bun test` prints its results there).
-- **A read you already bounded is delivered whole** (#327). Output from
-  `grep -A 30 … | head -40` or `sed -n 900,1000p` is what Claude asked for,
-  yet a summary cut it to about 25 lines. Under `balanced` retention the cut
-  lines could not be retrieved, only re-run. A Bash command that limits its own
-  output (`head`, `tail`, a `sed -n` line range, grep `-A/-B/-C N` or `-m N`)
-  now passes through untouched when the output is 8 KB or less. In a replay of
-  80 real grep commands, the 11 outputs that were summarised were all such
-  reads; all 11 now arrive whole.
-- **File and diff content you read is delivered whole or kept retrievable**
-  (#332). A `git diff` summary keeps only file stats, and a `cat` summary only
-  the head and tail of the file, while `balanced` retention stored neither
-  body: a 1 KB diff arrived as `1 file changed, +6 -0` and could not be
-  retrieved. `cat`, `git diff`/`show`, `git log -p` and the bounded reads above now pass
-  through untouched at 8 KB or less. Above that they are summarised, and
-  `balanced` keeps their body so `recall__retrieve` returns the content. This
-  stores more on disk under `balanced`; `store.max_size_mb` and eviction still
-  apply. The bounded-read check also sees past `cd`, `timeout` and `sudo`
-  prefixes now.
-- **A summary must save at least 25% to replace an output** (#319 part 2).
-  Before, any saving counted, so a 1.4 KB `gh issue view` had the middle of the
-  issue body cut to save 150 B. In a replay of recorded `gh` and `cd …` chain
-  results, summaries saving under 25% were about a fifth of the replacements but
-  2–3% of the bytes saved, and most could not be retrieved. Those outputs now
-  pass through untouched. The dedup cache and `bun run measure` apply the same
-  rule.
 - **A summary is used only when it is smaller than the output, header
   included** (#319). The hook compared the summary alone with the original, then
   added the `[recall:…]` header (60–140 B). Since 1.15.2 delivers Bash
@@ -768,7 +777,8 @@ Ten `recall__*` tools available in every Claude session:
 
 ---
 
-[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.15.2...HEAD
+[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.16.0...HEAD
+[1.16.0]: https://github.com/sakebomb/mcp-recall/compare/v1.15.2...v1.16.0
 [1.15.2]: https://github.com/sakebomb/mcp-recall/compare/v1.15.1...v1.15.2
 [1.15.1]: https://github.com/sakebomb/mcp-recall/compare/v1.15.0...v1.15.1
 [1.15.0]: https://github.com/sakebomb/mcp-recall/compare/v1.14.5...v1.15.0
