@@ -446,14 +446,15 @@ export function isBoundedRead(command: string): boolean {
 }
 
 /**
- * True when `command` reads content for Claude: a bounded read, `cat`, or
- * `git diff`/`git show`. Their summaries keep stats or a head and tail, which
+ * True when `command` reads content for Claude: a bounded read, `cat`,
+ * `git diff`/`git show`, or a patch from `git log -p`/`git stash show -p`. Their summaries keep stats or a head and tail, which
  * drops what Claude asked for, so the hook delivers small ones whole and
  * `balanced` retention keeps the body of large ones (#332).
  */
 export function isContentRead(command: string): boolean {
   return isBoundedRead(command) ||
-    commandSegments(command).some((s) => /^(cat|git\s+(diff|show))(\s|$)/.test(s));
+    commandSegments(command).some((s) => /^(cat|git\s+(diff|show))(\s|$)/.test(s) ||
+      /^git\s+(log|stash\s+show)(\s.*)?\s(-p|--patch|-u)(\s|$)/.test(s));
 }
 
 /**

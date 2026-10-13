@@ -438,7 +438,7 @@ gc_reminder_mb = 2048
 # Which intercepted outputs keep a retrievable verbatim body vs. summary-only:
 #   full     = keep every intercepted body (most retrievable, most disk)
 #   balanced = keep MCP/web/API results, network Bash (curl/wget/gh api) and
-#              content reads (cat, git diff/show, head/tail, sed -n ranges,
+#              content reads (cat, git diff/show/log -p, head/tail, sed -n,
 #              grep with context), whose summaries drop the content; store
 #              other reproducible Bash (git log/status, tests, ls, grep,
 #              docker ps, build/lint) summary-only — an old copy is either

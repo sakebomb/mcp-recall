@@ -42,7 +42,7 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   (#332). A `git diff` summary keeps only file stats, and a `cat` summary only
   the head and tail of the file, while `balanced` retention stored neither
   body: a 1 KB diff arrived as `1 file changed, +6 -0` and could not be
-  retrieved. `cat`, `git diff`/`show` and the bounded reads above now pass
+  retrieved. `cat`, `git diff`/`show`, `git log -p` and the bounded reads above now pass
   through untouched at 8 KB or less. Above that they are summarised, and
   `balanced` keeps their body so `recall__retrieve` returns the content. This
   stores more on disk under `balanced`; `store.max_size_mb` and eviction still

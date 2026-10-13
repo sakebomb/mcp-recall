@@ -4,7 +4,7 @@
  *
  *   full     — keep every intercepted body (max retrievability, max disk).
  *   balanced — keep MCP/web/API results, network-fetch Bash (curl/wget/gh api)
- *              and content reads (cat, git diff/show, head/tail, sed -n ranges,
+ *              and content reads (cat, git diff/show/log -p, head/tail, sed -n ranges,
  *              grep with context), whose summaries drop what Claude asked for
  *              (#332). Store other reproducible Bash (git log/status, tests, ls,
  *              plain grep, docker ps, build/lint…) summary-only: an old copy is

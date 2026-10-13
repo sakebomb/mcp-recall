@@ -7580,7 +7580,7 @@ function isBoundedRead(command) {
   });
 }
 function isContentRead(command) {
-  return isBoundedRead(command) || commandSegments(command).some((s) => /^(cat|git\s+(diff|show))(\s|$)/.test(s));
+  return isBoundedRead(command) || commandSegments(command).some((s) => /^(cat|git\s+(diff|show))(\s|$)/.test(s) || /^git\s+(log|stash\s+show)(\s.*)?\s(-p|--patch|-u)(\s|$)/.test(s));
 }
 function isCompoundCommand(command) {
   let quote = null;

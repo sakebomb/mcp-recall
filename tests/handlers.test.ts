@@ -1330,13 +1330,15 @@ describe("isContentRead (#332)", () => {
       "cat README.md", "cat -n src/x.py", "git diff", "git diff main -- src/", "git show HEAD~1",
       "git --no-pager diff", "cd /repo && cat a.md", 'echo "=== a"; cat a.md; echo "=== b"; cat b.md',
       "timeout 30 cat big.log", "sed -n 5,20p x.ts", "grep -n foo -A 5 x.ts",
+      "git log -p -3 src/x.ts", "git log --patch main..HEAD", "git stash show -p stash@{0}",
     ]) expect(isContentRead(command)).toBe(true);
   });
 
   it("does not count other commands", () => {
     for (const command of [
       "git log --oneline", "git status", "ls -la", "grep -rn foo src", "./catalog --list",
-      "concat a b", "echo cat", "git difftool", "bun test",
+      "concat a b", "echo cat", "git difftool", "bun test", "git log --oneline -p5x", "git stash show",
+      "git log --pretty=%h",
     ]) expect(isContentRead(command)).toBe(false);
   });
 });
