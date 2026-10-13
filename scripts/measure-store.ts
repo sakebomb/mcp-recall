@@ -26,7 +26,7 @@ import { getStats } from "../src/db/analytics";
 import { getHandler } from "../src/handlers/index";
 import { genericHandler } from "../src/handlers/generic";
 import { extractHints } from "../src/hints";
-import { deliveredBytes } from "../src/hooks/post-tool-use";
+import { deliveredBytes, savesEnough } from "../src/hooks/post-tool-use";
 
 interface Totals {
   original: number;
@@ -97,9 +97,9 @@ function replayMcp(db: Database, replay: Totals, byTool: Map<string, Totals>): v
       ({ summary } = genericHandler(row.tool_name, output));
     }
     // What Claude receives: the header plus the summary, or the output itself
-    // when that is not smaller (#319).
+    // when that does not save MIN_SAVING (#319).
     const sized = deliveredBytes(summary, row.original_size, extractHints(row.full_content));
-    const delivered = Math.min(sized, row.original_size);
+    const delivered = savesEnough(sized, row.original_size) ? sized : row.original_size;
     add(replay, row.original_size, delivered, 1);
     tally(byTool, row.tool_name, row.original_size, delivered, 1);
   }

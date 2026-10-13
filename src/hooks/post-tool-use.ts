@@ -168,8 +168,8 @@ export function handlePostToolUse(raw: string): HookOutput {
     const cachedDate = new Date(cached.created_at * 1000).toISOString().slice(0, 10);
     const text = `[recall:${cached.id} · cached · ${cachedDate}]\n${cached.summary}`;
     // A row stored before #319 may only have beaten the original without its
-    // header; replaying it must not deliver more than the output itself.
-    if (Buffer.byteLength(text, "utf8") >= Buffer.byteLength(fullContent, "utf8")) {
+    // header; replaying it must save as much as a fresh summary would.
+    if (!savesEnough(Buffer.byteLength(text, "utf8"), Buffer.byteLength(fullContent, "utf8"))) {
       log.debug(`SKIP cached-not-smaller · ${tool_name} · id=${cached.id}`);
       return {};
     }
@@ -192,13 +192,14 @@ export function handlePostToolUse(raw: string): HookOutput {
   }
   const summarySize = Buffer.byteLength(summary, "utf8");
 
-  // 7. Only store when what Claude receives, header included, is smaller than
-  //    the original: sizing the summary alone delivered small outputs larger
-  //    while reporting a reduction (#319).
+  // 7. Only store when what Claude receives, header included, saves at least
+  //    MIN_SAVING of the original: sizing the summary alone delivered small
+  //    outputs larger while reporting a reduction (#319), and a small saving
+  //    costs lines that may not be retrievable (#319 part 2).
   const hints = extractHints(fullContent);
   const deliveredSize = deliveredBytes(summary, originalSize, hints);
-  if (deliveredSize >= originalSize) {
-    log.debug(`SKIP no-compression · ${tool_name} · ${formatBytes(deliveredSize)} ≥ ${formatBytes(originalSize)}`);
+  if (!savesEnough(deliveredSize, originalSize)) {
+    log.debug(`SKIP no-compression · ${tool_name} · ${formatBytes(deliveredSize)} of ${formatBytes(originalSize)}`);
     return {};
   }
 
@@ -246,6 +247,19 @@ function reductionPercent(summarySize: number, originalSize: number): string {
 export function recallHeader(id: string, originalSize: number, summarySize: number, hints: string[]): string {
   const hintStr = hints.length ? ` · search: ${hints.map((h) => `"${h}"`).join(", ")}` : "";
   return `[recall:${id} · ${formatBytes(originalSize)}→${formatBytes(summarySize)} (${reductionPercent(summarySize, originalSize)}% reduction)${hintStr}]`;
+}
+
+/**
+ * The share of an output a summary must save, header included, to replace it.
+ * Below this the lines a summary drops cost more than the bytes it saves: in
+ * the #308 replay, summaries saving under 25% were about a fifth of Bash
+ * replacements, 2–3% of bytes saved, and mostly unretrievable (#319 part 2).
+ */
+export const MIN_SAVING = 0.25;
+
+/** True when delivering `delivered` bytes in place of `original` saves at least MIN_SAVING. */
+export function savesEnough(delivered: number, original: number): boolean {
+  return delivered <= original * (1 - MIN_SAVING);
 }
 
 /** Same length as every stored id (`recall_` + 16 hex), so the header can be sized before storing. */

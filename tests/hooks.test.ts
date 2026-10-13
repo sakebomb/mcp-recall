@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { handleSessionStart } from "../src/hooks/session-start";
-import { handlePostToolUse } from "../src/hooks/post-tool-use";
+import { handlePostToolUse, savesEnough } from "../src/hooks/post-tool-use";
 import { getDb, closeDb, listOutputs, getSessionDays, retrieveOutput, storeOutput, pinOutput, getMeta, hashContent } from "../src/db/index";
 import { resetConfig } from "../src/config";
 import { getProjectKey, getProjectPath } from "../src/project-key";
@@ -49,7 +49,7 @@ const LARGE_GITHUB_RESPONSE = JSON.stringify(
     state: "open",
     html_url: `https://github.com/org/repo/issues/${i + 1}`,
     labels: [{ name: "bug" }],
-    body: "x".repeat(300),
+    body: "x".repeat(900), // long enough that a summary saves the 25% minimum (#319)
   }))
 );
 
@@ -300,6 +300,43 @@ describe("handlePostToolUse", () => {
       makePostToolUseInput("Bash", bashOf(grepped), { tool_input: { command: "bun test | grep fail" } })
     );
     expect(result).toEqual({});
+  });
+
+  describe("a summary must save at least a quarter of the output (#319 part 2)", () => {
+    it("savesEnough accepts a 25% saving and rejects less", () => {
+      expect(savesEnough(750, 1000)).toBe(true);
+      expect(savesEnough(751, 1000)).toBe(false);
+      expect(savesEnough(1000, 1000)).toBe(false);
+    });
+
+    const cachedRun = (summaryShare: number) => {
+      const output = Array.from({ length: 70 }, (_, i) => `(pass) suite > case number ${i} with a reasonably long name`).join("\n");
+      storeOutput(getDb(":memory:"), {
+        project_key: getProjectKey(TEST_CWD), session_id: SESSION_ID, tool_name: "Bash",
+        summary: output.slice(0, Math.round(output.length * summaryShare)), full_content: output, original_size: Buffer.byteLength(output, "utf8"),
+        input_hash: undefined, output_hash: hashContent(output), full_retained: 1, command_fp: "bun test",
+      });
+      return { output, result: handlePostToolUse(makePostToolUseInput("Bash", bashOf(output), { tool_input: { command: "bun test | grep pass" } })) };
+    };
+
+    it("passes output through when a cached summary saves under 25%", () => {
+      expect(cachedRun(0.85).result).toEqual({});
+    });
+
+    it("still serves a cached summary that saves more", () => {
+      const { result } = cachedRun(0.5);
+      expect((result.hookSpecificOutput?.updatedToolOutput as { stdout: string }).stdout).toContain("· cached ·");
+    });
+
+    it("never delivers a fresh summary that saves under 25%", () => {
+      for (let n = 26; n <= 70; n++) {
+        closeDb();
+        const stdout = Array.from({ length: n }, (_, i) => `issue ${i}\tP2: Medium,S,admin\tA title describing what this item asks for`).join("\n");
+        const result = handlePostToolUse(makePostToolUseInput("Bash", bashOf(stdout), { tool_input: { command: "gh issue list --limit 70" } }));
+        const delivered = (result.hookSpecificOutput?.updatedToolOutput as { stdout: string } | undefined)?.stdout;
+        if (delivered !== undefined) expect(Buffer.byteLength(delivered)).toBeLessThanOrEqual(Buffer.byteLength(stdout) * 0.75);
+      }
+    });
   });
 
   it("records exactly the bytes it delivered (#319)", () => {

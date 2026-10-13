@@ -9060,7 +9060,7 @@ function handlePostToolUse(raw) {
     const cachedDate = new Date(cached3.created_at * 1000).toISOString().slice(0, 10);
     const text = `[recall:${cached3.id} \xB7 cached \xB7 ${cachedDate}]
 ${cached3.summary}`;
-    if (Buffer.byteLength(text, "utf8") >= Buffer.byteLength(fullContent, "utf8")) {
+    if (!savesEnough(Buffer.byteLength(text, "utf8"), Buffer.byteLength(fullContent, "utf8"))) {
       log.debug(`SKIP cached-not-smaller \xB7 ${tool_name} \xB7 id=${cached3.id}`);
       return {};
     }
@@ -9080,8 +9080,8 @@ ${cached3.summary}`;
   const summarySize = Buffer.byteLength(summary, "utf8");
   const hints = extractHints(fullContent);
   const deliveredSize = deliveredBytes(summary, originalSize, hints);
-  if (deliveredSize >= originalSize) {
-    log.debug(`SKIP no-compression \xB7 ${tool_name} \xB7 ${formatBytes(deliveredSize)} \u2265 ${formatBytes(originalSize)}`);
+  if (!savesEnough(deliveredSize, originalSize)) {
+    log.debug(`SKIP no-compression \xB7 ${tool_name} \xB7 ${formatBytes(deliveredSize)} of ${formatBytes(originalSize)}`);
     return {};
   }
   const full_retained = shouldRetainFullBody(config.store.retention, tool_name, command) ? 1 : 0;
@@ -9111,6 +9111,10 @@ function reductionPercent(summarySize, originalSize) {
 function recallHeader(id, originalSize, summarySize, hints) {
   const hintStr = hints.length ? ` \xB7 search: ${hints.map((h) => `"${h}"`).join(", ")}` : "";
   return `[recall:${id} \xB7 ${formatBytes(originalSize)}\u2192${formatBytes(summarySize)} (${reductionPercent(summarySize, originalSize)}% reduction)${hintStr}]`;
+}
+var MIN_SAVING = 0.25;
+function savesEnough(delivered, original) {
+  return delivered <= original * (1 - MIN_SAVING);
 }
 var ID_PLACEHOLDER = `recall_${"0".repeat(16)}`;
 function deliveredBytes(summary, originalSize, hints) {

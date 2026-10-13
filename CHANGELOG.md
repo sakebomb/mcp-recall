@@ -48,6 +48,13 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   stores more on disk under `balanced`; `store.max_size_mb` and eviction still
   apply. The bounded-read check also sees past `cd`, `timeout` and `sudo`
   prefixes now.
+- **A summary must save at least 25% to replace an output** (#319 part 2).
+  Before, any saving counted, so a 1.4 KB `gh issue view` had the middle of the
+  issue body cut to save 150 B. In a replay of recorded `gh` and `cd …` chain
+  results, summaries saving under 25% were about a fifth of the replacements but
+  2–3% of the bytes saved, and most could not be retrieved. Those outputs now
+  pass through untouched. The dedup cache and `bun run measure` apply the same
+  rule.
 - **A summary is used only when it is smaller than the output, header
   included** (#319). The hook compared the summary alone with the original, then
   added the `[recall:…]` header (60–140 B). Since 1.15.2 delivers Bash

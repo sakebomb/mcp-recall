@@ -42,7 +42,7 @@ PostToolUse hook  ── mcp__* (except mcp__recall__*) and Bash
       │ miss
  6. compress               getHandler(tool_name, response, input) → handler(…)
       │
- 7. summary ≥ original?    ──yes──▶ pass through untouched
+ 7. saves < 25%?          ──yes──▶ pass through untouched
       │ no
  8. store                  stored_outputs (+ FTS + chunks, via triggers)
       │
@@ -63,7 +63,7 @@ flowchart TD
     S4 --> S5{"5. dedup hit? same output, tool and command family"}
     S5 -->|yes| CACHE["return already-stored summary"]
     S5 -->|no| S6["6. compress via getHandler"]
-    S6 --> S7{"7. summary ≥ original?"}
+    S6 --> S7{"7. header + summary saves < 25%?"}
     S7 -->|yes| PASS
     S7 -->|no| S8["8. store — stored_outputs + FTS + chunks"]
     S8 --> S9["9. evict if over max_size_mb"]
@@ -219,8 +219,9 @@ filter; only an operation targeting a specific id may omit it.
 
 ### 3. Compress only when it shrinks
 
-Step 7 stores nothing unless what Claude receives, header included, is smaller than
-the original (#319). This is
+Step 7 stores nothing unless what Claude receives, header included, saves at least
+`MIN_SAVING` (25%) of the original (#319). Below that, the lines a summary drops
+cost more than the bytes it saves. This is
 why reasoning about "everything gets stored" is wrong: incompressible output passes
 through untouched. Any change to compression or storage must preserve this — a
 handler that returns a summary larger than its input simply won't be persisted, by
