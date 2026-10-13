@@ -259,7 +259,7 @@ export const MIN_SAVING = 0.25;
 
 /** True when delivering `delivered` bytes in place of `original` saves at least MIN_SAVING. */
 export function savesEnough(delivered: number, original: number): boolean {
-  return delivered <= original * (1 - MIN_SAVING);
+  return original > 0 && delivered <= original * (1 - MIN_SAVING);
 }
 
 /** Same length as every stored id (`recall_` + 16 hex), so the header can be sized before storing. */

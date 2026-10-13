@@ -9114,7 +9114,7 @@ function recallHeader(id, originalSize, summarySize, hints) {
 }
 var MIN_SAVING = 0.25;
 function savesEnough(delivered, original) {
-  return delivered <= original * (1 - MIN_SAVING);
+  return original > 0 && delivered <= original * (1 - MIN_SAVING);
 }
 var ID_PLACEHOLDER = `recall_${"0".repeat(16)}`;
 function deliveredBytes(summary, originalSize, hints) {

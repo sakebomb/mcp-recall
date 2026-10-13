@@ -307,6 +307,7 @@ describe("handlePostToolUse", () => {
       expect(savesEnough(750, 1000)).toBe(true);
       expect(savesEnough(751, 1000)).toBe(false);
       expect(savesEnough(1000, 1000)).toBe(false);
+      expect(savesEnough(0, 0)).toBe(false);
     });
 
     const cachedRun = (summaryShare: number) => {
