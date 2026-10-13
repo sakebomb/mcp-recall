@@ -10,7 +10,7 @@ import { genericHandler } from "../handlers/generic";
 import { extractHints } from "../hints";
 import { getDb, defaultDbPath, storeOutput, checkOutputDedup, hashContent, evictIfNeeded } from "../db/index";
 import { shouldRetainFullBody } from "../retention";
-import { commandFingerprint, normalizeCommand, isBoundedRead, BOUNDED_READ_MAX_BYTES } from "../handlers/bash";
+import { commandFingerprint, normalizeCommand, isContentRead, READ_PASSTHROUGH_MAX_BYTES } from "../handlers/bash";
 import { bashOutputText } from "../handlers/bash-shared";
 import { formatBytes } from "../format";
 import { log } from "../log";
@@ -134,12 +134,12 @@ export function handlePostToolUse(raw: string): HookOutput {
       ? (tool_input as { command: string }).command
       : undefined;
 
-  // 3. A read the command bounded itself (`| head -40`, `sed -n a,bp`) returns
-  //    what Claude asked for: deliver it whole below a size floor. A summary
-  //    would drop requested lines that balanced retention cannot give back (#327).
-  if (tool_name === "Bash" && command && isBoundedRead(command) &&
-      Buffer.byteLength(fullContent, "utf8") <= BOUNDED_READ_MAX_BYTES) {
-    log.debug(`SKIP bounded-read · ${formatBytes(Buffer.byteLength(fullContent, "utf8"))}`);
+  // 3. A content read (`cat`, `git diff`, `| head -40`, `sed -n a,bp`) returns
+  //    what Claude asked for: deliver it whole below a size floor, since a
+  //    summary keeps only stats or a head and tail (#327, #332).
+  if (tool_name === "Bash" && command && isContentRead(command) &&
+      Buffer.byteLength(fullContent, "utf8") <= READ_PASSTHROUGH_MAX_BYTES) {
+    log.debug(`SKIP content-read · ${formatBytes(Buffer.byteLength(fullContent, "utf8"))}`);
     return {};
   }
 

@@ -12,7 +12,7 @@ import { jsonHandler } from "../src/handlers/json";
 import { genericHandler } from "../src/handlers/generic";
 import { contentBlockHandler } from "../src/handlers/content-blocks";
 import { getHandler, extractText } from "../src/handlers/index";
-import { getBashHandler, normalizeCommand, commandFingerprint, isBoundedRead, compoundHandler, gitDiffHandler, gitLogHandler, terraformPlanHandler, gitStatusHandler, gitRefsHandler, packageInstallHandler, testRunnerHandler, dockerPsHandler, buildToolHandler, ghHandler, compilerDiagnosticsHandler, grepHandler, lsHandler, findHandler } from "../src/handlers/bash";
+import { getBashHandler, normalizeCommand, commandFingerprint, isBoundedRead, isContentRead, compoundHandler, gitDiffHandler, gitLogHandler, terraformPlanHandler, gitStatusHandler, gitRefsHandler, packageInstallHandler, testRunnerHandler, dockerPsHandler, buildToolHandler, ghHandler, compilerDiagnosticsHandler, grepHandler, lsHandler, findHandler } from "../src/handlers/bash";
 import { tavilyHandler } from "../src/handlers/tavily";
 import { databaseHandler } from "../src/handlers/database";
 import { sentryHandler } from "../src/handlers/sentry";
@@ -1316,6 +1316,28 @@ describe("isBoundedRead", () => {
       "./scripts/headless-run.sh",
       "echo head -5",
     ]) expect(isBoundedRead(command)).toBe(false);
+  });
+
+  it("sees through cd and wrapper prefixes", () => {
+    expect(isBoundedRead("timeout 30 grep -A 30 foo src")).toBe(true);
+    expect(isBoundedRead("cd /repo && sudo tail -n 50 /var/log/x")).toBe(true);
+  });
+});
+
+describe("isContentRead (#332)", () => {
+  it("recognises reads of file or diff content", () => {
+    for (const command of [
+      "cat README.md", "cat -n src/x.py", "git diff", "git diff main -- src/", "git show HEAD~1",
+      "git --no-pager diff", "cd /repo && cat a.md", 'echo "=== a"; cat a.md; echo "=== b"; cat b.md',
+      "timeout 30 cat big.log", "sed -n 5,20p x.ts", "grep -n foo -A 5 x.ts",
+    ]) expect(isContentRead(command)).toBe(true);
+  });
+
+  it("does not count other commands", () => {
+    for (const command of [
+      "git log --oneline", "git status", "ls -la", "grep -rn foo src", "./catalog --list",
+      "concat a b", "echo cat", "git difftool", "bun test",
+    ]) expect(isContentRead(command)).toBe(false);
   });
 });
 

@@ -418,24 +418,42 @@ export function commandFingerprint(command: string): string {
   return second ? `${verb} ${second[1]!}` : verb;
 }
 
-/** Output up to this size from a read the command bounded itself is delivered whole (#327). */
-export const BOUNDED_READ_MAX_BYTES = 8 * 1024;
+/** Output up to this size from a content read is delivered whole (#327, #332). */
+export const READ_PASSTHROUGH_MAX_BYTES = 8 * 1024;
+
+/**
+ * The commands in `command`, each without its `cd`/wrapper prefixes. The split
+ * ignores quoting, so a quoted `| head` can read as a command of its own;
+ * READ_PASSTHROUGH_MAX_BYTES caps what such a miss delivers.
+ */
+function commandSegments(command: string): string[] {
+  return command.split(/\||;|&&|\n/).map((part) => normalizeCommand(part));
+}
 
 /**
  * True when any command in `command` limits its own output: `head`/`tail`, a
  * `sed -n` line range, or grep context and match limits (`-A/-B/-C N`, `-m N`).
  * That output is what Claude asked for, so a summary would drop requested lines
- * (#327). The split ignores quoting, so a quoted `| head` can count as a bound;
- * BOUNDED_READ_MAX_BYTES caps what such a miss delivers.
+ * (#327).
  */
 export function isBoundedRead(command: string): boolean {
-  return command.split(/\||;|&&|\n/).some((part) => {
-    const s = part.trim();
+  return commandSegments(command).some((s) => {
     if (/^(head|tail)(\s|$)/.test(s)) return true;
     if (/^sed\s+(?:-\S+\s+)*-n\s+['"]?\d+(?:,\s*(?:\d+|\$))?p['"]?(\s|$)/.test(s)) return true;
     return /^(grep|egrep|fgrep|rg|ag|git\s+grep)\s/.test(s) &&
       /\s(-[a-zA-Z]*[ABCm]\s*\d+|--(?:after-|before-)?context[=\s]\d+|--max-count[=\s]\d+)/.test(s);
   });
+}
+
+/**
+ * True when `command` reads content for Claude: a bounded read, `cat`, or
+ * `git diff`/`git show`. Their summaries keep stats or a head and tail, which
+ * drops what Claude asked for, so the hook delivers small ones whole and
+ * `balanced` retention keeps the body of large ones (#332).
+ */
+export function isContentRead(command: string): boolean {
+  return isBoundedRead(command) ||
+    commandSegments(command).some((s) => /^(cat|git\s+(diff|show))(\s|$)/.test(s));
 }
 
 /**

@@ -38,6 +38,16 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   now passes through untouched when the output is 8 KB or less. In a replay of
   80 real grep commands, the 11 outputs that were summarised were all such
   reads; all 11 now arrive whole.
+- **File and diff content you read is delivered whole or kept retrievable**
+  (#332). A `git diff` summary keeps only file stats, and a `cat` summary only
+  the head and tail of the file, while `balanced` retention stored neither
+  body: a 1 KB diff arrived as `1 file changed, +6 -0` and could not be
+  retrieved. `cat`, `git diff`/`show` and the bounded reads above now pass
+  through untouched at 8 KB or less. Above that they are summarised, and
+  `balanced` keeps their body so `recall__retrieve` returns the content. This
+  stores more on disk under `balanced`; `store.max_size_mb` and eviction still
+  apply. The bounded-read check also sees past `cd`, `timeout` and `sudo`
+  prefixes now.
 - **A summary is used only when it is smaller than the output, header
   included** (#319). The hook compared the summary alone with the original, then
   added the `[recall:…]` header (60–140 B). Since 1.15.2 delivers Bash

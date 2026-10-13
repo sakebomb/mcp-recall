@@ -32,7 +32,7 @@ PostToolUse hook  ── mcp__* (except mcp__recall__*) and Bash
  2. extract text, scan for secrets
       │                    ──hit──▶ pass through untouched
       │ clean
- 3. Bash read bounded by the command, ≤ 8 KB?
+ 3. Bash content read, ≤ 8 KB?
       │                    ──yes──▶ pass through untouched
       │ no
  4. open project DB        getProjectKey(cwd) → defaultDbPath(key)
@@ -57,7 +57,7 @@ flowchart TD
     S1{"1. denylisted?"} -->|yes| PASS["pass through untouched"]
     S1 -->|no| S2{"2. secret detected?"}
     S2 -->|yes| PASS
-    S2 -->|no| S3{"3. Bash read bounded by the command, ≤ 8 KB?"}
+    S2 -->|no| S3{"3. Bash content read (cat, git diff, head…), ≤ 8 KB?"}
     S3 -->|yes| PASS
     S3 -->|no| S4["4. open project DB"]
     S4 --> S5{"5. dedup hit? same output, tool and command family"}
@@ -74,8 +74,11 @@ Four of these steps are exits, not just filters: **1, 2, 3 and 7 pass the output
 through unchanged** (`return {}`) rather than storing it. Step 7 is the one that
 surprises people — output that does not compress usefully (a short, error-dense
 log) is left alone, so not every intercepted tool call produces a stored row.
-Step 3 delivers a read the command already bounded (`| head -40`, `sed -n a,bp`,
-`grep -A 30`) whole, since a summary would drop lines Claude asked for (#327).
+Step 3 delivers a content read whole: `cat`, `git diff`/`show`, or a read the
+command already bounded (`| head -40`, `sed -n a,bp`, `grep -A 30`). A summary
+would keep only stats or a head and tail, dropping what Claude asked for (#327,
+#332). Larger content reads are summarised, and `balanced` retention keeps their
+body so `recall__retrieve` can return it.
 Step 5 is the other early return: a dedup hit sends back the *existing* row's
 summary and stores nothing new. A hit needs byte-identical output from the same
 tool and, for Bash, the same command family. An identical *input* is not enough:

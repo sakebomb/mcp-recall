@@ -20,13 +20,24 @@ describe("shouldRetainFullBody", () => {
       expect(shouldRetainFullBody("balanced", "mcp__github__list_issues")).toBe(true);
     });
 
-    it("drops reproducible Bash (git, tests, ls, grep, cat, docker ps)", () => {
+    it("drops reproducible Bash (git log/status, tests, ls, grep, docker ps)", () => {
       for (const c of [
-        "git diff", "git log --oneline", "cargo test", "pytest -q",
-        "ls -la", "grep -rn foo src/", "cat README.md", "docker ps -a", "make build",
+        "git log --oneline", "git status", "cargo test", "pytest -q",
+        "ls -la", "grep -rn foo src/", "docker ps -a", "make build",
       ]) {
         expect(shouldRetainFullBody("balanced", "Bash", c)).toBe(false);
       }
+    });
+
+    it("keeps content reads, whose summary drops what Claude asked for (#332)", () => {
+      for (const c of [
+        "git diff", "git show HEAD~1", "cat README.md", "sed -n 900,1000p src/x.ts",
+        "grep -n foo -A 30 src/x.ts | head -40", 'echo "=== a"; cat a.md',
+        "cd /repo && git --no-pager diff main", "timeout 30 cat big.log", "sudo cat /etc/hosts",
+      ]) {
+        expect(shouldRetainFullBody("balanced", "Bash", c)).toBe(true);
+      }
+      expect(shouldRetainFullBody("minimal", "Bash", "cat README.md")).toBe(false);
     });
 
     it("keeps network-fetch Bash (curl / wget / gh api) — expensive, stays valid", () => {
@@ -48,24 +59,24 @@ describe("shouldRetainFullBody", () => {
     });
 
     it("classifies a newline-separated `cd` identically to `&&` (#260)", () => {
-      for (const cmd of ["curl https://example.com", "git diff", "ls -la", "gh api /x"]) {
+      for (const cmd of ["curl https://example.com", "git diff", "git log", "ls -la", "gh api /x"]) {
         expect(shouldRetainFullBody("balanced", "Bash", `cd /repo\n${cmd}`))
           .toBe(shouldRetainFullBody("balanced", "Bash", `cd /repo && ${cmd}`));
       }
     });
 
     it("unwraps leading `cd <dir> && ` (including multi-hop) before classifying", () => {
-      expect(shouldRetainFullBody("balanced", "Bash", "cd /repo && git diff")).toBe(false);
+      expect(shouldRetainFullBody("balanced", "Bash", "cd /repo && git log")).toBe(false);
       expect(shouldRetainFullBody("balanced", "Bash", "cd /repo && curl https://x")).toBe(true);
       // multi-hop cd chains must still reach the real command
       expect(shouldRetainFullBody("balanced", "Bash", "cd /a && cd /b && curl https://x")).toBe(true);
-      expect(shouldRetainFullBody("balanced", "Bash", "cd /a; cd /b; git diff")).toBe(false);
+      expect(shouldRetainFullBody("balanced", "Bash", "cd /a; cd /b; git log")).toBe(false);
     });
 
     it("unwraps leading wrappers before classifying (#302)", () => {
       expect(shouldRetainFullBody("balanced", "Bash", "timeout 30 curl https://x")).toBe(true);
       expect(shouldRetainFullBody("balanced", "Bash", "env CI=1 gh api /x")).toBe(true);
-      expect(shouldRetainFullBody("balanced", "Bash", "timeout 30 git diff")).toBe(false);
+      expect(shouldRetainFullBody("balanced", "Bash", "timeout 30 git log")).toBe(false);
     });
 
     it("keeps unknown intercepted tools (never silently drop the unrecognised)", () => {

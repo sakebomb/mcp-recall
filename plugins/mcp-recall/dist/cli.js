@@ -7566,16 +7566,21 @@ function commandFingerprint(command) {
   const second = c.slice(verb.length).trimStart().match(BARE_TOKEN);
   return second ? `${verb} ${second[1]}` : verb;
 }
-var BOUNDED_READ_MAX_BYTES = 8 * 1024;
+var READ_PASSTHROUGH_MAX_BYTES = 8 * 1024;
+function commandSegments(command) {
+  return command.split(/\||;|&&|\n/).map((part) => normalizeCommand(part));
+}
 function isBoundedRead(command) {
-  return command.split(/\||;|&&|\n/).some((part) => {
-    const s = part.trim();
+  return commandSegments(command).some((s) => {
     if (/^(head|tail)(\s|$)/.test(s))
       return true;
     if (/^sed\s+(?:-\S+\s+)*-n\s+['"]?\d+(?:,\s*(?:\d+|\$))?p['"]?(\s|$)/.test(s))
       return true;
     return /^(grep|egrep|fgrep|rg|ag|git\s+grep)\s/.test(s) && /\s(-[a-zA-Z]*[ABCm]\s*\d+|--(?:after-|before-)?context[=\s]\d+|--max-count[=\s]\d+)/.test(s);
   });
+}
+function isContentRead(command) {
+  return isBoundedRead(command) || commandSegments(command).some((s) => /^(cat|git\s+(diff|show))(\s|$)/.test(s));
 }
 function isCompoundCommand(command) {
   let quote = null;
@@ -8965,7 +8970,7 @@ function shouldRetainFullBody(level, toolName, command) {
   if (toolName.startsWith("mcp__"))
     return true;
   if (toolName === "Bash") {
-    return NETWORK_BASH_RE.test(unwrapCommand(command ?? ""));
+    return NETWORK_BASH_RE.test(unwrapCommand(command ?? "")) || isContentRead(command ?? "");
   }
   return true;
 }
@@ -9042,8 +9047,8 @@ function handlePostToolUse(raw) {
     return {};
   }
   const command = tool_input !== null && typeof tool_input === "object" && typeof tool_input.command === "string" ? tool_input.command : undefined;
-  if (tool_name === "Bash" && command && isBoundedRead(command) && Buffer.byteLength(fullContent, "utf8") <= BOUNDED_READ_MAX_BYTES) {
-    log.debug(`SKIP bounded-read \xB7 ${formatBytes(Buffer.byteLength(fullContent, "utf8"))}`);
+  if (tool_name === "Bash" && command && isContentRead(command) && Buffer.byteLength(fullContent, "utf8") <= READ_PASSTHROUGH_MAX_BYTES) {
+    log.debug(`SKIP content-read \xB7 ${formatBytes(Buffer.byteLength(fullContent, "utf8"))}`);
     return {};
   }
   const projectKey = getProjectKey(cwd);

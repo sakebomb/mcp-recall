@@ -456,7 +456,7 @@ describe("handlePostToolUse", () => {
   // -------------------------------------------------------------------------
 
   it("derives and stores a command_fp for a Bash call", () => {
-    const bigDiff = "diff --git a/f b/f\n" + "+added line\n".repeat(400);
+    const bigDiff = "diff --git a/f b/f\n" + "+added line\n".repeat(1000); // above the 8 KB content-read floor
     handlePostToolUse(
       makePostToolUseInput(
         "Bash",
@@ -1034,7 +1034,7 @@ describe("handlePostToolUse — secrets in Bash output (#313)", () => {
   for (const shape of ["object", "JSON string"] as const) {
     const respond = (stdout: string) => {
       const response = shape === "object" ? envelope(stdout) : JSON.stringify(envelope(stdout));
-      return handlePostToolUse(makePostToolUseInput("Bash", response, { tool_input: { command: "cat deploy.log" } }));
+      return handlePostToolUse(makePostToolUseInput("Bash", response, { tool_input: { command: "./scripts/deploy.sh" } }));
     };
 
     it(`stores the same output without a secret (control, ${shape})`, () => {
@@ -1099,6 +1099,50 @@ describe("handlePostToolUse — a read the command bounded itself (#327)", () =>
     expect(Buffer.byteLength(large)).toBeGreaterThan(8 * 1024);
     expect(run(large, "tail -n 400 build.log")).not.toEqual({});
     expect(storedRows()).toBe(1);
+  });
+});
+
+describe("handlePostToolUse — reads of file and diff content (#332)", () => {
+  // A diff summary keeps only stats and a file summary only head and tail, so
+  // the content Claude asked for must arrive whole or stay retrievable.
+  const envelope = (stdout: string) => JSON.stringify({ stdout, stderr: "", interrupted: false, isImage: false, noOutputExpected: false });
+  const rows = () => getDb(":memory:").prepare("SELECT full_retained, full_content FROM stored_outputs").all() as { full_retained: number; full_content: string }[];
+  const run = (stdout: string, command: string) =>
+    handlePostToolUse(makePostToolUseInput("Bash", envelope(stdout), { tool_input: { command } }));
+  const doc = (n: number) => Array.from({ length: n }, (_, i) => `Line ${i} of the document, with enough words to be worth reading.`).join("\n");
+  const diff = (n: number) => [
+    "diff --git a/src/x.sql b/src/x.sql", "index 1b17b9b..2e31c17 100644", "--- a/src/x.sql", "+++ b/src/x.sql", `@@ -45,6 +45,${n} @@`,
+    ...Array.from({ length: n }, (_, i) => `+-- added comment line ${i} explaining why the column marks retired items`),
+  ].join("\n");
+
+  beforeEach(() => {
+    process.env.RECALL_DB_PATH = ":memory:";
+  });
+
+  afterEach(() => {
+    closeDb();
+    resetConfig();
+    delete process.env.RECALL_DB_PATH;
+  });
+
+  it("delivers a small file or diff whole and stores nothing", () => {
+    expect(run(doc(54), "cat docs/notes.md")).toEqual({});
+    expect(run(diff(6), "git diff b03279c..b1548cd -- src/x.sql")).toEqual({});
+    expect(rows()).toHaveLength(0);
+  });
+
+  it("keeps the body of a large content read under balanced retention", () => {
+    const body = doc(400);
+    expect(run(body, "cat docs/notes.md")).not.toEqual({});
+    expect(run(diff(300), "git diff main")).not.toEqual({});
+    expect(rows().map((r) => r.full_retained)).toEqual([1, 1]);
+    expect(rows()[0]!.full_content).toBe(body);
+  });
+
+  it("still stores other reproducible Bash summary-only (control)", () => {
+    const log = Array.from({ length: 400 }, (_, i) => `abc${String(i).padStart(4, "0")} fix: change number ${i} to the parser`).join("\n");
+    expect(run(log, "git log --oneline")).not.toEqual({});
+    expect(rows().map((r) => r.full_retained)).toEqual([0]);
   });
 });
 

@@ -79,7 +79,7 @@ flowchart TD
     DENY -- yes --> P1([skip: passes through unchanged])
     DENY -- no --> SCRT
     SCRT -- yes --> P2([skip + warn: passes through unchanged])
-    SCRT -- no --> BND{"Bash read bounded by the<br/>command, ≤ 8 KB?"}
+    SCRT -- no --> BND{"Bash content read<br/>(cat, git diff, head…), ≤ 8 KB?"}
     BND -- yes --> P3([passes through whole])
     BND -- no --> DEDUP_N
 
@@ -109,7 +109,7 @@ flowchart TD
 **Two hooks, one MCP server.**
 
 - `SessionStart` hook — records each active day, prunes expired items, and injects a compact context snapshot before the first message
-- `PostToolUse` hook — intercepts MCP tool outputs and native Bash commands; delivers a Bash read you already bounded (`| head -40`, `sed -n 900,1000p`) whole when it is 8 KB or less; deduplicates identical output from the same tool and command (by content hash); compresses, stores, and returns summary
+- `PostToolUse` hook — intercepts MCP tool outputs and native Bash commands; delivers a Bash read of file or diff content (`cat`, `git diff`, `| head -40`, `sed -n 900,1000p`) whole when it is 8 KB or less; deduplicates identical output from the same tool and command (by content hash); compresses, stores, and returns summary
 - `recall` MCP server — exposes eleven tools for retrieval, search, memory, and management
 
 > **Scope**: Compression applies to MCP tools and the native `Bash` built-in. The remaining built-ins (Read, Grep, Glob) pass through unchanged. See [Scope](#scope) for details.
@@ -437,10 +437,12 @@ gc_reminder_mb = 2048
 
 # Which intercepted outputs keep a retrievable verbatim body vs. summary-only:
 #   full     = keep every intercepted body (most retrievable, most disk)
-#   balanced = keep MCP/web/API results + network Bash (curl/wget/gh api);
-#              store reproducible Bash (git, tests, ls, grep, cat, docker ps,
-#              build/lint) summary-only — an old copy is either trivially
-#              reproducible or misleadingly stale, so it isn't worth keeping
+#   balanced = keep MCP/web/API results, network Bash (curl/wget/gh api) and
+#              content reads (cat, git diff/show, head/tail, sed -n ranges,
+#              grep with context), whose summaries drop the content; store
+#              other reproducible Bash (git log/status, tests, ls, grep,
+#              docker ps, build/lint) summary-only — an old copy is either
+#              trivially reproducible or misleadingly stale
 #   minimal  = drop every intercepted body (summary-only for all)
 # Notes stored via recall__note always keep their body, regardless of this.
 # Only affects future writes; existing bodies are untouched. When a body was

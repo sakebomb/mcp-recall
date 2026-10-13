@@ -18,8 +18,9 @@ export const RecallConfigSchema = z.object({
     eviction_half_life_days: z.number().positive().finite(),
     gc_reminder_mb: z.number().nonnegative(),
     // Which intercepted outputs keep a retrievable full body vs. summary-only.
-    // full = keep every body; balanced = keep MCP/web/API + network Bash, drop
-    // reproducible Bash (git/tests/ls/grep/cat…); minimal = drop all intercepted
+    // full = keep every body; balanced = keep MCP/web/API, network Bash and
+    // content reads (cat, git diff/show, head/tail, sed -n), drop other
+    // reproducible Bash (git log/tests/ls/grep…); minimal = drop all intercepted
     // bodies. Notes always keep their body regardless. See #-retention.
     retention: z.enum(["full", "balanced", "minimal"]),
   }),
