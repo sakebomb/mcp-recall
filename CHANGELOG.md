@@ -6,6 +6,33 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+## [1.16.1] — 2026-10-19
+
+### Fixed
+
+- **Bulk pins no longer flood `recall__context` or the session-start
+  snapshot** (#337, #269). The pinned section listed every pinned item and
+  read each one's full content. A store with 11,084 pins from two note-sync
+  backends returned all of them into Claude's context, and the snapshot
+  survived only by being cut, which dropped the user's own pins. The section
+  now shows at most 10 pins, at most 3 from any one session, dealt so every
+  session gets a slot before any gets a second. A closing line counts what
+  was left out per session (`+10,673 more from memoree-sync`) and names the
+  tools to browse or clear it. On that store, context went to 7 pins in
+  1,347 characters.
+- **`recall__session_summary` is bounded the same way** (#338, #336). A day's
+  pinned items and notes were listed in full: 4,522 rows on one day, shown
+  twice. Both lists now use the same sampling as `recall__context`. A summary
+  for a single `session_id` gives that session all 10 slots.
+- **A pinned note is listed once in `recall__session_summary`** (#343), under
+  pinned items rather than also under notes, as `recall__context` already did.
+- **A `sed -n` read with a range the shell computes is delivered whole**
+  (#344). `sed -n "$((n-40)),$((n+40))p" f`, `sed -n "${a},${b}p" f` and
+  `sed -n '120,+40p' f` are reads Claude bounded itself, but they were
+  summarised, so getting the requested lines back took a retrieve. They now
+  pass through at 8 KB or less, like a literal `sed -n 900,1000p`. Reads
+  wrapped in `ssh` or `pct exec` are not yet recognised (#339).
+
 ## [1.16.0] — 2026-10-13
 
 ### Changed
@@ -777,7 +804,8 @@ Ten `recall__*` tools available in every Claude session:
 
 ---
 
-[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.16.0...HEAD
+[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.16.1...HEAD
+[1.16.1]: https://github.com/sakebomb/mcp-recall/compare/v1.16.0...v1.16.1
 [1.16.0]: https://github.com/sakebomb/mcp-recall/compare/v1.15.2...v1.16.0
 [1.15.2]: https://github.com/sakebomb/mcp-recall/compare/v1.15.1...v1.15.2
 [1.15.1]: https://github.com/sakebomb/mcp-recall/compare/v1.15.0...v1.15.1
