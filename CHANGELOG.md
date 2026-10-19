@@ -20,6 +20,22 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   Items stored before this release have no recorded handler. They are
   counted, never attributed to one.
 
+### Changed
+
+- **Remote commands reach the handler for the command they run** (#339).
+  `ssh host 'git status'`, `pct exec 108 -- journalctl`, `docker exec ctr ls`
+  and `bash -c '…'` used to go to the shell fallback, because routing saw only
+  the wrapper. Wrappers now unwrap like `cd` and `timeout`, including nested
+  ones (`ssh h pct exec 108 -- …`, `ssh h 'cd /x && git diff'`). A remote
+  content read (`ssh h 'cat f'`) passes through whole like a local one. Shapes
+  that are not unambiguous (an unknown option, `ssh -N`, `'\''` quoting) keep
+  the old routing. The command fingerprint keeps the wrapper (`ssh git
+  status`), never the host or id. A routed summary keeps more detail and can
+  be larger: a remote `git diff` keeps each file's changes instead of 25
+  lines, 68% smaller in the bench where the fallback was 91%.
+- **A quoted `|` no longer reads as a command of its own** when deciding
+  whether a command is a content read (`echo "x | head -5"`).
+
 ## [1.16.1] — 2026-10-19
 
 ### Fixed
