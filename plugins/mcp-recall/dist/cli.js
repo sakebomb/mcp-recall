@@ -6479,6 +6479,54 @@ var jsonHandler = (_toolName, output) => {
   return { summary, originalSize };
 };
 
+// src/handlers/collapse.ts
+var TIMESTAMP_RES = [
+  /\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?/g,
+  /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [ \d]\d \d{2}:\d{2}:\d{2}(?:\.\d+)?/g,
+  /\b\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\b/g
+];
+var VOLATILE_RES = [
+  ...TIMESTAMP_RES.map((re) => [re, "<ts>"]),
+  [/\[\d+\]/g, "[<pid>]"],
+  [/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "<uuid>"],
+  [/\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{8,}\b/g, "<hex>"],
+  [/\b\d+(?:\.\d+)?(?:ms|\u00B5s|us|ns|s)\b/g, "<dur>"]
+];
+function repeatKey(line) {
+  return VOLATILE_RES.reduce((s, [re, mask]) => s.replace(re, mask), line);
+}
+function lastTimestamp(line) {
+  for (const re of TIMESTAMP_RES) {
+    const all = line.match(re);
+    if (all)
+      return all[all.length - 1];
+  }
+  return null;
+}
+function collapseRepeats(lines) {
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const first = lines[i];
+    let end = i + 1;
+    if (first.trim() !== "") {
+      const key = repeatKey(first);
+      while (end < lines.length && repeatKey(lines[end]) === key)
+        end++;
+    }
+    out.push({ text: end - i > 1 ? `${first}  ${runNote(lines.slice(i, end))}` : first, count: end - i });
+    i = end;
+  }
+  return out;
+}
+function runNote(run) {
+  const last = run[run.length - 1];
+  if (run.every((l) => l === run[0]))
+    return `(\xD7${run.length})`;
+  const ts = lastTimestamp(last);
+  return ts && ts !== lastTimestamp(run[0]) ? `(\xD7${run.length}, until ${ts})` : `(\xD7${run.length}, varying ids)`;
+}
+
 // src/handlers/shell.ts
 var HEAD_STDOUT = 25;
 var HEAD_STDERR = 20;
@@ -6515,11 +6563,12 @@ function formatLines(text, max) {
   const lines = trimTrailingEmpty(text.split(`
 `));
   const total = lines.length;
-  const truncated = total > max;
-  const head = lines.slice(0, max).join(`
+  const shown = collapseRepeats(lines).slice(0, max);
+  const hidden = total - shown.reduce((n, l) => n + l.count, 0);
+  const head = shown.map((l) => l.text).join(`
 `);
-  const overflow = truncated ? `
-\u2026 (+${total - max} more lines)` : "";
+  const overflow = hidden > 0 ? `
+\u2026 (+${hidden} more lines)` : "";
   return {
     header: `${total} line${total === 1 ? "" : "s"}`,
     body: `${head}${overflow}`
@@ -7390,9 +7439,11 @@ var genericHandler = (_toolName, output) => {
   if (raw.length <= MAX_CHARS) {
     return { summary: raw, originalSize };
   }
-  const lines = raw.split(`
+  const lines = collapseRepeats(raw.split(`
+`)).map((l) => l.text);
+  const text = lines.join(`
 `);
-  const summary = lines.length >= LINE_MODE_MIN_LINES ? summarizeLines(lines) : summarizeBlock(raw);
+  const summary = lines.length >= LINE_MODE_MIN_LINES ? summarizeLines(lines) : text.length <= MAX_CHARS ? text : summarizeBlock(text);
   return { summary, originalSize };
 };
 

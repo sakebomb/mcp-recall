@@ -12,6 +12,7 @@
  */
 import type { CompressionResult, Handler } from "./types";
 import { extractText } from "./types";
+import { collapseRepeats } from "./collapse";
 
 const MAX_CHARS = 500; // return unchanged at or below this size
 
@@ -71,9 +72,14 @@ export const genericHandler: Handler = (
     return { summary: raw, originalSize };
   }
 
-  const lines = raw.split("\n");
+  // Repeats collapse first (#340), so the head, tail and surfaced error lines
+  // are distinct lines; the elided count is then in collapsed lines.
+  const lines = collapseRepeats(raw.split("\n")).map((l) => l.text);
+  const text = lines.join("\n");
   const summary =
-    lines.length >= LINE_MODE_MIN_LINES ? summarizeLines(lines) : summarizeBlock(raw);
+    lines.length >= LINE_MODE_MIN_LINES ? summarizeLines(lines)
+    : text.length <= MAX_CHARS ? text
+    : summarizeBlock(text);
 
   // Note: for a small log whose few middle lines all match MATCH_RE, the
   // line-mode summary can be no smaller than the input (nothing is truly

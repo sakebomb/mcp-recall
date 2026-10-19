@@ -8,6 +8,7 @@
 import type { CompressionResult, Handler } from "./types";
 import { extractText } from "./types";
 import { jsonHandler } from "./json";
+import { collapseRepeats } from "./collapse";
 
 export const HEAD_STDOUT = 25;
 const HEAD_STDERR = 20;
@@ -54,15 +55,20 @@ function trimTrailingEmpty(lines: string[]): string[] {
   return lines.slice(0, end);
 }
 
+/**
+ * The first `max` lines after collapsing repeats (#340), so the budget goes to
+ * distinct lines. The header and the overflow count input lines, not summary lines.
+ */
 function formatLines(
   text: string,
   max: number
 ): { header: string; body: string } {
   const lines = trimTrailingEmpty(text.split("\n"));
   const total = lines.length;
-  const truncated = total > max;
-  const head = lines.slice(0, max).join("\n");
-  const overflow = truncated ? `\n… (+${total - max} more lines)` : "";
+  const shown = collapseRepeats(lines).slice(0, max);
+  const hidden = total - shown.reduce((n, l) => n + l.count, 0);
+  const head = shown.map((l) => l.text).join("\n");
+  const overflow = hidden > 0 ? `\n… (+${hidden} more lines)` : "";
   return {
     header: `${total} line${total === 1 ? "" : "s"}`,
     body: `${head}${overflow}`,
