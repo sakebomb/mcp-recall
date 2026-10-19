@@ -6493,8 +6493,13 @@ var VOLATILE_RES = [
   [/\b\d+(?:\.\d+)?(?:ms|\u00B5s|us|ns|s)\b/g, "<dur>"]
 ];
 var MAX_WORDS_BEFORE_TIMESTAMP = 2;
+var LOG_PREFIX_CHARS = 64;
+var TIMESTAMP_FIRST_RES = TIMESTAMP_RES.map((re) => new RegExp(re.source));
 function isLogLine(line) {
-  const starts = TIMESTAMP_RES.map((re) => line.search(new RegExp(re.source))).filter((i) => i >= 0);
+  const head = line.slice(0, LOG_PREFIX_CHARS);
+  if (!/\d\d:\d\d:\d\d/.test(head))
+    return false;
+  const starts = TIMESTAMP_FIRST_RES.map((re) => head.search(re)).filter((i) => i >= 0);
   if (starts.length === 0)
     return false;
   const prefix = line.slice(0, Math.min(...starts)).trim();
@@ -6515,15 +6520,15 @@ function lastTimestamp(line) {
   }
   return null;
 }
-function collapseRepeats(lines) {
+function collapseRepeats(lines, limit = Infinity) {
   const out = [];
   let i = 0;
-  while (i < lines.length) {
+  while (i < lines.length && out.length < limit) {
     const first = lines[i];
     let end = i + 1;
     if (first.trim() !== "") {
       const key = repeatKey(first);
-      while (end < lines.length && repeatKey(lines[end]) === key)
+      while (end < lines.length && (lines[end] === first || repeatKey(lines[end]) === key))
         end++;
     }
     out.push({ text: end - i > 1 ? `${first}  ${runNote(lines.slice(i, end))}` : first, count: end - i });
@@ -6575,7 +6580,7 @@ function formatLines(text, max) {
   const lines = trimTrailingEmpty(text.split(`
 `));
   const total = lines.length;
-  const shown = collapseRepeats(lines).slice(0, max);
+  const shown = collapseRepeats(lines, max);
   const hidden = total - shown.reduce((n, l) => n + l.count, 0);
   const head = shown.map((l) => l.text).join(`
 `);

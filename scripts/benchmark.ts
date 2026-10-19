@@ -79,6 +79,18 @@ const FIXTURES: Fixture[] = [
     exit_code: 0,
   },
   {
+    // Shell fallback. Repeats collapse before the 25-line cap since #340, so the
+    // last two messages are shown at all; before, the head held only retries.
+    label: "`journalctl -n 500` (retry loop, 3 messages)",
+    command: "journalctl -u app -n 500 --no-pager",
+    stdout: [
+      ...Array.from({ length: 300 }, (_, i) => `Oct 19 12:${String(10 + Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")} host app[812]: connection reset by peer, retrying in 1s`),
+      ...Array.from({ length: 199 }, (_, i) => `Oct 19 12:15:${String(i % 60).padStart(2, "0")} host app[812]: INFO queue depth 0`),
+      "Oct 19 12:16:00 host app[812]: FATAL: disk full on /var/lib/app",
+    ].join("\n"),
+    exit_code: 0,
+  },
+  {
     label: "`find` (400 paths)",
     command: "find . -name '*.ts'",
     stdout: rep("./src/very/deeply/nested/path/segment/file%i.ts", 400),

@@ -32,13 +32,20 @@ const VOLATILE_RES: Array<[RegExp, string]> = [
 // A log line puts its timestamp first, after at most a level, host or count
 // (`ERROR 2026-…`, `host 2026-…`, `1 time="…"`).
 const MAX_WORDS_BEFORE_TIMESTAMP = 2;
+// Where a log line's timestamp must start; also bounds the search per line.
+const LOG_PREFIX_CHARS = 64;
+// Non-global copies for `search`, compiled once: every line passes through here.
+const TIMESTAMP_FIRST_RES = TIMESTAMP_RES.map((re) => new RegExp(re.source));
 
 /**
  * True when `line` opens with a timestamp, as a log line does. A `|` before it
  * marks a table row (`2026-09-26 | 11:00:00 | closed`), whose times are data.
  */
 function isLogLine(line: string): boolean {
-  const starts = TIMESTAMP_RES.map((re) => line.search(new RegExp(re.source))).filter((i) => i >= 0);
+  const head = line.slice(0, LOG_PREFIX_CHARS);
+  // Every timestamp form holds an HH:MM:SS: one cheap test rules most lines out.
+  if (!/\d\d:\d\d:\d\d/.test(head)) return false;
+  const starts = TIMESTAMP_FIRST_RES.map((re) => head.search(re)).filter((i) => i >= 0);
   if (starts.length === 0) return false;
   const prefix = line.slice(0, Math.min(...starts)).trim();
   if (prefix.includes("|")) return false;
@@ -73,17 +80,18 @@ export interface CollapsedLine {
  * `lines` with each run of 2+ repeats replaced by its first line and a count:
  * `(×N)` when the run is identical, `(×N, until <ts>)` when only volatile
  * tokens differ and the last line has a timestamp, `(×N, varying ids)`
- * otherwise. Blank lines are never collapsed.
+ * otherwise. Blank lines are never collapsed. Stops after `limit` summary lines,
+ * for a caller that keeps only the head.
  */
-export function collapseRepeats(lines: string[]): CollapsedLine[] {
+export function collapseRepeats(lines: string[], limit = Infinity): CollapsedLine[] {
   const out: CollapsedLine[] = [];
   let i = 0;
-  while (i < lines.length) {
+  while (i < lines.length && out.length < limit) {
     const first = lines[i]!;
     let end = i + 1;
     if (first.trim() !== "") {
       const key = repeatKey(first);
-      while (end < lines.length && repeatKey(lines[end]!) === key) end++;
+      while (end < lines.length && (lines[end] === first || repeatKey(lines[end]!) === key)) end++;
     }
     out.push({ text: end - i > 1 ? `${first}  ${runNote(lines.slice(i, end))}` : first, count: end - i });
     i = end;

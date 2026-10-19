@@ -65,7 +65,7 @@ function formatLines(
 ): { header: string; body: string } {
   const lines = trimTrailingEmpty(text.split("\n"));
   const total = lines.length;
-  const shown = collapseRepeats(lines).slice(0, max);
+  const shown = collapseRepeats(lines, max);
   const hidden = total - shown.reduce((n, l) => n + l.count, 0);
   const head = shown.map((l) => l.text).join("\n");
   const overflow = hidden > 0 ? `\n… (+${hidden} more lines)` : "";

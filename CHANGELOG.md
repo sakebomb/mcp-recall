@@ -33,6 +33,14 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   status`), never the host or id. A routed summary keeps more detail and can
   be larger: a remote `git diff` keeps each file's changes instead of 25
   lines, 68% smaller in the bench where the fallback was 91%.
+- **The shell and generic fallbacks collapse repeated lines before they
+  truncate** (#340). A retry loop's 300 copies become one line with
+  `(×300, until <last timestamp>)`, so the 25-line budget reaches the lines
+  that differ: in the new `journalctl` bench fixture the summary now shows the
+  final `FATAL` line, which used to be cut. Only a log line, one that opens
+  with a timestamp, is compared with its timestamps, PIDs, UUIDs, hex ids and
+  durations masked; any other line must repeat exactly, so a table of time
+  slots or a list of commits never merges. Interleaved repeats keep their order.
 
 ## [1.16.1] — 2026-10-19
 
