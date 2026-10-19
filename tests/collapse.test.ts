@@ -11,12 +11,12 @@ describe("repeatKey", () => {
       "<ts> jupiter sshd[<pid>]: retry in <dur>"
     );
     expect(repeatKey("2026-10-19T12:00:01.123Z job 3f9a2c1e7b failed")).toBe("<ts> job <hex> failed");
-    expect(repeatKey("req 123e4567-e89b-12d3-a456-426614174000 done")).toBe("req <uuid> done");
+    expect(repeatKey("ERROR 12:00:01 req 123e4567-e89b-12d3-a456-426614174000 done")).toBe("ERROR <ts> req <uuid> done");
   });
 
   // The summary can be the only copy, so anything that is not plainly volatile
-  // must keep two lines apart.
-  it("keeps lines apart that differ in a path, status code, counter or word", () => {
+  // must keep two log lines apart. Each pair is a log line, so masking runs.
+  it("keeps log lines apart that differ in a path, status code, counter or word", () => {
     const apart: [string, string][] = [
       ["GET /api/a 200", "GET /api/b 200"],
       ["GET /api/a 200", "GET /api/a 500"],
@@ -25,7 +25,17 @@ describe("repeatKey", () => {
       ["key deadbeef", "key cafebabe"],
       ["exit 1", "exit 2"],
     ];
-    for (const [a, b] of apart) expect(repeatKey(a)).not.toBe(repeatKey(b));
+    for (const [a, b] of apart) {
+      expect(repeatKey(`12:00:01 ${a}`)).not.toBe(repeatKey(`12:00:02 ${b}`));
+    }
+  });
+
+  // Found in a transcript replay: a timestamp or id past the line's start is
+  // data, and masking it would hide which slots or commits exist.
+  it("does not mask a line that does not open with a timestamp", () => {
+    const slot = (t: string) => `  "s": "2026-09-26 | 2026-09-26T${t}:00.000Z | status=open | cap=10 booked=0"`;
+    expect(repeatKey(slot("14:00"))).not.toBe(repeatKey(slot("15:30")));
+    expect(repeatKey("3f9a2c1e7b wip")).not.toBe(repeatKey("8d0e4b6a2f wip"));
   });
 });
 
@@ -41,7 +51,7 @@ describe("collapseRepeats", () => {
   });
 
   it("says ids vary when a run has no timestamp to show", () => {
-    expect(texts(["worker[1] up", "worker[2] up"])).toEqual(["worker[1] up  (×2, varying ids)"]);
+    expect(texts(["12:00:01 worker[1] up", "12:00:01 worker[2] up"])).toEqual(["12:00:01 worker[1] up  (×2, varying ids)"]);
   });
 
   it("leaves interleaved repeats and blank lines in order", () => {

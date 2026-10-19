@@ -2,10 +2,11 @@
  * Collapses runs of repeated lines (#340), so a fallback summary spends its line
  * budget on distinct lines instead of a retry loop's hundredth copy.
  *
- * Two lines repeat when they are equal once volatile tokens are masked:
- * timestamps, bracketed PIDs (`sshd[812]`), UUIDs, mixed hex ids of 8+ chars,
- * and durations (`12ms`, `1.5s`). Nothing else is masked, so lines that differ
- * in a path, a status code or a bare counter (`retry 1`, `retry 2`) stay apart.
+ * Two lines repeat when they are equal, or when both are log lines (see
+ * {@link repeatKey}) equal once volatile tokens are masked: timestamps,
+ * bracketed PIDs (`sshd[812]`), UUIDs, mixed hex ids of 8+ chars, and durations
+ * (`12ms`, `1.5s`). Nothing else is masked, so lines that differ in a path, a
+ * status code or a bare counter (`retry 1`, `retry 2`) stay apart.
  * Only consecutive lines collapse: interleaved repeats keep their order.
  *
  * Under `balanced` retention a fallback row may keep no body, so the summary is
@@ -28,8 +29,25 @@ const VOLATILE_RES: Array<[RegExp, string]> = [
   [/\b\d+(?:\.\d+)?(?:ms|µs|us|ns|s)\b/g, "<dur>"],
 ];
 
-/** `line` with its volatile tokens masked: the key two repeats share. */
+// A log line puts its timestamp first, after at most a level, host or count
+// (`ERROR 2026-…`, `host 2026-…`, `1 time="…"`).
+const MAX_WORDS_BEFORE_TIMESTAMP = 2;
+
+/** True when `line` opens with a timestamp, as a log line does. */
+function isLogLine(line: string): boolean {
+  const starts = TIMESTAMP_RES.map((re) => line.search(new RegExp(re.source))).filter((i) => i >= 0);
+  if (starts.length === 0) return false;
+  const prefix = line.slice(0, Math.min(...starts)).trim();
+  return prefix === "" || prefix.split(/\s+/).length <= MAX_WORDS_BEFORE_TIMESTAMP;
+}
+
+/**
+ * `line` with its volatile tokens masked: the key two repeats share. Only a log
+ * line is masked; in any other line a timestamp or id may be the data itself
+ * (a list of booking slots, of commits), so it must match exactly.
+ */
 export function repeatKey(line: string): string {
+  if (!isLogLine(line)) return line;
   return VOLATILE_RES.reduce((s, [re, mask]) => s.replace(re, mask), line);
 }
 

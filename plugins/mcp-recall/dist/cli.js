@@ -6492,7 +6492,17 @@ var VOLATILE_RES = [
   [/\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{8,}\b/g, "<hex>"],
   [/\b\d+(?:\.\d+)?(?:ms|\u00B5s|us|ns|s)\b/g, "<dur>"]
 ];
+var MAX_WORDS_BEFORE_TIMESTAMP = 2;
+function isLogLine(line) {
+  const starts = TIMESTAMP_RES.map((re) => line.search(new RegExp(re.source))).filter((i) => i >= 0);
+  if (starts.length === 0)
+    return false;
+  const prefix = line.slice(0, Math.min(...starts)).trim();
+  return prefix === "" || prefix.split(/\s+/).length <= MAX_WORDS_BEFORE_TIMESTAMP;
+}
 function repeatKey(line) {
+  if (!isLogLine(line))
+    return line;
   return VOLATILE_RES.reduce((s, [re, mask]) => s.replace(re, mask), line);
 }
 function lastTimestamp(line) {
