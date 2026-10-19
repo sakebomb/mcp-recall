@@ -16,6 +16,7 @@ recall__context(days?, limit?)
 
 - Returns pinned items, unpinned notes, recently accessed items, hot items from the last session, and a one-line last-session headline
 - Each item appears in exactly one section — nothing is duplicated across sections
+- Pinned items are capped at 10, at most 3 from any one session, so a backend that pins thousands of notes cannot crowd out the rest. Past the cap the heading reads `Pinned (10 of 4,522):` and a closing line counts what was left out per session (`+4,519 more from memoree-sync`); browse those with `recall__list_stored`, or clear a session with `recall__forget`
 - `days` — lookback window for recently accessed items (default: 7)
 - `limit` — max recently accessed items to show (default: 5)
 
@@ -177,6 +178,7 @@ recall__session_summary(session_id?, date?)
 - Defaults to today (UTC). Pass `date` (YYYY-MM-DD) for a specific day, or `session_id` for a specific Claude session.
 - Session IDs appear in `recall__context` output and in the `recall__list_stored` table — look for the `session` column.
 - Shows: items stored, compression savings, tool breakdown, most-accessed items, pinned items, notes.
+- Pinned items and notes are each capped at 10, with the same per-session sharing and overflow line as `recall__context` (`Pinned: 3 of 4,522`). A `session_id` summary gives its one session all 10 slots.
 
 Example output:
 
