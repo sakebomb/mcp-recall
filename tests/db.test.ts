@@ -1309,7 +1309,7 @@ describe("db", () => {
     });
   });
 
-  describe("getContext pinned section", () => {
+  describe("session-fair sampling (getContext pinned, getSessionSummary)", () => {
     // Pins `count` rows into one session, created `ageSeconds` ago and spaced 1s
     // apart, the shape a bulk note backend leaves behind (#269).
     function pinMany(sessionId: string, count: number, ageSeconds: number) {
@@ -1340,13 +1340,13 @@ describe("db", () => {
 
       const data = getContext(db, PROJECT_KEY);
 
-      expect(data.pinned.map((p) => p.id)).toContain("recall_mine_0");
-      expect(data.pinned.length).toBeLessThanOrEqual(10);
-      for (const count of shownPerSession(data.pinned).values()) {
+      expect(data.pinned.items.map((p) => p.id)).toContain("recall_mine_0");
+      expect(data.pinned.items.length).toBeLessThanOrEqual(10);
+      for (const count of shownPerSession(data.pinned.items).values()) {
         expect(count).toBeLessThanOrEqual(3);
       }
-      expect(data.pinned_total).toBe(521);
-      expect(data.pinned_overflow).toEqual([
+      expect(data.pinned.total).toBe(521);
+      expect(data.pinned.overflow).toEqual([
         { session_id: "bulk-sync", count: 497 },
         { session_id: "other-sync", count: 17 },
       ]);
@@ -1359,8 +1359,8 @@ describe("db", () => {
 
       const data = getContext(db, PROJECT_KEY);
 
-      expect(data.pinned.length).toBe(10);
-      for (const count of shownPerSession(data.pinned).values()) {
+      expect(data.pinned.items.length).toBe(10);
+      for (const count of shownPerSession(data.pinned.items).values()) {
         expect(count).toBeGreaterThanOrEqual(2);
       }
     });
@@ -1370,9 +1370,9 @@ describe("db", () => {
 
       const data = getContext(db, PROJECT_KEY);
 
-      expect(data.pinned.length).toBe(2);
-      expect(data.pinned_total).toBe(2);
-      expect(data.pinned_overflow).toEqual([]);
+      expect(data.pinned.items.length).toBe(2);
+      expect(data.pinned.total).toBe(2);
+      expect(data.pinned.overflow).toEqual([]);
     });
 
     it("does not load full_content for pinned rows", () => {
@@ -1380,7 +1380,36 @@ describe("db", () => {
 
       const data = getContext(db, PROJECT_KEY);
 
-      expect(data.pinned[0]).not.toHaveProperty("full_content");
+      expect(data.pinned.items[0]).not.toHaveProperty("full_content");
+    });
+
+    // getSessionSummary samples the same way (#336). A fixed past day keeps
+    // every fixture row inside the summarised date.
+    const DAY = "2026-06-05";
+    const ageInDay = () =>
+      Math.floor(Date.now() / 1000) - (Math.floor(new Date(`${DAY}T00:00:00Z`).getTime() / 1000) + 3600);
+
+    it("session summary bounds a day's pinned and notes so a bulk session cannot fill them", () => {
+      pinMany("mine", 1, ageInDay());
+      pinMany("bulk-sync", 2000, ageInDay() - 60);
+
+      const summary = getSessionSummary(db, PROJECT_KEY, { date: DAY });
+
+      for (const sample of [summary.pinned, summary.notes]) {
+        expect(sample.items.map((i) => i.id)).toContain("recall_mine_0");
+        expect(sample.items.length).toBe(4);
+        expect(sample.total).toBe(2001);
+        expect(sample.overflow).toEqual([{ session_id: "bulk-sync", count: 1997 }]);
+      }
+    });
+
+    it("session summary for one session_id gives that session every slot", () => {
+      pinMany("bulk-sync", 500, ageInDay());
+
+      const summary = getSessionSummary(db, PROJECT_KEY, { session_id: "bulk-sync" });
+
+      expect(summary.pinned.items.length).toBe(10);
+      expect(summary.pinned.overflow).toEqual([{ session_id: "bulk-sync", count: 490 }]);
     });
   });
 });

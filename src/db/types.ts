@@ -98,19 +98,26 @@ export interface ContextOptions {
   limit?: number;  // max items in recently accessed section (default 5)
 }
 
-/** A pinned row as {@link getContext} returns it: display columns only, no `full_content`. */
-export type ContextPinnedItem = Pick<
+/** A sampled row: display columns only, no `full_content`. */
+export type SampledItem = Pick<
   StoredOutput,
   "id" | "session_id" | "tool_name" | "summary" | "created_at" | "last_accessed"
 >;
 
+/**
+ * A bounded, session-fair sample of a row set that a bulk writer can grow to
+ * thousands (#269, #336). `total` is the real count; `overflow` counts the
+ * rows left out of `items` per session, largest first.
+ */
+export interface SessionSample {
+  items: SampledItem[];
+  total: number;
+  overflow: Array<{ session_id: string; count: number }>;
+}
+
 /** Data returned by {@link getContext}: five isolated sections with no overlap. */
 export interface ContextData {
-  /** A bounded sample of the pinned items; `pinned_total` is the real count. */
-  pinned: ContextPinnedItem[];
-  pinned_total: number;
-  /** Pinned items left out of `pinned`, counted per session, largest first. */
-  pinned_overflow: Array<{ session_id: string; count: number }>;
+  pinned: SessionSample;
   notes: StoredOutput[];
   recent: StoredOutput[];
   hot: StoredOutput[];
@@ -140,8 +147,8 @@ export interface SessionSummaryData {
   accessed_count: number;
   total_accesses: number;
   top_accessed: Array<{ id: string; tool_name: string; summary: string; access_count: number }>;
-  pinned: Array<{ id: string; tool_name: string; summary: string }>;
-  notes: Array<{ id: string; summary: string }>;
+  pinned: SessionSample;
+  notes: SessionSample;
 }
 
 /** Per-tool row returned by {@link getToolBreakdown}. */

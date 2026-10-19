@@ -28,6 +28,7 @@ import {
   storeOutput,
   type StoredOutput,
   type ForgetOptions,
+  type SessionSample,
 } from "./db/index";
 import { loadConfig } from "./config";
 import { findSecrets } from "./secrets";
@@ -462,21 +463,28 @@ export interface ContextArgs {
   limit?: number;
 }
 
-const CONTEXT_OVERFLOW_SESSIONS = 3; // sessions named in the pinned overflow line
+const OVERFLOW_SESSIONS = 3; // sessions named in a sample's overflow line
 
-/** One line naming where the pins left out of recall__context live, largest session first. */
-function formatPinnedOverflow(overflow: Array<{ session_id: string; count: number }>): string {
+/** A sample's count for a section heading: "7", or "10 of 4,522" when rows were left out. */
+function formatSampleCount(sample: SessionSample): string {
+  return sample.overflow.length > 0
+    ? `${sample.items.length} of ${sample.total.toLocaleString("en-US")}`
+    : `${sample.items.length}`;
+}
+
+/** One line naming where a sample's left-out rows live, largest session first. */
+function formatSampleOverflow(overflow: SessionSample["overflow"]): string {
   const named = overflow
-    .slice(0, CONTEXT_OVERFLOW_SESSIONS)
+    .slice(0, OVERFLOW_SESSIONS)
     .map((o) => `+${o.count.toLocaleString("en-US")} more from ${o.session_id}`);
-  const rest = overflow.slice(CONTEXT_OVERFLOW_SESSIONS);
+  const rest = overflow.slice(OVERFLOW_SESSIONS);
   if (rest.length > 0) {
     const restCount = rest.reduce((sum, o) => sum + o.count, 0);
     named.push(`+${restCount.toLocaleString("en-US")} more from ${rest.length} other sessions`);
   }
   return (
     `  ${named.join(" · ")}\n` +
-    `    (recall__list_stored to browse; recall__forget session_id + force: true clears a session)`
+    `    (recall__list_stored to browse; recall__forget session_id clears a session, force: true for pinned)`
   );
 }
 
@@ -490,7 +498,7 @@ export function toolContext(
   const today = new Date(now).toISOString().slice(0, 10);
 
   const isEmpty =
-    data.pinned.length === 0 &&
+    data.pinned.items.length === 0 &&
     data.notes.length === 0 &&
     data.recent.length === 0 &&
     data.hot.length === 0 &&
@@ -506,18 +514,15 @@ export function toolContext(
     `Generated ${formatRelativeTime(Date.now() - now)}`,
   ];
 
-  if (data.pinned.length > 0) {
-    const count = data.pinned_overflow.length > 0
-      ? `${data.pinned.length} of ${data.pinned_total.toLocaleString("en-US")}`
-      : `${data.pinned.length}`;
-    lines.push("", `Pinned (${count}):`);
-    for (const item of data.pinned) {
+  if (data.pinned.items.length > 0) {
+    lines.push("", `Pinned (${formatSampleCount(data.pinned)}):`);
+    for (const item of data.pinned.items) {
       const excerpt = item.summary.slice(0, CONTEXT_EXCERPT_LEN).replace(/\n/g, " ");
       const ellipsis = item.summary.length > CONTEXT_EXCERPT_LEN ? "…" : "";
       lines.push(`  📌 ${item.id}  ${item.tool_name.padEnd(LIST_TOOL_COL_WIDTH)}  ${formatDate(item.created_at)}`);
       lines.push(`    ${excerpt}${ellipsis}`);
     }
-    if (data.pinned_overflow.length > 0) lines.push(formatPinnedOverflow(data.pinned_overflow));
+    if (data.pinned.overflow.length > 0) lines.push(formatSampleOverflow(data.pinned.overflow));
   }
 
   if (data.notes.length > 0) {
@@ -611,23 +616,25 @@ export function toolSessionSummary(
     }
   }
 
-  if (data.pinned.length > 0) {
-    lines.push("", `Pinned: ${data.pinned.length}`);
-    for (const item of data.pinned) {
+  if (data.pinned.items.length > 0) {
+    lines.push("", `Pinned: ${formatSampleCount(data.pinned)}`);
+    for (const item of data.pinned.items) {
       const excerpt = item.summary.slice(0, CONTEXT_EXCERPT_LEN).replace(/\n/g, " ");
       const ellipsis = item.summary.length > CONTEXT_EXCERPT_LEN ? "…" : "";
       lines.push(`  📌 ${item.id}  ${item.tool_name}`);
       lines.push(`    ${excerpt}${ellipsis}`);
     }
+    if (data.pinned.overflow.length > 0) lines.push(formatSampleOverflow(data.pinned.overflow));
   }
 
-  if (data.notes.length > 0) {
-    lines.push("", `Notes: ${data.notes.length}`);
-    for (const note of data.notes) {
+  if (data.notes.items.length > 0) {
+    lines.push("", `Notes: ${formatSampleCount(data.notes)}`);
+    for (const note of data.notes.items) {
       const excerpt = note.summary.slice(0, 100).replace(/\n/g, " ");
       const ellipsis = note.summary.length > 100 ? "…" : "";
       lines.push(`  ${note.id} — ${excerpt}${ellipsis}`);
     }
+    if (data.notes.overflow.length > 0) lines.push(formatSampleOverflow(data.notes.overflow));
   }
 
   return lines.join("\n");

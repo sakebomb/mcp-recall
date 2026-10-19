@@ -8,16 +8,17 @@ import type {
   SuggestionsData,
   ContextOptions,
   ContextData,
-  ContextPinnedItem,
+  SampledItem,
+  SessionSample,
   SessionSummaryOptions,
   SessionSummaryData,
 } from "./types";
 import { getSessionDays, EFFECTIVE_SIZE_EXPR } from "./queries";
 
-/** Most pinned items {@link getContext} returns, across all sessions. */
-export const CONTEXT_PINNED_LIMIT = 10;
-/** Most pinned items any one session contributes to that sample. */
-export const CONTEXT_PINNED_PER_SESSION = 3;
+/** Most rows a {@link sampleBySession} sample returns, across all sessions. */
+export const SAMPLE_LIMIT = 10;
+/** Most rows any one session contributes to a sample spanning sessions. */
+export const SAMPLE_PER_SESSION = 3;
 
 /**
  * Bytes Claude received for a row: its delivered size (header included, #319),
@@ -25,6 +26,54 @@ export const CONTEXT_PINNED_PER_SESSION = 3;
  * `*summary_bytes` savings figures below sum this.
  */
 const DELIVERED_EXPR = "COALESCE(delivered_size, summary_size)";
+
+/**
+ * Samples the rows matching `where` without letting one session fill the
+ * sample: each session contributes at most `perSession`, and slots are dealt
+ * round-robin (every session's best row before any session's second), best
+ * meaning most recently accessed, then newest. A bulk writer can put
+ * thousands of rows in one session (#269), so callers that list rows to
+ * Claude use this rather than an unbounded SELECT. `full_content` is never read.
+ */
+function sampleBySession(
+  db: Database,
+  where: string,
+  params: SQLQueryBindings[],
+  perSession = SAMPLE_PER_SESSION
+): SessionSample {
+  const items = db.prepare(`
+    WITH ranked AS (
+      SELECT id, session_id, tool_name, summary, created_at, last_accessed,
+        ROW_NUMBER() OVER (
+          PARTITION BY session_id
+          ORDER BY last_accessed DESC NULLS LAST, created_at DESC
+        ) AS rn
+      FROM stored_outputs
+      ${where}
+    )
+    SELECT id, session_id, tool_name, summary, created_at, last_accessed
+    FROM ranked
+    WHERE rn <= ?
+    ORDER BY rn, last_accessed DESC NULLS LAST, created_at DESC
+    LIMIT ?
+  `).all(...params, perSession, SAMPLE_LIMIT) as SampledItem[];
+
+  const counts = db.prepare(`
+    SELECT session_id, COUNT(*) AS count
+    FROM stored_outputs
+    ${where}
+    GROUP BY session_id
+  `).all(...params) as Array<{ session_id: string; count: number }>;
+  const shown = new Map<string, number>();
+  for (const item of items) shown.set(item.session_id, (shown.get(item.session_id) ?? 0) + 1);
+  const total = counts.reduce((sum, r) => sum + r.count, 0);
+  const overflow = counts
+    .map((r) => ({ session_id: r.session_id, count: r.count - (shown.get(r.session_id) ?? 0) }))
+    .filter((r) => r.count > 0)
+    .sort((a, b) => b.count - a.count || a.session_id.localeCompare(b.session_id));
+
+  return { items, total, overflow };
+}
 
 /**
  * Returns aggregate storage stats for a project. The savings figures
@@ -201,17 +250,10 @@ export function getSessionSummary(
     LIMIT 5
   `).all(...bp) as Array<{ id: string; tool_name: string; summary: string; access_count: number }>;
 
-  const pinned = db.prepare(`
-    SELECT id, tool_name, summary
-    FROM stored_outputs ${base} AND pinned = 1
-    ORDER BY created_at DESC
-  `).all(...bp) as Array<{ id: string; tool_name: string; summary: string }>;
-
-  const notes = db.prepare(`
-    SELECT id, summary
-    FROM stored_outputs ${base} AND tool_name = 'recall__note'
-    ORDER BY created_at DESC
-  `).all(...bp) as Array<{ id: string; summary: string }>;
+  // A single-session summary has one session to sample, so it gets every slot.
+  const perSession = opts.session_id ? SAMPLE_LIMIT : SAMPLE_PER_SESSION;
+  const pinned = sampleBySession(db, `${base} AND pinned = 1`, bp, perSession);
+  const notes = sampleBySession(db, `${base} AND tool_name = 'recall__note'`, bp, perSession);
 
   return { label, ...agg, tool_counts, top_accessed, pinned, notes };
 }
@@ -232,40 +274,8 @@ export function getContext(
   const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
   const today = new Date().toISOString().slice(0, 10);
 
-  // 1. Pinned items, bounded. A bulk writer can pin thousands of rows into one
-  //    session (#269), so each session contributes at most
-  //    CONTEXT_PINNED_PER_SESSION, and slots are dealt round-robin: every
-  //    session's best pin before any session's second.
-  const pinned = db.prepare(`
-    WITH ranked AS (
-      SELECT id, session_id, tool_name, summary, created_at, last_accessed,
-        ROW_NUMBER() OVER (
-          PARTITION BY session_id
-          ORDER BY last_accessed DESC NULLS LAST, created_at DESC
-        ) AS rn
-      FROM stored_outputs
-      WHERE project_key = ? AND pinned = 1
-    )
-    SELECT id, session_id, tool_name, summary, created_at, last_accessed
-    FROM ranked
-    WHERE rn <= ?
-    ORDER BY rn, last_accessed DESC NULLS LAST, created_at DESC
-    LIMIT ?
-  `).all(project_key, CONTEXT_PINNED_PER_SESSION, CONTEXT_PINNED_LIMIT) as ContextPinnedItem[];
-
-  const pinnedCounts = db.prepare(`
-    SELECT session_id, COUNT(*) AS count
-    FROM stored_outputs
-    WHERE project_key = ? AND pinned = 1
-    GROUP BY session_id
-  `).all(project_key) as Array<{ session_id: string; count: number }>;
-  const shown = new Map<string, number>();
-  for (const p of pinned) shown.set(p.session_id, (shown.get(p.session_id) ?? 0) + 1);
-  const pinned_total = pinnedCounts.reduce((sum, r) => sum + r.count, 0);
-  const pinned_overflow = pinnedCounts
-    .map((r) => ({ session_id: r.session_id, count: r.count - (shown.get(r.session_id) ?? 0) }))
-    .filter((r) => r.count > 0)
-    .sort((a, b) => b.count - a.count || a.session_id.localeCompare(b.session_id));
+  // 1. Pinned items, bounded and session-fair (#269)
+  const pinned = sampleBySession(db, "WHERE project_key = ? AND pinned = 1", [project_key]);
 
   // 2. Unpinned notes, newest first (capped to avoid noise)
   const notes = db.prepare(`
@@ -312,7 +322,7 @@ export function getContext(
     // Filter duplicates in JS to avoid unbounded NOT IN bind-param expansion.
     // Pinned and note items are already excluded by SQL predicates; only
     // recent items can overlap, but we build the full set for safety.
-    const excludeSet = new Set([...pinned, ...notes, ...recent].map((i) => i.id));
+    const excludeSet = new Set([...pinned.items, ...notes, ...recent].map((i) => i.id));
     const rows = db.prepare(`
       SELECT * FROM stored_outputs
       WHERE project_key = ?
@@ -326,5 +336,5 @@ export function getContext(
     hot.push(...rows.filter((r) => !excludeSet.has(r.id)).slice(0, 5));
   }
 
-  return { pinned, pinned_total, pinned_overflow, notes, recent, hot, last_session };
+  return { pinned, notes, recent, hot, last_session };
 }

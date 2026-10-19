@@ -20018,9 +20018,39 @@ function getSessionDays(db) {
   return db.prepare(`SELECT date FROM sessions ORDER BY date DESC`).all().map((r) => r.date);
 }
 // src/db/analytics.ts
-var CONTEXT_PINNED_LIMIT = 10;
-var CONTEXT_PINNED_PER_SESSION = 3;
+var SAMPLE_LIMIT = 10;
+var SAMPLE_PER_SESSION = 3;
 var DELIVERED_EXPR = "COALESCE(delivered_size, summary_size)";
+function sampleBySession(db, where, params, perSession = SAMPLE_PER_SESSION) {
+  const items = db.prepare(`
+    WITH ranked AS (
+      SELECT id, session_id, tool_name, summary, created_at, last_accessed,
+        ROW_NUMBER() OVER (
+          PARTITION BY session_id
+          ORDER BY last_accessed DESC NULLS LAST, created_at DESC
+        ) AS rn
+      FROM stored_outputs
+      ${where}
+    )
+    SELECT id, session_id, tool_name, summary, created_at, last_accessed
+    FROM ranked
+    WHERE rn <= ?
+    ORDER BY rn, last_accessed DESC NULLS LAST, created_at DESC
+    LIMIT ?
+  `).all(...params, perSession, SAMPLE_LIMIT);
+  const counts = db.prepare(`
+    SELECT session_id, COUNT(*) AS count
+    FROM stored_outputs
+    ${where}
+    GROUP BY session_id
+  `).all(...params);
+  const shown = new Map;
+  for (const item of items)
+    shown.set(item.session_id, (shown.get(item.session_id) ?? 0) + 1);
+  const total = counts.reduce((sum, r) => sum + r.count, 0);
+  const overflow = counts.map((r) => ({ session_id: r.session_id, count: r.count - (shown.get(r.session_id) ?? 0) })).filter((r) => r.count > 0).sort((a, b) => b.count - a.count || a.session_id.localeCompare(b.session_id));
+  return { items, total, overflow };
+}
 function getStats(db, project_key) {
   const row = db.prepare(`
     SELECT
@@ -20121,16 +20151,9 @@ function getSessionSummary(db, project_key, opts = {}) {
     ORDER BY access_count DESC
     LIMIT 5
   `).all(...bp);
-  const pinned = db.prepare(`
-    SELECT id, tool_name, summary
-    FROM stored_outputs ${base} AND pinned = 1
-    ORDER BY created_at DESC
-  `).all(...bp);
-  const notes = db.prepare(`
-    SELECT id, summary
-    FROM stored_outputs ${base} AND tool_name = 'recall__note'
-    ORDER BY created_at DESC
-  `).all(...bp);
+  const perSession = opts.session_id ? SAMPLE_LIMIT : SAMPLE_PER_SESSION;
+  const pinned = sampleBySession(db, `${base} AND pinned = 1`, bp, perSession);
+  const notes = sampleBySession(db, `${base} AND tool_name = 'recall__note'`, bp, perSession);
   return { label, ...agg, tool_counts, top_accessed, pinned, notes };
 }
 function getContext(db, project_key, opts = {}) {
@@ -20138,33 +20161,7 @@ function getContext(db, project_key, opts = {}) {
   const limit = opts.limit ?? 5;
   const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
   const today = new Date().toISOString().slice(0, 10);
-  const pinned = db.prepare(`
-    WITH ranked AS (
-      SELECT id, session_id, tool_name, summary, created_at, last_accessed,
-        ROW_NUMBER() OVER (
-          PARTITION BY session_id
-          ORDER BY last_accessed DESC NULLS LAST, created_at DESC
-        ) AS rn
-      FROM stored_outputs
-      WHERE project_key = ? AND pinned = 1
-    )
-    SELECT id, session_id, tool_name, summary, created_at, last_accessed
-    FROM ranked
-    WHERE rn <= ?
-    ORDER BY rn, last_accessed DESC NULLS LAST, created_at DESC
-    LIMIT ?
-  `).all(project_key, CONTEXT_PINNED_PER_SESSION, CONTEXT_PINNED_LIMIT);
-  const pinnedCounts = db.prepare(`
-    SELECT session_id, COUNT(*) AS count
-    FROM stored_outputs
-    WHERE project_key = ? AND pinned = 1
-    GROUP BY session_id
-  `).all(project_key);
-  const shown = new Map;
-  for (const p of pinned)
-    shown.set(p.session_id, (shown.get(p.session_id) ?? 0) + 1);
-  const pinned_total = pinnedCounts.reduce((sum, r) => sum + r.count, 0);
-  const pinned_overflow = pinnedCounts.map((r) => ({ session_id: r.session_id, count: r.count - (shown.get(r.session_id) ?? 0) })).filter((r) => r.count > 0).sort((a, b) => b.count - a.count || a.session_id.localeCompare(b.session_id));
+  const pinned = sampleBySession(db, "WHERE project_key = ? AND pinned = 1", [project_key]);
   const notes = db.prepare(`
     SELECT * FROM stored_outputs
     WHERE project_key = ? AND pinned = 0 AND tool_name = 'recall__note'
@@ -20198,7 +20195,7 @@ function getContext(db, project_key, opts = {}) {
   if (lastDate) {
     const startOfDay = Math.floor(new Date(`${lastDate}T00:00:00Z`).getTime() / 1000);
     const endOfDay = startOfDay + 86400;
-    const excludeSet = new Set([...pinned, ...notes, ...recent].map((i) => i.id));
+    const excludeSet = new Set([...pinned.items, ...notes, ...recent].map((i) => i.id));
     const rows = db.prepare(`
       SELECT * FROM stored_outputs
       WHERE project_key = ?
@@ -20211,7 +20208,7 @@ function getContext(db, project_key, opts = {}) {
     `).all(project_key, startOfDay, endOfDay, 5 + excludeSet.size);
     hot.push(...rows.filter((r) => !excludeSet.has(r.id)).slice(0, 5));
   }
-  return { pinned, pinned_total, pinned_overflow, notes, recent, hot, last_session };
+  return { pinned, notes, recent, hot, last_session };
 }
 // node_modules/smol-toml/dist/date.js
 /*!
@@ -21525,22 +21522,25 @@ ${hint}` : base;
   return `${[header, separator, ...rows].join(`
 `)}${footerSuffix}`;
 }
-var CONTEXT_OVERFLOW_SESSIONS = 3;
-function formatPinnedOverflow(overflow) {
-  const named = overflow.slice(0, CONTEXT_OVERFLOW_SESSIONS).map((o) => `+${o.count.toLocaleString("en-US")} more from ${o.session_id}`);
-  const rest = overflow.slice(CONTEXT_OVERFLOW_SESSIONS);
+var OVERFLOW_SESSIONS = 3;
+function formatSampleCount(sample) {
+  return sample.overflow.length > 0 ? `${sample.items.length} of ${sample.total.toLocaleString("en-US")}` : `${sample.items.length}`;
+}
+function formatSampleOverflow(overflow) {
+  const named = overflow.slice(0, OVERFLOW_SESSIONS).map((o) => `+${o.count.toLocaleString("en-US")} more from ${o.session_id}`);
+  const rest = overflow.slice(OVERFLOW_SESSIONS);
   if (rest.length > 0) {
     const restCount = rest.reduce((sum, o) => sum + o.count, 0);
     named.push(`+${restCount.toLocaleString("en-US")} more from ${rest.length} other sessions`);
   }
   return `  ${named.join(" \xB7 ")}
-` + `    (recall__list_stored to browse; recall__forget session_id + force: true clears a session)`;
+` + `    (recall__list_stored to browse; recall__forget session_id clears a session, force: true for pinned)`;
 }
 function toolContext(db, projectKey, args) {
   const data = getContext(db, projectKey, args);
   const now = Date.now();
   const today = new Date(now).toISOString().slice(0, 10);
-  const isEmpty = data.pinned.length === 0 && data.notes.length === 0 && data.recent.length === 0 && data.hot.length === 0 && data.last_session === null;
+  const isEmpty = data.pinned.items.length === 0 && data.notes.length === 0 && data.recent.length === 0 && data.hot.length === 0 && data.last_session === null;
   if (isEmpty) {
     return CONTEXT_EMPTY_RESPONSE;
   }
@@ -21549,17 +21549,16 @@ function toolContext(db, projectKey, args) {
     "\u2550".repeat(36),
     `Generated ${formatRelativeTime(Date.now() - now)}`
   ];
-  if (data.pinned.length > 0) {
-    const count = data.pinned_overflow.length > 0 ? `${data.pinned.length} of ${data.pinned_total.toLocaleString("en-US")}` : `${data.pinned.length}`;
-    lines.push("", `Pinned (${count}):`);
-    for (const item of data.pinned) {
+  if (data.pinned.items.length > 0) {
+    lines.push("", `Pinned (${formatSampleCount(data.pinned)}):`);
+    for (const item of data.pinned.items) {
       const excerpt = item.summary.slice(0, CONTEXT_EXCERPT_LEN).replace(/\n/g, " ");
       const ellipsis = item.summary.length > CONTEXT_EXCERPT_LEN ? "\u2026" : "";
       lines.push(`  \uD83D\uDCCC ${item.id}  ${item.tool_name.padEnd(LIST_TOOL_COL_WIDTH)}  ${formatDate(item.created_at)}`);
       lines.push(`    ${excerpt}${ellipsis}`);
     }
-    if (data.pinned_overflow.length > 0)
-      lines.push(formatPinnedOverflow(data.pinned_overflow));
+    if (data.pinned.overflow.length > 0)
+      lines.push(formatSampleOverflow(data.pinned.overflow));
   }
   if (data.notes.length > 0) {
     lines.push("", `Notes (${data.notes.length}):`);
@@ -21629,22 +21628,26 @@ function toolSessionSummary(db, projectKey, args) {
       lines.push(`    ${excerpt}${ellipsis}`);
     }
   }
-  if (data.pinned.length > 0) {
-    lines.push("", `Pinned: ${data.pinned.length}`);
-    for (const item of data.pinned) {
+  if (data.pinned.items.length > 0) {
+    lines.push("", `Pinned: ${formatSampleCount(data.pinned)}`);
+    for (const item of data.pinned.items) {
       const excerpt = item.summary.slice(0, CONTEXT_EXCERPT_LEN).replace(/\n/g, " ");
       const ellipsis = item.summary.length > CONTEXT_EXCERPT_LEN ? "\u2026" : "";
       lines.push(`  \uD83D\uDCCC ${item.id}  ${item.tool_name}`);
       lines.push(`    ${excerpt}${ellipsis}`);
     }
+    if (data.pinned.overflow.length > 0)
+      lines.push(formatSampleOverflow(data.pinned.overflow));
   }
-  if (data.notes.length > 0) {
-    lines.push("", `Notes: ${data.notes.length}`);
-    for (const note of data.notes) {
+  if (data.notes.items.length > 0) {
+    lines.push("", `Notes: ${formatSampleCount(data.notes)}`);
+    for (const note of data.notes.items) {
       const excerpt = note.summary.slice(0, 100).replace(/\n/g, " ");
       const ellipsis = note.summary.length > 100 ? "\u2026" : "";
       lines.push(`  ${note.id} \u2014 ${excerpt}${ellipsis}`);
     }
+    if (data.notes.overflow.length > 0)
+      lines.push(formatSampleOverflow(data.notes.overflow));
   }
   return lines.join(`
 `);
