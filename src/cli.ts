@@ -11,7 +11,7 @@
  *   status          — show configuration and health
  *   gc              — reclaim disk from orphaned project databases
  *   discover        — report output routed to fallback handlers (missed savings)
- *   profiles       — manage compression profiles
+ *   profiles        — manage compression profiles
  *   learn           — generate profiles from your installed MCP servers
  *   completions     — print shell completion script for bash, zsh, or fish
  *   --help, -h      — print this help
