@@ -20,6 +20,8 @@ export interface StoredOutput {
   command_fp: string | null;
   /** Bytes Claude received: header, newline, summary (#319). NULL for notes and pre-migration rows. */
   delivered_size: number | null;
+  /** Handler that produced the summary (#341). NULL for notes and rows stored before it was recorded. */
+  handler: string | null;
 }
 
 /** Input required to persist a new compressed tool output. */
@@ -44,6 +46,8 @@ export interface StoreInput {
   command_fp?: string | null;
   /** Bytes Claude received for this output (#319); omitted stores NULL. */
   delivered_size?: number | null;
+  /** Handler that produced the summary (#341); omitted stores NULL. */
+  handler?: string | null;
 }
 
 /** Options for full-text search across stored outputs. */
@@ -167,6 +171,30 @@ export interface CommandBreakdownRow {
   original_bytes: number;
   /** Delivered bytes, as in {@link Stats.total_summary_bytes}. */
   summary_bytes: number;
+}
+
+/** Per-handler row returned by {@link getHandlerBreakdown} (#341). */
+export interface HandlerBreakdownRow {
+  handler: string;
+  items: number;
+  original_bytes: number;
+  /** Delivered bytes, as in {@link Stats.total_summary_bytes}. */
+  summary_bytes: number;
+  /** Items fetched at least once through recall__retrieve: the lossiness signal. */
+  retrieved: number;
+}
+
+/** A tool or Bash command family routed to a fallback handler, from {@link getFallbackRoutes} (#341). */
+export interface FallbackRouteRow extends HandlerBreakdownRow {
+  tool_name: string;
+  /** Bash command family; "unknown" when untagged, null for non-Bash tools. */
+  command_fp: string | null;
+}
+
+/** Filters shared by the handler analytics. */
+export interface HandlerQueryOptions {
+  /** Only rows created at or after this Unix time (seconds). */
+  since?: number;
 }
 
 /** Options for {@link getSuggestions}. */

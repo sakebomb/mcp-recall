@@ -10,7 +10,8 @@
  *   uninstall       — remove hooks + MCP server
  *   status          — show configuration and health
  *   gc              — reclaim disk from orphaned project databases
- *   profiles        — manage compression profiles
+ *   discover        — report output routed to fallback handlers (missed savings)
+ *   profiles       — manage compression profiles
  *   learn           — generate profiles from your installed MCP servers
  *   completions     — print shell completion script for bash, zsh, or fish
  *   --help, -h      — print this help
@@ -24,6 +25,7 @@ import { handleLearnCommand } from "./learn/index";
 import { handleImportCommand } from "./import/index";
 import { installCommand, uninstallCommand, statusCommand } from "./install/index";
 import { gcCommand } from "./gc/index";
+import { discoverCommand, parseSince } from "./discover/index";
 import { log } from "./log";
 
 export async function getVersion(): Promise<string> {
@@ -44,7 +46,11 @@ Commands:
   gc [--force]         Reclaim disk: list/delete orphaned project DBs
     --stale-days N     Legacy DBs (no recorded path) older than N days are candidates (default 90)
     --vacuum           Full-VACUUM surviving DBs to reclaim free pages
-  profiles <cmd>       Manage compression profiles
+  discover             Rank output routed to fallback handlers: where a new handler would pay
+    --all              Every project's store, not just this one
+    --since YYYY-MM-DD Only output stored on or after this date
+    --limit N          Rows to list (default 10)
+  profiles <cmd>      Manage compression profiles
     seed [--all]       Install profiles for detected MCPs (--all for entire catalog)
     list               Show installed profiles
     install <id>       Install a specific community profile
@@ -94,7 +100,7 @@ _mcp_recall() {
   COMPREPLY=()
   cur="\${COMP_WORDS[COMP_CWORD]}"
 
-  local commands="install uninstall status gc profiles learn import completions --help --version"
+  local commands="install uninstall status gc discover profiles learn import completions --help --version"
   local profiles_cmds="list install update remove available info seed feed check retrain test"
 
   if [[ \${COMP_CWORD} -eq 1 ]]; then
@@ -182,6 +188,7 @@ _mcp_recall() {
         'uninstall:remove hooks and MCP server'
         'status:show current configuration and health'
         'gc:reclaim disk from orphaned project databases'
+        'discover:rank output routed to fallback handlers'
         'profiles:manage compression profiles'
         'learn:generate profiles from your installed MCP servers'
         'import:restore items from a recall__export JSON dump'
@@ -211,7 +218,7 @@ function fishCompletion(): string {
   return `# mcp-recall fish completions
 # Save to: mcp-recall completions fish > ~/.config/fish/completions/mcp-recall.fish
 
-set -l commands install uninstall status gc profiles learn import completions
+set -l commands install uninstall status gc discover profiles learn import completions
 
 # Top-level commands
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\
@@ -222,6 +229,8 @@ complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\
   -a status -d "Show current configuration and health"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\
   -a gc -d "Reclaim disk from orphaned project databases"
+complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\
+  -a discover -d "Rank output routed to fallback handlers"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\
   -a profiles -d "Manage compression profiles"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\
@@ -340,6 +349,27 @@ async function main(): Promise<void> {
 
   if (subcommand === "status") {
     await statusCommand();
+    process.exit(0);
+  }
+
+  if (subcommand === "discover") {
+    const sinceIdx = process.argv.indexOf("--since");
+    let since: number | undefined;
+    if (sinceIdx !== -1) {
+      const parsed = parseSince(process.argv[sinceIdx + 1] ?? "");
+      if (parsed === null) {
+        console.error("--since must be a date, YYYY-MM-DD");
+        process.exit(1);
+      }
+      since = parsed;
+    }
+    const limitIdx = process.argv.indexOf("--limit");
+    const limit = limitIdx !== -1 ? Number(process.argv[limitIdx + 1]) : undefined;
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+      console.error("--limit must be a positive integer");
+      process.exit(1);
+    }
+    discoverCommand({ all: process.argv.includes("--all"), since, limit });
     process.exit(0);
   }
 

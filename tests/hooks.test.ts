@@ -520,6 +520,24 @@ describe("handlePostToolUse", () => {
     expect(row.command_fp).toBe("git diff");
   });
 
+  it("records the handler that produced the stored summary (#341)", () => {
+    const bigDiff = "diff --git a/f b/f\n" + "+added line\n".repeat(1000);
+    handlePostToolUse(
+      makePostToolUseInput("Bash", JSON.stringify({ stdout: bigDiff, stderr: "", exit_code: 0 }), {
+        tool_input: { command: "git diff HEAD~1" },
+      })
+    );
+    handlePostToolUse(
+      makePostToolUseInput("mcp__github__list_issues", { content: [{ type: "text", text: LARGE_GITHUB_RESPONSE }] })
+    );
+    const db = getDb(":memory:");
+    const rows = db.prepare("SELECT tool_name, handler FROM stored_outputs ORDER BY tool_name").all();
+    expect(rows).toEqual([
+      { tool_name: "Bash", handler: "gitDiffHandler" },
+      { tool_name: "mcp__github__list_issues", handler: "githubHandler" },
+    ]);
+  });
+
   // -------------------------------------------------------------------------
   // Dedup
   // -------------------------------------------------------------------------
@@ -990,8 +1008,10 @@ describe("handlePostToolUse — empty summaries (#296)", () => {
     );
     expect(deliveredBody(result).trim()).not.toBe("");
     const db = getDb(":memory:");
-    const row = db.prepare("SELECT summary FROM stored_outputs").get() as { summary: string };
+    const row = db.prepare("SELECT summary, handler FROM stored_outputs").get() as { summary: string; handler: string };
     expect(row.summary.trim()).not.toBe("");
+    // The stored summary is the fallback's, so discover must attribute it there (#341).
+    expect(row.handler).toBe("genericHandler");
   });
 });
 

@@ -6,6 +6,20 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Added
+
+- **`mcp-recall discover`: where a new handler would pay** (#341). Each stored
+  output now records the handler that produced its summary. `discover` ranks
+  the tools and Bash command families routed to a fallback handler (generic,
+  JSON or shell) by bytes, with their reduction and retrieval rate. The
+  retrieval rate is the share fetched at least once with `recall__retrieve`,
+  and a high one means the summary dropped something needed. `--all` covers
+  every project's store, `--since YYYY-MM-DD` limits the window, and
+  `--limit N` sets the rows shown. It opens stores read-only. `recall__stats`
+  gains a `By handler` section with the same rates.
+  Items stored before this release have no recorded handler. They are
+  counted, never attributed to one.
+
 ## [1.16.1] — 2026-10-19
 
 ### Fixed

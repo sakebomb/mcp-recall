@@ -19708,7 +19708,8 @@ var MIGRATIONS = [
   "ALTER TABLE stored_outputs ADD COLUMN full_retained INTEGER NOT NULL DEFAULT 1",
   "ALTER TABLE stored_outputs ADD COLUMN command_fp TEXT",
   "CREATE INDEX IF NOT EXISTS idx_so_command_fp ON stored_outputs(project_key, command_fp)",
-  "ALTER TABLE stored_outputs ADD COLUMN delivered_size INTEGER"
+  "ALTER TABLE stored_outputs ADD COLUMN delivered_size INTEGER",
+  "ALTER TABLE stored_outputs ADD COLUMN handler TEXT"
 ];
 function applyMigrations(db) {
   for (const sql of MIGRATIONS) {
@@ -19850,14 +19851,15 @@ function storeOutput(db, input) {
   const bodyToStore = full_retained ? input.full_content : "";
   const command_fp = input.command_fp ?? null;
   const delivered_size = input.delivered_size ?? null;
+  const handler = input.handler ?? null;
   const insertAndChunk = db.transaction(() => {
     db.prepare(`
       INSERT INTO stored_outputs
         (id, project_key, session_id, tool_name, summary, full_content,
          original_size, summary_size, created_at, input_hash, output_hash, full_retained, command_fp,
-         delivered_size)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, input.project_key, input.session_id, input.tool_name, input.summary, bodyToStore, input.original_size, summary_size, created_at, input_hash, output_hash, full_retained, command_fp, delivered_size);
+         delivered_size, handler)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, input.project_key, input.session_id, input.tool_name, input.summary, bodyToStore, input.original_size, summary_size, created_at, input_hash, output_hash, full_retained, command_fp, delivered_size, handler);
     if (full_retained)
       storeChunks(db, id, input.full_content);
   });
@@ -19875,7 +19877,8 @@ function storeOutput(db, input) {
     output_hash,
     full_retained,
     command_fp,
-    delivered_size
+    delivered_size,
+    handler
   };
 }
 function hashContent(content) {
@@ -20079,6 +20082,34 @@ function getBashCommandBreakdown(db, project_key) {
     GROUP BY COALESCE(command_fp, 'unknown')
     ORDER BY original_bytes DESC
   `).all(project_key);
+}
+function handlerWhere(project_key, opts, recorded = true) {
+  const params = [project_key];
+  let where = `WHERE project_key = ? AND tool_name != 'recall__note' AND handler IS ${recorded ? "NOT " : ""}NULL`;
+  if (opts.since !== undefined) {
+    where += " AND created_at >= ?";
+    params.push(opts.since);
+  }
+  return { where, params };
+}
+var HANDLER_AGGREGATES = `
+  COUNT(*)                                          AS items,
+  COALESCE(SUM(original_size),0)                    AS original_bytes,
+  COALESCE(SUM(${DELIVERED_EXPR}),0)                AS summary_bytes,
+  COALESCE(SUM(CASE WHEN access_count > 0 THEN 1 ELSE 0 END),0) AS retrieved`;
+function getHandlerBreakdown(db, project_key, opts = {}) {
+  const { where, params } = handlerWhere(project_key, opts);
+  return db.prepare(`
+    SELECT handler, ${HANDLER_AGGREGATES}
+    FROM stored_outputs
+    ${where}
+    GROUP BY handler
+    ORDER BY original_bytes DESC
+  `).all(...params);
+}
+function countUnrecordedHandler(db, project_key, opts = {}) {
+  const { where, params } = handlerWhere(project_key, opts, false);
+  return db.prepare(`SELECT COUNT(*) AS n FROM stored_outputs ${where}`).get(...params).n;
 }
 function getToolBreakdown(db, project_key) {
   return db.prepare(`
@@ -21696,6 +21727,20 @@ function toolStats(db, projectKey, args = {}) {
     for (const row of cmdBreakdown) {
       const reduction = row.original_bytes > 0 ? `${((1 - row.summary_bytes / row.original_bytes) * 100).toFixed(0)}%` : " \u2014";
       lines.push(`  ${row.command_fp.padEnd(colW)}  ${String(row.items).padStart(4)} item${row.items === 1 ? " " : "s"}` + `  ${formatBytes(row.original_bytes).padStart(8)} \u2192 ${formatBytes(row.summary_bytes).padEnd(8)}  ${reduction.padStart(4)}`);
+    }
+  }
+  const handlerBreakdown = getHandlerBreakdown(db, projectKey);
+  if (handlerBreakdown.length > 0) {
+    lines.push("", "By handler (sorted by original size):");
+    const colW = Math.min(40, Math.max(...handlerBreakdown.map((r) => r.handler.length)));
+    for (const row of handlerBreakdown) {
+      const reduction = row.original_bytes > 0 ? `${((1 - row.summary_bytes / row.original_bytes) * 100).toFixed(0)}%` : " \u2014";
+      const retrieved = `${(row.retrieved / row.items * 100).toFixed(0)}% retrieved`;
+      lines.push(`  ${row.handler.padEnd(colW)}  ${String(row.items).padStart(4)} item${row.items === 1 ? " " : "s"}` + `  ${formatBytes(row.original_bytes).padStart(8)} \u2192 ${formatBytes(row.summary_bytes).padEnd(8)}  ${reduction.padStart(4)}` + `  ${retrieved}`);
+    }
+    const unrecorded = countUnrecordedHandler(db, projectKey);
+    if (unrecorded > 0) {
+      lines.push(`  (${unrecorded} older item${unrecorded === 1 ? "" : "s"} stored before handlers were recorded are not included)`);
     }
   }
   const suggestions = getSuggestions(db, projectKey, {

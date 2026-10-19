@@ -184,11 +184,14 @@ export function handlePostToolUse(raw: string): HookOutput {
   const handler = getHandler(tool_name, response, tool_input);
   log.debug(`handler: ${handler.name} · ${tool_name}`);
   let { summary, originalSize } = handler(tool_name, response);
+  // The handler whose summary is stored, for `mcp-recall discover` (#341).
+  let handlerName = handler.name;
   // An empty summary always passes the size check below, yet delivers nothing:
   // the handler did not recognize this shape. Fall back rather than store it (#296).
   if (summary.trim() === "" && originalSize > 0) {
     log.debug(`empty summary from ${handler.name} · ${tool_name} · falling back to genericHandler`);
     ({ summary, originalSize } = genericHandler(tool_name, response));
+    handlerName = genericHandler.name;
   }
   const summarySize = Buffer.byteLength(summary, "utf8");
 
@@ -223,6 +226,7 @@ export function handlePostToolUse(raw: string): HookOutput {
     full_retained,
     command_fp,
     delivered_size: deliveredSize,
+    handler: handlerName,
   });
 
   // 9. Evict if store exceeds size limit

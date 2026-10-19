@@ -174,6 +174,27 @@ describe("import round-trip", () => {
     }
   });
 
+  test("round-trips handler across export/import (#341)", async () => {
+    storeOutput(sourceDb, makeInput({ tool_name: "Bash", summary: "d", handler: "shellHandler" }));
+
+    const dumpFile = makeTmpPath();
+    const targetDbPath = makeTmpPath(".db");
+    exportToFile(dumpFile);
+
+    process.env.RECALL_DB_PATH = targetDbPath;
+    try {
+      await handleImportCommand([dumpFile]);
+      const targetDb = new Database(targetDbPath);
+      const row = targetDb
+        .prepare(`SELECT handler FROM stored_outputs WHERE tool_name = 'Bash'`)
+        .get() as { handler: string | null };
+      targetDb.close();
+      expect(row.handler).toBe("shellHandler");
+    } finally {
+      delete process.env.RECALL_DB_PATH;
+    }
+  });
+
   test("drops the body of a summary-only row from a malformed dump (full_retained=0 invariant)", async () => {
     const bigBody = "x".repeat(10000);
     const dump = [{

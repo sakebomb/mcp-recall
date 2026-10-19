@@ -5208,7 +5208,8 @@ var MIGRATIONS = [
   "ALTER TABLE stored_outputs ADD COLUMN full_retained INTEGER NOT NULL DEFAULT 1",
   "ALTER TABLE stored_outputs ADD COLUMN command_fp TEXT",
   "CREATE INDEX IF NOT EXISTS idx_so_command_fp ON stored_outputs(project_key, command_fp)",
-  "ALTER TABLE stored_outputs ADD COLUMN delivered_size INTEGER"
+  "ALTER TABLE stored_outputs ADD COLUMN delivered_size INTEGER",
+  "ALTER TABLE stored_outputs ADD COLUMN handler TEXT"
 ];
 function applyMigrations(db) {
   for (const sql of MIGRATIONS) {
@@ -5367,14 +5368,15 @@ function storeOutput(db, input) {
   const bodyToStore = full_retained ? input.full_content : "";
   const command_fp = input.command_fp ?? null;
   const delivered_size = input.delivered_size ?? null;
+  const handler = input.handler ?? null;
   const insertAndChunk = db.transaction(() => {
     db.prepare(`
       INSERT INTO stored_outputs
         (id, project_key, session_id, tool_name, summary, full_content,
          original_size, summary_size, created_at, input_hash, output_hash, full_retained, command_fp,
-         delivered_size)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, input.project_key, input.session_id, input.tool_name, input.summary, bodyToStore, input.original_size, summary_size, created_at, input_hash, output_hash, full_retained, command_fp, delivered_size);
+         delivered_size, handler)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, input.project_key, input.session_id, input.tool_name, input.summary, bodyToStore, input.original_size, summary_size, created_at, input_hash, output_hash, full_retained, command_fp, delivered_size, handler);
     if (full_retained)
       storeChunks(db, id, input.full_content);
   });
@@ -5392,7 +5394,8 @@ function storeOutput(db, input) {
     output_hash,
     full_retained,
     command_fp,
-    delivered_size
+    delivered_size,
+    handler
   };
 }
 function hashContent(content) {
@@ -5491,6 +5494,48 @@ function sampleBySession(db, where, params, perSession = SAMPLE_PER_SESSION) {
   const total = counts.reduce((sum, r) => sum + r.count, 0);
   const overflow = counts.map((r) => ({ session_id: r.session_id, count: r.count - (shown.get(r.session_id) ?? 0) })).filter((r) => r.count > 0).sort((a, b) => b.count - a.count || a.session_id.localeCompare(b.session_id));
   return { items, total, overflow };
+}
+var FALLBACK_HANDLERS = ["genericHandler", "jsonHandler", "shellHandler"];
+function handlerWhere(project_key, opts, recorded = true) {
+  const params = [project_key];
+  let where = `WHERE project_key = ? AND tool_name != 'recall__note' AND handler IS ${recorded ? "NOT " : ""}NULL`;
+  if (opts.since !== undefined) {
+    where += " AND created_at >= ?";
+    params.push(opts.since);
+  }
+  return { where, params };
+}
+var HANDLER_AGGREGATES = `
+  COUNT(*)                                          AS items,
+  COALESCE(SUM(original_size),0)                    AS original_bytes,
+  COALESCE(SUM(${DELIVERED_EXPR}),0)                AS summary_bytes,
+  COALESCE(SUM(CASE WHEN access_count > 0 THEN 1 ELSE 0 END),0) AS retrieved`;
+function getHandlerBreakdown(db, project_key, opts = {}) {
+  const { where, params } = handlerWhere(project_key, opts);
+  return db.prepare(`
+    SELECT handler, ${HANDLER_AGGREGATES}
+    FROM stored_outputs
+    ${where}
+    GROUP BY handler
+    ORDER BY original_bytes DESC
+  `).all(...params);
+}
+function getFallbackRoutes(db, project_key, opts = {}) {
+  const { where, params } = handlerWhere(project_key, opts);
+  const placeholders = FALLBACK_HANDLERS.map(() => "?").join(", ");
+  return db.prepare(`
+    SELECT tool_name,
+      CASE WHEN tool_name = 'Bash' THEN COALESCE(command_fp, 'unknown') END AS command_fp,
+      handler, ${HANDLER_AGGREGATES}
+    FROM stored_outputs
+    ${where} AND handler IN (${placeholders})
+    GROUP BY tool_name, 2, handler
+    ORDER BY original_bytes DESC
+  `).all(...params, ...FALLBACK_HANDLERS);
+}
+function countUnrecordedHandler(db, project_key, opts = {}) {
+  const { where, params } = handlerWhere(project_key, opts, false);
+  return db.prepare(`SELECT COUNT(*) AS n FROM stored_outputs ${where}`).get(...params).n;
 }
 function getToolBreakdown(db, project_key) {
   return db.prepare(`
@@ -9112,9 +9157,11 @@ ${cached3.summary}`;
   const handler = getHandler(tool_name, response, tool_input);
   log.debug(`handler: ${handler.name} \xB7 ${tool_name}`);
   let { summary, originalSize } = handler(tool_name, response);
+  let handlerName = handler.name;
   if (summary.trim() === "" && originalSize > 0) {
     log.debug(`empty summary from ${handler.name} \xB7 ${tool_name} \xB7 falling back to genericHandler`);
     ({ summary, originalSize } = genericHandler(tool_name, response));
+    handlerName = genericHandler.name;
   }
   const summarySize = Buffer.byteLength(summary, "utf8");
   const hints = extractHints(fullContent);
@@ -9137,7 +9184,8 @@ ${cached3.summary}`;
     output_hash,
     full_retained,
     command_fp,
-    delivered_size: deliveredSize
+    delivered_size: deliveredSize,
+    handler: handlerName
   });
   evictIfNeeded(db, projectKey, config.store.max_size_mb, config.store.eviction_half_life_days);
   log.debug(`STORED \xB7 ${tool_name} \xB7 id=${stored.id} \xB7 ${formatBytes(originalSize)}\u2192${formatBytes(summarySize)} (${reductionPercent(summarySize, originalSize)}% reduction)`);
@@ -10700,7 +10748,8 @@ var StoredOutputSchema = exports_external.object({
   input_hash: exports_external.string().nullable(),
   full_retained: exports_external.number().int().min(0).max(1).optional().default(1),
   command_fp: exports_external.string().nullable().optional().default(null),
-  delivered_size: exports_external.number().int().nonnegative().nullable().optional().default(null)
+  delivered_size: exports_external.number().int().nonnegative().nullable().optional().default(null),
+  handler: exports_external.string().nullable().optional().default(null)
 });
 var ExportSchema = exports_external.array(StoredOutputSchema);
 function partitionSecrets(items) {
@@ -10766,9 +10815,9 @@ function importItems(dbPath, items, opts) {
       INSERT INTO stored_outputs
         (id, project_key, session_id, tool_name, summary, full_content,
          original_size, summary_size, created_at, pinned, access_count,
-         last_accessed, input_hash, full_retained, command_fp, delivered_size)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(item.id, projectKey, item.session_id, item.tool_name, item.summary, item.full_retained ? item.full_content : "", item.original_size, item.summary_size, item.created_at, item.pinned, item.access_count, item.last_accessed, item.input_hash, item.full_retained, item.command_fp, item.delivered_size);
+         last_accessed, input_hash, full_retained, command_fp, delivered_size, handler)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(item.id, projectKey, item.session_id, item.tool_name, item.summary, item.full_retained ? item.full_content : "", item.original_size, item.summary_size, item.created_at, item.pinned, item.access_count, item.last_accessed, item.input_hash, item.full_retained, item.command_fp, item.delivered_size, item.handler);
     if (item.full_retained) {
       const chunks = chunkText(item.full_content);
       for (let i = 0;i < chunks.length; i++) {
@@ -11278,6 +11327,160 @@ Installation: ${BOLD}${label}${RESET}
   console.log("");
 }
 
+// src/discover/index.ts
+import { Database as Database4 } from "bun:sqlite";
+import { existsSync as existsSync4, readdirSync as readdirSync5 } from "fs";
+import { join as join9 } from "path";
+var DEFAULT_LIMIT = 10;
+var EMPTY = { routes: [], handlers: [], unrecorded: 0, stores: 0 };
+function hasHandlerColumn(db) {
+  const cols = db.prepare(`PRAGMA table_info(stored_outputs)`).all();
+  return cols.some((c) => c.name === "handler");
+}
+function readStore(file, opts = {}) {
+  let db = null;
+  try {
+    db = new Database4(file, { readonly: true });
+    const isRecallDb = db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='stored_outputs'`).get();
+    if (!isRecallDb)
+      return EMPTY;
+    const keys = db.prepare(`SELECT DISTINCT project_key FROM stored_outputs`).all().map((r) => r.project_key);
+    if (!hasHandlerColumn(db)) {
+      const since = opts.since ?? 0;
+      const { n } = db.prepare(`SELECT COUNT(*) AS n FROM stored_outputs WHERE tool_name != 'recall__note' AND created_at >= ?`).get(since);
+      return { ...EMPTY, unrecorded: n, stores: 1 };
+    }
+    const reports = keys.map((key) => ({
+      routes: getFallbackRoutes(db, key, opts),
+      handlers: getHandlerBreakdown(db, key, opts),
+      unrecorded: countUnrecordedHandler(db, key, opts),
+      stores: 0
+    }));
+    return { ...mergeReports(reports), stores: 1 };
+  } catch {
+    return EMPTY;
+  } finally {
+    db?.close();
+  }
+}
+function addCounts(a, b) {
+  return {
+    ...a,
+    items: a.items + b.items,
+    original_bytes: a.original_bytes + b.original_bytes,
+    summary_bytes: a.summary_bytes + b.summary_bytes,
+    retrieved: a.retrieved + b.retrieved
+  };
+}
+function sumBy(rows, key) {
+  const merged = new Map;
+  for (const row of rows) {
+    const k = key(row);
+    const prev = merged.get(k);
+    merged.set(k, prev ? addCounts(prev, row) : row);
+  }
+  return [...merged.values()].sort((a, b) => b.original_bytes - a.original_bytes);
+}
+function mergeReports(reports) {
+  return {
+    routes: sumBy(reports.flatMap((r) => r.routes), (r) => `${r.tool_name}\x00${r.command_fp ?? ""}\x00${r.handler}`),
+    handlers: sumBy(reports.flatMap((r) => r.handlers), (r) => r.handler),
+    unrecorded: reports.reduce((n, r) => n + r.unrecorded, 0),
+    stores: reports.reduce((n, r) => n + r.stores, 0)
+  };
+}
+function storeFiles(all, cwd = process.cwd()) {
+  if (!all) {
+    const file = defaultDbPath(getProjectKey(cwd));
+    return existsSync4(file) ? [file] : [];
+  }
+  const dir = dataDir();
+  if (!existsSync4(dir))
+    return [];
+  return readdirSync5(dir).filter((n) => n.endsWith(".db")).map((n) => join9(dir, n));
+}
+function pct(part, whole) {
+  return whole > 0 ? `${(part / whole * 100).toFixed(0)}%` : "\u2014";
+}
+function reduction(row) {
+  return row.original_bytes > 0 ? pct(row.original_bytes - row.summary_bytes, row.original_bytes) : "\u2014";
+}
+function routeLabel(row) {
+  return row.command_fp !== null ? `${row.tool_name}: ${row.command_fp}` : row.tool_name;
+}
+function table(header, rows, textCols = 1) {
+  const widths = header.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)));
+  const fmt = (cells) => "  " + cells.map((c, i) => i < textCols ? c.padEnd(widths[i]) : c.padStart(widths[i])).join("  ");
+  return [fmt(header), ...rows.map(fmt)];
+}
+function formatReport(report, limit = DEFAULT_LIMIT) {
+  const lines = [];
+  const shown = report.routes.slice(0, limit);
+  lines.push("Fallback-routed output, by original size (candidates for a new handler):");
+  if (shown.length === 0) {
+    lines.push("  none recorded");
+  } else {
+    lines.push(...table(["tool / command", "handler", "items", "original", "delivered", "reduction", "retrieved"], shown.map((r) => [
+      routeLabel(r),
+      r.handler,
+      String(r.items),
+      formatBytes(r.original_bytes),
+      formatBytes(r.summary_bytes),
+      reduction(r),
+      pct(r.retrieved, r.items)
+    ]), 2));
+    const hidden = report.routes.length - shown.length;
+    if (hidden > 0)
+      lines.push(`  \u2026 ${hidden} more (--limit to show more)`);
+  }
+  lines.push("", "By handler:");
+  if (report.handlers.length === 0) {
+    lines.push("  none recorded");
+  } else {
+    lines.push(...table(["handler", "items", "original", "delivered", "reduction", "retrieved"], report.handlers.map((r) => [
+      r.handler,
+      String(r.items),
+      formatBytes(r.original_bytes),
+      formatBytes(r.summary_bytes),
+      reduction(r),
+      pct(r.retrieved, r.items)
+    ])));
+  }
+  lines.push("", "retrieved = share fetched at least once with recall__retrieve; a high rate means the summary dropped something needed.");
+  if (report.unrecorded > 0) {
+    lines.push(`${report.unrecorded} item${report.unrecorded === 1 ? "" : "s"} stored before handlers were recorded (1.17.0) ` + `${report.unrecorded === 1 ? "is" : "are"} not included.`);
+  }
+  return lines.join(`
+`);
+}
+function parseSince(value) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!m)
+    return null;
+  const date = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (date.getMonth() !== Number(m[2]) - 1 || date.getDate() !== Number(m[3]))
+    return null;
+  return Math.floor(date.getTime() / 1000);
+}
+function localDate(seconds) {
+  const d = new Date(seconds * 1000);
+  const two = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`;
+}
+function discoverCommand(opts = {}) {
+  const files = storeFiles(opts.all ?? false);
+  if (files.length === 0) {
+    console.log(opts.all ? "No stores found." : "No store for this project yet.");
+    return;
+  }
+  const report = mergeReports(files.map((f) => readStore(f, { since: opts.since })));
+  const scope = opts.all ? `${report.stores} store${report.stores === 1 ? "" : "s"}` : "this project";
+  const since = opts.since !== undefined ? ` since ${localDate(opts.since)}` : "";
+  console.log(`mcp-recall discover \xB7 ${scope}${since}
+`);
+  console.log(formatReport(report, opts.limit));
+}
+
 // src/cli.ts
 async function getVersion() {
   const pkg = await Promise.resolve().then(() => __toESM(require_package(), 1));
@@ -11296,7 +11499,11 @@ Commands:
   gc [--force]         Reclaim disk: list/delete orphaned project DBs
     --stale-days N     Legacy DBs (no recorded path) older than N days are candidates (default 90)
     --vacuum           Full-VACUUM surviving DBs to reclaim free pages
-  profiles <cmd>       Manage compression profiles
+  discover             Rank output routed to fallback handlers: where a new handler would pay
+    --all              Every project's store, not just this one
+    --since YYYY-MM-DD Only output stored on or after this date
+    --limit N          Rows to list (default 10)
+  profiles <cmd>      Manage compression profiles
     seed [--all]       Install profiles for detected MCPs (--all for entire catalog)
     list               Show installed profiles
     install <id>       Install a specific community profile
@@ -11344,7 +11551,7 @@ _mcp_recall() {
   COMPREPLY=()
   cur="\${COMP_WORDS[COMP_CWORD]}"
 
-  local commands="install uninstall status gc profiles learn import completions --help --version"
+  local commands="install uninstall status gc discover profiles learn import completions --help --version"
   local profiles_cmds="list install update remove available info seed feed check retrain test"
 
   if [[ \${COMP_CWORD} -eq 1 ]]; then
@@ -11431,6 +11638,7 @@ _mcp_recall() {
         'uninstall:remove hooks and MCP server'
         'status:show current configuration and health'
         'gc:reclaim disk from orphaned project databases'
+        'discover:rank output routed to fallback handlers'
         'profiles:manage compression profiles'
         'learn:generate profiles from your installed MCP servers'
         'import:restore items from a recall__export JSON dump'
@@ -11459,7 +11667,7 @@ function fishCompletion() {
   return `# mcp-recall fish completions
 # Save to: mcp-recall completions fish > ~/.config/fish/completions/mcp-recall.fish
 
-set -l commands install uninstall status gc profiles learn import completions
+set -l commands install uninstall status gc discover profiles learn import completions
 
 # Top-level commands
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
@@ -11470,6 +11678,8 @@ complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
   -a status -d "Show current configuration and health"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
   -a gc -d "Reclaim disk from orphaned project databases"
+complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
+  -a discover -d "Rank output routed to fallback handlers"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
   -a profiles -d "Manage compression profiles"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
@@ -11574,6 +11784,26 @@ async function main() {
   }
   if (subcommand === "status") {
     await statusCommand();
+    process.exit(0);
+  }
+  if (subcommand === "discover") {
+    const sinceIdx = process.argv.indexOf("--since");
+    let since;
+    if (sinceIdx !== -1) {
+      const parsed = parseSince(process.argv[sinceIdx + 1] ?? "");
+      if (parsed === null) {
+        console.error("--since must be a date, YYYY-MM-DD");
+        process.exit(1);
+      }
+      since = parsed;
+    }
+    const limitIdx = process.argv.indexOf("--limit");
+    const limit = limitIdx !== -1 ? Number(process.argv[limitIdx + 1]) : undefined;
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+      console.error("--limit must be a positive integer");
+      process.exit(1);
+    }
+    discoverCommand({ all: process.argv.includes("--all"), since, limit });
     process.exit(0);
   }
   if (subcommand === "gc") {

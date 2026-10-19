@@ -21,6 +21,8 @@ import {
   getStats,
   getToolBreakdown,
   getBashCommandBreakdown,
+  getHandlerBreakdown,
+  countUnrecordedHandler,
   getSuggestions,
   getSessionDays,
   getSessionSummary,
@@ -739,6 +741,31 @@ export function toolStats(
         `  ${row.command_fp.padEnd(colW)}  ${String(row.items).padStart(4)} item${row.items === 1 ? " " : "s"}` +
           `  ${formatBytes(row.original_bytes).padStart(8)} → ${formatBytes(row.summary_bytes).padEnd(8)}  ${reduction.padStart(4)}`
       );
+    }
+  }
+
+  // Per-handler retrieval rate (#341): a handler whose summaries are often
+  // retrieved is dropping something Claude needed. Rows stored before handlers
+  // were recorded are counted, never attributed.
+  const handlerBreakdown = getHandlerBreakdown(db, projectKey);
+  if (handlerBreakdown.length > 0) {
+    lines.push("", "By handler (sorted by original size):");
+    const colW = Math.min(40, Math.max(...handlerBreakdown.map((r) => r.handler.length)));
+    for (const row of handlerBreakdown) {
+      const reduction =
+        row.original_bytes > 0
+          ? `${((1 - row.summary_bytes / row.original_bytes) * 100).toFixed(0)}%`
+          : " —";
+      const retrieved = `${((row.retrieved / row.items) * 100).toFixed(0)}% retrieved`;
+      lines.push(
+        `  ${row.handler.padEnd(colW)}  ${String(row.items).padStart(4)} item${row.items === 1 ? " " : "s"}` +
+          `  ${formatBytes(row.original_bytes).padStart(8)} → ${formatBytes(row.summary_bytes).padEnd(8)}  ${reduction.padStart(4)}` +
+          `  ${retrieved}`
+      );
+    }
+    const unrecorded = countUnrecordedHandler(db, projectKey);
+    if (unrecorded > 0) {
+      lines.push(`  (${unrecorded} older item${unrecorded === 1 ? "" : "s"} stored before handlers were recorded are not included)`);
     }
   }
 

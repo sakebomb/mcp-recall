@@ -130,6 +130,15 @@ leaks — are visible. Families come from a privacy-safe fingerprint (the leadin
 command verb/subcommand only; never an argument or secret); rows written before
 this feature, or with no bare command verb, fold into an `unknown` bucket.
 
+A `By handler` section shows each compression handler's reduction and its
+**retrieval rate**: the share of its items fetched at least once with
+`recall__retrieve`. A high rate means its summaries drop something Claude then
+needs. Handlers are recorded from 1.17.0 on. Older items have none and are
+counted on one closing line, not attributed. The handler is the one routing
+chose, so a dedicated handler that hands an unparseable output to the shell
+summary still counts as itself. `mcp-recall discover` ranks the items that
+went to a fallback handler.
+
 ```
 recall__stats()
 ```
@@ -155,6 +164,11 @@ By Bash command (sorted by original size):
   rg           3 items     42KB →  7.1KB    83%
   git diff     2 items     34KB →   11KB    68%
   cat          1 item      12KB →   11KB    12%
+
+By handler (sorted by original size):
+  playwrightHandler     4 items    215KB →  1.2KB    99%  0% retrieved
+  githubHandler         3 items    106KB →  3.3KB    97%  33% retrieved
+  shellHandler          4 items     54KB →   38KB    30%  50% retrieved
 
 Suggestions:
   📌 Consider pinning:

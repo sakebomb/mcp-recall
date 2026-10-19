@@ -320,6 +320,7 @@ mcp-recall install              # register hooks + MCP server in Claude Code
 mcp-recall uninstall            # remove hooks + MCP server
 mcp-recall status               # report install health and store size
 mcp-recall gc [--force]         # reclaim disk (see Maintenance above)
+mcp-recall discover [--all]     # rank output routed to fallback handlers (--since, --limit)
 mcp-recall learn                # generate profiles from your installed MCPs
 mcp-recall profiles <cmd>       # manage compression profiles (see Profiles below)
 mcp-recall import <file>        # restore items from a recall__export dump

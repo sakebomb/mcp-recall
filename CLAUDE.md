@@ -60,6 +60,9 @@ src/
   hooks/                Hook implementations (SessionStart, PostToolUse)
   gc/                   mcp-recall gc — classifies every project DB and reclaims disk.
                         Deletion policy lives in STATUS_POLICY; see the safety note below.
+  discover/             mcp-recall discover — ranks fallback-routed output by bytes, with
+                        reduction and retrieval rate (#341). Read-only over every store.
+                        A NULL `handler` means "stored before #341", never a fallback.
   import/               mcp-recall import — restores a recall__export dump into a store
   install/              mcp-recall install / uninstall / status — writes to ~/.claude.json, settings.json, CLAUDE.md
   learn/                mcp-recall learn — reads ~/.claude.json, spawns MCP servers via stdio, generates TOML profiles
@@ -101,6 +104,7 @@ mcp-recall install            # write MCP entry, hooks, and CLAUDE.md instructio
 mcp-recall uninstall          # reverse of install
 mcp-recall status             # report install health (MCP entry, hooks, CLAUDE.md block, store size)
 mcp-recall gc [--force]       # list/reclaim orphaned project DBs (--stale-days N, --vacuum). Dry run by default
+mcp-recall discover [--all]   # rank fallback-routed output by bytes, reduction, retrieval rate (--since, --limit)
 mcp-recall import <file>      # restore from a recall__export dump (--overwrite, --dry-run). --keep-project-key removed in #226 (rejected)
 mcp-recall completions <shell> # emit a zsh/bash/fish completion script
 mcp-recall learn [server…]    # auto-generate TOML profiles by inspecting installed MCP servers

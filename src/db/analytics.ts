@@ -4,6 +4,9 @@ import type {
   Stats,
   ToolBreakdownRow,
   CommandBreakdownRow,
+  HandlerBreakdownRow,
+  FallbackRouteRow,
+  HandlerQueryOptions,
   SuggestionsOptions,
   SuggestionsData,
   ContextOptions,
@@ -124,6 +127,83 @@ export function getBashCommandBreakdown(db: Database, project_key: string): Comm
     GROUP BY COALESCE(command_fp, 'unknown')
     ORDER BY original_bytes DESC
   `).all(project_key) as CommandBreakdownRow[];
+}
+
+/**
+ * Handlers that summarise without knowing the output's source: the content
+ * fallbacks at the end of getHandler, and the Bash route for a command with no
+ * dedicated handler. A large, frequent route through one of these is where a new
+ * handler would pay (#341).
+ */
+export const FALLBACK_HANDLERS = ["genericHandler", "jsonHandler", "shellHandler"] as const;
+
+/**
+ * Rows the handler analytics read: intercepted output with a recorded handler.
+ * A NULL handler only means the row was stored before #341 (the migration cannot
+ * backfill), so those rows are counted apart and never treated as a fallback.
+ */
+function handlerWhere(
+  project_key: string,
+  opts: HandlerQueryOptions,
+  recorded = true
+): { where: string; params: SQLQueryBindings[] } {
+  const params: SQLQueryBindings[] = [project_key];
+  let where = `WHERE project_key = ? AND tool_name != 'recall__note' AND handler IS ${recorded ? "NOT " : ""}NULL`;
+  if (opts.since !== undefined) {
+    where += " AND created_at >= ?";
+    params.push(opts.since);
+  }
+  return { where, params };
+}
+
+const HANDLER_AGGREGATES = `
+  COUNT(*)                                          AS items,
+  COALESCE(SUM(original_size),0)                    AS original_bytes,
+  COALESCE(SUM(${DELIVERED_EXPR}),0)                AS summary_bytes,
+  COALESCE(SUM(CASE WHEN access_count > 0 THEN 1 ELSE 0 END),0) AS retrieved`;
+
+/** Per-handler savings and retrieval, sorted by original_bytes desc (#341). */
+export function getHandlerBreakdown(
+  db: Database,
+  project_key: string,
+  opts: HandlerQueryOptions = {}
+): HandlerBreakdownRow[] {
+  const { where, params } = handlerWhere(project_key, opts);
+  return db.prepare(`
+    SELECT handler, ${HANDLER_AGGREGATES}
+    FROM stored_outputs
+    ${where}
+    GROUP BY handler
+    ORDER BY original_bytes DESC
+  `).all(...params) as HandlerBreakdownRow[];
+}
+
+/**
+ * Tools and Bash command families whose output went to a fallback handler,
+ * sorted by original_bytes desc: the candidates for a new handler (#341).
+ */
+export function getFallbackRoutes(
+  db: Database,
+  project_key: string,
+  opts: HandlerQueryOptions = {}
+): FallbackRouteRow[] {
+  const { where, params } = handlerWhere(project_key, opts);
+  const placeholders = FALLBACK_HANDLERS.map(() => "?").join(", ");
+  return db.prepare(`
+    SELECT tool_name,
+      CASE WHEN tool_name = 'Bash' THEN COALESCE(command_fp, 'unknown') END AS command_fp,
+      handler, ${HANDLER_AGGREGATES}
+    FROM stored_outputs
+    ${where} AND handler IN (${placeholders})
+    GROUP BY tool_name, 2, handler
+    ORDER BY original_bytes DESC
+  `).all(...params, ...FALLBACK_HANDLERS) as FallbackRouteRow[];
+}
+
+/** Intercepted rows stored before handlers were recorded (#341): reported, never analysed. */
+export function countUnrecordedHandler(db: Database, project_key: string, opts: HandlerQueryOptions = {}): number {
+  const { where, params } = handlerWhere(project_key, opts, false);
+  return (db.prepare(`SELECT COUNT(*) AS n FROM stored_outputs ${where}`).get(...params) as { n: number }).n;
 }
 
 /** Returns per-tool storage stats, sorted by original_bytes desc. */
