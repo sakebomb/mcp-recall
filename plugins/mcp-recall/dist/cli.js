@@ -6498,6 +6498,8 @@ function isLogLine(line) {
   if (starts.length === 0)
     return false;
   const prefix = line.slice(0, Math.min(...starts)).trim();
+  if (prefix.includes("|"))
+    return false;
   return prefix === "" || prefix.split(/\s+/).length <= MAX_WORDS_BEFORE_TIMESTAMP;
 }
 function repeatKey(line) {

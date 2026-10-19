@@ -35,6 +35,8 @@ describe("repeatKey", () => {
   it("does not mask a line that does not open with a timestamp", () => {
     const slot = (t: string) => `  "s": "2026-09-26 | 2026-09-26T${t}:00.000Z | status=open | cap=10 booked=0"`;
     expect(repeatKey(slot("14:00"))).not.toBe(repeatKey(slot("15:30")));
+    const row = (from: string, to: string) => `2026-09-26 | ${from}:00 | ${to}:00 | closed | 10 | 0 | 0`;
+    expect(repeatKey(row("11:00", "11:30"))).not.toBe(repeatKey(row("11:30", "12:00")));
     expect(repeatKey("3f9a2c1e7b wip")).not.toBe(repeatKey("8d0e4b6a2f wip"));
   });
 });

@@ -33,11 +33,15 @@ const VOLATILE_RES: Array<[RegExp, string]> = [
 // (`ERROR 2026-…`, `host 2026-…`, `1 time="…"`).
 const MAX_WORDS_BEFORE_TIMESTAMP = 2;
 
-/** True when `line` opens with a timestamp, as a log line does. */
+/**
+ * True when `line` opens with a timestamp, as a log line does. A `|` before it
+ * marks a table row (`2026-09-26 | 11:00:00 | closed`), whose times are data.
+ */
 function isLogLine(line: string): boolean {
   const starts = TIMESTAMP_RES.map((re) => line.search(new RegExp(re.source))).filter((i) => i >= 0);
   if (starts.length === 0) return false;
   const prefix = line.slice(0, Math.min(...starts)).trim();
+  if (prefix.includes("|")) return false;
   return prefix === "" || prefix.split(/\s+/).length <= MAX_WORDS_BEFORE_TIMESTAMP;
 }
 
