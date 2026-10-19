@@ -173,18 +173,27 @@ describe("handleSessionStart — context injection", () => {
   it("truncates snapshot at 2000 characters when context is large", () => {
     const db = getDb(":memory:");
     const projectKey = getProjectKey(TEST_CWD);
-    // Store enough pinned items to push the formatted snapshot past 2000 chars.
-    // toolContext formats each item as ~200 chars; 15 items ≈ 3000 chars.
-    for (let i = 0; i < 15; i++) {
+    // Fill the bounded sections to push the formatted snapshot past 2000 chars:
+    // ten pins (one per session, so the per-session cap doesn't thin them) and
+    // ten unpinned notes, ~200 chars each ≈ 4000 chars.
+    for (let i = 0; i < 10; i++) {
       const stored = storeOutput(db, {
         project_key: projectKey,
-        session_id: "sess-inject-002",
+        session_id: `sess-inject-002-${i}`,
         tool_name: "mcp__github__list_issues",
         summary: `pinned item ${i} — ${"x".repeat(80)}`,
-        full_content: "full",
+        full_content: `full ${i}`,
         original_size: 100,
       });
       pinOutput(db, stored.id, projectKey, true);
+      storeOutput(db, {
+        project_key: projectKey,
+        session_id: "sess-inject-002",
+        tool_name: "recall__note",
+        summary: `note ${i} — ${"y".repeat(80)}`,
+        full_content: `note body ${i}`,
+        original_size: 100,
+      });
     }
 
     const spy = spyOn(process.stdout, "write");

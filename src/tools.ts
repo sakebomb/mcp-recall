@@ -462,6 +462,24 @@ export interface ContextArgs {
   limit?: number;
 }
 
+const CONTEXT_OVERFLOW_SESSIONS = 3; // sessions named in the pinned overflow line
+
+/** One line naming where the pins left out of recall__context live, largest session first. */
+function formatPinnedOverflow(overflow: Array<{ session_id: string; count: number }>): string {
+  const named = overflow
+    .slice(0, CONTEXT_OVERFLOW_SESSIONS)
+    .map((o) => `+${o.count.toLocaleString("en-US")} more from ${o.session_id}`);
+  const rest = overflow.slice(CONTEXT_OVERFLOW_SESSIONS);
+  if (rest.length > 0) {
+    const restCount = rest.reduce((sum, o) => sum + o.count, 0);
+    named.push(`+${restCount.toLocaleString("en-US")} more from ${rest.length} other sessions`);
+  }
+  return (
+    `  ${named.join(" · ")}\n` +
+    `    (recall__list_stored to browse; recall__forget session_id + force: true clears a session)`
+  );
+}
+
 export function toolContext(
   db: Database,
   projectKey: string,
@@ -489,13 +507,17 @@ export function toolContext(
   ];
 
   if (data.pinned.length > 0) {
-    lines.push("", `Pinned (${data.pinned.length}):`);
+    const count = data.pinned_overflow.length > 0
+      ? `${data.pinned.length} of ${data.pinned_total.toLocaleString("en-US")}`
+      : `${data.pinned.length}`;
+    lines.push("", `Pinned (${count}):`);
     for (const item of data.pinned) {
       const excerpt = item.summary.slice(0, CONTEXT_EXCERPT_LEN).replace(/\n/g, " ");
       const ellipsis = item.summary.length > CONTEXT_EXCERPT_LEN ? "…" : "";
       lines.push(`  📌 ${item.id}  ${item.tool_name.padEnd(LIST_TOOL_COL_WIDTH)}  ${formatDate(item.created_at)}`);
       lines.push(`    ${excerpt}${ellipsis}`);
     }
+    if (data.pinned_overflow.length > 0) lines.push(formatPinnedOverflow(data.pinned_overflow));
   }
 
   if (data.notes.length > 0) {

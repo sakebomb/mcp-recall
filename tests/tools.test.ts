@@ -1026,6 +1026,28 @@ describe("MCP tool handlers", () => {
       expect(result).toContain(stored.id);
     });
 
+    it("caps the pinned section and names the sessions it left out", () => {
+      const insert = db.prepare(`
+        INSERT INTO stored_outputs
+          (id, project_key, session_id, tool_name, summary, full_content,
+           original_size, summary_size, created_at, pinned)
+        VALUES (?, ?, ?, 'recall__note', 'bulk note', 'body', 1024, 64, ?, 1)
+      `);
+      const now = Math.floor(Date.now() / 1000);
+      db.transaction(() => {
+        for (let i = 0; i < 2000; i++) insert.run(`recall_bulk_${i}`, PROJECT_KEY, "bulk-sync", now - 86400 + i);
+      })();
+      const mine = storeOutput(db, makeInput());
+      pinOutput(db, mine.id, PROJECT_KEY, true);
+
+      const result = toolContext(db, PROJECT_KEY, {});
+
+      expect(result).toContain("Pinned (4 of 2,001):");
+      expect(result).toContain(mine.id);
+      expect(result).toContain("+1,997 more from bulk-sync");
+      expect((result.match(/📌/g) ?? []).length).toBe(4);
+    });
+
     it("shows notes", () => {
       storeOutput(db, makeInput({ tool_name: "recall__note", summary: "(note): Auth findings" }));
       const result = toolContext(db, PROJECT_KEY, {});

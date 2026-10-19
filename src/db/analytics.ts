@@ -8,10 +8,16 @@ import type {
   SuggestionsData,
   ContextOptions,
   ContextData,
+  ContextPinnedItem,
   SessionSummaryOptions,
   SessionSummaryData,
 } from "./types";
 import { getSessionDays, EFFECTIVE_SIZE_EXPR } from "./queries";
+
+/** Most pinned items {@link getContext} returns, across all sessions. */
+export const CONTEXT_PINNED_LIMIT = 10;
+/** Most pinned items any one session contributes to that sample. */
+export const CONTEXT_PINNED_PER_SESSION = 3;
 
 /**
  * Bytes Claude received for a row: its delivered size (header included, #319),
@@ -226,12 +232,40 @@ export function getContext(
   const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
   const today = new Date().toISOString().slice(0, 10);
 
-  // 1. All pinned items, most recently accessed first
+  // 1. Pinned items, bounded. A bulk writer can pin thousands of rows into one
+  //    session (#269), so each session contributes at most
+  //    CONTEXT_PINNED_PER_SESSION, and slots are dealt round-robin: every
+  //    session's best pin before any session's second.
   const pinned = db.prepare(`
-    SELECT * FROM stored_outputs
+    WITH ranked AS (
+      SELECT id, session_id, tool_name, summary, created_at, last_accessed,
+        ROW_NUMBER() OVER (
+          PARTITION BY session_id
+          ORDER BY last_accessed DESC NULLS LAST, created_at DESC
+        ) AS rn
+      FROM stored_outputs
+      WHERE project_key = ? AND pinned = 1
+    )
+    SELECT id, session_id, tool_name, summary, created_at, last_accessed
+    FROM ranked
+    WHERE rn <= ?
+    ORDER BY rn, last_accessed DESC NULLS LAST, created_at DESC
+    LIMIT ?
+  `).all(project_key, CONTEXT_PINNED_PER_SESSION, CONTEXT_PINNED_LIMIT) as ContextPinnedItem[];
+
+  const pinnedCounts = db.prepare(`
+    SELECT session_id, COUNT(*) AS count
+    FROM stored_outputs
     WHERE project_key = ? AND pinned = 1
-    ORDER BY last_accessed DESC NULLS LAST, created_at DESC
-  `).all(project_key) as StoredOutput[];
+    GROUP BY session_id
+  `).all(project_key) as Array<{ session_id: string; count: number }>;
+  const shown = new Map<string, number>();
+  for (const p of pinned) shown.set(p.session_id, (shown.get(p.session_id) ?? 0) + 1);
+  const pinned_total = pinnedCounts.reduce((sum, r) => sum + r.count, 0);
+  const pinned_overflow = pinnedCounts
+    .map((r) => ({ session_id: r.session_id, count: r.count - (shown.get(r.session_id) ?? 0) }))
+    .filter((r) => r.count > 0)
+    .sort((a, b) => b.count - a.count || a.session_id.localeCompare(b.session_id));
 
   // 2. Unpinned notes, newest first (capped to avoid noise)
   const notes = db.prepare(`
@@ -292,5 +326,5 @@ export function getContext(
     hot.push(...rows.filter((r) => !excludeSet.has(r.id)).slice(0, 5));
   }
 
-  return { pinned, notes, recent, hot, last_session };
+  return { pinned, pinned_total, pinned_overflow, notes, recent, hot, last_session };
 }

@@ -98,9 +98,19 @@ export interface ContextOptions {
   limit?: number;  // max items in recently accessed section (default 5)
 }
 
+/** A pinned row as {@link getContext} returns it: display columns only, no `full_content`. */
+export type ContextPinnedItem = Pick<
+  StoredOutput,
+  "id" | "session_id" | "tool_name" | "summary" | "created_at" | "last_accessed"
+>;
+
 /** Data returned by {@link getContext}: five isolated sections with no overlap. */
 export interface ContextData {
-  pinned: StoredOutput[];
+  /** A bounded sample of the pinned items; `pinned_total` is the real count. */
+  pinned: ContextPinnedItem[];
+  pinned_total: number;
+  /** Pinned items left out of `pinned`, counted per session, largest first. */
+  pinned_overflow: Array<{ session_id: string; count: number }>;
   notes: StoredOutput[];
   recent: StoredOutput[];
   hot: StoredOutput[];

@@ -5459,6 +5459,8 @@ function getSessionDays(db) {
   return db.prepare(`SELECT date FROM sessions ORDER BY date DESC`).all().map((r) => r.date);
 }
 // src/db/analytics.ts
+var CONTEXT_PINNED_LIMIT = 10;
+var CONTEXT_PINNED_PER_SESSION = 3;
 var DELIVERED_EXPR = "COALESCE(delivered_size, summary_size)";
 function getToolBreakdown(db, project_key) {
   return db.prepare(`
@@ -5538,10 +5540,32 @@ function getContext(db, project_key, opts = {}) {
   const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
   const today = new Date().toISOString().slice(0, 10);
   const pinned = db.prepare(`
-    SELECT * FROM stored_outputs
+    WITH ranked AS (
+      SELECT id, session_id, tool_name, summary, created_at, last_accessed,
+        ROW_NUMBER() OVER (
+          PARTITION BY session_id
+          ORDER BY last_accessed DESC NULLS LAST, created_at DESC
+        ) AS rn
+      FROM stored_outputs
+      WHERE project_key = ? AND pinned = 1
+    )
+    SELECT id, session_id, tool_name, summary, created_at, last_accessed
+    FROM ranked
+    WHERE rn <= ?
+    ORDER BY rn, last_accessed DESC NULLS LAST, created_at DESC
+    LIMIT ?
+  `).all(project_key, CONTEXT_PINNED_PER_SESSION, CONTEXT_PINNED_LIMIT);
+  const pinnedCounts = db.prepare(`
+    SELECT session_id, COUNT(*) AS count
+    FROM stored_outputs
     WHERE project_key = ? AND pinned = 1
-    ORDER BY last_accessed DESC NULLS LAST, created_at DESC
+    GROUP BY session_id
   `).all(project_key);
+  const shown = new Map;
+  for (const p of pinned)
+    shown.set(p.session_id, (shown.get(p.session_id) ?? 0) + 1);
+  const pinned_total = pinnedCounts.reduce((sum, r) => sum + r.count, 0);
+  const pinned_overflow = pinnedCounts.map((r) => ({ session_id: r.session_id, count: r.count - (shown.get(r.session_id) ?? 0) })).filter((r) => r.count > 0).sort((a, b) => b.count - a.count || a.session_id.localeCompare(b.session_id));
   const notes = db.prepare(`
     SELECT * FROM stored_outputs
     WHERE project_key = ? AND pinned = 0 AND tool_name = 'recall__note'
@@ -5588,7 +5612,7 @@ function getContext(db, project_key, opts = {}) {
     `).all(project_key, startOfDay, endOfDay, 5 + excludeSet.size);
     hot.push(...rows.filter((r) => !excludeSet.has(r.id)).slice(0, 5));
   }
-  return { pinned, notes, recent, hot, last_session };
+  return { pinned, pinned_total, pinned_overflow, notes, recent, hot, last_session };
 }
 // src/secrets.ts
 var SECRET_PATTERNS = [
@@ -5701,6 +5725,17 @@ function reductionPct(original, summary) {
     return "0%";
   return `${((1 - summary / original) * 100).toFixed(0)}%`;
 }
+var CONTEXT_OVERFLOW_SESSIONS = 3;
+function formatPinnedOverflow(overflow) {
+  const named = overflow.slice(0, CONTEXT_OVERFLOW_SESSIONS).map((o) => `+${o.count.toLocaleString("en-US")} more from ${o.session_id}`);
+  const rest = overflow.slice(CONTEXT_OVERFLOW_SESSIONS);
+  if (rest.length > 0) {
+    const restCount = rest.reduce((sum, o) => sum + o.count, 0);
+    named.push(`+${restCount.toLocaleString("en-US")} more from ${rest.length} other sessions`);
+  }
+  return `  ${named.join(" \xB7 ")}
+` + `    (recall__list_stored to browse; recall__forget session_id + force: true clears a session)`;
+}
 function toolContext(db, projectKey, args) {
   const data = getContext(db, projectKey, args);
   const now = Date.now();
@@ -5715,13 +5750,16 @@ function toolContext(db, projectKey, args) {
     `Generated ${formatRelativeTime(Date.now() - now)}`
   ];
   if (data.pinned.length > 0) {
-    lines.push("", `Pinned (${data.pinned.length}):`);
+    const count = data.pinned_overflow.length > 0 ? `${data.pinned.length} of ${data.pinned_total.toLocaleString("en-US")}` : `${data.pinned.length}`;
+    lines.push("", `Pinned (${count}):`);
     for (const item of data.pinned) {
       const excerpt = item.summary.slice(0, CONTEXT_EXCERPT_LEN).replace(/\n/g, " ");
       const ellipsis = item.summary.length > CONTEXT_EXCERPT_LEN ? "\u2026" : "";
       lines.push(`  \uD83D\uDCCC ${item.id}  ${item.tool_name.padEnd(LIST_TOOL_COL_WIDTH)}  ${formatDate(item.created_at)}`);
       lines.push(`    ${excerpt}${ellipsis}`);
     }
+    if (data.pinned_overflow.length > 0)
+      lines.push(formatPinnedOverflow(data.pinned_overflow));
   }
   if (data.notes.length > 0) {
     lines.push("", `Notes (${data.notes.length}):`);

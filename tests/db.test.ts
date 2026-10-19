@@ -1308,4 +1308,79 @@ describe("db", () => {
       expect(data.hot).toEqual([]);
     });
   });
+
+  describe("getContext pinned section", () => {
+    // Pins `count` rows into one session, created `ageSeconds` ago and spaced 1s
+    // apart, the shape a bulk note backend leaves behind (#269).
+    function pinMany(sessionId: string, count: number, ageSeconds: number) {
+      const insert = db.prepare(`
+        INSERT INTO stored_outputs
+          (id, project_key, session_id, tool_name, summary, full_content,
+           original_size, summary_size, created_at, pinned)
+        VALUES (?, ?, ?, 'recall__note', 'a note', 'full note body', 1024, 64, ?, 1)
+      `);
+      const base = Math.floor(Date.now() / 1000) - ageSeconds;
+      db.transaction(() => {
+        for (let i = 0; i < count; i++) {
+          insert.run(`recall_${sessionId}_${i}`, PROJECT_KEY, sessionId, base + i);
+        }
+      })();
+    }
+
+    function shownPerSession(pinned: Array<{ session_id: string }>): Map<string, number> {
+      const counts = new Map<string, number>();
+      for (const p of pinned) counts.set(p.session_id, (counts.get(p.session_id) ?? 0) + 1);
+      return counts;
+    }
+
+    it("a bulk session cannot crowd a lone older pin out of the pinned section", () => {
+      pinMany("mine", 1, 90 * 86400);
+      pinMany("other-sync", 20, 30 * 86400);
+      pinMany("bulk-sync", 500, 86400);
+
+      const data = getContext(db, PROJECT_KEY);
+
+      expect(data.pinned.map((p) => p.id)).toContain("recall_mine_0");
+      expect(data.pinned.length).toBeLessThanOrEqual(10);
+      for (const count of shownPerSession(data.pinned).values()) {
+        expect(count).toBeLessThanOrEqual(3);
+      }
+      expect(data.pinned_total).toBe(521);
+      expect(data.pinned_overflow).toEqual([
+        { session_id: "bulk-sync", count: 497 },
+        { session_id: "other-sync", count: 17 },
+      ]);
+    });
+
+    it("shares the pinned slots across sessions before giving any one a second", () => {
+      // Staggered ages: by recency alone s1-s3 would take three slots each and
+      // s4 one, so this fails unless slots are dealt round-robin.
+      ["s1", "s2", "s3", "s4"].forEach((s, i) => pinMany(s, 5, (i + 1) * 86400));
+
+      const data = getContext(db, PROJECT_KEY);
+
+      expect(data.pinned.length).toBe(10);
+      for (const count of shownPerSession(data.pinned).values()) {
+        expect(count).toBeGreaterThanOrEqual(2);
+      }
+    });
+
+    it("lists every pin with no overflow when under the cap", () => {
+      pinMany("mine", 2, 86400);
+
+      const data = getContext(db, PROJECT_KEY);
+
+      expect(data.pinned.length).toBe(2);
+      expect(data.pinned_total).toBe(2);
+      expect(data.pinned_overflow).toEqual([]);
+    });
+
+    it("does not load full_content for pinned rows", () => {
+      pinMany("mine", 1, 86400);
+
+      const data = getContext(db, PROJECT_KEY);
+
+      expect(data.pinned[0]).not.toHaveProperty("full_content");
+    });
+  });
 });
