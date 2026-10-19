@@ -11503,7 +11503,7 @@ Commands:
     --all              Every project's store, not just this one
     --since YYYY-MM-DD Only output stored on or after this date
     --limit N          Rows to list (default 10)
-  profiles <cmd>      Manage compression profiles
+  profiles <cmd>       Manage compression profiles
     seed [--all]       Install profiles for detected MCPs (--all for entire catalog)
     list               Show installed profiles
     install <id>       Install a specific community profile
