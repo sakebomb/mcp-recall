@@ -430,6 +430,15 @@ function commandSegments(command: string): string[] {
   return command.split(/\||;|&&|\n/).map((part) => normalizeCommand(part));
 }
 
+// A sed line address: a number, a shell expansion the shell turns into one
+// (`$n`, `${n}`, `$((n+40))`), or a bare `$` for the last line. A command
+// substitution `$(…)` is not matched: commandSegments splits on its pipes.
+const SED_LINE = String.raw`(?:\d+|\$(?:\w+|\{\w+\}|\(\([^()]*\)\))|\$)`;
+/** `sed -n` printing one line or a line range (`N,M`, `N,$`, `N,+M`). */
+const SED_LINE_RANGE = new RegExp(
+  String.raw`^sed\s+(?:-\S+\s+)*-n\s+['"]?${SED_LINE}(?:,\s*\+?${SED_LINE})?p['"]?(\s|$)`
+);
+
 /**
  * True when any command in `command` limits its own output: `head`/`tail`, a
  * `sed -n` line range, or grep context and match limits (`-A/-B/-C N`, `-m N`).
@@ -439,7 +448,7 @@ function commandSegments(command: string): string[] {
 export function isBoundedRead(command: string): boolean {
   return commandSegments(command).some((s) => {
     if (/^(head|tail)(\s|$)/.test(s)) return true;
-    if (/^sed\s+(?:-\S+\s+)*-n\s+['"]?\d+(?:,\s*(?:\d+|\$))?p['"]?(\s|$)/.test(s)) return true;
+    if (SED_LINE_RANGE.test(s)) return true;
     return /^(grep|egrep|fgrep|rg|ag|git\s+grep)\s/.test(s) &&
       /\s(-[a-zA-Z]*[ABCm]\s*\d+|--(?:after-|before-)?context[=\s]\d+|--max-count[=\s]\d+)/.test(s);
   });

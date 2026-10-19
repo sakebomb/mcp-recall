@@ -7607,11 +7607,13 @@ var READ_PASSTHROUGH_MAX_BYTES = 8 * 1024;
 function commandSegments(command) {
   return command.split(/\||;|&&|\n/).map((part) => normalizeCommand(part));
 }
+var SED_LINE = String.raw`(?:\d+|\$(?:\w+|\{\w+\}|\(\([^()]*\)\))|\$)`;
+var SED_LINE_RANGE = new RegExp(String.raw`^sed\s+(?:-\S+\s+)*-n\s+['"]?${SED_LINE}(?:,\s*\+?${SED_LINE})?p['"]?(\s|$)`);
 function isBoundedRead(command) {
   return commandSegments(command).some((s) => {
     if (/^(head|tail)(\s|$)/.test(s))
       return true;
-    if (/^sed\s+(?:-\S+\s+)*-n\s+['"]?\d+(?:,\s*(?:\d+|\$))?p['"]?(\s|$)/.test(s))
+    if (SED_LINE_RANGE.test(s))
       return true;
     return /^(grep|egrep|fgrep|rg|ag|git\s+grep)\s/.test(s) && /\s(-[a-zA-Z]*[ABCm]\s*\d+|--(?:after-|before-)?context[=\s]\d+|--max-count[=\s]\d+)/.test(s);
   });

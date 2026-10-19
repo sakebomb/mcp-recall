@@ -1304,6 +1304,24 @@ describe("isBoundedRead", () => {
     ]) expect(isBoundedRead(command)).toBe(true);
   });
 
+  it("recognises a sed -n range whose ends the shell computes, or an N,+M range", () => {
+    for (const command of [
+      'sed -n "$((n-40)),$((n+40))p" src/x.ts',
+      'sed -n "${start},${end}p" src/x.ts',
+      "sed -n '120,+40p' src/x.ts",
+      'sed -n "$start,+75p" src/x.ts',
+      "sed -n '30,$p' src/x.ts",
+    ]) expect(isBoundedRead(command)).toBe(true);
+  });
+
+  it("does not take a sed substitution or every-Nth-line step for a range", () => {
+    for (const command of [
+      "sed -n 's/^KEY=//p' .env.example",
+      'sed -n "s/$pat//p" src/x.ts',
+      "sed -n '0~5p' src/x.ts",
+    ]) expect(isBoundedRead(command)).toBe(false);
+  });
+
   it("does not mistake other commands for a bound", () => {
     for (const command of [
       "grep -rn foo src",
