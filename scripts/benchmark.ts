@@ -21,6 +21,13 @@ interface Fixture {
 
 const rep = (line: string, n: number) => Array.from({ length: n }, (_, i) => line.replace(/%i/g, String(i))).join("\n");
 
+const DIFF_18_FILES = Array.from({ length: 18 }, (_, i) =>
+  `diff --git a/src/f${i}.ts b/src/f${i}.ts\nindex abc..def 100644\n--- a/src/f${i}.ts\n+++ b/src/f${i}.ts\n@@ -1,6 +1,8 @@\n` +
+  rep(" context %i", 4) + "\n" + rep("-old %i", 5) + "\n" + rep("+new %i", 7)
+).join("\n");
+const RG_240_MATCHES = rep("src/mod%i/orchestrator.ts:%i:  const r = doThing(ctx, %i)", 240)
+  .replace(/mod(\d+)/g, (_, n) => `mod${Number(n) % 6}`);
+
 const FIXTURES: Fixture[] = [
   {
     label: "`tsc --noEmit` (60 errors)",
@@ -43,16 +50,26 @@ const FIXTURES: Fixture[] = [
   {
     label: "`git --no-pager diff` (18 files)",
     command: "git --no-pager diff",
-    stdout: Array.from({ length: 18 }, (_, i) =>
-      `diff --git a/src/f${i}.ts b/src/f${i}.ts\nindex abc..def 100644\n--- a/src/f${i}.ts\n+++ b/src/f${i}.ts\n@@ -1,6 +1,8 @@\n` +
-      rep(" context %i", 4) + "\n" + rep("-old %i", 5) + "\n" + rep("+new %i", 7)
-    ).join("\n"),
+    stdout: DIFF_18_FILES,
+    exit_code: 0,
+  },
+  {
+    // The same output run over ssh: routed by the remote command since #339.
+    label: "`ssh host 'cd /srv && git diff'` (18 files)",
+    command: "ssh -p 22 build-host 'cd /srv/app && git --no-pager diff'",
+    stdout: DIFF_18_FILES,
     exit_code: 0,
   },
   {
     label: "`rg` (240 matches, 6 files)",
     command: "rg --no-heading doThing",
-    stdout: rep("src/mod%i/orchestrator.ts:%i:  const r = doThing(ctx, %i)", 240).replace(/mod(\d+)/g, (_, n) => `mod${Number(n) % 6}`),
+    stdout: RG_240_MATCHES,
+    exit_code: 0,
+  },
+  {
+    label: "`ssh host rg` (240 matches, 6 files)",
+    command: "ssh build-host rg --no-heading doThing",
+    stdout: RG_240_MATCHES,
     exit_code: 0,
   },
   {

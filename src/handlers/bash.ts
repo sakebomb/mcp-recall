@@ -336,6 +336,161 @@ const WRAPPER_PREFIXES = [
 ];
 
 /**
+ * The command a quoted or bare argument runs, as a shell would pass it on: one
+ * single-quoted span, one double-quoted span (`\"`, `\\`, `` \` ``, `\$`
+ * unescaped), or the bare words as they are. A quoted span may be followed by a
+ * local pipeline or separator (`'cmd' | head`), which runs on this side but
+ * reads the same output, so it is kept. Anything else after the quote (`'a'\''b'`,
+ * `'a' b`) is ambiguous: null.
+ */
+function quotedCommand(arg: string): string | null {
+  const s = arg.trim();
+  let body: string;
+  let rest: string;
+  if (s.startsWith("'")) {
+    const end = s.indexOf("'", 1);
+    if (end === -1) return null;
+    body = s.slice(1, end);
+    rest = s.slice(end + 1);
+  } else if (s.startsWith('"')) {
+    const m = s.match(/^"((?:[^"\\]|\\[\s\S])*)"/);
+    if (!m) return null;
+    body = m[1]!.replace(/\\(["\\`$])/g, "$1");
+    rest = s.slice(m[0].length);
+  } else {
+    return s;
+  }
+  if (rest.trim() === "") return body.trim();
+  return /^\s*[|;&<>]/.test(rest) ? `${body.trim()} ${rest.trim()}` : null;
+}
+
+/**
+ * Splits `-xyz` option clusters off the front of `args`. `withValue` lists the
+ * single-letter options that take a value (attached, `-p22`, or as the next
+ * word), `flags` those that take none, `long` the long options (`--name` or
+ * `--name=value`; true when they take a value). Returns what follows the
+ * options, or null on any option outside those lists or a quoted value.
+ */
+function skipOptions(
+  args: string,
+  withValue: string,
+  flags: string,
+  long: Record<string, boolean> = {}
+): string | null {
+  let rest = args;
+  for (let i = 0; i < 16; i++) {
+    const opt = rest.match(/^(-[^\s'"]*)(?:\s+|$)/);
+    if (!opt) return rest;
+    rest = rest.slice(opt[0].length);
+    const word = opt[1]!;
+    if (word === "--") return rest;
+    let needsValue = false;
+    if (word.startsWith("--")) {
+      const [name, inline] = word.slice(2).split("=", 2);
+      if (!(name! in long)) return null;
+      needsValue = long[name!]! && inline === undefined;
+    } else {
+      for (let j = 1; j < word.length; j++) {
+        const ch = word[j]!;
+        if (withValue.includes(ch)) {
+          needsValue = j === word.length - 1; // otherwise the value is attached
+          break;
+        }
+        if (!flags.includes(ch)) return null;
+      }
+    }
+    if (needsValue) {
+      const value = rest.match(/^[^\s'"]+(?:\s+|$)/);
+      if (!value) return null;
+      rest = rest.slice(value[0].length);
+    }
+  }
+  return null;
+}
+
+// ssh(1) single-letter options. -N (no remote command) is in neither list, so
+// a tunnel is never unwrapped.
+const SSH_WITH_VALUE = "BbcDEeFIiJLlmOoPpQRSWw";
+const SSH_FLAGS = "46AaCfGgKkMnqsTtVvXxYy";
+const DOCKER_EXEC_WITH_VALUE = "euw";
+const DOCKER_EXEC_FLAGS = "dit";
+const DOCKER_EXEC_LONG: Record<string, boolean> = {
+  detach: false, interactive: false, tty: false, privileged: false,
+  env: true, "env-file": true, user: true, workdir: true, "detach-keys": true,
+};
+// A host, container or `user@host`: no leading dash, quote or operator.
+const TARGET = /^[A-Za-z0-9_][\w.@:-]*\s+/;
+
+/**
+ * Commands that run another command elsewhere (#339): `ssh host cmd`,
+ * `pct exec <id> -- cmd`, `docker exec ctr cmd`, and `bash -c 'cmd'`. Each
+ * returns the command run, or null when the shape is not unambiguous. `label`
+ * names the remote ones in the fingerprint; `bash -c` runs locally and has none.
+ */
+const REMOTE_WRAPPERS: Array<{ label: string | null; unwrap: (c: string) => string | null }> = [
+  {
+    label: "ssh",
+    unwrap: (c) => {
+      const args = c.match(/^ssh\s+/) ? skipOptions(c.replace(/^ssh\s+/, ""), SSH_WITH_VALUE, SSH_FLAGS) : null;
+      const host = args?.match(TARGET);
+      return host ? quotedCommand(args!.slice(host[0].length)) : null;
+    },
+  },
+  {
+    label: "pct exec",
+    unwrap: (c) => {
+      const m = c.match(/^pct\s+exec\s+\d+\s+(?:--\s+)?/);
+      return m ? quotedCommand(c.slice(m[0].length)) : null;
+    },
+  },
+  {
+    label: "docker exec",
+    unwrap: (c) => {
+      const args = c.match(/^docker\s+exec\s+/)
+        ? skipOptions(c.replace(/^docker\s+exec\s+/, ""), DOCKER_EXEC_WITH_VALUE, DOCKER_EXEC_FLAGS, DOCKER_EXEC_LONG)
+        : null;
+      const ctr = args?.match(TARGET);
+      return ctr ? quotedCommand(args!.slice(ctr[0].length)) : null;
+    },
+  },
+  {
+    label: null,
+    unwrap: (c) => {
+      const m = c.match(/^(?:ba)?sh\s+-[elx]*c[elx]*\s+(?=['"])/);
+      return m ? quotedCommand(c.slice(m[0].length)) : null;
+    },
+  },
+];
+
+/** {@link normalizeCommand}, plus the remote wrappers it stepped through, outermost first. */
+function unwrapCommand(command: string): { command: string; remote: string[] } {
+  let c = command.trim();
+  const remote: string[] = [];
+  // Bounded: chained prefixes are rare, and a bound keeps a pathological input
+  // from looping. Stops as soon as no prefix matches.
+  for (let i = 0; i < 8; i++) {
+    const cd = c.match(CD_PREFIX);
+    if (cd) {
+      c = cd[1]!.trim();
+      continue;
+    }
+    const wrapper = WRAPPER_PREFIXES.map((re) => c.match(re)).find((m) => m !== null);
+    if (wrapper) {
+      c = c.slice(wrapper[0].length);
+      continue;
+    }
+    const inner = REMOTE_WRAPPERS
+      .map(({ label, unwrap }) => ({ label, inner: unwrap(c) }))
+      .find((r) => r.inner !== null && r.inner !== "");
+    if (!inner) break;
+    if (inner.label) remote.push(inner.label);
+    c = inner.inner!;
+  }
+  c = c.replace(/^git\s+(?:(?:--no-pager|--paginate|-P)\s+|-[cC]\s+\S+\s+)+/, "git ");
+  return { command: c, remote };
+}
+
+/**
  * Normalises a Bash command so routing sees the real subcommand: unwraps leading
  * `cd <dir>` prefixes (see {@link CD_PREFIX} for the separator and quoting shapes
  * accepted) and strips git global options (`--no-pager`, `-C <path>`, `-c <k=v>`,
@@ -346,25 +501,26 @@ const WRAPPER_PREFIXES = [
  * `time`, `nice -n 10`, `env A=1`, `A=1`, `sudo`; see {@link WRAPPER_PREFIXES}),
  * so routing, the fingerprint and retention all see the wrapped command (#302).
  *
+ * And unwraps commands run elsewhere (`ssh host 'git status'`, `pct exec 108 --
+ * journalctl`, `docker exec ctr ps`, `bash -c '…'`; see {@link REMOTE_WRAPPERS}),
+ * so they reach the handler for the command they run (#339).
+ *
  * Chained prefixes are unwrapped across mixed separators and wrappers (`cd /a &&
- * timeout 60 git diff`) under a bounded loop.
+ * timeout 60 git diff`, `ssh h 'cd /x && git diff'`) under a bounded loop.
  */
 export function normalizeCommand(command: string): string {
-  let c = command.trim();
-  // Bounded: chained prefixes are rare, and a bound keeps a pathological input
-  // from looping. Stops as soon as no prefix matches.
-  for (let i = 0; i < 8; i++) {
-    const cd = c.match(CD_PREFIX);
-    if (cd) {
-      c = cd[1]!.trim();
-      continue;
-    }
-    const wrapper = WRAPPER_PREFIXES.map((re) => c.match(re)).find((m) => m !== null);
-    if (!wrapper) break;
-    c = c.slice(wrapper[0].length);
-  }
-  c = c.replace(/^git\s+(?:(?:--no-pager|--paginate|-P)\s+|-[cC]\s+\S+\s+)+/, "git ");
-  return c;
+  return unwrapCommand(command).command;
+}
+
+/**
+ * The fingerprint the hook stores for a raw Bash command: {@link commandFingerprint}
+ * of the normalised command, prefixed by any remote wrappers it ran through
+ * (`ssh git status`, `pct exec journalctl`), so local and remote stay apart in
+ * analytics (#339). Wrapper labels are constants: no host, id or container name.
+ */
+export function bashFingerprint(command: string): string {
+  const { command: inner, remote } = unwrapCommand(command);
+  return [...remote, commandFingerprint(inner)].filter((s) => s !== "").join(" ");
 }
 
 // Dispatcher commands whose first token names a tool family, not the operation —
@@ -422,12 +578,48 @@ export function commandFingerprint(command: string): string {
 export const READ_PASSTHROUGH_MAX_BYTES = 8 * 1024;
 
 /**
- * The commands in `command`, each without its `cd`/wrapper prefixes. The split
- * ignores quoting, so a quoted `| head` can read as a command of its own;
- * READ_PASSTHROUGH_MAX_BYTES caps what such a miss delivers.
+ * `command` split at every `|`, `||`, `;`, `&&`, `&` and newline outside quotes,
+ * escapes and `( … )`, so a quoted remote command (`ssh h 'cat f | head'`) stays
+ * one segment until it is unwrapped.
  */
-function commandSegments(command: string): string[] {
-  return command.split(/\||;|&&|\n/).map((part) => normalizeCommand(part));
+function splitTopLevel(command: string): string[] {
+  const parts: string[] = [];
+  let quote: string | null = null;
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i]!;
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+    } else if (ch === "\\") {
+      i++;
+    } else if (quote) {
+      if (ch === quote) quote = null;
+    } else if (ch === "'" || ch === '"' || ch === "`") {
+      quote = ch;
+    } else if (ch === "(") {
+      depth++;
+    } else if (ch === ")") {
+      depth = Math.max(0, depth - 1);
+    } else if (depth === 0 && (ch === "|" || ch === ";" || ch === "&" || ch === "\n")) {
+      parts.push(command.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(command.slice(start));
+  return parts.filter((p) => p.trim() !== "");
+}
+
+/**
+ * The commands in `command`, each without its `cd`/wrapper prefixes. A segment
+ * that unwraps to a command line of its own (`ssh h 'cat f | head'`) is split
+ * again, a bounded number of times.
+ */
+function commandSegments(command: string, depth = 0): string[] {
+  return splitTopLevel(command).flatMap((part) => {
+    const c = normalizeCommand(part);
+    return depth < 3 && splitTopLevel(c).length > 1 ? commandSegments(c, depth + 1) : [c];
+  });
 }
 
 // A sed line address: a number, a shell expansion the shell turns into one

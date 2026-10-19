@@ -12,7 +12,7 @@ import { jsonHandler } from "../src/handlers/json";
 import { genericHandler } from "../src/handlers/generic";
 import { contentBlockHandler } from "../src/handlers/content-blocks";
 import { getHandler, extractText } from "../src/handlers/index";
-import { getBashHandler, normalizeCommand, commandFingerprint, isBoundedRead, isContentRead, compoundHandler, gitDiffHandler, gitLogHandler, terraformPlanHandler, gitStatusHandler, gitRefsHandler, packageInstallHandler, testRunnerHandler, dockerPsHandler, buildToolHandler, ghHandler, compilerDiagnosticsHandler, grepHandler, lsHandler, findHandler } from "../src/handlers/bash";
+import { getBashHandler, normalizeCommand, commandFingerprint, bashFingerprint, isBoundedRead, isContentRead, compoundHandler, gitDiffHandler, gitLogHandler, terraformPlanHandler, gitStatusHandler, gitRefsHandler, packageInstallHandler, testRunnerHandler, dockerPsHandler, buildToolHandler, ghHandler, compilerDiagnosticsHandler, grepHandler, lsHandler, findHandler } from "../src/handlers/bash";
 import { tavilyHandler } from "../src/handlers/tavily";
 import { databaseHandler } from "../src/handlers/database";
 import { sentryHandler } from "../src/handlers/sentry";
@@ -1213,6 +1213,75 @@ describe("getBashHandler", () => {
       const t0 = performance.now();
       normalizeCommand(input);
       expect(performance.now() - t0).toBeLessThan(250);
+    });
+  });
+
+  // #339: routing saw `ssh`/`pct exec`, not the command they run, so every remote
+  // command fell to the shell fallback (38% in the README benchmark).
+  describe("unwraps commands run elsewhere (#339)", () => {
+    const shapes: [string, string, Handler][] = [
+      ["ssh h 'git status'", "git status", gitStatusHandler],
+      ['ssh -p 22 h "docker ps"', "docker ps", dockerPsHandler],
+      ["ssh -p22 h git status", "git status", gitStatusHandler],
+      ["ssh -p22 -tt -o StrictHostKeyChecking=no root@10.0.0.5 git log --stat", "git log --stat", gitLogHandler],
+      ["ssh -i ~/.ssh/k -J bastion h 'rg foo src'", "rg foo src", grepHandler],
+      ["ssh h 'cd /x && git diff'", "git diff", gitDiffHandler],
+      ["pct exec 108 -- git status", "git status", gitStatusHandler],
+      ["pct exec 108 git log", "git log", gitLogHandler],
+      ["pct exec 108 -- bash -c 'git diff HEAD'", "git diff HEAD", gitDiffHandler],
+      ["ssh jupiter pct exec 108 -- ls -la /etc", "ls -la /etc", lsHandler],
+      ["docker exec -it -u root -w /app web find . -name x", "find . -name x", findHandler],
+      ["docker exec --user=root web git status", "git status", gitStatusHandler],
+      ["bash -lc 'grep -rn foo src'", "grep -rn foo src", grepHandler],
+      ['sh -c "git log \\"--format=%h\\""', 'git log "--format=%h"', gitLogHandler],
+      ["timeout 30 ssh h 'git status'", "git status", gitStatusHandler],
+    ];
+
+    for (const [command, inner, handler] of shapes) {
+      it(`routes ${command}`, () => {
+        expect(normalizeCommand(command)).toBe(inner);
+        expect(getBashHandler({ command })).toBe(handler);
+      });
+    }
+
+    it("routes a remote compound command to the compound handler", () => {
+      expect(getBashHandler({ command: "ssh h 'git status; uptime'" })).toBe(compoundHandler);
+    });
+
+    it("keeps a local pipeline after the quoted remote command", () => {
+      expect(normalizeCommand("ssh h 'journalctl -n 500' | grep err")).toBe("journalctl -n 500 | grep err");
+    });
+
+    it("leaves ambiguous or commandless shapes as they are", () => {
+      for (const command of [
+        "ssh h", "ssh -N -L 8080:x:80 h", "ssh -N h sleep 10", "ssh -Z h ls", 'ssh -o "A B" h ls', "ssh h 'unterminated",
+        "ssh h 'it'\\''s'", "ssh h 'a' b", "ssh -p", "pct exec", "pct exec abc -- ls", "pct list",
+        "docker exec web", "docker exec --rm web ls", "bash script.sh", "bash -c", "sh -c rg",
+      ]) {
+        expect(() => normalizeCommand(command)).not.toThrow();
+        expect(normalizeCommand(command)).toBe(command);
+      }
+    });
+
+    it("fingerprints the remote wrapper and the command, never the host or id", () => {
+      expect(bashFingerprint("ssh -p 22 jupiter 'git status'")).toBe("ssh git status");
+      expect(bashFingerprint("pct exec 108 -- journalctl -n 200")).toBe("pct exec journalctl");
+      expect(bashFingerprint("ssh jupiter pct exec 108 -- docker ps")).toBe("ssh pct exec docker ps");
+      expect(bashFingerprint("docker exec web ls")).toBe("docker exec ls");
+      expect(bashFingerprint("bash -c 'rg foo'")).toBe("rg"); // runs locally
+      expect(bashFingerprint("timeout 30 git diff")).toBe("git diff");
+      expect(bashFingerprint("ssh jupiter")).toBe("ssh");
+    });
+
+    it("sees a content read inside a remote command", () => {
+      expect(isContentRead("ssh h 'cat /etc/hosts'")).toBe(true);
+      expect(isContentRead("ssh h 'journalctl -u x | tail -50'")).toBe(true);
+      expect(isContentRead("pct exec 108 -- sed -n 1,40p /etc/x.conf")).toBe(true);
+      expect(isContentRead("ssh h 'docker ps'")).toBe(false);
+    });
+
+    it("does not read a quoted pipe as a command of its own", () => {
+      expect(isContentRead('echo "pipe it | head -5" > notes.txt')).toBe(false);
     });
   });
 

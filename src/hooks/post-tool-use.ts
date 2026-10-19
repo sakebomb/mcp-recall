@@ -10,7 +10,7 @@ import { genericHandler } from "../handlers/generic";
 import { extractHints } from "../hints";
 import { getDb, defaultDbPath, storeOutput, checkOutputDedup, hashContent, evictIfNeeded } from "../db/index";
 import { shouldRetainFullBody } from "../retention";
-import { commandFingerprint, normalizeCommand, isContentRead, READ_PASSTHROUGH_MAX_BYTES } from "../handlers/bash";
+import { bashFingerprint, isContentRead, READ_PASSTHROUGH_MAX_BYTES } from "../handlers/bash";
 import { bashOutputText } from "../handlers/bash-shared";
 import { formatBytes } from "../format";
 import { log } from "../log";
@@ -154,7 +154,7 @@ export function handlePostToolUse(raw: string): HookOutput {
   // (#251). Bash only; a "" fingerprint (no bare verb) is stored as NULL/unknown.
   const command_fp =
     tool_name === "Bash" && command
-      ? commandFingerprint(normalizeCommand(command)) || null
+      ? bashFingerprint(command) || null
       : null;
   const input_hash =
     tool_input !== undefined

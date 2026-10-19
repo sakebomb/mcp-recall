@@ -7602,8 +7602,116 @@ var WRAPPER_PREFIXES = [
   new RegExp(String.raw`^(?:${ASSIGN}\s+)+${NEXT}`),
   new RegExp(String.raw`^(?:sudo|doas)\s+${NEXT}`)
 ];
-function normalizeCommand(command) {
+function quotedCommand(arg) {
+  const s = arg.trim();
+  let body;
+  let rest;
+  if (s.startsWith("'")) {
+    const end = s.indexOf("'", 1);
+    if (end === -1)
+      return null;
+    body = s.slice(1, end);
+    rest = s.slice(end + 1);
+  } else if (s.startsWith('"')) {
+    const m = s.match(/^"((?:[^"\\]|\\[\s\S])*)"/);
+    if (!m)
+      return null;
+    body = m[1].replace(/\\(["\\`$])/g, "$1");
+    rest = s.slice(m[0].length);
+  } else {
+    return s;
+  }
+  if (rest.trim() === "")
+    return body.trim();
+  return /^\s*[|;&<>]/.test(rest) ? `${body.trim()} ${rest.trim()}` : null;
+}
+function skipOptions(args, withValue, flags, long = {}) {
+  let rest = args;
+  for (let i = 0;i < 16; i++) {
+    const opt = rest.match(/^(-[^\s'"]*)(?:\s+|$)/);
+    if (!opt)
+      return rest;
+    rest = rest.slice(opt[0].length);
+    const word = opt[1];
+    if (word === "--")
+      return rest;
+    let needsValue = false;
+    if (word.startsWith("--")) {
+      const [name, inline] = word.slice(2).split("=", 2);
+      if (!(name in long))
+        return null;
+      needsValue = long[name] && inline === undefined;
+    } else {
+      for (let j = 1;j < word.length; j++) {
+        const ch = word[j];
+        if (withValue.includes(ch)) {
+          needsValue = j === word.length - 1;
+          break;
+        }
+        if (!flags.includes(ch))
+          return null;
+      }
+    }
+    if (needsValue) {
+      const value = rest.match(/^[^\s'"]+(?:\s+|$)/);
+      if (!value)
+        return null;
+      rest = rest.slice(value[0].length);
+    }
+  }
+  return null;
+}
+var SSH_WITH_VALUE = "BbcDEeFIiJLlmOoPpQRSWw";
+var SSH_FLAGS = "46AaCfGgKkMnqsTtVvXxYy";
+var DOCKER_EXEC_WITH_VALUE = "euw";
+var DOCKER_EXEC_FLAGS = "dit";
+var DOCKER_EXEC_LONG = {
+  detach: false,
+  interactive: false,
+  tty: false,
+  privileged: false,
+  env: true,
+  "env-file": true,
+  user: true,
+  workdir: true,
+  "detach-keys": true
+};
+var TARGET = /^[A-Za-z0-9_][\w.@:-]*\s+/;
+var REMOTE_WRAPPERS = [
+  {
+    label: "ssh",
+    unwrap: (c) => {
+      const args = c.match(/^ssh\s+/) ? skipOptions(c.replace(/^ssh\s+/, ""), SSH_WITH_VALUE, SSH_FLAGS) : null;
+      const host = args?.match(TARGET);
+      return host ? quotedCommand(args.slice(host[0].length)) : null;
+    }
+  },
+  {
+    label: "pct exec",
+    unwrap: (c) => {
+      const m = c.match(/^pct\s+exec\s+\d+\s+(?:--\s+)?/);
+      return m ? quotedCommand(c.slice(m[0].length)) : null;
+    }
+  },
+  {
+    label: "docker exec",
+    unwrap: (c) => {
+      const args = c.match(/^docker\s+exec\s+/) ? skipOptions(c.replace(/^docker\s+exec\s+/, ""), DOCKER_EXEC_WITH_VALUE, DOCKER_EXEC_FLAGS, DOCKER_EXEC_LONG) : null;
+      const ctr = args?.match(TARGET);
+      return ctr ? quotedCommand(args.slice(ctr[0].length)) : null;
+    }
+  },
+  {
+    label: null,
+    unwrap: (c) => {
+      const m = c.match(/^(?:ba)?sh\s+-[elx]*c[elx]*\s+(?=['"])/);
+      return m ? quotedCommand(c.slice(m[0].length)) : null;
+    }
+  }
+];
+function unwrapCommand(command) {
   let c = command.trim();
+  const remote = [];
   for (let i = 0;i < 8; i++) {
     const cd = c.match(CD_PREFIX);
     if (cd) {
@@ -7611,12 +7719,26 @@ function normalizeCommand(command) {
       continue;
     }
     const wrapper = WRAPPER_PREFIXES.map((re) => c.match(re)).find((m) => m !== null);
-    if (!wrapper)
+    if (wrapper) {
+      c = c.slice(wrapper[0].length);
+      continue;
+    }
+    const inner = REMOTE_WRAPPERS.map(({ label, unwrap }) => ({ label, inner: unwrap(c) })).find((r) => r.inner !== null && r.inner !== "");
+    if (!inner)
       break;
-    c = c.slice(wrapper[0].length);
+    if (inner.label)
+      remote.push(inner.label);
+    c = inner.inner;
   }
   c = c.replace(/^git\s+(?:(?:--no-pager|--paginate|-P)\s+|-[cC]\s+\S+\s+)+/, "git ");
-  return c;
+  return { command: c, remote };
+}
+function normalizeCommand(command) {
+  return unwrapCommand(command).command;
+}
+function bashFingerprint(command) {
+  const { command: inner, remote } = unwrapCommand(command);
+  return [...remote, commandFingerprint(inner)].filter((s) => s !== "").join(" ");
 }
 var SUBCOMMAND_TOOLS = new Set([
   "git",
@@ -7649,8 +7771,41 @@ function commandFingerprint(command) {
   return second ? `${verb} ${second[1]}` : verb;
 }
 var READ_PASSTHROUGH_MAX_BYTES = 8 * 1024;
-function commandSegments(command) {
-  return command.split(/\||;|&&|\n/).map((part) => normalizeCommand(part));
+function splitTopLevel(command) {
+  const parts = [];
+  let quote = null;
+  let depth = 0;
+  let start = 0;
+  for (let i = 0;i < command.length; i++) {
+    const ch = command[i];
+    if (quote === "'") {
+      if (ch === "'")
+        quote = null;
+    } else if (ch === "\\") {
+      i++;
+    } else if (quote) {
+      if (ch === quote)
+        quote = null;
+    } else if (ch === "'" || ch === '"' || ch === "`") {
+      quote = ch;
+    } else if (ch === "(") {
+      depth++;
+    } else if (ch === ")") {
+      depth = Math.max(0, depth - 1);
+    } else if (depth === 0 && (ch === "|" || ch === ";" || ch === "&" || ch === `
+`)) {
+      parts.push(command.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(command.slice(start));
+  return parts.filter((p) => p.trim() !== "");
+}
+function commandSegments(command, depth = 0) {
+  return splitTopLevel(command).flatMap((part) => {
+    const c = normalizeCommand(part);
+    return depth < 3 && splitTopLevel(c).length > 1 ? commandSegments(c, depth + 1) : [c];
+  });
 }
 var SED_LINE = String.raw`(?:\d+|\$(?:\w+|\{\w+\}|\(\([^()]*\)\))|\$)`;
 var SED_LINE_RANGE = new RegExp(String.raw`^sed\s+(?:-\S+\s+)*-n\s+['"]?${SED_LINE}(?:,\s*\+?${SED_LINE})?p['"]?(\s|$)`);
@@ -9045,7 +9200,7 @@ function extractHints(content, maxHints = DEFAULT_MAX_HINTS) {
 
 // src/retention.ts
 var NETWORK_BASH_RE = /^(curl|wget|https?|xh)\b|^gh\s+api\b/;
-var unwrapCommand = normalizeCommand;
+var unwrapCommand2 = normalizeCommand;
 function shouldRetainFullBody(level, toolName, command) {
   if (level === "full")
     return true;
@@ -9054,7 +9209,7 @@ function shouldRetainFullBody(level, toolName, command) {
   if (toolName.startsWith("mcp__"))
     return true;
   if (toolName === "Bash") {
-    return NETWORK_BASH_RE.test(unwrapCommand(command ?? "")) || isContentRead(command ?? "");
+    return NETWORK_BASH_RE.test(unwrapCommand2(command ?? "")) || isContentRead(command ?? "");
   }
   return true;
 }
@@ -9137,7 +9292,7 @@ function handlePostToolUse(raw) {
   }
   const projectKey = getProjectKey(cwd);
   const db = getDb(defaultDbPath(projectKey));
-  const command_fp = tool_name === "Bash" && command ? commandFingerprint(normalizeCommand(command)) || null : null;
+  const command_fp = tool_name === "Bash" && command ? bashFingerprint(command) || null : null;
   const input_hash = tool_input !== undefined ? createHash3("sha256").update(tool_name + JSON.stringify(tool_input)).digest("hex") : null;
   const output_hash = hashContent(fullContent);
   const cachedResponse = (cached3) => {
