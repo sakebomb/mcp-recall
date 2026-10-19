@@ -33,8 +33,6 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   status`), never the host or id. A routed summary keeps more detail and can
   be larger: a remote `git diff` keeps each file's changes instead of 25
   lines, 68% smaller in the bench where the fallback was 91%.
-- **A quoted `|` no longer reads as a command of its own** when deciding
-  whether a command is a content read (`echo "x | head -5"`).
 
 ## [1.16.1] — 2026-10-19
 

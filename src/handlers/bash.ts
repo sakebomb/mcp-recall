@@ -611,15 +611,27 @@ function splitTopLevel(command: string): string[] {
 }
 
 /**
- * The commands in `command`, each without its `cd`/wrapper prefixes. A segment
- * that unwraps to a command line of its own (`ssh h 'cat f | head'`) is split
- * again, a bounded number of times.
+ * The quote-aware commands in `command`, each without its `cd`/wrapper prefixes.
+ * A segment that unwraps to a command line of its own (`ssh h 'cat f | head'`)
+ * is split again, a bounded number of times.
  */
-function commandSegments(command: string, depth = 0): string[] {
+function unwrappedSegments(command: string, depth = 0): string[] {
   return splitTopLevel(command).flatMap((part) => {
     const c = normalizeCommand(part);
-    return depth < 3 && splitTopLevel(c).length > 1 ? commandSegments(c, depth + 1) : [c];
+    return depth < 3 && splitTopLevel(c).length > 1 ? unwrappedSegments(c, depth + 1) : [c];
   });
+}
+
+/**
+ * The commands in `command`, each without its `cd`/wrapper prefixes: the
+ * {@link unwrappedSegments}, plus a split that ignores quoting. The second finds
+ * a read no unwrap reaches (`for h in a b; do ssh $h '… | head'`, a multi-range
+ * `sed -n '1,5p;9,12p'`). Missing a read summarizes lines Claude asked for; a
+ * false one (`echo "x | head"`) delivers at most READ_PASSTHROUGH_MAX_BYTES.
+ */
+function commandSegments(command: string): string[] {
+  const unquoted = command.split(/\||;|&&|\n/).map((part) => normalizeCommand(part));
+  return [...unwrappedSegments(command), ...unquoted];
 }
 
 // A sed line address: a number, a shell expansion the shell turns into one

@@ -7801,11 +7801,15 @@ function splitTopLevel(command) {
   parts.push(command.slice(start));
   return parts.filter((p) => p.trim() !== "");
 }
-function commandSegments(command, depth = 0) {
+function unwrappedSegments(command, depth = 0) {
   return splitTopLevel(command).flatMap((part) => {
     const c = normalizeCommand(part);
-    return depth < 3 && splitTopLevel(c).length > 1 ? commandSegments(c, depth + 1) : [c];
+    return depth < 3 && splitTopLevel(c).length > 1 ? unwrappedSegments(c, depth + 1) : [c];
   });
+}
+function commandSegments(command) {
+  const unquoted = command.split(/\||;|&&|\n/).map((part) => normalizeCommand(part));
+  return [...unwrappedSegments(command), ...unquoted];
 }
 var SED_LINE = String.raw`(?:\d+|\$(?:\w+|\{\w+\}|\(\([^()]*\)\))|\$)`;
 var SED_LINE_RANGE = new RegExp(String.raw`^sed\s+(?:-\S+\s+)*-n\s+['"]?${SED_LINE}(?:,\s*\+?${SED_LINE})?p['"]?(\s|$)`);

@@ -1280,8 +1280,18 @@ describe("getBashHandler", () => {
       expect(isContentRead("ssh h 'docker ps'")).toBe(false);
     });
 
-    it("does not read a quoted pipe as a command of its own", () => {
-      expect(isContentRead('echo "pipe it | head -5" > notes.txt')).toBe(false);
+    // A transcript replay found these delivered whole before #339 and summarized
+    // after it, once the split respected quotes: a missed read drops lines Claude
+    // asked for, so the quote-blind split stays as well.
+    it("still sees a read that no unwrap reaches", () => {
+      expect(isBoundedRead("sed -n '70,115p;255,300p' src/router.py")).toBe(true);
+      expect(isBoundedRead("cd /x && grep -n '' f.ts | sed -n '85,175p;285,345p'")).toBe(true);
+      expect(isBoundedRead("for h in a b; do ssh $h 'journalctl -n 500 | tail -20'; done")).toBe(true);
+      expect(isBoundedRead(`ssh h 'pct exec 165 -- runuser -u r -- bash -c "free -g | head -2"'`)).toBe(true);
+    });
+
+    it("accepts reading a quoted pipe as a read, capped at the passthrough size", () => {
+      expect(isContentRead('echo "pipe it | head -5" > notes.txt')).toBe(true);
     });
   });
 
