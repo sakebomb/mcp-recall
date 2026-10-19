@@ -1310,19 +1310,20 @@ describe("db", () => {
   });
 
   describe("session-fair sampling (getContext pinned, getSessionSummary)", () => {
-    // Pins `count` rows into one session, created `ageSeconds` ago and spaced 1s
-    // apart, the shape a bulk note backend leaves behind (#269).
-    function pinMany(sessionId: string, count: number, ageSeconds: number) {
+    // Writes `count` notes into one session, created `ageSeconds` ago and spaced
+    // 1s apart, pinned unless `pinned` is 0: the shape a bulk note backend
+    // leaves behind (#269).
+    function pinMany(sessionId: string, count: number, ageSeconds: number, pinned = 1) {
       const insert = db.prepare(`
         INSERT INTO stored_outputs
           (id, project_key, session_id, tool_name, summary, full_content,
            original_size, summary_size, created_at, pinned)
-        VALUES (?, ?, ?, 'recall__note', 'a note', 'full note body', 1024, 64, ?, 1)
+        VALUES (?, ?, ?, 'recall__note', 'a note', 'full note body', 1024, 64, ?, ?)
       `);
       const base = Math.floor(Date.now() / 1000) - ageSeconds;
       db.transaction(() => {
         for (let i = 0; i < count; i++) {
-          insert.run(`recall_${sessionId}_${i}`, PROJECT_KEY, sessionId, base + i);
+          insert.run(`recall_${sessionId}_${i}`, PROJECT_KEY, sessionId, base + i, pinned);
         }
       })();
     }
@@ -1392,15 +1393,28 @@ describe("db", () => {
     it("session summary bounds a day's pinned and notes so a bulk session cannot fill them", () => {
       pinMany("mine", 1, ageInDay());
       pinMany("bulk-sync", 2000, ageInDay() - 60);
+      pinMany("mine-notes", 1, ageInDay(), 0);
+      pinMany("bulk-notes", 2000, ageInDay() - 60, 0);
 
       const summary = getSessionSummary(db, PROJECT_KEY, { date: DAY });
 
-      for (const sample of [summary.pinned, summary.notes]) {
-        expect(sample.items.map((i) => i.id)).toContain("recall_mine_0");
-        expect(sample.items.length).toBe(4);
-        expect(sample.total).toBe(2001);
-        expect(sample.overflow).toEqual([{ session_id: "bulk-sync", count: 1997 }]);
-      }
+      expect(summary.pinned.items.map((i) => i.id)).toContain("recall_mine_0");
+      expect(summary.pinned.items.length).toBe(4);
+      expect(summary.pinned.total).toBe(2001);
+      expect(summary.pinned.overflow).toEqual([{ session_id: "bulk-sync", count: 1997 }]);
+      expect(summary.notes.items.map((i) => i.id)).toContain("recall_mine-notes_0");
+      expect(summary.notes.items.length).toBe(4);
+      expect(summary.notes.total).toBe(2001);
+      expect(summary.notes.overflow).toEqual([{ session_id: "bulk-notes", count: 1997 }]);
+    });
+
+    it("session summary lists a pinned note under pinned only, as getContext does", () => {
+      pinMany("mine", 1, ageInDay());
+
+      const summary = getSessionSummary(db, PROJECT_KEY, { date: DAY });
+
+      expect(summary.pinned.total).toBe(1);
+      expect(summary.notes.total).toBe(0);
     });
 
     it("session summary for one session_id gives that session every slot", () => {

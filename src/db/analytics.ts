@@ -251,9 +251,11 @@ export function getSessionSummary(
   `).all(...bp) as Array<{ id: string; tool_name: string; summary: string; access_count: number }>;
 
   // A single-session summary has one session to sample, so it gets every slot.
+  // Notes are unpinned ones only, as in getContext: a pinned note is listed
+  // under pinned, not twice.
   const perSession = opts.session_id ? SAMPLE_LIMIT : SAMPLE_PER_SESSION;
   const pinned = sampleBySession(db, `${base} AND pinned = 1`, bp, perSession);
-  const notes = sampleBySession(db, `${base} AND tool_name = 'recall__note'`, bp, perSession);
+  const notes = sampleBySession(db, `${base} AND pinned = 0 AND tool_name = 'recall__note'`, bp, perSession);
 
   return { label, ...agg, tool_counts, top_accessed, pinned, notes };
 }

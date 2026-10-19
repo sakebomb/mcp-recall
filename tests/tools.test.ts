@@ -991,7 +991,7 @@ describe("MCP tool handlers", () => {
       expect(result).toContain(stored.id);
     });
 
-    it("caps a day's pinned and notes and names the sessions it left out", () => {
+    it("caps a day's pinned notes once, under pinned, and names the sessions it left out", () => {
       const insert = db.prepare(`
         INSERT INTO stored_outputs
           (id, project_key, session_id, tool_name, summary, full_content,
@@ -1006,8 +1006,8 @@ describe("MCP tool handlers", () => {
       const result = toolSessionSummary(db, PROJECT_KEY, { date: "2026-06-05" });
 
       expect(result).toContain("Pinned: 3 of 2,000");
-      expect(result).toContain("Notes: 3 of 2,000");
-      expect(result.split("+1,997 more from bulk-sync").length - 1).toBe(2);
+      expect(result).not.toContain("Notes:");
+      expect(result.split("+1,997 more from bulk-sync").length - 1).toBe(1);
       expect((result.match(/📌/g) ?? []).length).toBe(3);
     });
 

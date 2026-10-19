@@ -179,6 +179,7 @@ recall__session_summary(session_id?, date?)
 - Session IDs appear in `recall__context` output and in the `recall__list_stored` table — look for the `session` column.
 - Shows: items stored, compression savings, tool breakdown, most-accessed items, pinned items, notes.
 - Pinned items and notes are each capped at 10, with the same per-session sharing and overflow line as `recall__context` (`Pinned: 3 of 4,522`). A `session_id` summary gives its one session all 10 slots.
+- Notes lists unpinned notes only; a pinned note appears under pinned items, as in `recall__context`.
 
 Example output:
 

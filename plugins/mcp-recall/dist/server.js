@@ -20153,7 +20153,7 @@ function getSessionSummary(db, project_key, opts = {}) {
   `).all(...bp);
   const perSession = opts.session_id ? SAMPLE_LIMIT : SAMPLE_PER_SESSION;
   const pinned = sampleBySession(db, `${base} AND pinned = 1`, bp, perSession);
-  const notes = sampleBySession(db, `${base} AND tool_name = 'recall__note'`, bp, perSession);
+  const notes = sampleBySession(db, `${base} AND pinned = 0 AND tool_name = 'recall__note'`, bp, perSession);
   return { label, ...agg, tool_counts, top_accessed, pinned, notes };
 }
 function getContext(db, project_key, opts = {}) {
