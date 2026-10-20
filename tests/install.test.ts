@@ -131,6 +131,27 @@ describe("writeJsonFile / readJsonFile", () => {
     expect(await readJsonFile(real)).toEqual({ created: true });
   });
 
+  it("writes through a dangling chain of symlinks to its end (#373)", async () => {
+    const real = path.join(tmpDir, "dotfiles", "end.json");
+    const middle = path.join(tmpDir, "middle.json");
+    const link = path.join(tmpDir, "chain.json");
+    await symlink(real, middle);
+    await symlink(middle, link);
+    await writeJsonFile(link, { created: true });
+    expect((await lstat(middle)).isSymbolicLink()).toBe(true);
+    expect(await readJsonFile(real)).toEqual({ created: true });
+  });
+
+  it.skipIf(process.platform === "win32")("keeps the mode when a stale temp file is left over (#373)", async () => {
+    const filePath = path.join(tmpDir, ".claude.json");
+    await writeJsonFile(filePath, { a: 1 });
+    await chmod(filePath, 0o600);
+    await writeFile(filePath + ".tmp", "stale", { mode: 0o666 }); // left by a crash
+    await writeJsonFile(filePath, { a: 2 });
+    expect((await stat(filePath)).mode & 0o777).toBe(0o600);
+    expect(await readJsonFile(filePath)).toEqual({ a: 2 });
+  });
+
   it.skipIf(process.platform === "win32")("keeps the existing file's mode (#373)", async () => {
     const filePath = path.join(tmpDir, ".claude.json");
     await writeJsonFile(filePath, { a: 1 });

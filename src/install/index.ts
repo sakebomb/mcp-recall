@@ -10,7 +10,7 @@
  */
 
 import { existsSync } from "fs";
-import { mkdir, rename, readFile, realpath, readlink, stat, chmod } from "fs/promises";
+import { mkdir, rename, readFile, realpath, readlink, stat, chmod, rm, writeFile } from "fs/promises";
 import path from "path";
 import os from "os";
 import { loadProfiles } from "../profiles/loader";
@@ -152,9 +152,12 @@ export async function writeJsonFile(filePath: string, data: unknown): Promise<vo
   await writeTextFile(filePath, JSON.stringify(data, null, 2) + "\n");
 }
 
+// The kernel's own symlink-chain limit (Linux ELOOP), so a loop cannot spin.
+const MAX_LINK_HOPS = 40;
+
 /**
- * The file a write to `filePath` should replace: the target of a symlink, even
- * a dangling one, so a dotfiles-managed link survives the rename (#373).
+ * The file a write to `filePath` should replace: the end of a symlink chain,
+ * even a dangling one, so a dotfiles-managed link survives the rename (#373).
  */
 async function writeTarget(filePath: string): Promise<string> {
   try {
@@ -162,11 +165,15 @@ async function writeTarget(filePath: string): Promise<string> {
   } catch (e: unknown) {
     if (!isEnoent(e)) throw e;
   }
-  try {
-    return path.resolve(path.dirname(filePath), await readlink(filePath));
-  } catch {
-    return filePath; // no file yet, or not a link
+  let target = filePath;
+  for (let hop = 0; hop < MAX_LINK_HOPS; hop++) {
+    try {
+      target = path.resolve(path.dirname(target), await readlink(target));
+    } catch {
+      return target; // no file yet, or the end of the chain
+    }
   }
+  return target;
 }
 
 /**
@@ -178,8 +185,10 @@ async function writeTextFile(filePath: string, content: string): Promise<void> {
   await mkdir(path.dirname(target), { recursive: true });
   const mode = await stat(target).then((s) => s.mode & 0o7777, () => undefined);
   const tmp = target + ".tmp";
-  await Bun.write(tmp, content);
-  // After the write, so a stale temp file and the umask cannot widen it.
+  // A fresh temp file is created with the mode (narrowed by the umask), so it is
+  // never wider than the file it replaces; the chmod restores bits the umask cut.
+  await rm(tmp, { force: true });
+  await writeFile(tmp, content, mode === undefined ? undefined : { mode });
   if (mode !== undefined) await chmod(tmp, mode);
   await rename(tmp, target);
 }
