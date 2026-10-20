@@ -124,11 +124,11 @@ jobs:
           ./node_modules/.bin/mcp-recall install --dry-run
 
   # The standalone binary (#361) is a third launch path: compiled, with the
-  # bundled profiles embedded, registering itself as hooks and server. This
-  # builds it and runs the same store/skip/import checks with Bun removed from
-  # PATH, then install, status and the registered MCP server.
-  standalone-binary:
-    name: Standalone binary
+  # bundled profiles embedded, registering itself as hooks and server. Every
+  # release target is cross-compiled once here, exactly as publish.yml builds
+  # them, and each is then run on its own OS below (#367).
+  standalone-binary-build:
+    name: Standalone binary (build)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -137,15 +137,66 @@ jobs:
         with:
           bun-version: 1.3.14
 
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Build the linux-x64 binary
-        run: bun run build:binary --target bun-linux-x64
+      - name: Build every release target
+        run: bun run build:binary --all
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: standalone-binaries
+          path: dist/bin/
+          retention-days: 3
+
+  # The store/skip/import checks with Bun removed from PATH, then install,
+  # status, the registered hook and server, and npm <-> binary switches.
+  # scripts/sandbox-binary.sh runs the same checks locally in a container.
+  standalone-binary:
+    name: Standalone binary (${{ matrix.file }})
+    needs: standalone-binary-build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,    file: mcp-recall-linux-x64 }
+          - { os: ubuntu-24.04-arm, file: mcp-recall-linux-arm64 }
+          - { os: macos-latest,     file: mcp-recall-darwin-arm64 }
+          - { os: macos-15-intel,   file: mcp-recall-darwin-x64 }
+          - { os: windows-latest,   file: mcp-recall-windows-x64.exe }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+
+      # For the script's helpers and the npm side of the switch checks; the
+      # binary itself runs with Bun removed from PATH.
+      - uses: oven-sh/setup-bun@v2.1.3
+        with:
+          bun-version: 1.3.14
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: standalone-binaries
+          path: dist/bin
+
+      - name: Restore the executable bit (artifacts drop it)
+        run: chmod +x "dist/bin/${{ matrix.file }}"
+
+      # A browser download is quarantined, and the binary is not notarized, so
+      # Gatekeeper's verdict is recorded rather than asserted. What is asserted
+      # is the README's workaround: clearing the attribute lets it run.
+      - name: Gatekeeper on a quarantined copy
+        if: runner.os == 'macOS'
+        run: |
+          gk="$RUNNER_TEMP/gatekeeper/mcp-recall"
+          mkdir -p "$(dirname "$gk")" && cp "dist/bin/${{ matrix.file }}" "$gk"
+          xattr -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;" "$gk"
+          spctl --assess --type execute -vv "$gk" || echo "::notice::Gatekeeper rejects a quarantined ${{ matrix.file }} (expected: not notarized)"
+          xattr -d com.apple.quarantine "$gk"
+          "$gk" --version
 
       - name: Exercise the binary without Bun on PATH
-        run: bash scripts/packaged-cli-smoke.sh --binary dist/bin/mcp-recall-linux-x64
+        run: bash scripts/packaged-cli-smoke.sh --binary "dist/bin/${{ matrix.file }}"

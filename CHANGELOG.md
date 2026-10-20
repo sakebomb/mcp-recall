@@ -22,6 +22,15 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   no npm credentials. CI builds the Linux x64 binary on every PR and runs the
   packaged-CLI checks against it with Bun removed from `PATH`, then `install`,
   `status` and the registered MCP server.
+- **Every binary is tested on its own OS** (#367). CI cross-compiles the five
+  release targets once and runs each on a GitHub-hosted Linux x64/arm64,
+  macOS arm64/Intel or Windows runner. The checks now also run the registered
+  hook through a shell, as Claude Code does, and switch an install from npm to
+  the binary and back with user edits in place. #364, #365 and #366 are
+  recorded as known defects there and fail the run once fixed. On macOS, CI
+  records Gatekeeper's verdict on a quarantined copy and checks the README's
+  workaround. `bun run sandbox:binary` runs the same checks locally in an
+  offline Docker container.
 
 ## [1.17.0] — 2026-10-19
 

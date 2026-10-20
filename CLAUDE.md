@@ -23,6 +23,7 @@ bun run typecheck     # tsc --noEmit
 bun run build         # bundle src/ → plugins/mcp-recall/dist/
 bun run start         # MCP server
 bun run dev           # MCP server in watch mode
+bun run sandbox:binary  # standalone-binary checks in a throwaway, offline Docker container
 ```
 
 No `just` / `make` in this project. Use `bun test` directly (not `just test`).

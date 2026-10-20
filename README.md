@@ -264,7 +264,7 @@ mcp-recall install                           # registers the binary itself as ho
 
 To build one from source instead: `bun run build:binary` (this platform) or `bun run build:binary --all`, into `dist/bin/`.
 
-A binary is 60–95 MB, since it carries the Bun runtime. Its bundled profiles are inside it, and are copied out once per version to `~/.local/share/mcp-recall/bundled-profiles/`. The hooks name the binary's path, so run `mcp-recall install` again if you move it. Only the Linux x64 binary is exercised in CI; the macOS binaries are unsigned, and Gatekeeper may block one downloaded through a browser.
+A binary is 60–95 MB, since it carries the Bun runtime. Its bundled profiles are inside it, and are copied out once per version to `~/.local/share/mcp-recall/bundled-profiles/`. The hooks name the binary's path, so run `mcp-recall install` again if you move it. CI runs every binary on its own OS. The macOS binaries are not notarized: `curl` leaves them runnable, but Gatekeeper blocks one downloaded through a browser until you clear the quarantine flag with `xattr -d com.apple.quarantine ~/.local/bin/mcp-recall`.
 
 ---
 

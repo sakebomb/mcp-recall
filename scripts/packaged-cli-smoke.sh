@@ -16,10 +16,14 @@
 #
 # Usage: scripts/packaged-cli-smoke.sh <consumer-project-dir>
 #        scripts/packaged-cli-smoke.sh --binary <standalone-binary>   (#361)
-# The single-quoted node/bun programs below are meant to be literal.
+# The --binary mode runs on Linux, macOS and Git Bash on Windows (#367), and
+# scripts/sandbox-binary.sh runs it in a throwaway container. Bun is the only
+# dependency besides the shell, coreutils and perl.
+# The single-quoted bun programs below are meant to be literal.
 # shellcheck disable=SC2016
 set -euo pipefail
 
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BINARY=""
 if [ "${1:-}" = "--binary" ]; then
   BINARY="$(cd "$(dirname "${2:?usage: $0 --binary <path>}")" && pwd)/$(basename "$2")"
@@ -32,10 +36,20 @@ trap 'rm -rf "$WORK"' EXIT
 
 # Isolate from any real config, store, or project on this machine.
 export HOME="$WORK/home"
+# Windows: Bun's os.homedir() reads USERPROFILE, so HOME alone would leave the
+# real profile exposed. Git Bash converts the other POSIX paths in the env itself.
+if command -v cygpath >/dev/null 2>&1; then
+  export USERPROFILE; USERPROFILE="$(cygpath -w "$HOME")"
+fi
 export RECALL_CONFIG_PATH="$WORK/no-such-config.toml"
 unset RECALL_DEBUG
 PROJECT="$WORK/project"
 mkdir -p "$HOME" "$PROJECT"
+
+# Portable: BSD sed has no \x1b (and macOS has no timeout(1), so perl's alarm below).
+strip_ansi() { perl -pe 's/\e\[[0-9;]*m//g'; }
+# The path a program sees: Windows form under Git Bash, unchanged elsewhere.
+native() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s' "$1"; fi; }
 
 # 36 chars after the prefix matches the "GitHub PAT (classic)" pattern. Built in
 # pieces so this file never contains a string a secret scanner would flag.
@@ -57,8 +71,8 @@ db_scalar() {
 # 40 lines of ordinary multi-line output: long enough that the summary is smaller
 # than the original, so the hook stores it rather than passing it through.
 payload() { # <marker> [extra line]
-  node -e '
-    const [marker, extra] = process.argv.slice(1);
+  MARKER="$1" EXTRA="${2:-}" bun -e '
+    const { MARKER: marker, EXTRA: extra } = process.env;
     const lines = [];
     for (let i = 0; i < 40; i++) lines.push(`build step ${i}: compiled module-${i} ok (${marker})`);
     if (extra) lines.splice(20, 0, extra);
@@ -70,7 +84,7 @@ payload() { # <marker> [extra line]
       tool_input: { marker },
       tool_response: { content: [{ type: "text", text: body }] },
     }));
-  ' "$@"
+  '
 }
 
 exercise() { # <label> <command...>
@@ -106,7 +120,7 @@ exercise() { # <label> <command...>
 
   # 3. import withholds the credential-bearing row and still lands the clean one.
   local dump="$WORK/$label-dump.json"
-  OUT="$dump" FAKE="$FAKE_SECRET" node -e '
+  OUT="$dump" FAKE="$FAKE_SECRET" bun -e '
     const row = (id, body) => ({
       id, project_key: "dump-project", session_id: "dump-session",
       tool_name: "mcp__fixture__read_log", summary: "summary", full_content: body,
@@ -140,33 +154,159 @@ exercise() { # <label> <command...>
   echo "ok: credential absent from the database files"
 }
 
+# config_js <expr> — a JS expression over the isolated ~/.claude.json (c) and
+# ~/.claude/settings.json (s), with BIN, hooks(event) and recallHooks(event) in scope.
+config_js() {
+  EXPR="$1" bun -e '
+    const { homedir } = require("os");
+    const read = async (p) => (await Bun.file(p).exists()) ? JSON.parse(await Bun.file(p).text()) : {};
+    const c = await read(homedir() + "/.claude.json");
+    const s = await read(homedir() + "/.claude/settings.json");
+    const BIN = process.env.BIN ?? "";
+    const hooks = (ev) => (s.hooks?.[ev] ?? []).flatMap((e) => e.hooks ?? []);
+    const marker = { SessionStart: " session-start", PostToolUse: " post-tool-use" };
+    const recallHooks = (ev) => hooks(ev).filter((h) => h.command.endsWith(marker[ev]));
+    const r = eval(process.env.EXPR);
+    console.log(typeof r === "string" ? r : JSON.stringify(r));
+  '
+}
+# config_edit <statements> — mutate c and s as a user would, and write both back.
+config_edit() {
+  EXPR="$1" bun -e '
+    const { homedir } = require("os");
+    const cp = homedir() + "/.claude.json", sp = homedir() + "/.claude/settings.json";
+    const c = JSON.parse(await Bun.file(cp).text()), s = JSON.parse(await Bun.file(sp).text());
+    eval(process.env.EXPR);
+    await Bun.write(cp, JSON.stringify(c, null, 2));
+    await Bun.write(sp, JSON.stringify(s, null, 2));
+  '
+}
+js_true() { [ "$(config_js "$1")" = "true" ]; }
+check() { js_true "$2" || fail "$1"; echo "ok: $1"; } # <description> <expr true when correct>
+# known_defect <issue> <description> <command…> — the command succeeds once the
+# defect is fixed, and then this fails so the fix turns it into a check.
+known_defect() {
+  local issue="$1" desc="$2"; shift 2
+  if "$@"; then fail "#$issue looks fixed ($desc): make this a check"; fi
+  echo "known defect #$issue: $desc"
+}
+fresh_home() {
+  export HOME="$WORK/$1"
+  mkdir -p "$HOME"
+  if command -v cygpath >/dev/null 2>&1; then USERPROFILE="$(cygpath -w "$HOME")"; fi
+}
+
+# 6. Moving between an npm install and the binary, in both directions, with the
+#    edits a user makes to recall's entries and to everything around them.
+switch_checks() {
+  NPM=(bun "$REPO/plugins/mcp-recall/dist/cli.js")
+  [ -f "${NPM[1]}" ] || fail "switch: no npm bundle at ${NPM[1]}"
+  local copy="$WORK/bin/mcp-recall$EXE"
+  mkdir -p "$WORK/bin"
+  cp "$BINARY" "$copy"
+  BIN="$(native "$copy")"
+  fresh_home switch-home
+
+  "${NPM[@]}" install >/dev/null
+  config_edit '
+    c.mcpServers.recall.env = { RECALL_DB_PATH: "/custom/db" };
+    s.hooks.PostToolUse[0].hooks[0].timeout = 30;
+    s.hooks.PostToolUse.unshift({ matcher: "Bash", hooks: [{ type: "command", command: "other-tool check" }] });
+    s.model = "opus";'
+  # Without this, a seed that silently failed would let the #365 lines pass as "defect".
+  check "npm: the user's env and timeout are in place before the switch" \
+    'c.mcpServers.recall.env?.RECALL_DB_PATH === "/custom/db" && recallHooks("PostToolUse")[0].timeout === 30'
+
+  run_bin "$copy" install >/dev/null
+  check "npm -> binary: the server runs the binary" 'c.mcpServers.recall.command === BIN'
+  check "npm -> binary: one recall hook per event" \
+    'recallHooks("SessionStart").length === 1 && recallHooks("PostToolUse").length === 1'
+  check "npm -> binary: another tool's hook and unrelated settings survive" \
+    'hooks("PostToolUse").some((h) => h.command === "other-tool check") && s.model === "opus"'
+  known_defect 365 "npm -> binary keeps the server's env" \
+    js_true 'c.mcpServers.recall.env?.RECALL_DB_PATH === "/custom/db"'
+  known_defect 365 "npm -> binary keeps a raised hook timeout" \
+    js_true 'recallHooks("PostToolUse")[0].timeout === 30'
+
+  "${NPM[@]}" install >/dev/null
+  check "binary -> npm: the server runs bun and the bundle" \
+    'c.mcpServers.recall.command === "bun" && /server\.js$/.test(c.mcpServers.recall.args[0])'
+  check "binary -> npm: one recall hook per event, none naming the binary" \
+    'recallHooks("SessionStart").length === 1 && recallHooks("PostToolUse").length === 1
+     && ![...hooks("SessionStart"), ...hooks("PostToolUse")].some((h) => h.command.includes(BIN))'
+
+  run_bin "$copy" install >/dev/null
+  mv "$copy" "$copy.gone"
+  known_defect 364 "npm status flags a registered binary that is gone" npm_status_not_installed
+  mv "$copy.gone" "$copy"
+
+  # A name without "recall": the hook detectors key on that substring.
+  fresh_home rename-home
+  local renamed="$WORK/bin/mr$EXE"
+  cp "$BINARY" "$renamed"
+  BIN="$(native "$renamed")"
+  case "$BIN" in *recall*) fail "rename: $BIN contains 'recall', so this would prove nothing" ;; esac
+  run_bin "$renamed" install >/dev/null
+  run_bin "$renamed" install >/dev/null
+  known_defect 366 "a renamed binary installed twice has one hook per event" \
+    js_true 'recallHooks("SessionStart").length === 1 && recallHooks("PostToolUse").length === 1'
+  run_bin "$renamed" uninstall >/dev/null
+  check "uninstall removes a renamed binary's server" 'c.mcpServers?.recall === undefined'
+  known_defect 366 "uninstall removes a renamed binary's hooks" \
+    js_true 'recallHooks("SessionStart").length + recallHooks("PostToolUse").length === 0'
+}
+npm_status_not_installed() { ! "${NPM[@]}" status 2>&1 | strip_ansi | grep -qx "Installation: installed"; }
+
 if [ -n "$BINARY" ]; then
+  case "$BINARY" in *.exe) EXE=.exe ;; *) EXE="" ;; esac
   # Bun is dropped from PATH for the binary only: the db_scalar and payload
   # helpers still use it, but the binary must run without it.
   NO_BUN_PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v -e '\.bun' | paste -sd: -)"
-  exercise binary env PATH="$NO_BUN_PATH" "$BINARY"
+  run_bin() { env PATH="$NO_BUN_PATH" "$@"; }
+  exercise binary run_bin "$BINARY"
 
   # 5. install registers the binary itself, status calls it complete, and the
-  #    registered server answers MCP. HOME is already isolated above.
-  env PATH="$NO_BUN_PATH" "$BINARY" install >/dev/null || fail "binary: install exited non-zero"
-  server="$(bun -e 'const r = JSON.parse(await Bun.file(process.env.HOME + "/.claude.json").text()).mcpServers.recall; console.log([r.command, ...r.args].join(" "))')"
-  [ "$server" = "$BINARY serve" ] || fail "binary: registered server is '$server', expected '$BINARY serve'"
-  hook="$(bun -e 'const s = JSON.parse(await Bun.file(process.env.HOME + "/.claude/settings.json").text()); console.log(s.hooks.PostToolUse.at(-1).hooks[0].command)')"
-  [ "$hook" = "$BINARY post-tool-use" ] || fail "binary: registered hook is '$hook'"
-  status="$(env PATH="$NO_BUN_PATH" "$BINARY" status 2>&1 | sed 's/\x1b\[[0-9;]*m//g')"
+  #    registered hook and server work when launched the way Claude Code launches
+  #    them. HOME is already isolated above.
+  export BIN
+  BIN="$(native "$BINARY")"
+  run_bin "$BINARY" install >/dev/null || fail "binary: install exited non-zero"
+  check "install registered the binary as the server" \
+    'c.mcpServers.recall.command === BIN && c.mcpServers.recall.args.join(" ") === "serve"'
+  check "install registered the binary as both hooks" \
+    'recallHooks("SessionStart").length === 1 && recallHooks("PostToolUse").length === 1
+     && recallHooks("PostToolUse")[0].command.includes(BIN)'
+  status="$(run_bin "$BINARY" status 2>&1 | strip_ansi)"
   # Exact line: "not installed" and "partial / stale" must not pass.
   printf '%s\n' "$status" | grep -qx "Installation: installed" || fail "binary: status does not report installed"
   printf '%s\n' "$status" | grep -q "Profiles: [1-9]" || fail "binary: bundled profiles not found"
-  echo "ok: install registered the binary; status reports it installed with its profiles"
+  echo "ok: status reports the binary installed with its bundled profiles"
 
+  # Claude Code runs a hook command through a shell (Git Bash on Windows), so
+  # this is what proves the path's quoting.
+  hook="$(config_js 'recallHooks("PostToolUse")[0].command')"
+  payload "HOOK-SHELL" >"$WORK/in.json"
+  out="$(run_bin bash -c "$hook" <"$WORK/in.json" 2>/dev/null)" || fail "binary: registered hook exited non-zero: $hook"
+  case "$out" in
+    *'"updatedMCPToolOutput":"[recall:'*) ;;
+    *) fail "binary: the registered hook did not intercept; it printed: $out" ;;
+  esac
+  echo "ok: the registered hook command runs through a shell"
+
+  # The MCP server is launched as command + args, with no shell.
+  server=()
+  while IFS= read -r word; do server+=("$word"); done \
+    < <(config_js '[c.mcpServers.recall.command, ...c.mcpServers.recall.args].join("\n")')
   tools="$(printf '%s\n' \
     '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}' \
     '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
     '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
-    | env PATH="$NO_BUN_PATH" timeout 10 bash -c "$server" 2>/dev/null \
-    | grep -o '"name":"recall__[a-z_]*"' | sort -u | wc -l)"
+    | run_bin perl -e 'alarm shift; exec @ARGV or die "exec: $!"' 10 "${server[@]}" 2>/dev/null \
+    | grep -o '"name":"recall__[a-z_]*"' | sort -u | wc -l | tr -d ' ')"
   [ "$tools" -gt 0 ] || fail "binary: the registered server listed no recall tools"
   echo "ok: the registered server lists $tools recall tools"
+
+  switch_checks
 
   echo "standalone binary behaviour checks passed"
   exit 0
