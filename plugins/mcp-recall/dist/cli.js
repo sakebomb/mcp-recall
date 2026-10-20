@@ -6558,6 +6558,13 @@ function runNote(run) {
   return ts && ts !== lastTimestamp(run[0]) ? `(\xD7${run.length}, until ${ts})` : `(\xD7${run.length}, varying ids)`;
 }
 
+// src/handlers/rtk.ts
+var RECOVERY_HINT_RE = /\brtk recall [0-9a-f]{6,}\b|^\s*\[full [a-z ]+: rtk [^\]]+\]\s*$/;
+var MAX_HINTS = 5;
+function recoveryHints(lines) {
+  return lines.filter((l) => RECOVERY_HINT_RE.test(l)).slice(0, MAX_HINTS).map((l) => l.trim());
+}
+
 // src/handlers/shell.ts
 var HEAD_STDOUT = 25;
 var HEAD_STDERR = 20;
@@ -6600,9 +6607,11 @@ function formatLines(text, max) {
 `);
   const overflow = hidden > 0 ? `
 \u2026 (+${hidden} more lines)` : "";
+  const hints = recoveryHints(lines.slice(total - hidden)).map((h) => `
+${clipLine(h)}`).join("");
   return {
     header: `${total} line${total === 1 ? "" : "s"}`,
-    body: `${head}${overflow}`
+    body: `${head}${overflow}${hints}`
   };
 }
 function parseStructured(raw) {
@@ -7462,8 +7471,9 @@ function summarizeLineWindow(lines, headLines, tailLines) {
   const tail = lines.slice(lines.length - tailLines);
   const middle = lines.slice(headLines, lines.length - tailLines);
   const matches = middle.filter((l) => MATCH_RE.test(l)).slice(0, MAX_MATCH_LINES);
+  const hints = recoveryHints(middle.filter((l) => !matches.includes(l)));
   const note = matches.length ? `\u2026(${middle.length} middle line${plural(middle.length)} elided; ${matches.length} error/warn shown)\u2026` : `\u2026(${middle.length} middle line${plural(middle.length)} elided)\u2026`;
-  return [...head, note, ...matches, ...tail].map((l) => clipLine(l)).join(`
+  return [...head, note, ...matches, ...hints, ...tail].map((l) => clipLine(l)).join(`
 `);
 }
 var genericHandler = (_toolName, output) => {
@@ -7763,6 +7773,14 @@ var DOCKER_EXEC_LONG = {
 var TARGET = /^[A-Za-z0-9_][\w.@:-]*\s+/;
 var REMOTE_WRAPPERS = [
   {
+    label: "rtk",
+    unwrap: (c) => {
+      const m = c.match(/^rtk\s+(?:(?:-v+|--verbose|--skip-env)\s+)*/);
+      const inner = m ? c.slice(m[0].length) : null;
+      return inner === null || RTK_OWN_READ.test(inner) ? null : inner;
+    }
+  },
+  {
     label: "ssh",
     unwrap: (c) => {
       const args = c.match(/^ssh\s+/) ? skipOptions(c.replace(/^ssh\s+/, ""), SSH_WITH_VALUE, SSH_FLAGS) : null;
@@ -7793,9 +7811,10 @@ var REMOTE_WRAPPERS = [
     }
   }
 ];
+var RTK_OWN_READ = /^(read|recall)(\s|$)/;
 function unwrapCommand(command) {
   let c = command.trim();
-  const remote = [];
+  const wrappers = [];
   for (let i = 0;i < 8; i++) {
     const cd = c.match(CD_PREFIX);
     if (cd) {
@@ -7811,18 +7830,18 @@ function unwrapCommand(command) {
     if (!inner)
       break;
     if (inner.label)
-      remote.push(inner.label);
+      wrappers.push(inner.label);
     c = inner.inner;
   }
   c = c.replace(/^git\s+(?:(?:--no-pager|--paginate|-P)\s+|-[cC]\s+\S+\s+)+/, "git ");
-  return { command: c, remote };
+  return { command: c, wrappers };
 }
 function normalizeCommand(command) {
   return unwrapCommand(command).command;
 }
 function bashFingerprint(command) {
-  const { command: inner, remote } = unwrapCommand(command);
-  return [...remote, commandFingerprint(inner)].filter((s) => s !== "").join(" ");
+  const { command: inner, wrappers } = unwrapCommand(command);
+  return [...wrappers, commandFingerprint(inner)].filter((s) => s !== "").join(" ");
 }
 var SUBCOMMAND_TOOLS = new Set([
   "git",
@@ -7833,7 +7852,8 @@ var SUBCOMMAND_TOOLS = new Set([
   "yarn",
   "bun",
   "docker",
-  "kubectl"
+  "kubectl",
+  "rtk"
 ]);
 var WRAPPER_TOOLS = new Set(["sudo", "doas", "time", "nice"]);
 var BARE_TOKEN = /^([a-zA-Z][\w-]*)(?=[\s;&|<>()]|$)/;
@@ -7907,7 +7927,7 @@ function isBoundedRead(command) {
   });
 }
 function isContentRead(command) {
-  return isBoundedRead(command) || commandSegments(command).some((s) => /^(cat|git\s+(diff|show))(\s|$)/.test(s) || /^git\s+(log|stash\s+show)(\s.*)?\s(-p|--patch|-u)(\s|$)/.test(s));
+  return isBoundedRead(command) || commandSegments(command).some((s) => /^(cat|git\s+(diff|show))(\s|$)/.test(s) || /^git\s+(log|stash\s+show)(\s.*)?\s(-p|--patch|-u)(\s|$)/.test(s) || /^rtk\s+(?:-\S+\s+)*(read|recall)(\s|$)/.test(s));
 }
 function isCompoundCommand(command) {
   let quote = null;
@@ -7963,9 +7983,11 @@ function getBashHandler(input) {
   const rawCommand = extractCommand(input);
   if (!rawCommand)
     return shellHandler;
-  const command = normalizeCommand(rawCommand);
+  const { command, wrappers } = unwrapCommand(rawCommand);
   if (isCompoundCommand(command))
     return compoundHandler;
+  if (wrappers.includes("rtk"))
+    return shellHandler;
   if (/^git\s+grep(\s|$)/.test(command))
     return grepHandler;
   if (/^git\s+(diff|show)(\s|$)/.test(command))

@@ -1212,6 +1212,15 @@ describe("handlePostToolUse — reads of file and diff content (#332)", () => {
     expect(rows().map((r) => r.full_retained)).toEqual([0]);
   });
 
+  it("treats a read rewritten by rtk like the read it was (#353)", () => {
+    expect(run(doc(54), "rtk read docs/notes.md")).toEqual({});
+    const body = doc(400);
+    expect(run(body, "rtk read docs/notes.md")).not.toEqual({});
+    expect(run(diff(300), "rtk git diff main")).not.toEqual({});
+    expect(rows().map((r) => r.full_retained)).toEqual([1, 1]);
+    expect(rows()[0]!.full_content).toBe(body);
+  });
+
   it("keeps the body of reproducible Bash whose summary clipped a line (#349)", () => {
     const bundle = `built dist/app.min.js\n${"x".repeat(200_000)}`;
     expect(run(bundle, "make bundle")).not.toEqual({});

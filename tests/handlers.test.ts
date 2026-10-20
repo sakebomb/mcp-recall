@@ -1295,6 +1295,66 @@ describe("getBashHandler", () => {
     });
   });
 
+  // #353: rtk's PreToolUse hook rewrites the command first, so the hook saw `rtk`
+  // and lumped every command into one fingerprint, and `rtk read f` was not a read.
+  describe("commands rewritten by rtk (#353)", () => {
+    // The shapes `rtk rewrite` 1.0.1 produces for cat, head, git, ssh and wrappers.
+    const RTK_DIFF = [
+      " src/handlers/bash.ts | 12 +++++++-----", " src/handlers/shell.ts |  4 ++--", " 2 files changed, 10 insertions(+), 6 deletions(-)",
+      "", "Changes:", "", "src/handlers/bash.ts", "@@ -740,6 +740,9 @@ export function getBashHandler", "-  const command = normalizeCommand(rawCommand);",
+      "+  const { command, wrappers } = unwrapCommand(rawCommand);", "  +7 -5", "", "src/handlers/shell.ts", "@@ -64,6 +64,7 @@", "+  const hints = 1;", "  +3 -1",
+    ].join("\n");
+
+    it("fingerprints rtk and the command it runs", () => {
+      expect(bashFingerprint("rtk git diff HEAD~3")).toBe("rtk git diff");
+      expect(bashFingerprint("cd src && rtk git diff")).toBe("rtk git diff");
+      expect(bashFingerprint("timeout 30 rtk git log -5")).toBe("rtk git log");
+      expect(bashFingerprint("rtk ssh anubis 'git status'")).toBe("rtk ssh git status");
+      expect(bashFingerprint("rtk read src/cli.ts --head-lines 40")).toBe("rtk read");
+      expect(bashFingerprint("rtk recall 18f9a13f3086")).toBe("rtk recall");
+      expect(bashFingerprint("rtk -v cargo test")).toBe("rtk cargo test");
+    });
+
+    it("treats rtk's reads and the reads it runs as content reads", () => {
+      expect(isContentRead("rtk read src/handlers/collapse.ts")).toBe(true);
+      expect(isContentRead("rtk read src/cli.ts --tail-lines 20")).toBe(true);
+      expect(isContentRead("rtk recall 18f9a13f3086 --tail 50")).toBe(true);
+      expect(isContentRead("rtk git diff HEAD~3")).toBe(true);
+      expect(isContentRead("rtk git status")).toBe(false);
+    });
+
+    it("routes rtk output to the shell fallback, never a parser for the raw command", () => {
+      for (const command of ["rtk git diff HEAD~3", "rtk git log -5", "rtk git status", "rtk grep -rn foo src", "rtk ls -la", "rtk ssh h 'docker ps'", "cd src && rtk git diff", "rtk read f"]) {
+        expect(getBashHandler({ command })).toBe(shellHandler);
+      }
+      expect(getBashHandler({ command: "rtk git status; rtk git diff" })).toBe(compoundHandler);
+    });
+
+    it("claims no count for rtk's header-stripped diff", () => {
+      const output = { stdout: RTK_DIFF, stderr: "", exit_code: 0 };
+      const { summary } = getBashHandler({ command: "rtk git diff HEAD~3" })("Bash", output);
+      expect(summary).toBe(shellHandler("Bash", output).summary);
+      expect(summary).not.toMatch(/^git diff —/);
+    });
+
+    it("claims no count for rtk's elided grep, which grepHandler would miscount", () => {
+      // rtk prints its true total, then a sample and a hint for the rest.
+      const shown = Array.from({ length: 200 }, (_, i) => `src/m${i % 43}.ts:${i + 1}:export const f${i} = 1;`);
+      const stdout = ["338 matches in 63 files:", "", ...shown, "+20 more files [+138 hidden: rtk recall 207c077f54e0]"].join("\n");
+      const output = { stdout, stderr: "", exit_code: 0 };
+      expect(grepHandler("Bash", output).summary).toMatch(/^grep — 200 matches in 43 files/); // the false count
+      const { summary } = getBashHandler({ command: "rtk grep -rn export src" })("Bash", output);
+      expect(summary).not.toMatch(/^grep —/);
+      expect(summary).toContain("338 matches in 63 files:");
+    });
+
+    it("leaves a command that only mentions rtk alone", () => {
+      expect(normalizeCommand("rtk")).toBe("rtk");
+      expect(normalizeCommand("rtkx git diff")).toBe("rtkx git diff");
+      expect(getBashHandler({ command: "git diff" })).toBe(gitDiffHandler);
+    });
+  });
+
   it("routes gh commands to ghHandler", () => {
     expect(getBashHandler({ command: "gh pr list" })).toBe(ghHandler);
     expect(getBashHandler({ command: "gh issue list" })).toBe(ghHandler);

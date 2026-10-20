@@ -424,11 +424,22 @@ const TARGET = /^[A-Za-z0-9_][\w.@:-]*\s+/;
 
 /**
  * Commands that run another command elsewhere (#339): `ssh host cmd`,
- * `pct exec <id> -- cmd`, `docker exec ctr cmd`, and `bash -c 'cmd'`. Each
- * returns the command run, or null when the shape is not unambiguous. `label`
- * names the remote ones in the fingerprint; `bash -c` runs locally and has none.
+ * `pct exec <id> -- cmd`, `docker exec ctr cmd`, and `bash -c 'cmd'`; or through
+ * rtk's proxy, `rtk git diff` (#353). Each returns the command run, or null when
+ * the shape is not unambiguous. `label` names the wrapper in the fingerprint;
+ * `bash -c` runs locally and has none.
  */
 const REMOTE_WRAPPERS: Array<{ label: string | null; unwrap: (c: string) => string | null }> = [
+  {
+    // rtk's own `read` and `recall` run no other command, so they stay as they
+    // are: `rtk read f` fingerprints as `rtk read` and is a content read.
+    label: "rtk",
+    unwrap: (c) => {
+      const m = c.match(/^rtk\s+(?:(?:-v+|--verbose|--skip-env)\s+)*/);
+      const inner = m ? c.slice(m[0].length) : null;
+      return inner === null || RTK_OWN_READ.test(inner) ? null : inner;
+    },
+  },
   {
     label: "ssh",
     unwrap: (c) => {
@@ -463,10 +474,13 @@ const REMOTE_WRAPPERS: Array<{ label: string | null; unwrap: (c: string) => stri
   },
 ];
 
-/** {@link normalizeCommand}, plus the remote wrappers it stepped through, outermost first. */
-function unwrapCommand(command: string): { command: string; remote: string[] } {
+/** rtk subcommands that return content Claude asked for: a file, or what rtk elided. */
+const RTK_OWN_READ = /^(read|recall)(\s|$)/;
+
+/** {@link normalizeCommand}, plus the labelled wrappers it stepped through, outermost first. */
+function unwrapCommand(command: string): { command: string; wrappers: string[] } {
   let c = command.trim();
-  const remote: string[] = [];
+  const wrappers: string[] = [];
   // Bounded: chained prefixes are rare, and a bound keeps a pathological input
   // from looping. Stops as soon as no prefix matches.
   for (let i = 0; i < 8; i++) {
@@ -484,11 +498,11 @@ function unwrapCommand(command: string): { command: string; remote: string[] } {
       .map(({ label, unwrap }) => ({ label, inner: unwrap(c) }))
       .find((r) => r.inner !== null && r.inner !== "");
     if (!inner) break;
-    if (inner.label) remote.push(inner.label);
+    if (inner.label) wrappers.push(inner.label);
     c = inner.inner!;
   }
   c = c.replace(/^git\s+(?:(?:--no-pager|--paginate|-P)\s+|-[cC]\s+\S+\s+)+/, "git ");
-  return { command: c, remote };
+  return { command: c, wrappers };
 }
 
 /**
@@ -504,7 +518,8 @@ function unwrapCommand(command: string): { command: string; remote: string[] } {
  *
  * And unwraps commands run elsewhere (`ssh host 'git status'`, `pct exec 108 --
  * journalctl`, `docker exec ctr ps`, `bash -c '…'`; see {@link REMOTE_WRAPPERS}),
- * so they reach the handler for the command they run (#339).
+ * so they reach the handler for the command they run (#339). `rtk <cmd>` unwraps
+ * the same way for the fingerprint and retention, but not for routing (#353).
  *
  * Chained prefixes are unwrapped across mixed separators and wrappers (`cd /a &&
  * timeout 60 git diff`, `ssh h 'cd /x && git diff'`) under a bounded loop.
@@ -515,19 +530,21 @@ export function normalizeCommand(command: string): string {
 
 /**
  * The fingerprint the hook stores for a raw Bash command: {@link commandFingerprint}
- * of the normalised command, prefixed by any remote wrappers it ran through
- * (`ssh git status`, `pct exec journalctl`), so local and remote stay apart in
- * analytics (#339). Wrapper labels are constants: no host, id or container name.
+ * of the normalised command, prefixed by any wrappers it ran through (`ssh git
+ * status`, `pct exec journalctl`, `rtk git diff`), so local, remote and rtk-run
+ * stay apart in analytics (#339, #353). Wrapper labels are constants: no host,
+ * id or container name.
  */
 export function bashFingerprint(command: string): string {
-  const { command: inner, remote } = unwrapCommand(command);
-  return [...remote, commandFingerprint(inner)].filter((s) => s !== "").join(" ");
+  const { command: inner, wrappers } = unwrapCommand(command);
+  return [...wrappers, commandFingerprint(inner)].filter((s) => s !== "").join(" ");
 }
 
 // Dispatcher commands whose first token names a tool family, not the operation —
 // the meaningful fingerprint is "verb subcommand" (e.g. "git diff", "cargo build").
+// `rtk` is here for its own commands (`rtk read`), which are not unwrapped.
 const SUBCOMMAND_TOOLS = new Set([
-  "git", "cargo", "go", "npm", "pnpm", "yarn", "bun", "docker", "kubectl",
+  "git", "cargo", "go", "npm", "pnpm", "yarn", "bun", "docker", "kubectl", "rtk",
 ]);
 
 // Wrapper commands that prefix a real command; skipped so the fingerprint names
@@ -663,12 +680,14 @@ export function isBoundedRead(command: string): boolean {
  * True when `command` reads content for Claude: a bounded read, `cat`,
  * `git diff`/`git show`, or a patch from `git log -p`/`git stash show -p`. Their summaries keep stats or a head and tail, which
  * drops what Claude asked for, so the hook delivers small ones whole and
- * `balanced` retention keeps the body of large ones (#332).
+ * `balanced` retention keeps the body of large ones (#332). rtk's rewrite of
+ * a read, `rtk read f`, and `rtk recall <hash>` count too (#353).
  */
 export function isContentRead(command: string): boolean {
   return isBoundedRead(command) ||
     commandSegments(command).some((s) => /^(cat|git\s+(diff|show))(\s|$)/.test(s) ||
-      /^git\s+(log|stash\s+show)(\s.*)?\s(-p|--patch|-u)(\s|$)/.test(s));
+      /^git\s+(log|stash\s+show)(\s.*)?\s(-p|--patch|-u)(\s|$)/.test(s) ||
+      /^rtk\s+(?:-\S+\s+)*(read|recall)(\s|$)/.test(s));
 }
 
 /**
@@ -740,9 +759,12 @@ export const compoundHandler: Handler = (
 export function getBashHandler(input: unknown): Handler {
   const rawCommand = extractCommand(input);
   if (!rawCommand) return shellHandler;
-  const command = normalizeCommand(rawCommand);
+  const { command, wrappers } = unwrapCommand(rawCommand);
 
   if (isCompoundCommand(command)) return compoundHandler;
+  // rtk reshapes output (a diff without its headers), so a parser for the raw
+  // command could read it wrong and claim a false count, the #350 class (#353).
+  if (wrappers.includes("rtk")) return shellHandler;
 
   if (/^git\s+grep(\s|$)/.test(command)) return grepHandler;
   if (/^git\s+(diff|show)(\s|$)/.test(command)) return gitDiffHandler;

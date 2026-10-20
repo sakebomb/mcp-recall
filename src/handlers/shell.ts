@@ -9,7 +9,8 @@ import type { CompressionResult, Handler } from "./types";
 import { extractText } from "./types";
 import { jsonHandler } from "./json";
 import { collapseRepeats } from "./collapse";
-import { MAX_LINE_CHARS } from "./clip";
+import { clipLine, MAX_LINE_CHARS } from "./clip";
+import { recoveryHints } from "./rtk";
 
 export const HEAD_STDOUT = 25;
 const HEAD_STDERR = 20;
@@ -58,8 +59,9 @@ function trimTrailingEmpty(lines: string[]): string[] {
 
 /**
  * The first `max` lines after collapsing repeats (#340), so the budget goes to
- * distinct lines, each clipped to MAX_LINE_CHARS (#349). The header and the
- * overflow count input lines, not summary lines.
+ * distinct lines, each clipped to MAX_LINE_CHARS (#349), then any rtk recovery
+ * hint from the lines cut (#353). The header and the overflow count input
+ * lines, not summary lines.
  */
 function formatLines(
   text: string,
@@ -71,9 +73,10 @@ function formatLines(
   const hidden = total - shown.reduce((n, l) => n + l.count, 0);
   const head = shown.map((l) => l.text).join("\n");
   const overflow = hidden > 0 ? `\n… (+${hidden} more lines)` : "";
+  const hints = recoveryHints(lines.slice(total - hidden)).map((h) => `\n${clipLine(h)}`).join("");
   return {
     header: `${total} line${total === 1 ? "" : "s"}`,
-    body: `${head}${overflow}`,
+    body: `${head}${overflow}${hints}`,
   };
 }
 

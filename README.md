@@ -590,6 +590,17 @@ Claude Code's `PostToolUse` hook supports output replacement for MCP tools and t
 
 The remaining built-in tools — `Read`, `Grep`, `Glob` — do not support output replacement. Their full output enters context directly. If large file reads are your biggest context consumer, consider the [filesystem MCP server](https://github.com/modelcontextprotocol/servers) instead of the built-in Read tool.
 
+### Running alongside rtk
+
+[rtk](https://github.com/rtk-ai/rtk)'s hook rewrites a Bash command before it runs (`cat f` → `rtk read f`, `git diff` → `rtk git diff`), so mcp-recall sees rtk's output, not the command's. Measured with rtk 1.0.1:
+
+- **Reads stay reads.** `rtk read`, `rtk recall` and an rtk-run `git diff` are content reads: delivered whole up to 8 KB, body kept above it.
+- **rtk's output gets the shell fallback**, never a handler for the raw command. rtk reshapes output (its `grep` prints a sample under its true total), and a parser for the raw shape would report a wrong count. So an rtk-run command is summarized less finely than mcp-recall alone would: a large `rtk git diff` gets a 25-line head (body kept) rather than a per-file summary.
+- **rtk's recovery hints survive.** A summary that cuts a line holding `rtk recall <hash>` or `[full diff: rtk … --no-compact]` appends it.
+- **Analytics stay per command**: fingerprints read `rtk git diff`, `rtk read`, not `rtk`.
+
+rtk's optional PostToolUse filter (`rtk:posthook` in its pipeline) also rewrites tool output; running both output filters has not been measured.
+
 ---
 
 ## Privacy

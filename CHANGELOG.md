@@ -59,6 +59,17 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   37 outputs over 8 KB that were delivered whole (2.9 MB) now arrive as 0.4 MB,
   and no output of 8 KB or less changes. The bench gains a 180 KB minified
   `grep` line: 97.9% smaller.
+- **Running alongside rtk is no longer worse than mcp-recall alone** (#353).
+  rtk rewrites a command before it runs, so the hook saw `rtk read f` or
+  `rtk git diff` and treated neither as a read: a 4.7 KB `rtk read` arrived
+  as a 25-line summary with no body kept, and every rtk command shared the
+  fingerprint `rtk`. `rtk <cmd>` now unwraps like `ssh` for retention and the
+  fingerprint (`rtk git diff`), and `rtk read`/`rtk recall` are content reads.
+  rtk's output always gets the shell fallback, since a parser for the raw
+  command would misread it (its `grep` sample of 200 lines under a true total
+  of 338 would be reported as 200 matches). A summary that cuts one of rtk's
+  recovery hints (`rtk recall <hash>`) now appends it. README: "Running
+  alongside rtk".
 
 ## [1.16.1] — 2026-10-19
 

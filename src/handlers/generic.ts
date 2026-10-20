@@ -14,6 +14,7 @@ import type { CompressionResult, Handler } from "./types";
 import { extractText } from "./types";
 import { collapseRepeats } from "./collapse";
 import { clipLine } from "./clip";
+import { recoveryHints } from "./rtk";
 
 const MAX_CHARS = 500; // return unchanged at or below this size
 
@@ -46,21 +47,22 @@ function summarizeLines(lines: string[]): string {
 
 /**
  * First `headLines` and last `tailLines` lines, with a count of the elided
- * middle and any error/warn lines surfaced from it, each line clipped to
- * MAX_LINE_CHARS (#349). Callers keep `lines.length > headLines + tailLines`
- * so the windows never overlap.
+ * middle and any error/warn lines and rtk recovery hints (#353) surfaced from
+ * it, each line clipped to MAX_LINE_CHARS (#349). Callers keep
+ * `lines.length > headLines + tailLines` so the windows never overlap.
  */
 export function summarizeLineWindow(lines: string[], headLines: number, tailLines: number): string {
   const head = lines.slice(0, headLines);
   const tail = lines.slice(lines.length - tailLines);
   const middle = lines.slice(headLines, lines.length - tailLines);
   const matches = middle.filter((l) => MATCH_RE.test(l)).slice(0, MAX_MATCH_LINES);
+  const hints = recoveryHints(middle.filter((l) => !matches.includes(l)));
 
   const note = matches.length
     ? `…(${middle.length} middle line${plural(middle.length)} elided; ${matches.length} error/warn shown)…`
     : `…(${middle.length} middle line${plural(middle.length)} elided)…`;
 
-  return [...head, note, ...matches, ...tail].map((l) => clipLine(l)).join("\n");
+  return [...head, note, ...matches, ...hints, ...tail].map((l) => clipLine(l)).join("\n");
 }
 
 export const genericHandler: Handler = (
