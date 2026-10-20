@@ -34,7 +34,10 @@ bin/recall              Entrypoint used by hooks/hooks.json (session-start, post
                         and as the npm `bin`. Resolves symlinks before locating src/.
 src/
   server.ts             MCP server — exposes the recall__* tools listed below
-  cli.ts                Hook CLI dispatcher (mcp-recall install / learn / profiles / …)
+  cli.ts                Hook CLI dispatcher (mcp-recall install / learn / profiles / serve / …)
+  binary.ts             Standalone-binary startup (#361): extracts embedded profiles, then cli main.
+                        Built by scripts/build-binary.ts (`bun run build:binary`) into dist/bin/.
+                        install/ detects the binary (detectLaunch) and registers it as hooks + server
   config.ts             TOML config loader (Zod-validated, cached)
   project-key.ts        Git root detection + SHA256 path hash
   log.ts                Unified stderr logging — info/warn/error/debug, gated on RECALL_DEBUG=1

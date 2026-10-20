@@ -243,6 +243,16 @@ Or symlink it:
 ln -sf /path/to/mcp-recall/plugins/mcp-recall/dist/cli.js ~/.local/bin/mcp-recall
 ```
 
+Or build a standalone binary, which needs no Bun at run time:
+
+```bash
+bun run build:binary                 # dist/bin/mcp-recall-<os>-<arch>
+cp dist/bin/mcp-recall-linux-x64 ~/.local/bin/mcp-recall
+mcp-recall install                   # registers the binary itself as hooks and server
+```
+
+One file runs the CLI, both hooks and the MCP server (`mcp-recall serve`). It is about 90 MB, since it carries the Bun runtime. The bundled profiles are inside it, and are copied out once per version to `~/.local/share/mcp-recall/bundled-profiles/`. `bun run build:binary --all` cross-compiles every release platform. If you move the binary, run `mcp-recall install` again, since the hooks name its path.
+
 ---
 
 ## Updating
@@ -324,6 +334,7 @@ The active project's database is always protected. When the store grows past `st
 mcp-recall install              # register hooks + MCP server in Claude Code
 mcp-recall uninstall            # remove hooks + MCP server
 mcp-recall status               # report install health and store size
+mcp-recall serve                # run the MCP server on stdio (Claude Code starts it)
 mcp-recall gc [--force]         # reclaim disk (see Maintenance above)
 mcp-recall discover [--all]     # rank output routed to fallback handlers (--since, --limit)
 mcp-recall learn                # generate profiles from your installed MCPs

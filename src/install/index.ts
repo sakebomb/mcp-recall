@@ -47,14 +47,39 @@ export function defaultClaudeMdPath(): string {
   return path.join(os.homedir(), ".claude", "CLAUDE.md");
 }
 
-// ── Dist path detection ───────────────────────────────────────────────────────
+// ── Launch detection ─────────────────────────────────────────────────────────
 
-export interface RecallPaths {
-  serverJs: string;
-  cliJs: string;
+/** How Claude Code runs mcp-recall: through bun and the bundled dist, or a standalone binary (#361). */
+export interface RecallLaunch {
+  /** The command a hook runs, before its subcommand: `bun /…/dist/cli.js`, or the binary. */
+  cli: string;
+  /** The `mcpServers.recall` entry for ~/.claude.json. */
+  server: { type: "stdio"; command: string; args: string[] };
+  /** Files the launch needs: install refuses, and status warns, when one is missing. */
+  artifacts: Array<{ label: string; path: string }>;
 }
 
-export function detectPaths(): RecallPaths {
+/**
+ * True inside a `bun build --compile` binary, whose modules live under a virtual
+ * root: `/$bunfs/` on POSIX, `B:\~BUN\` on Windows. `Bun.isStandaloneExecutable`
+ * says so directly in newer Bun; the path is the fallback for older ones.
+ */
+export function isStandaloneBinary(modulePath = import.meta.path): boolean {
+  const flag = (Bun as { isStandaloneExecutable?: boolean }).isStandaloneExecutable;
+  return flag ?? /^(\/\$bunfs\/|[A-Za-z]:[\\/]~BUN[\\/])/.test(modulePath);
+}
+
+const quoteIfSpaced = (p: string) => (/\s/.test(p) ? JSON.stringify(p) : p);
+
+export function detectLaunch(standalone = isStandaloneBinary()): RecallLaunch {
+  if (standalone) {
+    const bin = process.execPath;
+    return {
+      cli: quoteIfSpaced(bin),
+      server: { type: "stdio", command: bin, args: ["serve"] },
+      artifacts: [{ label: "binary", path: bin }],
+    };
+  }
   // import.meta.path is the absolute path of the currently executing file.
   // Running from src/install/index.ts (dev): dist is ../../plugins/mcp-recall/dist/
   // Running from dist/cli.js (built):        dist is import.meta.dir itself.
@@ -62,10 +87,13 @@ export function detectPaths(): RecallPaths {
   const distDir = isBuilt
     ? import.meta.dir
     : path.resolve(import.meta.dir, "../../plugins/mcp-recall/dist");
+  const serverJs = path.join(distDir, "server.js");
+  const cliJs = path.join(distDir, "cli.js");
 
   return {
-    serverJs: path.join(distDir, "server.js"),
-    cliJs:    path.join(distDir, "cli.js"),
+    cli: `bun ${quoteIfSpaced(cliJs)}`,
+    server: { type: "stdio", command: "bun", args: [serverJs] },
+    artifacts: [{ label: "dist/server.js", path: serverJs }, { label: "dist/cli.js", path: cliJs }],
   };
 }
 
@@ -188,16 +216,17 @@ interface HookEntry {
   matcher?: string;
 }
 
-export function makeSessionStartEntry(cliJs: string) {
+/** `cli` is {@link RecallLaunch.cli}: `bun /…/dist/cli.js`, or a binary's path. */
+export function makeSessionStartEntry(cli: string) {
   return {
-    hooks: [{ type: "command", command: `bun ${cliJs} session-start`, timeout: 10 }],
+    hooks: [{ type: "command", command: `${cli} session-start`, timeout: 10 }],
   };
 }
 
-export function makePostToolUseEntry(cliJs: string) {
+export function makePostToolUseEntry(cli: string) {
   return {
     matcher: POST_TOOL_USE_MATCHER,
-    hooks: [{ type: "command", command: `bun ${cliJs} post-tool-use`, timeout: 10 }],
+    hooks: [{ type: "command", command: `${cli} post-tool-use`, timeout: 10 }],
   };
 }
 
@@ -236,6 +265,8 @@ export interface InstallOptions {
   claudeJsonPath?: string;
   settingsPath?: string;
   claudeMdPath?: string;
+  /** Defaults to {@link detectLaunch}; tests pass one. */
+  launch?: RecallLaunch;
 }
 
 export async function installCommand(opts: InstallOptions = {}): Promise<void> {
@@ -244,13 +275,13 @@ export async function installCommand(opts: InstallOptions = {}): Promise<void> {
     claudeJsonPath = defaultClaudeJsonPath(),
     settingsPath   = defaultSettingsPath(),
     claudeMdPath   = defaultClaudeMdPath(),
+    launch         = detectLaunch(),
   } = opts;
 
-  const paths = detectPaths();
-
-  if (!existsSync(paths.serverJs) || !existsSync(paths.cliJs)) {
+  const missing = launch.artifacts.find((a) => !existsSync(a.path));
+  if (missing) {
     console.error(`${RED}✗ Build artifacts not found.${RESET}`);
-    console.error(`  Expected: ${DIM}${paths.serverJs}${RESET}`);
+    console.error(`  Expected: ${DIM}${missing.path}${RESET}`);
     console.error(`  Run ${BOLD}bun run build${RESET} first.`);
     process.exit(1);
   }
@@ -264,9 +295,11 @@ export async function installCommand(opts: InstallOptions = {}): Promise<void> {
   // ── ~/.claude.json ──────────────────────────────────────────────────────────
   const claudeJson = await readJsonFile(claudeJsonPath);
   const mcpServers = (claudeJson["mcpServers"] as Record<string, unknown>) ?? {};
-  const newServer  = { type: "stdio", command: "bun", args: [paths.serverJs] };
+  const newServer  = launch.server;
   const existing   = mcpServers["recall"] as Record<string, unknown> | undefined;
-  const currentServerPath = (existing?.["args"] as string[])?.[0];
+  // Compare the whole launch, so moving between npm and a binary is an update.
+  const sameServer = existing?.["command"] === newServer.command
+    && JSON.stringify(existing?.["args"]) === JSON.stringify(newServer.args);
 
   if (!existing) {
     if (!dryRun) {
@@ -275,7 +308,7 @@ export async function installCommand(opts: InstallOptions = {}): Promise<void> {
     }
     console.log(`${GREEN}✓${RESET} MCP server registered     ${DIM}(${claudeJsonPath})${RESET}`);
     anyChange = true;
-  } else if (currentServerPath !== paths.serverJs) {
+  } else if (!sameServer) {
     if (!dryRun) {
       claudeJson["mcpServers"] = { ...mcpServers, recall: newServer };
       await writeJsonFile(claudeJsonPath, claudeJson);
@@ -294,7 +327,7 @@ export async function installCommand(opts: InstallOptions = {}): Promise<void> {
   // SessionStart
   const ssHooks  = (hooks["SessionStart"] as unknown[]) ?? [];
   const ssIdx    = ssHooks.findIndex(isOurSessionStartHook);
-  const newSS    = makeSessionStartEntry(paths.cliJs);
+  const newSS    = makeSessionStartEntry(launch.cli);
 
   if (ssIdx === -1) {
     hooks["SessionStart"] = [...ssHooks, newSS];
@@ -317,7 +350,7 @@ export async function installCommand(opts: InstallOptions = {}): Promise<void> {
   // PostToolUse
   const ptuHooks = (hooks["PostToolUse"] as unknown[]) ?? [];
   const ptuIdx   = ptuHooks.findIndex(isOurPostToolUseHook);
-  const newPTU   = makePostToolUseEntry(paths.cliJs);
+  const newPTU   = makePostToolUseEntry(launch.cli);
 
   if (ptuIdx === -1) {
     hooks["PostToolUse"] = [...ptuHooks, newPTU];
@@ -447,6 +480,8 @@ export interface StatusOptions {
   claudeJsonPath?: string;
   settingsPath?: string;
   claudeMdPath?: string;
+  /** Defaults to {@link detectLaunch}; tests pass one. */
+  launch?: RecallLaunch;
 }
 
 export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
@@ -454,9 +489,8 @@ export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
     claudeJsonPath = defaultClaudeJsonPath(),
     settingsPath   = defaultSettingsPath(),
     claudeMdPath   = defaultClaudeMdPath(),
+    launch         = detectLaunch(),
   } = opts;
-
-  const recallPaths = detectPaths();
 
   function tick(ok: boolean) { return ok ? `${GREEN}✓${RESET}` : `${RED}✗${RESET}`; }
   function pad(s: string, n: number) { return s + " ".repeat(Math.max(0, n - s.length)); }
@@ -477,10 +511,10 @@ export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
   const claudeMdOk = isClaudeMdInjected(claudeMdContent);
 
   // Build artifacts
-  const serverExists = existsSync(recallPaths.serverJs);
-  const cliExists    = existsSync(recallPaths.cliJs);
+  const artifacts    = launch.artifacts.map((a) => ({ ...a, exists: existsSync(a.path) }));
+  const artifactsOk  = artifacts.every((a) => a.exists);
 
-  const fullyInstalled = serverRegistered && ssRegistered && ptuRegistered && claudeMdOk && serverExists && cliExists;
+  const fullyInstalled = serverRegistered && ssRegistered && ptuRegistered && claudeMdOk && artifactsOk;
   const label = fullyInstalled
     ? `${GREEN}installed${RESET}`
     : (serverRegistered || ssRegistered || ptuRegistered)
@@ -495,12 +529,13 @@ export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
   console.log(`  ${pad("~/.claude/CLAUDE.md", 30)}  ${tick(claudeMdOk)} mcp-recall instructions`);
   console.log("");
   console.log(`  ${pad("Build artifacts", 30)}`);
-  console.log(`  ${pad("  dist/server.js", 30)}  ${tick(serverExists)} ${DIM}${recallPaths.serverJs}${RESET}`);
-  console.log(`  ${pad("  dist/cli.js", 30)}  ${tick(cliExists)} ${DIM}${recallPaths.cliJs}${RESET}`);
+  for (const a of artifacts) {
+    console.log(`  ${pad(`  ${a.label}`, 30)}  ${tick(a.exists)} ${DIM}${a.path}${RESET}`);
+  }
 
   if (!fullyInstalled) {
     console.log("");
-    if (!serverExists || !cliExists) {
+    if (!artifactsOk) {
       console.log(`  Run ${BOLD}bun run build${RESET} then ${BOLD}mcp-recall install${RESET}`);
     } else {
       console.log(`  Run ${BOLD}mcp-recall install${RESET}`);

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, spyOn, mock } from "bun:test";
 import { mkdtemp, rm } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
@@ -19,9 +19,14 @@ import {
   CLAUDE_MD_MARKER_START,
   CLAUDE_MD_MARKER_END,
   CLAUDE_MD_BLOCK,
+  statusCommand,
+  detectLaunch,
+  isStandaloneBinary,
+  type RecallLaunch,
 } from "../src/install/index";
 
-const FAKE_CLI    = "/fake/mcp-recall/dist/cli.js";
+// A RecallLaunch.cli as an npm install writes it: bun and the bundled dist.
+const FAKE_CLI    = "bun /fake/mcp-recall/dist/cli.js";
 const FAKE_SERVER = "/fake/mcp-recall/dist/server.js";
 
 // Stub detectPaths so tests don't depend on the actual build artifacts existing.
@@ -80,7 +85,7 @@ describe("isOurPostToolUseHook", () => {
   it("rejects a hook with different matcher", () => {
     expect(isOurPostToolUseHook({
       matcher: "mcp__other__*",
-      hooks: [{ type: "command", command: `bun ${FAKE_CLI} post-tool-use` }],
+      hooks: [{ type: "command", command: `${FAKE_CLI} post-tool-use` }],
     })).toBe(false);
   });
 
@@ -167,7 +172,7 @@ describe("JSON merge — adds our entries non-destructively", () => {
   });
 
   it("updates stale path on re-run", async () => {
-    const stale = makeSessionStartEntry("/old/mcp-recall/dist/cli.js");
+    const stale = makeSessionStartEntry("bun /old/mcp-recall/dist/cli.js");
     await writeJsonFile(settingsPath, {
       hooks: { SessionStart: [stale] },
     });
@@ -186,7 +191,7 @@ describe("JSON merge — adds our entries non-destructively", () => {
 
     const result = await readJsonFile(settingsPath);
     const updated = (result["hooks"] as any)["SessionStart"][0];
-    expect(updated.hooks[0].command).toBe(`bun ${FAKE_CLI} session-start`);
+    expect(updated.hooks[0].command).toBe(`${FAKE_CLI} session-start`);
   });
 });
 
@@ -344,5 +349,100 @@ describe("removeClaudeMd", () => {
     const filePath = path.join(tmpDir, "nonexistent-CLAUDE.md");
     const removed = await removeClaudeMd(filePath);
     expect(removed).toBe(false);
+  });
+});
+
+// ── standalone binary launch (#361) ──────────────────────────────────────────
+
+describe("launch detection", () => {
+  it("recognises a compiled binary's module root on POSIX and Windows", () => {
+    expect(isStandaloneBinary("/$bunfs/root/mcp-recall")).toBe(true);
+    expect(isStandaloneBinary("B:\\~BUN\\root\\mcp-recall.exe")).toBe(true);
+    expect(isStandaloneBinary("/home/u/mcp-recall/src/install/index.ts")).toBe(false);
+    expect(isStandaloneBinary("/usr/lib/node_modules/mcp-recall/plugins/mcp-recall/dist/cli.js")).toBe(false);
+  });
+
+  it("launches a binary as itself, with `serve` for the server", () => {
+    const launch = detectLaunch(true);
+    expect(launch.cli).toBe(process.execPath);
+    expect(launch.server).toEqual({ type: "stdio", command: process.execPath, args: ["serve"] });
+    expect(launch.artifacts.map((a) => a.path)).toEqual([process.execPath]);
+  });
+
+  it("launches an npm install through bun and the bundled dist", () => {
+    const launch = detectLaunch(false);
+    expect(launch.cli).toMatch(/^bun \S+\/plugins\/mcp-recall\/dist\/cli\.js$/);
+    expect(launch.server.command).toBe("bun");
+    expect(launch.server.args[0]).toMatch(/\/plugins\/mcp-recall\/dist\/server\.js$/);
+  });
+});
+
+describe("install / uninstall / status with a binary launch", () => {
+  let binary: string;
+  let claudeMdPath: string;
+  let launch: RecallLaunch;
+  const quiet = () => spyOn(console, "log").mockImplementation(() => {});
+
+  beforeEach(async () => {
+    binary = path.join(tmpDir, "bin", "mcp-recall");
+    await Bun.write(binary, ""); // stands in for the binary; install checks it exists
+    claudeMdPath = path.join(tmpDir, "CLAUDE.md");
+    launch = { cli: binary, server: { type: "stdio", command: binary, args: ["serve"] }, artifacts: [{ label: "binary", path: binary }] };
+  });
+
+  afterEach(() => mock.restore());
+
+  it("replaces an npm install's entries with the binary's", async () => {
+    await writeJsonFile(claudeJsonPath, { mcpServers: { recall: { type: "stdio", command: "bun", args: [FAKE_SERVER] } } });
+    await writeJsonFile(settingsPath, {
+      hooks: { SessionStart: [makeSessionStartEntry(FAKE_CLI)], PostToolUse: [makePostToolUseEntry(FAKE_CLI)] },
+    });
+    quiet();
+    await installCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch });
+
+    const claudeJson = await readJsonFile(claudeJsonPath) as any;
+    const settings = await readJsonFile(settingsPath) as any;
+    expect(claudeJson.mcpServers.recall).toEqual({ type: "stdio", command: binary, args: ["serve"] });
+    expect(settings.hooks.SessionStart).toHaveLength(1);
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toBe(`${binary} session-start`);
+    expect(settings.hooks.PostToolUse).toHaveLength(1);
+    expect(settings.hooks.PostToolUse[0].hooks[0].command).toBe(`${binary} post-tool-use`);
+  });
+
+  it("is idempotent, and uninstall removes the binary's entries", async () => {
+    const log = quiet();
+    await installCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch });
+    log.mockClear();
+    await installCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch });
+    expect(log.mock.calls.flat().join("\n")).toContain("MCP server already registered");
+    expect(log.mock.calls.flat().join("\n")).toContain("PostToolUse hook already registered");
+
+    await uninstallCommand({ claudeJsonPath, settingsPath, claudeMdPath });
+    const claudeJson = await readJsonFile(claudeJsonPath) as any;
+    const settings = await readJsonFile(settingsPath) as any;
+    expect(claudeJson.mcpServers.recall).toBeUndefined();
+    expect(settings.hooks.SessionStart).toEqual([]);
+    expect(settings.hooks.PostToolUse).toEqual([]);
+  });
+
+  it("status reports the binary as the artifact and calls the install complete", async () => {
+    const log = quiet();
+    await installCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch });
+    log.mockClear();
+    await statusCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch });
+    const out = log.mock.calls.flat().join("\n");
+    expect(out).toContain("installed");
+    expect(out).not.toContain("partial");
+    expect(out).toContain(binary);
+    expect(out).not.toContain("dist/server.js");
+  });
+
+  it("status calls the install stale when the registered binary is gone", async () => {
+    const log = quiet();
+    await installCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch });
+    await rm(binary);
+    log.mockClear();
+    await statusCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch });
+    expect(log.mock.calls.flat().join("\n")).toContain("partial / stale");
   });
 });

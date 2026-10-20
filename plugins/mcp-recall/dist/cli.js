@@ -94,6 +94,7 @@ var require_package = __commonJS((exports, module) => {
       dev: "bun --watch src/server.ts",
       typecheck: "tsc --noEmit",
       bench: "bun run scripts/benchmark.ts",
+      "build:binary": "bun run scripts/build-binary.ts",
       measure: "bun run scripts/measure-store.ts",
       build: "bun build src/server.ts --target bun --outfile plugins/mcp-recall/dist/server.js && bun build src/cli.ts --target bun --outfile plugins/mcp-recall/dist/cli.js && cp hooks/hooks.json plugins/mcp-recall/hooks/hooks.json && rm -rf plugins/mcp-recall/profiles && cp -r profiles plugins/mcp-recall/profiles",
       prepare: "git config core.hooksPath .githooks"
@@ -11209,12 +11210,28 @@ function defaultSettingsPath() {
 function defaultClaudeMdPath() {
   return path.join(os.homedir(), ".claude", "CLAUDE.md");
 }
-function detectPaths() {
+function isStandaloneBinary(modulePath = import.meta.path) {
+  const flag = Bun.isStandaloneExecutable;
+  return flag ?? /^(\/\$bunfs\/|[A-Za-z]:[\\/]~BUN[\\/])/.test(modulePath);
+}
+var quoteIfSpaced = (p) => /\s/.test(p) ? JSON.stringify(p) : p;
+function detectLaunch(standalone = isStandaloneBinary()) {
+  if (standalone) {
+    const bin = process.execPath;
+    return {
+      cli: quoteIfSpaced(bin),
+      server: { type: "stdio", command: bin, args: ["serve"] },
+      artifacts: [{ label: "binary", path: bin }]
+    };
+  }
   const isBuilt = import.meta.path.endsWith(".js");
   const distDir = isBuilt ? import.meta.dir : path.resolve(import.meta.dir, "../../plugins/mcp-recall/dist");
+  const serverJs = path.join(distDir, "server.js");
+  const cliJs = path.join(distDir, "cli.js");
   return {
-    serverJs: path.join(distDir, "server.js"),
-    cliJs: path.join(distDir, "cli.js")
+    cli: `bun ${quoteIfSpaced(cliJs)}`,
+    server: { type: "stdio", command: "bun", args: [serverJs] },
+    artifacts: [{ label: "dist/server.js", path: serverJs }, { label: "dist/cli.js", path: cliJs }]
   };
 }
 async function readJsonFile(filePath) {
@@ -11315,15 +11332,15 @@ async function removeClaudeMd(filePath) {
 var SESSION_START_MARKER = "session-start";
 var POST_TOOL_USE_MARKER = "post-tool-use";
 var POST_TOOL_USE_MATCHER = "(mcp__(?!recall__).*|Bash)";
-function makeSessionStartEntry(cliJs) {
+function makeSessionStartEntry(cli) {
   return {
-    hooks: [{ type: "command", command: `bun ${cliJs} session-start`, timeout: 10 }]
+    hooks: [{ type: "command", command: `${cli} session-start`, timeout: 10 }]
   };
 }
-function makePostToolUseEntry(cliJs) {
+function makePostToolUseEntry(cli) {
   return {
     matcher: POST_TOOL_USE_MATCHER,
-    hooks: [{ type: "command", command: `bun ${cliJs} post-tool-use`, timeout: 10 }]
+    hooks: [{ type: "command", command: `${cli} post-tool-use`, timeout: 10 }]
   };
 }
 function isOurSessionStartHook(entry) {
@@ -11356,12 +11373,13 @@ async function installCommand(opts = {}) {
     dryRun = false,
     claudeJsonPath = defaultClaudeJsonPath(),
     settingsPath = defaultSettingsPath(),
-    claudeMdPath = defaultClaudeMdPath()
+    claudeMdPath = defaultClaudeMdPath(),
+    launch = detectLaunch()
   } = opts;
-  const paths = detectPaths();
-  if (!existsSync3(paths.serverJs) || !existsSync3(paths.cliJs)) {
+  const missing = launch.artifacts.find((a) => !existsSync3(a.path));
+  if (missing) {
     console.error(`${RED}\u2717 Build artifacts not found.${RESET}`);
-    console.error(`  Expected: ${DIM}${paths.serverJs}${RESET}`);
+    console.error(`  Expected: ${DIM}${missing.path}${RESET}`);
     console.error(`  Run ${BOLD}bun run build${RESET} first.`);
     process.exit(1);
   }
@@ -11372,9 +11390,9 @@ async function installCommand(opts = {}) {
   let anyChange = false;
   const claudeJson = await readJsonFile(claudeJsonPath);
   const mcpServers = claudeJson["mcpServers"] ?? {};
-  const newServer = { type: "stdio", command: "bun", args: [paths.serverJs] };
+  const newServer = launch.server;
   const existing = mcpServers["recall"];
-  const currentServerPath = existing?.["args"]?.[0];
+  const sameServer = existing?.["command"] === newServer.command && JSON.stringify(existing?.["args"]) === JSON.stringify(newServer.args);
   if (!existing) {
     if (!dryRun) {
       claudeJson["mcpServers"] = { ...mcpServers, recall: newServer };
@@ -11382,7 +11400,7 @@ async function installCommand(opts = {}) {
     }
     console.log(`${GREEN}\u2713${RESET} MCP server registered     ${DIM}(${claudeJsonPath})${RESET}`);
     anyChange = true;
-  } else if (currentServerPath !== paths.serverJs) {
+  } else if (!sameServer) {
     if (!dryRun) {
       claudeJson["mcpServers"] = { ...mcpServers, recall: newServer };
       await writeJsonFile(claudeJsonPath, claudeJson);
@@ -11397,7 +11415,7 @@ async function installCommand(opts = {}) {
   let settingsChanged = false;
   const ssHooks = hooks["SessionStart"] ?? [];
   const ssIdx = ssHooks.findIndex(isOurSessionStartHook);
-  const newSS = makeSessionStartEntry(paths.cliJs);
+  const newSS = makeSessionStartEntry(launch.cli);
   if (ssIdx === -1) {
     hooks["SessionStart"] = [...ssHooks, newSS];
     settingsChanged = true;
@@ -11417,7 +11435,7 @@ async function installCommand(opts = {}) {
   }
   const ptuHooks = hooks["PostToolUse"] ?? [];
   const ptuIdx = ptuHooks.findIndex(isOurPostToolUseHook);
-  const newPTU = makePostToolUseEntry(paths.cliJs);
+  const newPTU = makePostToolUseEntry(launch.cli);
   if (ptuIdx === -1) {
     hooks["PostToolUse"] = [...ptuHooks, newPTU];
     settingsChanged = true;
@@ -11523,9 +11541,9 @@ async function statusCommand(opts = {}) {
   const {
     claudeJsonPath = defaultClaudeJsonPath(),
     settingsPath = defaultSettingsPath(),
-    claudeMdPath = defaultClaudeMdPath()
+    claudeMdPath = defaultClaudeMdPath(),
+    launch = detectLaunch()
   } = opts;
-  const recallPaths = detectPaths();
   function tick(ok) {
     return ok ? `${GREEN}\u2713${RESET}` : `${RED}\u2717${RESET}`;
   }
@@ -11544,9 +11562,9 @@ async function statusCommand(opts = {}) {
     claudeMdContent = await readFile(claudeMdPath, "utf8");
   } catch {}
   const claudeMdOk = isClaudeMdInjected(claudeMdContent);
-  const serverExists = existsSync3(recallPaths.serverJs);
-  const cliExists = existsSync3(recallPaths.cliJs);
-  const fullyInstalled = serverRegistered && ssRegistered && ptuRegistered && claudeMdOk && serverExists && cliExists;
+  const artifacts = launch.artifacts.map((a) => ({ ...a, exists: existsSync3(a.path) }));
+  const artifactsOk = artifacts.every((a) => a.exists);
+  const fullyInstalled = serverRegistered && ssRegistered && ptuRegistered && claudeMdOk && artifactsOk;
   const label = fullyInstalled ? `${GREEN}installed${RESET}` : serverRegistered || ssRegistered || ptuRegistered ? `${YELLOW}partial / stale${RESET}` : `${RED}not installed${RESET}`;
   console.log(`
 Installation: ${BOLD}${label}${RESET}
@@ -11557,11 +11575,12 @@ Installation: ${BOLD}${label}${RESET}
   console.log(`  ${pad("~/.claude/CLAUDE.md", 30)}  ${tick(claudeMdOk)} mcp-recall instructions`);
   console.log("");
   console.log(`  ${pad("Build artifacts", 30)}`);
-  console.log(`  ${pad("  dist/server.js", 30)}  ${tick(serverExists)} ${DIM}${recallPaths.serverJs}${RESET}`);
-  console.log(`  ${pad("  dist/cli.js", 30)}  ${tick(cliExists)} ${DIM}${recallPaths.cliJs}${RESET}`);
+  for (const a of artifacts) {
+    console.log(`  ${pad(`  ${a.label}`, 30)}  ${tick(a.exists)} ${DIM}${a.path}${RESET}`);
+  }
   if (!fullyInstalled) {
     console.log("");
-    if (!serverExists || !cliExists) {
+    if (!artifactsOk) {
       console.log(`  Run ${BOLD}bun run build${RESET} then ${BOLD}mcp-recall install${RESET}`);
     } else {
       console.log(`  Run ${BOLD}mcp-recall install${RESET}`);
@@ -11750,6 +11769,7 @@ function discoverCommand(opts = {}) {
 }
 
 // src/cli.ts
+import { join as join10 } from "path";
 async function getVersion() {
   const pkg = await Promise.resolve().then(() => __toESM(require_package(), 1));
   return pkg.version;
@@ -11764,7 +11784,8 @@ Commands:
   install              Register hooks + MCP server in Claude Code
   uninstall            Remove hooks + MCP server
   status               Show current configuration and health
-  gc [--force]         Reclaim disk: list/delete orphaned project DBs
+  serve                Run the MCP server on stdio (Claude Code starts this)
+  gc [--force]       Reclaim disk: list/delete orphaned project DBs
     --stale-days N     Legacy DBs (no recorded path) older than N days are candidates (default 90)
     --vacuum           Full-VACUUM surviving DBs to reclaim free pages
   discover             Rank output routed to fallback handlers: where a new handler would pay
@@ -12074,6 +12095,10 @@ async function main() {
     discoverCommand({ all: process.argv.includes("--all"), since, limit });
     process.exit(0);
   }
+  if (subcommand === "serve") {
+    await import(join10(import.meta.dir, import.meta.path.endsWith(".js") ? "server.js" : "server.ts"));
+    return;
+  }
   if (subcommand === "gc") {
     const staleIdx = process.argv.indexOf("--stale-days");
     const staleDays = staleIdx !== -1 && process.argv[staleIdx + 1] ? Number(process.argv[staleIdx + 1]) : undefined;
@@ -12119,6 +12144,7 @@ if (import.meta.main) {
 }
 export {
   printHelp,
+  main,
   getVersion,
   completionScript
 };

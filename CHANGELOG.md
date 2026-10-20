@@ -6,6 +6,17 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Added
+
+- **A standalone binary, with no Bun needed at run time** (#361).
+  `bun run build:binary` compiles one executable that runs the CLI, both hooks
+  and the MCP server, through a new `mcp-recall serve`. The bundled profiles
+  are inside it and are copied out once per version. `mcp-recall install` run
+  from the binary registers the binary itself (`<binary> post-tool-use`,
+  `<binary> serve`), and replaces an npm install's entries rather than adding
+  beside them. `--all` cross-compiles Linux, macOS and Windows. It is about
+  90 MB, since it carries the Bun runtime.
+
 ## [1.17.0] — 2026-10-19
 
 ### Added

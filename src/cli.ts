@@ -9,7 +9,8 @@
  *   install         — register hooks + MCP server in Claude Code
  *   uninstall       — remove hooks + MCP server
  *   status          — show configuration and health
- *   gc              — reclaim disk from orphaned project databases
+ *   serve           — run the MCP server on stdio (what Claude Code starts)
+ *   gc             — reclaim disk from orphaned project databases
  *   discover        — report output routed to fallback handlers (missed savings)
  *   profiles        — manage compression profiles
  *   learn           — generate profiles from your installed MCP servers
@@ -27,6 +28,7 @@ import { installCommand, uninstallCommand, statusCommand } from "./install/index
 import { gcCommand } from "./gc/index";
 import { discoverCommand, parseSince } from "./discover/index";
 import { log } from "./log";
+import { join } from "path";
 
 export async function getVersion(): Promise<string> {
   const pkg = await import("../package.json");
@@ -43,7 +45,8 @@ Commands:
   install              Register hooks + MCP server in Claude Code
   uninstall            Remove hooks + MCP server
   status               Show current configuration and health
-  gc [--force]         Reclaim disk: list/delete orphaned project DBs
+  serve                Run the MCP server on stdio (Claude Code starts this)
+  gc [--force]       Reclaim disk: list/delete orphaned project DBs
     --stale-days N     Legacy DBs (no recorded path) older than N days are candidates (default 90)
     --vacuum           Full-VACUUM surviving DBs to reclaim free pages
   discover             Rank output routed to fallback handlers: where a new handler would pay
@@ -287,7 +290,8 @@ complete -c mcp-recall -n "__fish_seen_subcommand_from profiles; and __fish_seen
 
 const subcommand = process.argv[2];
 
-async function main(): Promise<void> {
+/** Exported for the standalone binary's entry, which imports this module (#361). */
+export async function main(): Promise<void> {
   // Flags that work anywhere in argv
   if (process.argv.includes("--help") || process.argv.includes("-h")) {
     printHelp();
@@ -371,6 +375,15 @@ async function main(): Promise<void> {
     }
     discoverCommand({ all: process.argv.includes("--all"), since, limit });
     process.exit(0);
+  }
+
+  // The MCP server on stdio, which a standalone binary registers (#361). It runs
+  // until stdin closes, so no exit here. Imported by path, not a literal, so the
+  // bundled dist/cli.js leaves the server out: inlining it added ~7 ms to every
+  // hook call. The binary imports the server itself (src/binary.ts).
+  if (subcommand === "serve") {
+    await import(join(import.meta.dir, import.meta.path.endsWith(".js") ? "server.js" : "server.ts"));
+    return;
   }
 
   if (subcommand === "gc") {
