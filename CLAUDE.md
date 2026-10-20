@@ -28,6 +28,8 @@ bun run sandbox:binary  # standalone-binary checks in a throwaway, offline Docke
 
 No `just` / `make` in this project. Use `bun test` directly (not `just test`).
 
+**Releases** follow the weekly train in `CONTRIBUTING.md` (Releases): merge any day, release Wednesday morning ET on the maintainer's go, hotfix only for security or a broken install/hook. Do not propose publishing outside it.
+
 ## Architecture
 
 ```

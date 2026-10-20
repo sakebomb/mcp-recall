@@ -57,6 +57,21 @@ mcp-recall must never break a tool call under any failure condition. Every new c
 - [ ] PR title < 70 characters
 - [ ] PR body includes `## Summary` and `## Test plan`
 
+## Releases
+
+Fixes merge to `main` any day; releases ship on a weekly train.
+
+- **Cutoff:** whatever is on `main` by Tuesday night goes in that week's release.
+- **Release:** Wednesday morning, US Eastern, and only when something user-facing changed. A release is the maintainer's call; nothing publishes on its own.
+- **Hotfix:** any day, but only for a security fix or a broken install or hook. Everything else waits for Wednesday.
+
+Release-morning steps:
+
+1. Dry-run the binaries job: `gh workflow run publish.yml --ref main`. It builds and smoke-tests every target, keeps them as a 7-day workflow artifact, and publishes nothing. Its binaries report `<version>-dryrun.<sha>`, so they cannot pass for a release.
+2. Open the release PR: bump `package.json` and both `plugin.json` files, date the `CHANGELOG.md` section, rebuild.
+3. After it merges, create the GitHub release `v<version>` (`gh release create --target` needs the full SHA). That runs `publish.yml`, which checks the tag matches `package.json`, publishes to npm and attaches the binaries plus `SHA256SUMS`.
+4. Verify from a real download: the npm package from a clean project, and a binary from the release page.
+
 ## Contributing a profile
 
 The easier contribution path — declarative TOML, no TypeScript, no clone of this repo needed. Profiles live in [sakebomb/mcp-recall-profiles](https://github.com/sakebomb/mcp-recall-profiles).

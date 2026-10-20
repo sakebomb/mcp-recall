@@ -101,6 +101,15 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # A dry run builds unreleased main, so it must not carry a released version
+      # number (#379). The suffix reaches --version and the profile-extraction dir.
+      - name: Stamp a dry-run version
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          VERSION="$(node -p "require('./package.json').version")-dryrun.${GITHUB_SHA::7}"
+          npm pkg set version="$VERSION"
+          echo "dry-run build version $VERSION"
+
       - name: Build every release target
         run: bun run build:binary --all
 
@@ -116,6 +125,7 @@ jobs:
             dist/bin/mcp-recall-*
             dist/bin/SHA256SUMS
           if-no-files-found: error
+          retention-days: 7
 
       - name: Attach binaries and checksums to the release
         if: github.event_name == 'release'
