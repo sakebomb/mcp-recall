@@ -11375,40 +11375,60 @@ function makePostToolUseEntry(cli) {
     hooks: [{ type: "command", command: `${cli} post-tool-use`, timeout: 10 }]
   };
 }
-function isOurHookCommand(hook, marker) {
-  const cmd = hook?.["command"];
-  return typeof cmd === "string" && cmd.includes("recall") && cmd.includes(marker);
+function recallHooks(clis = []) {
+  const recogniser = (marker, matcher) => {
+    const hook = (h) => {
+      const cmd = h?.["command"];
+      if (typeof cmd !== "string")
+        return false;
+      return cmd.includes("recall") && cmd.includes(marker) || clis.some((cli) => cmd === `${cli} ${marker}`);
+    };
+    const entry = (e) => {
+      if (!e || typeof e !== "object")
+        return false;
+      const { matcher: m, hooks } = e;
+      return (matcher === undefined || m === matcher) && Array.isArray(hooks) && hooks.some(hook);
+    };
+    return { entry, hook };
+  };
+  return {
+    SessionStart: recogniser(SESSION_START_MARKER),
+    PostToolUse: recogniser(POST_TOOL_USE_MARKER, POST_TOOL_USE_MATCHER)
+  };
 }
-function isOurSessionStartHook(entry) {
-  if (!entry || typeof entry !== "object")
-    return false;
-  const hooks = entry["hooks"];
-  if (!Array.isArray(hooks))
-    return false;
-  return hooks.some((h) => isOurHookCommand(h, SESSION_START_MARKER));
+function knownClis(launch, server) {
+  const command = server?.["command"];
+  return typeof command === "string" && !isBunProgram(command) ? [launch.cli, shellWord(command)] : [launch.cli];
 }
-function isOurPostToolUseHook(entry) {
-  if (!entry || typeof entry !== "object")
-    return false;
-  const e = entry;
-  if (e["matcher"] !== POST_TOOL_USE_MATCHER)
-    return false;
-  const hooks = e["hooks"];
-  if (!Array.isArray(hooks))
-    return false;
-  return hooks.some((h) => isOurHookCommand(h, POST_TOOL_USE_MARKER));
+function removeOurHooks(entries, ours) {
+  let removed = 0;
+  const kept = entries.flatMap((e) => {
+    if (!ours.entry(e))
+      return [e];
+    const entry = e;
+    const hooks = entry.hooks.filter((h) => !ours.hook(h));
+    removed += entry.hooks.length - hooks.length;
+    return hooks.length > 0 ? [{ ...entry, hooks }] : [];
+  });
+  return { entries: kept, removed };
 }
-function upsertHook(entries, isOurs, marker, fresh) {
-  const idx = entries.findIndex(isOurs);
+function upsertHook(entries, ours, fresh) {
+  const idx = entries.findIndex(ours.entry);
   if (idx === -1)
     return { entries: [...entries, fresh], result: "added" };
+  const dupes = removeOurHooks(entries.slice(idx + 1), ours);
   const entry = entries[idx];
-  const ours = entry.hooks.find((h) => isOurHookCommand(h, marker));
+  const first = entry.hooks.findIndex(ours.hook);
   const command = fresh.hooks[0].command;
-  if (ours?.command === command)
+  const hooks = entry.hooks.flatMap((h, i) => {
+    if (i === first)
+      return [{ ...h, command }];
+    return ours.hook(h) ? [] : [h];
+  });
+  const changed = dupes.removed > 0 || hooks.length !== entry.hooks.length || entry.hooks[first].command !== command;
+  if (!changed)
     return { entries, result: "present" };
-  const updated = { ...entry, hooks: entry.hooks.map((h) => h === ours ? { ...h, command } : h) };
-  return { entries: entries.map((e, i) => i === idx ? updated : e), result: "updated" };
+  return { entries: [...entries.slice(0, idx), { ...entry, hooks }, ...dupes.entries], result: "updated" };
 }
 async function installCommand(opts = {}) {
   const {
@@ -11455,7 +11475,8 @@ async function installCommand(opts = {}) {
   const settings = await readJsonFile(settingsPath);
   const hooks = settings["hooks"] ?? {};
   let settingsChanged = false;
-  const ss = upsertHook(hooks["SessionStart"] ?? [], isOurSessionStartHook, SESSION_START_MARKER, makeSessionStartEntry(launch.cli));
+  const ours = recallHooks(knownClis(launch, existing));
+  const ss = upsertHook(hooks["SessionStart"] ?? [], ours.SessionStart, makeSessionStartEntry(launch.cli));
   hooks["SessionStart"] = ss.entries;
   if (ss.result === "added") {
     console.log(`${GREEN}\u2713${RESET} SessionStart hook added    ${DIM}(${settingsPath})${RESET}`);
@@ -11464,7 +11485,7 @@ async function installCommand(opts = {}) {
   } else {
     console.log(`${DIM}\u2139 SessionStart hook already registered${RESET}`);
   }
-  const ptu = upsertHook(hooks["PostToolUse"] ?? [], isOurPostToolUseHook, POST_TOOL_USE_MARKER, makePostToolUseEntry(launch.cli));
+  const ptu = upsertHook(hooks["PostToolUse"] ?? [], ours.PostToolUse, makePostToolUseEntry(launch.cli));
   hooks["PostToolUse"] = ptu.entries;
   if (ptu.result === "added") {
     console.log(`${GREEN}\u2713${RESET} PostToolUse hook added     ${DIM}(${settingsPath})${RESET}`);
@@ -11509,11 +11530,13 @@ async function uninstallCommand(opts = {}) {
   const {
     claudeJsonPath = defaultClaudeJsonPath(),
     settingsPath = defaultSettingsPath(),
-    claudeMdPath = defaultClaudeMdPath()
+    claudeMdPath = defaultClaudeMdPath(),
+    launch = detectLaunch()
   } = opts;
   let anyChange = false;
   const claudeJson = await readJsonFile(claudeJsonPath);
   const mcpServers = claudeJson["mcpServers"];
+  const ours = recallHooks(knownClis(launch, mcpServers?.["recall"]));
   if (mcpServers?.["recall"]) {
     delete mcpServers["recall"];
     await writeJsonFile(claudeJsonPath, claudeJson);
@@ -11525,20 +11548,18 @@ async function uninstallCommand(opts = {}) {
   const settings = await readJsonFile(settingsPath);
   const hooks = settings["hooks"] ?? {};
   let settingsChanged = false;
-  const ssHooks = hooks["SessionStart"] ?? [];
-  const ssIdx = ssHooks.findIndex(isOurSessionStartHook);
-  if (ssIdx !== -1) {
-    hooks["SessionStart"] = ssHooks.filter((_, i) => i !== ssIdx);
+  const ss = removeOurHooks(hooks["SessionStart"] ?? [], ours.SessionStart);
+  if (ss.removed > 0) {
+    hooks["SessionStart"] = ss.entries;
     settingsChanged = true;
     anyChange = true;
     console.log(`${GREEN}\u2713${RESET} Removed SessionStart hook   ${DIM}(${settingsPath})${RESET}`);
   } else {
     console.log(`${DIM}\u2139 SessionStart hook not present${RESET}`);
   }
-  const ptuHooks = hooks["PostToolUse"] ?? [];
-  const ptuIdx = ptuHooks.findIndex(isOurPostToolUseHook);
-  if (ptuIdx !== -1) {
-    hooks["PostToolUse"] = ptuHooks.filter((_, i) => i !== ptuIdx);
+  const ptu = removeOurHooks(hooks["PostToolUse"] ?? [], ours.PostToolUse);
+  if (ptu.removed > 0) {
+    hooks["PostToolUse"] = ptu.entries;
     settingsChanged = true;
     anyChange = true;
     console.log(`${GREEN}\u2713${RESET} Removed PostToolUse hook    ${DIM}(${settingsPath})${RESET}`);
@@ -11597,8 +11618,8 @@ function registeredFiles(launches) {
   }
   return [...files.values()];
 }
-function ourHookCommands(entries, isOurs, marker) {
-  return (entries ?? []).filter(isOurs).flatMap((e) => e.hooks.filter((h) => isOurHookCommand(h, marker)).map((h) => h.command));
+function ourHookCommands(entries, ours) {
+  return (entries ?? []).filter(ours.entry).flatMap((e) => e.hooks.filter(ours.hook).map((h) => h.command));
 }
 async function statusCommand(opts = {}) {
   const {
@@ -11617,20 +11638,21 @@ async function statusCommand(opts = {}) {
   const settings = await readJsonFile(settingsPath);
   const hooks = settings["hooks"] ?? {};
   const mcpServers = claudeJson["mcpServers"];
-  const serverRegistered = !!mcpServers?.["recall"];
-  const ssRegistered = (hooks["SessionStart"] ?? []).some(isOurSessionStartHook);
-  const ptuRegistered = (hooks["PostToolUse"] ?? []).some(isOurPostToolUseHook);
+  const server = mcpServers?.["recall"];
+  const ours = recallHooks(knownClis(launch, server));
+  const serverRegistered = !!server;
+  const ssRegistered = (hooks["SessionStart"] ?? []).some(ours.SessionStart.entry);
+  const ptuRegistered = (hooks["PostToolUse"] ?? []).some(ours.PostToolUse.entry);
   let claudeMdContent = "";
   try {
     claudeMdContent = await readFile(claudeMdPath, "utf8");
   } catch {}
   const claudeMdOk = isClaudeMdInjected(claudeMdContent);
-  const server = mcpServers?.["recall"];
   const serverWords = typeof server?.["command"] === "string" ? [[server["command"], ...Array.isArray(server["args"]) ? server["args"].map(String) : []]] : [];
   const files = registeredFiles([
     ...serverWords,
-    ...ourHookCommands(hooks["SessionStart"], isOurSessionStartHook, SESSION_START_MARKER).map(shellWords),
-    ...ourHookCommands(hooks["PostToolUse"], isOurPostToolUseHook, POST_TOOL_USE_MARKER).map(shellWords)
+    ...ourHookCommands(hooks["SessionStart"], ours.SessionStart).map(shellWords),
+    ...ourHookCommands(hooks["PostToolUse"], ours.PostToolUse).map(shellWords)
   ]);
   const filesOk = files.every((f) => f.exists);
   const elsewhere = server !== undefined && !runsServer(server, launch.server);

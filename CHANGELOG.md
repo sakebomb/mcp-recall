@@ -47,6 +47,13 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   checks the files they run (the binary, or bun and its script), under a
   "Registered launch" heading that replaces "Build artifacts". When the
   registered install is not the one running `status`, it says which is which.
+- **A binary renamed without "recall" in its path is recognised** (#366).
+  Recall's hooks were found only by that word, so installing such a binary
+  twice added a second set of hooks, and `uninstall` removed the server but
+  left every hook behind. Hooks are now also recognised as this install's
+  launch, or the binary the registered server names. `install` removes
+  duplicates an earlier version left, `uninstall` removes every copy, and
+  both keep a hook you grouped into recall's entry.
 
 ## [1.17.0] — 2026-10-19
 

@@ -271,47 +271,97 @@ export function makePostToolUseEntry(cli: string) {
 
 // ── Hook detectors ────────────────────────────────────────────────────────────
 
-/** True for one hook (not an entry) that runs recall's `marker` subcommand. */
-function isOurHookCommand(hook: unknown, marker: string): boolean {
-  const cmd = (hook as Record<string, unknown> | null)?.["command"];
-  return typeof cmd === "string" && cmd.includes("recall") && cmd.includes(marker);
+/** Recognisers for recall's hooks in one event: the entry that holds one, and the hook itself. */
+export interface OurHooks {
+  entry: (entry: unknown) => boolean;
+  hook: (hook: unknown) => boolean;
+}
+
+/**
+ * Recall's hooks for each event. A hook is recall's when its command names
+ * recall and the subcommand, as every npm install's does, or when it is
+ * exactly `<cli> <subcommand>` for one of `clis`: launches known to run recall,
+ * which covers a binary whose path has no "recall" in it (#366).
+ */
+export function recallHooks(clis: readonly string[] = []): { SessionStart: OurHooks; PostToolUse: OurHooks } {
+  const recogniser = (marker: string, matcher?: string): OurHooks => {
+    const hook = (h: unknown) => {
+      const cmd = (h as Record<string, unknown> | null)?.["command"];
+      if (typeof cmd !== "string") return false;
+      return (cmd.includes("recall") && cmd.includes(marker)) || clis.some((cli) => cmd === `${cli} ${marker}`);
+    };
+    const entry = (e: unknown) => {
+      if (!e || typeof e !== "object") return false;
+      const { matcher: m, hooks } = e as Record<string, unknown>;
+      return (matcher === undefined || m === matcher) && Array.isArray(hooks) && hooks.some(hook);
+    };
+    return { entry, hook };
+  };
+  return {
+    SessionStart: recogniser(SESSION_START_MARKER),
+    PostToolUse: recogniser(POST_TOOL_USE_MARKER, POST_TOOL_USE_MATCHER),
+  };
+}
+
+/**
+ * The launches known to run recall, for {@link recallHooks}: this install's, and
+ * the binary the registered server names, so that uninstall from npm still
+ * finds the hooks of a renamed binary (#366).
+ */
+function knownClis(launch: RecallLaunch, server: unknown): string[] {
+  const command = (server as Record<string, unknown> | undefined)?.["command"];
+  return typeof command === "string" && !isBunProgram(command) ? [launch.cli, shellWord(command)] : [launch.cli];
 }
 
 export function isOurSessionStartHook(entry: unknown): boolean {
-  if (!entry || typeof entry !== "object") return false;
-  const hooks = (entry as Record<string, unknown>)["hooks"];
-  if (!Array.isArray(hooks)) return false;
-  return hooks.some((h) => isOurHookCommand(h, SESSION_START_MARKER));
+  return recallHooks().SessionStart.entry(entry);
 }
 
 export function isOurPostToolUseHook(entry: unknown): boolean {
-  if (!entry || typeof entry !== "object") return false;
-  const e = entry as Record<string, unknown>;
-  if (e["matcher"] !== POST_TOOL_USE_MATCHER) return false;
-  const hooks = e["hooks"];
-  if (!Array.isArray(hooks)) return false;
-  return hooks.some((h) => isOurHookCommand(h, POST_TOOL_USE_MARKER));
+  return recallHooks().PostToolUse.entry(entry);
+}
+
+/**
+ * Removes recall's hooks from `entries`, dropping an entry only once it is
+ * empty, so a hook the user grouped beside recall's stays. Returns how many
+ * hooks went.
+ */
+export function removeOurHooks(entries: unknown[], ours: OurHooks): { entries: unknown[]; removed: number } {
+  let removed = 0;
+  const kept = entries.flatMap((e) => {
+    if (!ours.entry(e)) return [e];
+    const entry = e as HookEntry;
+    const hooks = entry.hooks.filter((h) => !ours.hook(h));
+    removed += entry.hooks.length - hooks.length;
+    return hooks.length > 0 ? [{ ...entry, hooks }] : [];
+  });
+  return { entries: kept, removed };
 }
 
 /**
  * Adds `fresh` to `entries`, or points recall's existing hook at fresh's command.
  * An update changes that hook's `command` and nothing else: a timeout the user
  * raised, and other hooks they grouped into the same entry, stay (#365).
+ * Duplicates of recall's hook after the first are removed (#366).
  */
 export function upsertHook(
   entries: unknown[],
-  isOurs: (entry: unknown) => boolean,
-  marker: string,
+  ours: OurHooks,
   fresh: HookEntry,
 ): { entries: unknown[]; result: "added" | "updated" | "present" } {
-  const idx = entries.findIndex(isOurs);
+  const idx = entries.findIndex(ours.entry);
   if (idx === -1) return { entries: [...entries, fresh], result: "added" };
+  const dupes = removeOurHooks(entries.slice(idx + 1), ours);
   const entry = entries[idx] as HookEntry;
-  const ours = entry.hooks.find((h) => isOurHookCommand(h, marker));
+  const first = entry.hooks.findIndex(ours.hook);
   const command = fresh.hooks[0]!.command;
-  if (ours?.command === command) return { entries, result: "present" };
-  const updated = { ...entry, hooks: entry.hooks.map((h) => (h === ours ? { ...h, command } : h)) };
-  return { entries: entries.map((e, i) => (i === idx ? updated : e)), result: "updated" };
+  const hooks = entry.hooks.flatMap((h, i) => {
+    if (i === first) return [{ ...h, command }];
+    return ours.hook(h) ? [] : [h]; // a second copy inside the same entry
+  });
+  const changed = dupes.removed > 0 || hooks.length !== entry.hooks.length || entry.hooks[first]!.command !== command;
+  if (!changed) return { entries, result: "present" };
+  return { entries: [...entries.slice(0, idx), { ...entry, hooks }, ...dupes.entries], result: "updated" };
 }
 
 // ── install ───────────────────────────────────────────────────────────────────
@@ -379,11 +429,12 @@ export async function installCommand(opts: InstallOptions = {}): Promise<void> {
   const settings     = await readJsonFile(settingsPath);
   const hooks        = (settings["hooks"] as Record<string, unknown[]>) ?? {};
   let settingsChanged = false;
+  // From the server entry as it was before this run, which may name a renamed binary.
+  const ours = recallHooks(knownClis(launch, existing));
 
   // SessionStart
   const ss = upsertHook(
-    (hooks["SessionStart"] as unknown[]) ?? [], isOurSessionStartHook,
-    SESSION_START_MARKER, makeSessionStartEntry(launch.cli),
+    (hooks["SessionStart"] as unknown[]) ?? [], ours.SessionStart, makeSessionStartEntry(launch.cli),
   );
   hooks["SessionStart"] = ss.entries;
   if (ss.result === "added") {
@@ -396,8 +447,7 @@ export async function installCommand(opts: InstallOptions = {}): Promise<void> {
 
   // PostToolUse
   const ptu = upsertHook(
-    (hooks["PostToolUse"] as unknown[]) ?? [], isOurPostToolUseHook,
-    POST_TOOL_USE_MARKER, makePostToolUseEntry(launch.cli),
+    (hooks["PostToolUse"] as unknown[]) ?? [], ours.PostToolUse, makePostToolUseEntry(launch.cli),
   );
   hooks["PostToolUse"] = ptu.entries;
   if (ptu.result === "added") {
@@ -448,6 +498,8 @@ export interface UninstallOptions {
   claudeJsonPath?: string;
   settingsPath?: string;
   claudeMdPath?: string;
+  /** Defaults to {@link detectLaunch}; tests pass one. */
+  launch?: RecallLaunch;
 }
 
 export async function uninstallCommand(opts: UninstallOptions = {}): Promise<void> {
@@ -455,6 +507,7 @@ export async function uninstallCommand(opts: UninstallOptions = {}): Promise<voi
     claudeJsonPath = defaultClaudeJsonPath(),
     settingsPath   = defaultSettingsPath(),
     claudeMdPath   = defaultClaudeMdPath(),
+    launch         = detectLaunch(),
   } = opts;
 
   let anyChange = false;
@@ -462,6 +515,8 @@ export async function uninstallCommand(opts: UninstallOptions = {}): Promise<voi
   // ~/.claude.json
   const claudeJson = await readJsonFile(claudeJsonPath);
   const mcpServers = claudeJson["mcpServers"] as Record<string, unknown> | undefined;
+  // Read before the entry goes: it may name a renamed binary whose hooks follow (#366).
+  const ours = recallHooks(knownClis(launch, mcpServers?.["recall"]));
   if (mcpServers?.["recall"]) {
     delete mcpServers["recall"];
     await writeJsonFile(claudeJsonPath, claudeJson);
@@ -476,10 +531,10 @@ export async function uninstallCommand(opts: UninstallOptions = {}): Promise<voi
   const hooks        = (settings["hooks"] as Record<string, unknown[]>) ?? {};
   let settingsChanged = false;
 
-  const ssHooks  = (hooks["SessionStart"] as unknown[]) ?? [];
-  const ssIdx    = ssHooks.findIndex(isOurSessionStartHook);
-  if (ssIdx !== -1) {
-    hooks["SessionStart"] = ssHooks.filter((_, i) => i !== ssIdx);
+  // Every copy, not only the first: earlier versions could leave duplicates (#366).
+  const ss = removeOurHooks((hooks["SessionStart"] as unknown[]) ?? [], ours.SessionStart);
+  if (ss.removed > 0) {
+    hooks["SessionStart"] = ss.entries;
     settingsChanged = true;
     anyChange = true;
     console.log(`${GREEN}✓${RESET} Removed SessionStart hook   ${DIM}(${settingsPath})${RESET}`);
@@ -487,10 +542,9 @@ export async function uninstallCommand(opts: UninstallOptions = {}): Promise<voi
     console.log(`${DIM}ℹ SessionStart hook not present${RESET}`);
   }
 
-  const ptuHooks = (hooks["PostToolUse"] as unknown[]) ?? [];
-  const ptuIdx   = ptuHooks.findIndex(isOurPostToolUseHook);
-  if (ptuIdx !== -1) {
-    hooks["PostToolUse"] = ptuHooks.filter((_, i) => i !== ptuIdx);
+  const ptu = removeOurHooks((hooks["PostToolUse"] as unknown[]) ?? [], ours.PostToolUse);
+  if (ptu.removed > 0) {
+    hooks["PostToolUse"] = ptu.entries;
     settingsChanged = true;
     anyChange = true;
     console.log(`${GREEN}✓${RESET} Removed PostToolUse hook    ${DIM}(${settingsPath})${RESET}`);
@@ -568,10 +622,10 @@ export function registeredFiles(launches: string[][]): RegisteredFile[] {
 }
 
 /** The commands of recall's own hooks among an event's entries, not their neighbours'. */
-function ourHookCommands(entries: unknown, isOurs: (e: unknown) => boolean, marker: string): string[] {
+function ourHookCommands(entries: unknown, ours: OurHooks): string[] {
   return ((entries as unknown[] | undefined) ?? [])
-    .filter(isOurs)
-    .flatMap((e) => (e as HookEntry).hooks.filter((h) => isOurHookCommand(h, marker)).map((h) => h.command));
+    .filter(ours.entry)
+    .flatMap((e) => (e as HookEntry).hooks.filter(ours.hook).map((h) => h.command));
 }
 
 export interface StatusOptions {
@@ -599,9 +653,12 @@ export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
   const hooks        = (settings["hooks"] as Record<string, unknown[]>) ?? {};
   const mcpServers   = claudeJson["mcpServers"] as Record<string, unknown> | undefined;
 
-  const serverRegistered = !!mcpServers?.["recall"];
-  const ssRegistered     = ((hooks["SessionStart"] as unknown[]) ?? []).some(isOurSessionStartHook);
-  const ptuRegistered    = ((hooks["PostToolUse"]  as unknown[]) ?? []).some(isOurPostToolUseHook);
+  const server = mcpServers?.["recall"] as Record<string, unknown> | undefined;
+  const ours   = recallHooks(knownClis(launch, server));
+
+  const serverRegistered = !!server;
+  const ssRegistered     = ((hooks["SessionStart"] as unknown[]) ?? []).some(ours.SessionStart.entry);
+  const ptuRegistered    = ((hooks["PostToolUse"]  as unknown[]) ?? []).some(ours.PostToolUse.entry);
 
   // CLAUDE.md
   let claudeMdContent = "";
@@ -609,14 +666,13 @@ export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
   const claudeMdOk = isClaudeMdInjected(claudeMdContent);
 
   // What the registered entries run, which may be another install's (#364)
-  const server = mcpServers?.["recall"] as Record<string, unknown> | undefined;
   const serverWords = typeof server?.["command"] === "string"
     ? [[server["command"], ...(Array.isArray(server["args"]) ? server["args"].map(String) : [])]]
     : [];
   const files = registeredFiles([
     ...serverWords,
-    ...ourHookCommands(hooks["SessionStart"], isOurSessionStartHook, SESSION_START_MARKER).map(shellWords),
-    ...ourHookCommands(hooks["PostToolUse"], isOurPostToolUseHook, POST_TOOL_USE_MARKER).map(shellWords),
+    ...ourHookCommands(hooks["SessionStart"], ours.SessionStart).map(shellWords),
+    ...ourHookCommands(hooks["PostToolUse"], ours.PostToolUse).map(shellWords),
   ]);
   const filesOk   = files.every((f) => f.exists);
   const elsewhere = server !== undefined && !runsServer(server, launch.server);

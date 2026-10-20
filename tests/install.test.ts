@@ -630,3 +630,78 @@ describe("install keeps the user's edits to recall's entries (#365)", () => {
     expect(await Bun.file(settingsPath).text()).toBe(before);
   });
 });
+
+describe("a binary renamed without \"recall\" in its path (#366)", () => {
+  let dir: string;
+  let bin: string;
+  let claudeMdPath: string;
+  let mr: RecallLaunch;
+  let npm: RecallLaunch;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "mr-test-"));
+    bin = path.join(dir, "mr");
+    // Precondition: with "recall" anywhere in the path, these tests prove nothing.
+    if (bin.includes("recall")) throw new Error(`renamed-binary path contains "recall": ${bin}`);
+    claudeMdPath = path.join(tmpDir, "CLAUDE.md");
+    const dist = path.join(tmpDir, "dist");
+    for (const f of [path.join(dist, "server.js"), path.join(dist, "cli.js"), bin]) await Bun.write(f, "");
+    mr = { cli: bin, server: { type: "stdio", command: bin, args: ["serve"] }, artifacts: [{ label: "binary", path: bin }] };
+    npm = {
+      cli: `bun ${path.join(dist, "cli.js")}`,
+      server: { type: "stdio", command: "bun", args: [path.join(dist, "server.js")] },
+      artifacts: [{ label: "dist/cli.js", path: path.join(dist, "cli.js") }],
+    };
+    spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(async () => {
+    mock.restore();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const commands = async (event: string) =>
+    ((await readJsonFile(settingsPath) as any).hooks?.[event] ?? []).map((e: any) => e.hooks.map((h: any) => h.command));
+
+  it("installing twice leaves one hook per event", async () => {
+    await installCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch: mr });
+    await installCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch: mr });
+    expect(await commands("SessionStart")).toEqual([[`${bin} session-start`]]);
+    expect(await commands("PostToolUse")).toEqual([[`${bin} post-tool-use`]]);
+  });
+
+  it("install removes duplicates an earlier version left, keeping a neighbour hook", async () => {
+    await writeJsonFile(claudeJsonPath, { mcpServers: { recall: mr.server } });
+    await writeJsonFile(settingsPath, {
+      hooks: {
+        SessionStart: [makeSessionStartEntry(bin), makeSessionStartEntry(bin)],
+        PostToolUse: [
+          makePostToolUseEntry(bin),
+          { matcher: POST_TOOL_USE_MATCHER, hooks: [{ type: "command", command: "audit-log" }, makePostToolUseEntry(bin).hooks[0]] },
+        ],
+      },
+    });
+    await installCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch: mr });
+    expect(await commands("SessionStart")).toEqual([[`${bin} session-start`]]);
+    expect(await commands("PostToolUse")).toEqual([[`${bin} post-tool-use`], ["audit-log"]]);
+  });
+
+  it("uninstall by the renamed binary removes all its hooks, keeping a neighbour hook", async () => {
+    await installCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch: mr });
+    const settings = await readJsonFile(settingsPath) as any;
+    settings.hooks.PostToolUse[0].hooks.push({ type: "command", command: "audit-log" });
+    settings.hooks.SessionStart.push(makeSessionStartEntry(bin)); // a duplicate from before the fix
+    await writeJsonFile(settingsPath, settings);
+    await uninstallCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch: mr });
+    expect(await commands("SessionStart")).toEqual([]);
+    expect(await commands("PostToolUse")).toEqual([["audit-log"]]);
+  });
+
+  it("uninstall from the npm install removes the hooks of the renamed binary it finds registered", async () => {
+    await installCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch: mr });
+    await uninstallCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch: npm });
+    expect((await readJsonFile(claudeJsonPath) as any).mcpServers.recall).toBeUndefined();
+    expect(await commands("SessionStart")).toEqual([]);
+    expect(await commands("PostToolUse")).toEqual([]);
+  });
+});

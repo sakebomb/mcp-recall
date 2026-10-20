@@ -185,13 +185,6 @@ config_edit() {
 }
 js_true() { [ "$(config_js "$1")" = "true" ]; }
 check() { js_true "$2" || fail "$1"; echo "ok: $1"; } # <description> <expr true when correct>
-# known_defect <issue> <description> <command…> — the command succeeds once the
-# defect is fixed, and then this fails so the fix turns it into a check.
-known_defect() {
-  local issue="$1" desc="$2"; shift 2
-  if "$@"; then fail "#$issue looks fixed ($desc): make this a check"; fi
-  echo "known defect #$issue: $desc"
-}
 fresh_home() {
   export HOME="$WORK/$1"
   mkdir -p "$HOME"
@@ -253,12 +246,12 @@ switch_checks() {
   case "$BIN" in *recall*) fail "rename: $BIN contains 'recall', so this would prove nothing" ;; esac
   run_bin "$renamed" install >/dev/null
   run_bin "$renamed" install >/dev/null
-  known_defect 366 "a renamed binary installed twice has one hook per event" \
-    js_true 'recallHooks("SessionStart").length === 1 && recallHooks("PostToolUse").length === 1'
+  check "a renamed binary installed twice has one hook per event (#366)" \
+    'recallHooks("SessionStart").length === 1 && recallHooks("PostToolUse").length === 1'
   run_bin "$renamed" uninstall >/dev/null
   check "uninstall removes a renamed binary's server" 'c.mcpServers?.recall === undefined'
-  known_defect 366 "uninstall removes a renamed binary's hooks" \
-    js_true 'recallHooks("SessionStart").length + recallHooks("PostToolUse").length === 0'
+  check "uninstall removes a renamed binary's hooks (#366)" \
+    'recallHooks("SessionStart").length + recallHooks("PostToolUse").length === 0'
 }
 npm_status_not_installed() { ! "${NPM[@]}" status 2>&1 | strip_ansi | grep -qx "Installation: installed"; }
 
