@@ -240,6 +240,7 @@ source ~/.zshrc
 Or symlink it:
 
 ```bash
+mkdir -p ~/.local/bin
 ln -sf /path/to/mcp-recall/plugins/mcp-recall/dist/cli.js ~/.local/bin/mcp-recall
 ```
 
@@ -258,9 +259,12 @@ F=mcp-recall-linux-x64   # pick yours from the table
 curl -fLO https://github.com/sakebomb/mcp-recall/releases/latest/download/$F
 curl -fLO https://github.com/sakebomb/mcp-recall/releases/latest/download/SHA256SUMS
 grep " $F\$" SHA256SUMS | sha256sum -c       # macOS: … | shasum -a 256 -c
+mkdir -p ~/.local/bin                        # absent on a default macOS account
 install -m 755 $F ~/.local/bin/mcp-recall
-mcp-recall install                           # registers the binary itself as hooks and server
+~/.local/bin/mcp-recall install              # registers the binary itself as hooks and server
 ```
+
+The hooks and server use the binary's full path, so they work without `~/.local/bin` on your `PATH`. Add it to `PATH` only to type `mcp-recall` yourself.
 
 To build one from source instead: `bun run build:binary` (this platform) or `bun run build:binary --all`, into `dist/bin/`.
 

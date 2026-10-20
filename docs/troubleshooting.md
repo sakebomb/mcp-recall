@@ -170,6 +170,7 @@ echo 'alias mcp-recall="bun /path/to/mcp-recall/plugins/mcp-recall/dist/cli.js"'
 source ~/.zshrc
 
 # Option 2 — symlink
+mkdir -p ~/.local/bin
 ln -sf /path/to/mcp-recall/plugins/mcp-recall/dist/cli.js ~/.local/bin/mcp-recall
 # Ensure ~/.local/bin is in your PATH
 ```

@@ -72,6 +72,7 @@ source ~/.zshrc
 **Option 2 — symlink (permanent)**
 
 ```bash
+mkdir -p ~/.local/bin
 ln -sf /path/to/mcp-recall/plugins/mcp-recall/dist/cli.js ~/.local/bin/mcp-recall
 # make sure ~/.local/bin is in your PATH
 ```
