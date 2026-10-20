@@ -146,7 +146,8 @@ async function compareBoth(): Promise<void> {
   const hook = await loadHook();
   const repo = join(import.meta.dir, "..");
   // rtk's rewrite names `rtk`, so the rewritten command finds the binary on PATH.
-  const path = `${join(RTK, "..")}:${process.env.PATH}`;
+  // A bare `rtk` is on PATH already; prepending its dirname would add `.`.
+  const path = RTK.includes("/") ? `${join(RTK, "..")}:${process.env.PATH}` : process.env.PATH;
   const sh = (command: string) => spawnSync("bash", ["-c", command], { cwd: repo, env: { ...rtkEnv, PATH: path }, encoding: "utf8", maxBuffer: 256 << 20 });
   const describe = (d: { delivered: string; stored: boolean; body: boolean }) =>
     `${fmt(bytes(d.delivered))}${d.stored ? (d.body ? ", stored with body" : ", stored, no body") : ", whole"}`;
