@@ -16,6 +16,12 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   `<binary> serve`), and replaces an npm install's entries rather than adding
   beside them. `--all` cross-compiles Linux, macOS and Windows. It is about
   90 MB, since it carries the Bun runtime.
+- **Releases attach the binaries** (#361), for Linux x64/arm64, macOS
+  arm64/x64 and Windows x64, with a `SHA256SUMS`: README Option D. They are
+  built and attached by a separate job after npm publish succeeds, which holds
+  no npm credentials. CI builds the Linux x64 binary on every PR and runs the
+  packaged-CLI checks against it with Bun removed from `PATH`, then `install`,
+  `status` and the registered MCP server.
 
 ## [1.17.0] — 2026-10-19
 

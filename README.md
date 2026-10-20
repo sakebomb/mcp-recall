@@ -187,7 +187,7 @@ Used daily in development of this project since the first release in March 2026.
 ### Prerequisites
 
 - [Claude Code](https://claude.ai/claude-code) installed
-- [Bun](https://bun.sh) installed — `curl -fsSL https://bun.sh/install | bash`
+- [Bun](https://bun.sh) installed — `curl -fsSL https://bun.sh/install | bash` (not needed for the standalone binary, Option D)
 
 ### Option A — npm (recommended)
 
@@ -243,15 +243,28 @@ Or symlink it:
 ln -sf /path/to/mcp-recall/plugins/mcp-recall/dist/cli.js ~/.local/bin/mcp-recall
 ```
 
-Or build a standalone binary, which needs no Bun at run time:
+### Option D — standalone binary (no Bun)
+
+One file runs the CLI, both hooks and the MCP server (`mcp-recall serve`), with no Bun or Node installed. Releases after 1.17.0 attach a binary for each platform and a `SHA256SUMS`:
+
+| Platform | File |
+|---|---|
+| Linux x64 / arm64 | `mcp-recall-linux-x64`, `mcp-recall-linux-arm64` |
+| macOS Apple silicon / Intel | `mcp-recall-darwin-arm64`, `mcp-recall-darwin-x64` |
+| Windows x64 | `mcp-recall-windows-x64.exe` |
 
 ```bash
-bun run build:binary                 # dist/bin/mcp-recall-<os>-<arch>
-cp dist/bin/mcp-recall-linux-x64 ~/.local/bin/mcp-recall
-mcp-recall install                   # registers the binary itself as hooks and server
+F=mcp-recall-linux-x64   # pick yours from the table
+curl -fLO https://github.com/sakebomb/mcp-recall/releases/latest/download/$F
+curl -fLO https://github.com/sakebomb/mcp-recall/releases/latest/download/SHA256SUMS
+grep " $F\$" SHA256SUMS | sha256sum -c       # macOS: … | shasum -a 256 -c
+install -m 755 $F ~/.local/bin/mcp-recall
+mcp-recall install                           # registers the binary itself as hooks and server
 ```
 
-One file runs the CLI, both hooks and the MCP server (`mcp-recall serve`). It is about 90 MB, since it carries the Bun runtime. The bundled profiles are inside it, and are copied out once per version to `~/.local/share/mcp-recall/bundled-profiles/`. `bun run build:binary --all` cross-compiles every release platform. If you move the binary, run `mcp-recall install` again, since the hooks name its path.
+To build one from source instead: `bun run build:binary` (this platform) or `bun run build:binary --all`, into `dist/bin/`.
+
+A binary is 60–95 MB, since it carries the Bun runtime. Its bundled profiles are inside it, and are copied out once per version to `~/.local/share/mcp-recall/bundled-profiles/`. The hooks name the binary's path, so run `mcp-recall install` again if you move it. Only the Linux x64 binary is exercised in CI; the macOS binaries are unsigned, and Gatekeeper may block one downloaded through a browser.
 
 ---
 
@@ -279,6 +292,10 @@ bun install
 bun run build
 mcp-recall install   # re-registers hooks with the new binary path
 ```
+
+### Option D — standalone binary
+
+Download the new release's file over the old one, as in [Option D](#option-d--standalone-binary-no-bun) above, then run `mcp-recall install`. It is a no-op unless the binary's path changed.
 
 ### After updating
 

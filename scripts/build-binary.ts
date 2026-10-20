@@ -7,7 +7,8 @@
  *   bun run build:binary --target bun-linux-arm64 [--target …]
  *   bun run build:binary --all                  # every release target
  *
- * Writes dist/bin/mcp-recall-<target>[.exe] and a .sha256 beside each. A
+ * Writes dist/bin/mcp-recall-<target>[.exe], a .sha256 beside each, and a
+ * SHA256SUMS covering them all. A
  * cross-compiled target downloads that platform's Bun runtime the first time.
  */
 import { createHash } from "crypto";
@@ -80,6 +81,10 @@ if (import.meta.main) {
       const out = build(t, entry, outDir);
       console.log(`${out}  ${(statSync(out).size / 1048576).toFixed(1)} MB`);
     }
+    // One file for `sha256sum -c SHA256SUMS`, covering every binary in dist/bin.
+    const sums = readdirSync(outDir).filter((n) => n.endsWith(".sha256")).sort()
+      .map((n) => readFileSync(join(outDir, n), "utf8")).join("");
+    writeFileSync(join(outDir, "SHA256SUMS"), sums);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

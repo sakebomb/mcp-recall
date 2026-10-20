@@ -15,11 +15,18 @@
 # string of the right shape, assembled at run time; no real secret is involved.
 #
 # Usage: scripts/packaged-cli-smoke.sh <consumer-project-dir>
+#        scripts/packaged-cli-smoke.sh --binary <standalone-binary>   (#361)
 # The single-quoted node/bun programs below are meant to be literal.
 # shellcheck disable=SC2016
 set -euo pipefail
 
-CONSUMER="$(cd "${1:?usage: $0 <consumer-project-dir>}" && pwd)"
+BINARY=""
+if [ "${1:-}" = "--binary" ]; then
+  BINARY="$(cd "$(dirname "${2:?usage: $0 --binary <path>}")" && pwd)/$(basename "$2")"
+  [ -x "$BINARY" ] || { echo "::error::not an executable: $BINARY"; exit 1; }
+else
+  CONSUMER="$(cd "${1:?usage: $0 <consumer-project-dir>}" && pwd)"
+fi
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -132,6 +139,38 @@ exercise() { # <label> <command...>
   done
   echo "ok: credential absent from the database files"
 }
+
+if [ -n "$BINARY" ]; then
+  # Bun is dropped from PATH for the binary only: the db_scalar and payload
+  # helpers still use it, but the binary must run without it.
+  NO_BUN_PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v -e '\.bun' | paste -sd: -)"
+  exercise binary env PATH="$NO_BUN_PATH" "$BINARY"
+
+  # 5. install registers the binary itself, status calls it complete, and the
+  #    registered server answers MCP. HOME is already isolated above.
+  env PATH="$NO_BUN_PATH" "$BINARY" install >/dev/null || fail "binary: install exited non-zero"
+  server="$(bun -e 'const r = JSON.parse(await Bun.file(process.env.HOME + "/.claude.json").text()).mcpServers.recall; console.log([r.command, ...r.args].join(" "))')"
+  [ "$server" = "$BINARY serve" ] || fail "binary: registered server is '$server', expected '$BINARY serve'"
+  hook="$(bun -e 'const s = JSON.parse(await Bun.file(process.env.HOME + "/.claude/settings.json").text()); console.log(s.hooks.PostToolUse.at(-1).hooks[0].command)')"
+  [ "$hook" = "$BINARY post-tool-use" ] || fail "binary: registered hook is '$hook'"
+  status="$(env PATH="$NO_BUN_PATH" "$BINARY" status 2>&1 | sed 's/\x1b\[[0-9;]*m//g')"
+  # Exact line: "not installed" and "partial / stale" must not pass.
+  printf '%s\n' "$status" | grep -qx "Installation: installed" || fail "binary: status does not report installed"
+  printf '%s\n' "$status" | grep -q "Profiles: [1-9]" || fail "binary: bundled profiles not found"
+  echo "ok: install registered the binary; status reports it installed with its profiles"
+
+  tools="$(printf '%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}' \
+    '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+    | env PATH="$NO_BUN_PATH" timeout 10 bash -c "$server" 2>/dev/null \
+    | grep -o '"name":"recall__[a-z_]*"' | sort -u | wc -l)"
+  [ "$tools" -gt 0 ] || fail "binary: the registered server listed no recall tools"
+  echo "ok: the registered server lists $tools recall tools"
+
+  echo "standalone binary behaviour checks passed"
+  exit 0
+fi
 
 # Through the node_modules/.bin symlink, which runs the packaged src/.
 exercise npm-bin "$CONSUMER/node_modules/.bin/mcp-recall"
