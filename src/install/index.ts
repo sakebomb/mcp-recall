@@ -76,7 +76,8 @@ export function isStandaloneBinary(modulePath = import.meta.path): boolean {
  * single quotes, where a backslash stays literal (`C:\Program Files\…`).
  */
 export function shellWord(p: string): string {
-  return /[^\w@%+=:,./\\-]/.test(p) ? `'${p.replace(/'/g, `'\\''`)}'` : p;
+  // Only characters a shell leaves alone stay bare; a backslash is an escape.
+  return /[^\w@%+=:,./-]/.test(p) ? `'${p.replace(/'/g, `'\\''`)}'` : p;
 }
 
 export function detectLaunch(standalone = isStandaloneBinary()): RecallLaunch {

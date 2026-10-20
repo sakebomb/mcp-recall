@@ -11217,7 +11217,7 @@ function isStandaloneBinary(modulePath = import.meta.path) {
   return /^(\/\$bunfs\/|[A-Za-z]:[\\/]~BUN[\\/])/.test(modulePath);
 }
 function shellWord(p) {
-  return /[^\w@%+=:,./\\-]/.test(p) ? `'${p.replace(/'/g, `'\\''`)}'` : p;
+  return /[^\w@%+=:,./-]/.test(p) ? `'${p.replace(/'/g, `'\\''`)}'` : p;
 }
 function detectLaunch(standalone = isStandaloneBinary()) {
   if (standalone) {

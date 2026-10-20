@@ -364,7 +364,12 @@ describe("launch detection", () => {
 
   it("quotes a path a shell would split, and round-trips it through bash", () => {
     expect(shellWord("/usr/local/bin/mcp-recall")).toBe("/usr/local/bin/mcp-recall");
-    const paths = ["/Users/a b/Application Support/mcp-recall", "C:\\Program Files\\mcp-recall\\mcp-recall.exe", "/opt/it's/mcp-recall"];
+    const paths = [
+      "/Users/a b/Application Support/mcp-recall",
+      "C:\\Program Files\\mcp-recall\\mcp-recall.exe",
+      "C:\\Users\\me\\bin\\mcp-recall.exe", // no space: the backslashes alone need quoting
+      "/opt/it's/mcp-recall",
+    ];
     for (const p of paths) {
       const echoed = Bun.spawnSync(["bash", "-c", `printf %s ${shellWord(p)}`]).stdout.toString();
       expect(echoed).toBe(p);
