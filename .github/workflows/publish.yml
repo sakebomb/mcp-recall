@@ -3,10 +3,15 @@ name: Publish to npm
 on:
   release:
     types: [published]
+  # Dry run of the binaries job (#377): builds and smoke-tests every target and
+  # keeps them as a workflow artifact. Publishes nothing — the npm job is skipped
+  # and no release is touched.
+  workflow_dispatch:
 
 jobs:
   publish:
     name: Publish
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -61,10 +66,12 @@ jobs:
   # Standalone binaries attached to the release (#361). A separate job so the
   # npm job keeps contents: read and this one never sees NPM_TOKEN or an OIDC
   # token; it runs only after npm publish succeeded, so a failed release gets no
-  # binaries.
+  # binaries. On a dry run publish is skipped, which would skip this job too
+  # without the explicit condition.
   binaries:
-    name: Attach standalone binaries
+    name: Standalone binaries
     needs: publish
+    if: ${{ !cancelled() && (needs.publish.result == 'success' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -81,6 +88,7 @@ jobs:
 
       # Same guard as the publish job, and the tag arrives via env for the same reason.
       - name: Verify release tag matches package.json
+        if: github.event_name == 'release'
         env:
           TAG: ${{ github.event.release.tag_name }}
         run: |
@@ -99,7 +107,18 @@ jobs:
       - name: Exercise the linux-x64 binary before attaching anything
         run: bash scripts/packaged-cli-smoke.sh --binary dist/bin/mcp-recall-linux-x64
 
+      - name: Keep binaries and checksums as a workflow artifact (dry run)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          name: standalone-binaries
+          path: |
+            dist/bin/mcp-recall-*
+            dist/bin/SHA256SUMS
+          if-no-files-found: error
+
       - name: Attach binaries and checksums to the release
+        if: github.event_name == 'release'
         env:
           TAG: ${{ github.event.release.tag_name }}
           GH_TOKEN: ${{ github.token }}
