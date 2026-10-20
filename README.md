@@ -167,7 +167,7 @@ Command-aware Bash compression, per-output on representative fixtures (regenerat
 | `rg` (240 matches, 6 files) | 13.6 KB | 1.4 KB | 89.7% |
 | `ls -R` (deep tree) | 1.5 KB | 207 B | 86.5% |
 | `cargo build` (typical failure) | 1.9 KB | 581 B | 69.8% |
-| `git --no-pager diff` (18 files) | 4.1 KB | 1.3 KB | 68.0% |
+| `git --no-pager diff` (18 files) | 4.1 KB | 1.3 KB | 68.1% |
 
 These show what each handler produces. From 1.16.0 the hook delivers a diff or file read of 8 KB or less whole, so the `git diff` fixture above would reach Claude unsummarised. These are per-output compression ratios, not a whole-session token figure — most outputs are smaller and the generic fallback already caps long output. That is why the measured Bash figure above (59.2%) is lower. For your own session savings, read `recall__stats` (which counts intercepted output only).
 
@@ -599,7 +599,7 @@ The remaining built-in tools — `Read`, `Grep`, `Glob` — do not support outpu
 - **rtk's recovery hints survive.** A summary that cuts a line holding `rtk recall <hash>` or `[full diff: rtk … --no-compact]` appends it.
 - **Analytics stay per command**: fingerprints read `rtk git diff`, `rtk read`, not `rtk`.
 
-rtk's optional PostToolUse filter (`rtk:posthook` in its pipeline) also rewrites tool output; running both output filters has not been measured.
+rtk's optional PostToolUse filter (`rtk:posthook` in its pipeline) also rewrites tool output; running both output filters has not been measured. For a measured comparison of the two tools, and where each loses, see [docs/rtk.md](docs/rtk.md).
 
 ---
 
