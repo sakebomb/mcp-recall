@@ -31,7 +31,9 @@ if [ "${1:-}" = "--binary" ]; then
 else
   CONSUMER="$(cd "${1:?usage: $0 <consumer-project-dir>}" && pwd)"
 fi
-WORK="$(mktemp -d)"
+# Physical path: a binary registers its resolved location, and macOS's temp dir
+# sits under a symlink (/var -> /private/var).
+WORK="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$WORK"' EXIT
 
 # Isolate from any real config, store, or project on this machine.
@@ -236,6 +238,8 @@ switch_checks() {
      && ![...hooks("SessionStart"), ...hooks("PostToolUse")].some((h) => h.command.includes(BIN))'
 
   run_bin "$copy" install >/dev/null
+  # Positive control: the line below must be reporting #364, not a broken status.
+  npm_status_not_installed && fail "switch: npm status does not report installed while the binary is present"
   mv "$copy" "$copy.gone"
   known_defect 364 "npm status flags a registered binary that is gone" npm_status_not_installed
   mv "$copy.gone" "$copy"
@@ -262,6 +266,9 @@ if [ -n "$BINARY" ]; then
   # Bun is dropped from PATH for the binary only: the db_scalar and payload
   # helpers still use it, but the binary must run without it.
   NO_BUN_PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v -e '\.bun' | paste -sd: -)"
+  if PATH="$NO_BUN_PATH" command -v bun >/dev/null 2>&1; then
+    fail "bun is still on PATH after removing .bun directories; the binary checks would not prove it runs without Bun"
+  fi
   run_bin() { env PATH="$NO_BUN_PATH" "$@"; }
   exercise binary run_bin "$BINARY"
 
@@ -302,7 +309,7 @@ if [ -n "$BINARY" ]; then
     '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
     '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
     | run_bin perl -e 'alarm shift; exec @ARGV or die "exec: $!"' 10 "${server[@]}" 2>/dev/null \
-    | grep -o '"name":"recall__[a-z_]*"' | sort -u | wc -l | tr -d ' ')"
+    | grep -o '"name":"recall__[a-z_]*"' | sort -u | wc -l | tr -d ' ')" || tools=0
   [ "$tools" -gt 0 ] || fail "binary: the registered server listed no recall tools"
   echo "ok: the registered server lists $tools recall tools"
 
