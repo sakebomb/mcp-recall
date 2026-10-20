@@ -471,6 +471,16 @@ describe("status checks the launch that is registered, not its own (#364)", () =
     expect(out).toContain("✗ /gone/mcp-recall/dist/cli.js");
   });
 
+  it("checks only recall's hook in a shared entry, not a neighbour that names the same event", async () => {
+    await installAs(npm);
+    const settings = await readJsonFile(settingsPath) as any;
+    settings.hooks.PostToolUse[0].hooks.push({ type: "command", command: "/gone/notify post-tool-use" });
+    await writeJsonFile(settingsPath, settings);
+    const out = await statusOf(npm);
+    expect(out).toContain("Installation: installed");
+    expect(out).not.toContain("/gone/notify");
+  });
+
   it("is stale when the registered bun itself is gone", async () => {
     await installAs(npm);
     const claudeJson = await readJsonFile(claudeJsonPath) as any;

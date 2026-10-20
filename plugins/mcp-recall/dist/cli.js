@@ -11598,7 +11598,7 @@ function registeredFiles(launches) {
   return [...files.values()];
 }
 function ourHookCommands(entries, isOurs, marker) {
-  return (entries ?? []).filter(isOurs).flatMap((e) => e.hooks.map((h) => h.command)).filter((c) => typeof c === "string" && c.includes(marker));
+  return (entries ?? []).filter(isOurs).flatMap((e) => e.hooks.filter((h) => isOurHookCommand(h, marker)).map((h) => h.command));
 }
 async function statusCommand(opts = {}) {
   const {

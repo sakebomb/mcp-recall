@@ -567,12 +567,11 @@ export function registeredFiles(launches: string[][]): RegisteredFile[] {
   return [...files.values()];
 }
 
-/** The commands of recall's own hooks among an event's entries. */
+/** The commands of recall's own hooks among an event's entries, not their neighbours'. */
 function ourHookCommands(entries: unknown, isOurs: (e: unknown) => boolean, marker: string): string[] {
   return ((entries as unknown[] | undefined) ?? [])
     .filter(isOurs)
-    .flatMap((e) => (e as HookEntry).hooks.map((h) => h.command))
-    .filter((c) => typeof c === "string" && c.includes(marker));
+    .flatMap((e) => (e as HookEntry).hooks.filter((h) => isOurHookCommand(h, marker)).map((h) => h.command));
 }
 
 export interface StatusOptions {
