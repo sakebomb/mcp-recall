@@ -11209,7 +11209,7 @@ Next steps:`);
 
 // src/install/index.ts
 import { existsSync as existsSync3 } from "fs";
-import { mkdir, rename, readFile } from "fs/promises";
+import { mkdir, rename, readFile, realpath, readlink, stat, chmod } from "fs/promises";
 import path from "path";
 import os from "os";
 function isEnoent(e) {
@@ -11296,13 +11296,33 @@ async function readJsonFile(filePath) {
   }
 }
 async function writeJsonFile(filePath, data) {
-  const dir = path.dirname(filePath);
-  await mkdir(dir, { recursive: true });
-  const content = JSON.stringify(data, null, 2) + `
-`;
-  const tmp = filePath + ".tmp";
+  await writeTextFile(filePath, JSON.stringify(data, null, 2) + `
+`);
+}
+async function writeTarget(filePath) {
+  try {
+    return await realpath(filePath);
+  } catch (e) {
+    if (!isEnoent(e))
+      throw e;
+  }
+  try {
+    return path.resolve(path.dirname(filePath), await readlink(filePath));
+  } catch {
+    return filePath;
+  }
+}
+async function writeTextFile(filePath, content) {
+  const target = await writeTarget(filePath);
+  await mkdir(path.dirname(target), { recursive: true });
+  const mode = await stat(target).then((s) => s.mode & 4095, () => {
+    return;
+  });
+  const tmp = target + ".tmp";
   await Bun.write(tmp, content);
-  await rename(tmp, filePath);
+  if (mode !== undefined)
+    await chmod(tmp, mode);
+  await rename(tmp, target);
 }
 var CLAUDE_MD_MARKER_START = "<!-- BEGIN mcp-recall -->";
 var CLAUDE_MD_MARKER_END = "<!-- END mcp-recall -->";
@@ -11319,13 +11339,6 @@ Proactively:
 var CLAUDE_MD_BLOCK = `${CLAUDE_MD_MARKER_START}
 ${CLAUDE_MD_SNIPPET}
 ${CLAUDE_MD_MARKER_END}`;
-async function writeTextFile(filePath, content) {
-  const dir = path.dirname(filePath);
-  await mkdir(dir, { recursive: true });
-  const tmp = filePath + ".tmp";
-  await Bun.write(tmp, content);
-  await rename(tmp, filePath);
-}
 function isClaudeMdInjected(content) {
   return content.includes(CLAUDE_MD_MARKER_START);
 }

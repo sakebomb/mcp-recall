@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn, mock } from "bun:test";
-import { mkdtemp, rm } from "fs/promises";
+import { mkdtemp, rm, symlink, lstat, stat, chmod, mkdir, writeFile, readFile } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
 import os from "os";
@@ -110,6 +110,44 @@ describe("writeJsonFile / readJsonFile", () => {
     const nested = path.join(tmpDir, "a", "b", "c.json");
     await writeJsonFile(nested, { ok: true });
     expect(existsSync(nested)).toBe(true);
+  });
+
+  it("writes through a symlink and keeps the link (#373)", async () => {
+    const real = path.join(tmpDir, "dotfiles", "settings.json");
+    await writeJsonFile(real, { old: true });
+    const link = path.join(tmpDir, "settings.json");
+    await symlink(real, link);
+    await writeJsonFile(link, { updated: true });
+    expect((await lstat(link)).isSymbolicLink()).toBe(true);
+    expect(await readJsonFile(real)).toEqual({ updated: true });
+  });
+
+  it("writes through a dangling symlink to its target (#373)", async () => {
+    const real = path.join(tmpDir, "dotfiles", "missing.json");
+    const link = path.join(tmpDir, "dangling.json");
+    await symlink(real, link);
+    await writeJsonFile(link, { created: true });
+    expect((await lstat(link)).isSymbolicLink()).toBe(true);
+    expect(await readJsonFile(real)).toEqual({ created: true });
+  });
+
+  it.skipIf(process.platform === "win32")("keeps the existing file's mode (#373)", async () => {
+    const filePath = path.join(tmpDir, ".claude.json");
+    await writeJsonFile(filePath, { a: 1 });
+    await chmod(filePath, 0o600);
+    await writeJsonFile(filePath, { a: 2 });
+    expect((await stat(filePath)).mode & 0o777).toBe(0o600);
+  });
+
+  it("keeps a symlinked CLAUDE.md a symlink through install (#373)", async () => {
+    const real = path.join(tmpDir, "dotfiles", "CLAUDE.md");
+    await mkdir(path.dirname(real), { recursive: true });
+    await writeFile(real, "# mine\n");
+    const link = path.join(tmpDir, "CLAUDE.md");
+    await symlink(real, link);
+    await injectClaudeMd(link);
+    expect((await lstat(link)).isSymbolicLink()).toBe(true);
+    expect(await readFile(real, "utf8")).toContain(CLAUDE_MD_MARKER_START);
   });
 });
 

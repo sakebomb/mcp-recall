@@ -10,7 +10,7 @@
  */
 
 import { existsSync } from "fs";
-import { mkdir, rename, readFile } from "fs/promises";
+import { mkdir, rename, readFile, realpath, readlink, stat, chmod } from "fs/promises";
 import path from "path";
 import os from "os";
 import { loadProfiles } from "../profiles/loader";
@@ -149,12 +149,39 @@ export async function readJsonFile(filePath: string): Promise<Record<string, unk
 }
 
 export async function writeJsonFile(filePath: string, data: unknown): Promise<void> {
-  const dir = path.dirname(filePath);
-  await mkdir(dir, { recursive: true });
-  const content = JSON.stringify(data, null, 2) + "\n";
-  const tmp = filePath + ".tmp";
+  await writeTextFile(filePath, JSON.stringify(data, null, 2) + "\n");
+}
+
+/**
+ * The file a write to `filePath` should replace: the target of a symlink, even
+ * a dangling one, so a dotfiles-managed link survives the rename (#373).
+ */
+async function writeTarget(filePath: string): Promise<string> {
+  try {
+    return await realpath(filePath);
+  } catch (e: unknown) {
+    if (!isEnoent(e)) throw e;
+  }
+  try {
+    return path.resolve(path.dirname(filePath), await readlink(filePath));
+  } catch {
+    return filePath; // no file yet, or not a link
+  }
+}
+
+/**
+ * Atomic write (temp file + rename) through any symlink, keeping the replaced
+ * file's mode: a 600 `~/.claude.json` can hold MCP server tokens (#373).
+ */
+async function writeTextFile(filePath: string, content: string): Promise<void> {
+  const target = await writeTarget(filePath);
+  await mkdir(path.dirname(target), { recursive: true });
+  const mode = await stat(target).then((s) => s.mode & 0o7777, () => undefined);
+  const tmp = target + ".tmp";
   await Bun.write(tmp, content);
-  await rename(tmp, filePath);
+  // After the write, so a stale temp file and the umask cannot widen it.
+  if (mode !== undefined) await chmod(tmp, mode);
+  await rename(tmp, target);
 }
 
 // ── CLAUDE.md helpers ─────────────────────────────────────────────────────────
@@ -174,14 +201,6 @@ Proactively:
 - \`recall__search("query")\` — find stored outputs by content when you don't have an ID`;
 
 export const CLAUDE_MD_BLOCK = `${CLAUDE_MD_MARKER_START}\n${CLAUDE_MD_SNIPPET}\n${CLAUDE_MD_MARKER_END}`;
-
-async function writeTextFile(filePath: string, content: string): Promise<void> {
-  const dir = path.dirname(filePath);
-  await mkdir(dir, { recursive: true });
-  const tmp = filePath + ".tmp";
-  await Bun.write(tmp, content);
-  await rename(tmp, filePath);
-}
 
 export function isClaudeMdInjected(content: string): boolean {
   return content.includes(CLAUDE_MD_MARKER_START);

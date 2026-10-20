@@ -34,6 +34,11 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ### Fixed
 
+- **`install` and `uninstall` keep a symlinked config a symlink, and keep its
+  mode** (#373). They replaced the file with a temp file, so a dotfiles-managed
+  `settings.json` or `CLAUDE.md` link became a plain file, and a `~/.claude.json`
+  set to 600 became readable by others. They now write to the link's target and
+  copy the old file's mode.
 - **A failure past the shell fallback's 25-line head is shown** (#358). The
   fallback kept the first 25 lines and counted the rest, so a unit failing at
   line 31 of `journalctl -b -1` was neither shown nor, under `balanced`
