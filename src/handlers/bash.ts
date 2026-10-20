@@ -4,7 +4,7 @@
  * Falls back to the shell handler for unrecognised commands.
  */
 import type { CompressionResult, Handler } from "./types";
-import { shellHandler } from "./shell";
+import { shellHandler, contentReadHandler } from "./shell";
 import {
   bashOutputText,
   extractStdout,
@@ -691,6 +691,18 @@ export function isContentRead(command: string): boolean {
 }
 
 /**
+ * True when the output comes from a file rather than a run: the pipeline starts
+ * with `cat`, `head`, `tail`, a `sed -n` range or `rtk read`. `journalctl | head`
+ * is a run, and so is `cat <<EOF | ssh h`, so their failure lines still surface (#358).
+ */
+export function isFileRead(command: string): boolean {
+  const first = normalizeCommand(command.split("|")[0] ?? "");
+  if (/^cat\s+<</.test(first)) return false;
+  return /^(cat|head|tail)(\s|$)/.test(first) || SED_LINE_RANGE.test(first) ||
+    /^rtk\s+(?:-\S+\s+)*read(\s|$)/.test(first);
+}
+
+/**
  * True when `command` runs more than one command in sequence: a `;`, `&&`, `||`
  * or newline outside quotes, escapes and `( … )`/`$( … )`, with a command after
  * it. A pipe is not a separator: it yields one output stream.
@@ -764,6 +776,7 @@ export function getBashHandler(input: unknown): Handler {
   if (isCompoundCommand(command)) return compoundHandler;
   // rtk reshapes output (a diff without its headers), so a parser for the raw
   // command could read it wrong and claim a false count, the #350 class (#353).
+  if (isFileRead(command)) return contentReadHandler;
   if (wrappers.includes("rtk")) return shellHandler;
 
   if (/^git\s+grep(\s|$)/.test(command)) return grepHandler;
@@ -806,7 +819,7 @@ export function getBashHandler(input: unknown): Handler {
  * there (`bun test` prints its results on stderr), so empty stdout is normal.
  */
 const READS_STDERR = new Set<Handler>([
-  shellHandler, compoundHandler, testRunnerHandler, buildToolHandler,
+  shellHandler, contentReadHandler, compoundHandler, testRunnerHandler, buildToolHandler,
   compilerDiagnosticsHandler, packageInstallHandler,
 ]);
 

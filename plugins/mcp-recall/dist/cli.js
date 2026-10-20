@@ -5497,7 +5497,7 @@ function sampleBySession(db, where, params, perSession = SAMPLE_PER_SESSION) {
   const overflow = counts.map((r) => ({ session_id: r.session_id, count: r.count - (shown.get(r.session_id) ?? 0) })).filter((r) => r.count > 0).sort((a, b) => b.count - a.count || a.session_id.localeCompare(b.session_id));
   return { items, total, overflow };
 }
-var FALLBACK_HANDLERS = ["genericHandler", "jsonHandler", "shellHandler"];
+var FALLBACK_HANDLERS = ["genericHandler", "jsonHandler", "shellHandler", "contentReadHandler"];
 function handlerWhere(project_key, opts, recorded = true) {
   const params = [project_key];
   let where = `WHERE project_key = ? AND tool_name != 'recall__note' AND handler IS ${recorded ? "NOT " : ""}NULL`;
@@ -6567,6 +6567,53 @@ function recoveryHints(lines) {
   return lines.filter((l) => RECOVERY_HINT_RE.test(l)).slice(0, MAX_HINTS).map((l) => l.trim());
 }
 
+// src/handlers/generic.ts
+var MAX_CHARS = 500;
+var HEAD_CHARS = 380;
+var TAIL_CHARS = 100;
+var HEAD_LINES2 = 5;
+var TAIL_LINES = 5;
+var LINE_MODE_MIN_LINES = HEAD_LINES2 + TAIL_LINES + 1;
+var MAX_MATCH_LINES = 8;
+var MATCH_RE = /\b(error|errors|warn|warning|fail|failed|failure|exception|fatal|panic|denied|refused|timeout)\b/i;
+function summarizeBlock(raw) {
+  const head = raw.slice(0, HEAD_CHARS).trimEnd();
+  const tail = raw.slice(-TAIL_CHARS).trimStart();
+  return `${head}
+\u2026
+${tail}`;
+}
+function failureLines(lines) {
+  return lines.filter((l) => MATCH_RE.test(l)).slice(0, MAX_MATCH_LINES);
+}
+var plural = (n) => n === 1 ? "" : "s";
+function summarizeLines(lines) {
+  return summarizeLineWindow(lines, HEAD_LINES2, TAIL_LINES);
+}
+function summarizeLineWindow(lines, headLines, tailLines) {
+  const head = lines.slice(0, headLines);
+  const tail = lines.slice(lines.length - tailLines);
+  const middle = lines.slice(headLines, lines.length - tailLines);
+  const matches = failureLines(middle);
+  const hints = recoveryHints(middle.filter((l) => !matches.includes(l)));
+  const note = matches.length ? `\u2026(${middle.length} middle line${plural(middle.length)} elided; ${matches.length} error/warn shown)\u2026` : `\u2026(${middle.length} middle line${plural(middle.length)} elided)\u2026`;
+  return [...head, note, ...matches, ...hints, ...tail].map((l) => clipLine(l)).join(`
+`);
+}
+var genericHandler = (_toolName, output) => {
+  const raw = extractText(output);
+  const originalSize = Buffer.byteLength(raw, "utf8");
+  if (raw.length <= MAX_CHARS) {
+    return { summary: raw, originalSize };
+  }
+  const lines = collapseRepeats(raw.split(`
+`)).map((l) => l.text);
+  const text = lines.join(`
+`);
+  const summary = lines.length >= LINE_MODE_MIN_LINES ? summarizeLines(lines) : text.length <= MAX_CHARS ? text : summarizeBlock(text);
+  return { summary, originalSize };
+};
+
 // src/handlers/shell.ts
 var HEAD_STDOUT = 25;
 var HEAD_STDERR = 20;
@@ -6599,7 +6646,7 @@ function trimTrailingEmpty(lines) {
     end--;
   return lines.slice(0, end);
 }
-function formatLines(text, max) {
+function formatLines(text, max, surfaceFailures) {
   const lines = trimTrailingEmpty(text.split(`
 `));
   const total = lines.length;
@@ -6609,7 +6656,10 @@ function formatLines(text, max) {
 `);
   const overflow = hidden > 0 ? `
 \u2026 (+${hidden} more lines)` : "";
-  const hints = recoveryHints(lines.slice(total - hidden)).map((h) => `
+  const cut = lines.slice(total - hidden);
+  const failures = surfaceFailures ? failureLines(cut) : [];
+  const extra = [...failures, ...recoveryHints(cut.filter((l) => !failures.includes(l)))];
+  const hints = extra.map((h) => `
 ${clipLine(h)}`).join("");
   return {
     header: `${total} line${total === 1 ? "" : "s"}`,
@@ -6625,7 +6675,7 @@ function parseStructured(raw) {
   } catch {}
   return null;
 }
-var shellHandler = (_toolName, output) => {
+function summarizeShell(_toolName, output, surfaceFailures) {
   const raw = extractText(output);
   const structured = parseStructured(raw);
   const measured = structured ? [structured.stdout ?? structured.output ?? "", structured.stderr ?? ""].filter((s) => s.length > 0).join(`
@@ -6644,9 +6694,9 @@ var shellHandler = (_toolName, output) => {
       } catch {}
     }
     const exitStr = exitCode !== undefined ? `exit:${exitCode} \xB7 ` : "";
-    const stdoutFmt = formatLines(stdout, HEAD_STDOUT);
+    const stdoutFmt = formatLines(stdout, HEAD_STDOUT, surfaceFailures);
     const hasStderr = stderr.trim().length > 0;
-    const stderrFmt = hasStderr ? formatLines(stderr, HEAD_STDERR) : null;
+    const stderrFmt = hasStderr ? formatLines(stderr, HEAD_STDERR, surfaceFailures) : null;
     const stderrDesc = stderrFmt ? ` \xB7 ${stderrFmt.header} stderr` : "";
     const header = `[bash \xB7 ${exitStr}${stdoutFmt.header} stdout${stderrDesc}]`;
     const parts = [header];
@@ -6668,13 +6718,15 @@ var shellHandler = (_toolName, output) => {
       return { summary, originalSize };
     } catch {}
   }
-  const fmt = formatLines(text, HEAD_STDOUT);
+  const fmt = formatLines(text, HEAD_STDOUT, surfaceFailures);
   return {
     summary: `[bash \xB7 ${fmt.header}]
 ${fmt.body}`,
     originalSize
   };
-};
+}
+var shellHandler = (toolName, output) => summarizeShell(toolName, output, true);
+var contentReadHandler = (toolName, output) => summarizeShell(toolName, output, false);
 
 // src/handlers/bash-shared.ts
 var MAX_LOG_COMMITS = 20;
@@ -6988,7 +7040,7 @@ function summarizeTestRun(output) {
   const combined = `${stdout}
 ${stderr}`.trim();
   const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
-  const failureLines = [];
+  const failureLines2 = [];
   let failureNames = 0, passLines = 0, failLines = 0;
   let detailBudget = 0;
   for (const line of combined.split(`
@@ -7004,14 +7056,14 @@ ${stderr}`.trim();
     const isMessage = /^error:\s/.test(t) || /^E\s{2,}\S/.test(line);
     if (isName) {
       failureNames++;
-      failureLines.push({ text: clipName(t), isName: true });
+      failureLines2.push({ text: clipName(t), isName: true });
       detailBudget = t.startsWith("\u25CF") ? MAX_DETAIL_LINES : 0;
     } else if (isMessage) {
-      failureLines.push({ text: t.slice(0, MAX_LINE), isName: false });
+      failureLines2.push({ text: t.slice(0, MAX_LINE), isName: false });
       if (/^error:\s/.test(t))
         detailBudget = MAX_DETAIL_LINES;
     } else if (detailBudget > 0 && isDetail(t)) {
-      failureLines.push({ text: t.slice(0, MAX_LINE), isName: false });
+      failureLines2.push({ text: t.slice(0, MAX_LINE), isName: false });
       detailBudget--;
     }
   }
@@ -7081,12 +7133,12 @@ ${stderr}`.trim();
     parts.push(`${skipped} skipped`);
   const summaryStr = parts.length > 0 ? parts.join(", ") : "no counts in output";
   const lines = [`test runner \u2014 ${status}: ${summaryStr}${total > 0 ? ` (${total} total)` : ""}`];
-  if (isFail && failureLines.length > 0) {
-    const kept = selectFailureLines(failureLines, MAX_BUILD_ERRORS);
+  if (isFail && failureLines2.length > 0) {
+    const kept = selectFailureLines(failureLines2, MAX_BUILD_ERRORS);
     lines.push(`  failures:`);
     lines.push(...kept.map((l) => `    ${l.text}`));
-    if (failureLines.length > kept.length) {
-      lines.push(`    \u2026 (+${failureLines.length - kept.length} more)`);
+    if (failureLines2.length > kept.length) {
+      lines.push(`    \u2026 (+${failureLines2.length - kept.length} more)`);
     }
   }
   return { summary: lines.join(`
@@ -7446,50 +7498,6 @@ var findHandler = (toolName, output) => {
 `),
     originalSize
   }));
-};
-
-// src/handlers/generic.ts
-var MAX_CHARS = 500;
-var HEAD_CHARS = 380;
-var TAIL_CHARS = 100;
-var HEAD_LINES2 = 5;
-var TAIL_LINES = 5;
-var LINE_MODE_MIN_LINES = HEAD_LINES2 + TAIL_LINES + 1;
-var MAX_MATCH_LINES = 8;
-var MATCH_RE = /\b(error|errors|warn|warning|fail|failed|failure|exception|fatal|panic|denied|refused|timeout)\b/i;
-function summarizeBlock(raw) {
-  const head = raw.slice(0, HEAD_CHARS).trimEnd();
-  const tail = raw.slice(-TAIL_CHARS).trimStart();
-  return `${head}
-\u2026
-${tail}`;
-}
-var plural = (n) => n === 1 ? "" : "s";
-function summarizeLines(lines) {
-  return summarizeLineWindow(lines, HEAD_LINES2, TAIL_LINES);
-}
-function summarizeLineWindow(lines, headLines, tailLines) {
-  const head = lines.slice(0, headLines);
-  const tail = lines.slice(lines.length - tailLines);
-  const middle = lines.slice(headLines, lines.length - tailLines);
-  const matches = middle.filter((l) => MATCH_RE.test(l)).slice(0, MAX_MATCH_LINES);
-  const hints = recoveryHints(middle.filter((l) => !matches.includes(l)));
-  const note = matches.length ? `\u2026(${middle.length} middle line${plural(middle.length)} elided; ${matches.length} error/warn shown)\u2026` : `\u2026(${middle.length} middle line${plural(middle.length)} elided)\u2026`;
-  return [...head, note, ...matches, ...hints, ...tail].map((l) => clipLine(l)).join(`
-`);
-}
-var genericHandler = (_toolName, output) => {
-  const raw = extractText(output);
-  const originalSize = Buffer.byteLength(raw, "utf8");
-  if (raw.length <= MAX_CHARS) {
-    return { summary: raw, originalSize };
-  }
-  const lines = collapseRepeats(raw.split(`
-`)).map((l) => l.text);
-  const text = lines.join(`
-`);
-  const summary = lines.length >= LINE_MODE_MIN_LINES ? summarizeLines(lines) : text.length <= MAX_CHARS ? text : summarizeBlock(text);
-  return { summary, originalSize };
 };
 
 // src/handlers/bash.ts
@@ -7931,6 +7939,12 @@ function isBoundedRead(command) {
 function isContentRead(command) {
   return isBoundedRead(command) || commandSegments(command).some((s) => /^(cat|git\s+(diff|show))(\s|$)/.test(s) || /^git\s+(log|stash\s+show)(\s.*)?\s(-p|--patch|-u)(\s|$)/.test(s) || /^rtk\s+(?:-\S+\s+)*(read|recall)(\s|$)/.test(s));
 }
+function isFileRead(command) {
+  const first = normalizeCommand(command.split("|")[0] ?? "");
+  if (/^cat\s+<</.test(first))
+    return false;
+  return /^(cat|head|tail)(\s|$)/.test(first) || SED_LINE_RANGE.test(first) || /^rtk\s+(?:-\S+\s+)*read(\s|$)/.test(first);
+}
 function isCompoundCommand(command) {
   let quote = null;
   let depth = 0;
@@ -7988,6 +8002,8 @@ function getBashHandler(input) {
   const { command, wrappers } = unwrapCommand(rawCommand);
   if (isCompoundCommand(command))
     return compoundHandler;
+  if (isFileRead(command))
+    return contentReadHandler;
   if (wrappers.includes("rtk"))
     return shellHandler;
   if (/^git\s+grep(\s|$)/.test(command))
@@ -8038,6 +8054,7 @@ function getBashHandler(input) {
 }
 var READS_STDERR = new Set([
   shellHandler,
+  contentReadHandler,
   compoundHandler,
   testRunnerHandler,
   buildToolHandler,

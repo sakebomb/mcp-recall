@@ -34,6 +34,13 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ### Fixed
 
+- **A failure past the shell fallback's 25-line head is shown** (#358). The
+  fallback kept the first 25 lines and counted the rest, so a unit failing at
+  line 31 of `journalctl -b -1` was neither shown nor, under `balanced`
+  retention, retrievable. Up to 8 error/warn lines from the cut part now follow
+  the count, as the generic handler already does. A file read (`cat`, `head`,
+  `tail`, `sed -n`) does not get them: an `error` there is source or prose, and
+  its body is kept. `discover` reports those reads as `contentReadHandler`.
 - **`mcp-recall install` keeps your edits to recall's entries** (#365). When
   the launch changed, as on any switch between npm and the binary, install
   replaced them whole: an `env` on `mcpServers.recall` was lost, and a raised

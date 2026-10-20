@@ -132,10 +132,10 @@ export function getBashCommandBreakdown(db: Database, project_key: string): Comm
 /**
  * Handlers that summarise without knowing the output's source: the content
  * fallbacks at the end of getHandler, and the Bash route for a command with no
- * dedicated handler. A large, frequent route through one of these is where a new
- * handler would pay (#341).
+ * dedicated handler (contentReadHandler for a read, #358). A large, frequent
+ * route through one of these is where a new handler would pay (#341).
  */
-export const FALLBACK_HANDLERS = ["genericHandler", "jsonHandler", "shellHandler"] as const;
+export const FALLBACK_HANDLERS = ["genericHandler", "jsonHandler", "shellHandler", "contentReadHandler"] as const;
 
 /**
  * Rows the handler analytics read: intercepted output with a recorded handler.

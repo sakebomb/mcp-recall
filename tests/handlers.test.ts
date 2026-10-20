@@ -4,7 +4,7 @@ import { githubHandler } from "../src/handlers/github";
 import type { Handler } from "../src/handlers/types";
 import { gitlabHandler } from "../src/handlers/gitlab";
 import { filesystemHandler } from "../src/handlers/filesystem";
-import { shellHandler, stripAnsi, stripSshNoise } from "../src/handlers/shell";
+import { shellHandler, contentReadHandler, stripAnsi, stripSshNoise } from "../src/handlers/shell";
 import { csvHandler, looksLikeCsv } from "../src/handlers/csv";
 import { linearHandler } from "../src/handlers/linear";
 import { slackHandler } from "../src/handlers/slack";
@@ -12,7 +12,7 @@ import { jsonHandler } from "../src/handlers/json";
 import { genericHandler } from "../src/handlers/generic";
 import { contentBlockHandler } from "../src/handlers/content-blocks";
 import { getHandler, extractText } from "../src/handlers/index";
-import { getBashHandler, normalizeCommand, commandFingerprint, bashFingerprint, isBoundedRead, isContentRead, compoundHandler, gitDiffHandler, gitLogHandler, terraformPlanHandler, gitStatusHandler, gitRefsHandler, packageInstallHandler, testRunnerHandler, dockerPsHandler, buildToolHandler, ghHandler, compilerDiagnosticsHandler, grepHandler, lsHandler, findHandler } from "../src/handlers/bash";
+import { getBashHandler, normalizeCommand, commandFingerprint, bashFingerprint, isBoundedRead, isContentRead, isFileRead, compoundHandler, gitDiffHandler, gitLogHandler, terraformPlanHandler, gitStatusHandler, gitRefsHandler, packageInstallHandler, testRunnerHandler, dockerPsHandler, buildToolHandler, ghHandler, compilerDiagnosticsHandler, grepHandler, lsHandler, findHandler } from "../src/handlers/bash";
 import { tavilyHandler } from "../src/handlers/tavily";
 import { databaseHandler } from "../src/handlers/database";
 import { sentryHandler } from "../src/handlers/sentry";
@@ -819,6 +819,30 @@ describe("shellHandler", () => {
     expect(summary).not.toContain("line35");
   });
 
+  it("keeps failure lines from past the 25-line head (#358)", () => {
+    const input = [
+      ...Array.from({ length: 30 }, (_, i) => `systemd[1]: Started session-${i}.scope`),
+      "systemd[1]: cups-browsed.service: Main process exited, code=exited, status=1/FAILURE",
+      "systemd[1]: cups-browsed.service: Failed with result 'exit-code'.",
+      ...Array.from({ length: 10 }, (_, i) => `kernel: usb 1-${i}: new high-speed USB device`),
+    ].join("\n");
+    const { summary } = shellHandler("mcp__bash__execute", JSON.stringify({ stdout: input, stderr: "", returncode: 0 }));
+    expect(summary).toContain("+17 more lines");
+    expect(summary).toContain("status=1/FAILURE");
+    expect(summary).toContain("Failed with result 'exit-code'");
+    expect(summary).not.toContain("usb 1-9");
+  });
+
+  it("caps the failure lines surfaced from the cut part (#358)", () => {
+    const input = [
+      ...Array.from({ length: 25 }, (_, i) => `line${i + 1}`),
+      ...Array.from({ length: 20 }, (_, i) => `error: cut failure ${i}`),
+    ].join("\n");
+    const { summary } = shellHandler("mcp__bash__execute", input);
+    expect(summary).toContain("error: cut failure 7");
+    expect(summary).not.toContain("error: cut failure 8");
+  });
+
   it("routes JSON stdout through the JSON handler (structured)", () => {
     const json = JSON.stringify({ id: 1, name: "foo", tags: ["a", "b"] });
     const input = JSON.stringify({ stdout: json, stderr: "", returncode: 0 });
@@ -1324,9 +1348,11 @@ describe("getBashHandler", () => {
     });
 
     it("routes rtk output to the shell fallback, never a parser for the raw command", () => {
-      for (const command of ["rtk git diff HEAD~3", "rtk git log -5", "rtk git status", "rtk grep -rn foo src", "rtk ls -la", "rtk ssh h 'docker ps'", "cd src && rtk git diff", "rtk read f"]) {
+      for (const command of ["rtk git diff HEAD~3", "rtk git log -5", "rtk git status", "rtk grep -rn foo src", "rtk ls -la", "rtk ssh h 'docker ps'", "cd src && rtk git diff"]) {
         expect(getBashHandler({ command })).toBe(shellHandler);
       }
+      // A read is the shell summary without failure lines (#358).
+      expect(getBashHandler({ command: "rtk read f" })).toBe(contentReadHandler);
       expect(getBashHandler({ command: "rtk git status; rtk git diff" })).toBe(compoundHandler);
     });
 
@@ -1497,6 +1523,39 @@ describe("isContentRead (#332)", () => {
       "concat a b", "echo cat", "git difftool", "bun test", "git log --oneline -p5x", "git stash show",
       "git log --pretty=%h",
     ]) expect(isContentRead(command)).toBe(false);
+  });
+});
+
+describe("failure lines from a file read versus a run (#358)", () => {
+  // Source that mentions errors past the 25-line head, as a file read sees it.
+  const source = [
+    ...Array.from({ length: 30 }, (_, i) => `const v${i} = ${i};`),
+    'throw new ApiError("validation_error", "Validation failed.");',
+  ].join("\n");
+  const envelope = { stdout: source, stderr: "", exit_code: 0 };
+
+  it("recognises a pipeline that starts by reading a file", () => {
+    for (const command of [
+      "cat src/x.ts", "head -n 200 x.log", "tail -n 500 /var/log/syslog", "sed -n 1,400p x.ts",
+      "cat x.ts | grep -v '^$'", "rtk read src/x.ts", "ssh host cat /etc/x",
+    ]) expect(isFileRead(command)).toBe(true);
+  });
+
+  it("treats a command piped to head, and a heredoc fed to a run, as runs", () => {
+    for (const command of [
+      "journalctl -b -1 | head -200", "cat <<'EOF' | ssh host bash", "concat a b", "python3 x.py",
+    ]) expect(isFileRead(command)).toBe(false);
+  });
+
+  it("adds no failure lines to a file read", () => {
+    const { summary } = getBashHandler({ command: "cd /repo && cat src/x.ts" })("Bash", envelope);
+    expect(summary).toContain("+6 more lines");
+    expect(summary).not.toContain("Validation failed");
+  });
+
+  it("adds them to a command piped to head (control)", () => {
+    const { summary } = getBashHandler({ command: "journalctl -b -1 | head -200" })("Bash", envelope);
+    expect(summary).toContain("Validation failed");
   });
 });
 

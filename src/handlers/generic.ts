@@ -39,6 +39,11 @@ function summarizeBlock(raw: string): string {
   return `${head}\n…\n${tail}`;
 }
 
+/** Up to MAX_MATCH_LINES error/warn lines from lines a summary would cut. */
+export function failureLines(lines: string[]): string[] {
+  return lines.filter((l) => MATCH_RE.test(l)).slice(0, MAX_MATCH_LINES);
+}
+
 const plural = (n: number): string => (n === 1 ? "" : "s");
 
 function summarizeLines(lines: string[]): string {
@@ -55,7 +60,7 @@ export function summarizeLineWindow(lines: string[], headLines: number, tailLine
   const head = lines.slice(0, headLines);
   const tail = lines.slice(lines.length - tailLines);
   const middle = lines.slice(headLines, lines.length - tailLines);
-  const matches = middle.filter((l) => MATCH_RE.test(l)).slice(0, MAX_MATCH_LINES);
+  const matches = failureLines(middle);
   const hints = recoveryHints(middle.filter((l) => !matches.includes(l)));
 
   const note = matches.length

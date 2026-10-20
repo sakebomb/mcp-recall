@@ -30,13 +30,13 @@ Each bench fixture goes through mcp-recall's handler and through `rtk pipe -f <f
 | `git --no-pager diff` (18 files) | 4.1 KB | 1.3 KB (68.1%) | 1.9 KB (55.0%) | 1/2 · 1/2 |
 | `rg` (240 matches, 6 files) | 13.6 KB | 1.4 KB (89.7%) | 2.3 KB (82.9%) | 2/2 · 2/2 |
 | `journalctl -n 500` (retry loop, 3 messages) | 30.9 KB | 286 B (99.1%) | 180 B (99.4%) | 1/1 · 1/1 |
-| `journalctl -b -1` (a unit fails, no line says "error") | 3.3 KB | 2.0 KB (38.0%) | 101 B (97.0%) | 0/2 · 0/2 |
+| `journalctl -b -1` (a unit fails, no line says "error") | 3.3 KB | 2.2 KB (32.2%) | 101 B (97.0%) | 2/2 · 0/2 |
 | `grep -n` piped to `head` (one 180 KB minified line) | 191.2 KB | 4.0 KB (97.9%) | 191.2 KB (0.0%) | — |
 | `find` (400 paths) | 19.0 KB | 1.2 KB (93.7%) | 185 B (99.1%) | 1/2 · 1/2 |
 
 - **rtk keeps more of a compiler run.** It lists all 60 `tsc` errors grouped by file; mcp-recall gives the count and the first 20.
 - **On a small diff they keep different things.** rtk shows changed lines for 13 of the 18 files, then truncates with a re-run hint. mcp-recall gives all 18 files with their line counts but no changed lines, and keeps the body for `recall__retrieve`.
-- **Neither reports the failed unit.** rtk's log filter classifies by keyword and prints `0 errors`. mcp-recall's shell fallback keeps the first 25 lines, and the failure is at line 31 ([#358](https://github.com/sakebomb/mcp-recall/issues/358)).
+- **Only mcp-recall reports the failed unit.** rtk's log filter classifies by keyword and prints `0 errors`. mcp-recall's shell fallback keeps the first 25 lines, then the error/warn lines from the rest, which include the failure at line 31 ([#358](https://github.com/sakebomb/mcp-recall/issues/358)).
 - **rtk passes one huge line through.** mcp-recall cuts any line at 4,000 chars with `… (+N chars)` and keeps the body.
 
 ## Your own Bash history

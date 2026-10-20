@@ -11,6 +11,7 @@ import { jsonHandler } from "./json";
 import { collapseRepeats } from "./collapse";
 import { clipLine, MAX_LINE_CHARS } from "./clip";
 import { recoveryHints } from "./rtk";
+import { failureLines } from "./generic";
 
 export const HEAD_STDOUT = 25;
 const HEAD_STDERR = 20;
@@ -59,13 +60,14 @@ function trimTrailingEmpty(lines: string[]): string[] {
 
 /**
  * The first `max` lines after collapsing repeats (#340), so the budget goes to
- * distinct lines, each clipped to MAX_LINE_CHARS (#349), then any rtk recovery
- * hint from the lines cut (#353). The header and the overflow count input
- * lines, not summary lines.
+ * distinct lines, each clipped to MAX_LINE_CHARS (#349), then any error/warn
+ * lines when `surfaceFailures` (#358) and rtk recovery hints (#353) from the
+ * lines cut. The header and the overflow count input lines, not summary lines.
  */
 function formatLines(
   text: string,
-  max: number
+  max: number,
+  surfaceFailures: boolean
 ): { header: string; body: string } {
   const lines = trimTrailingEmpty(text.split("\n"));
   const total = lines.length;
@@ -73,7 +75,10 @@ function formatLines(
   const hidden = total - shown.reduce((n, l) => n + l.count, 0);
   const head = shown.map((l) => l.text).join("\n");
   const overflow = hidden > 0 ? `\n… (+${hidden} more lines)` : "";
-  const hints = recoveryHints(lines.slice(total - hidden)).map((h) => `\n${clipLine(h)}`).join("");
+  const cut = lines.slice(total - hidden);
+  const failures = surfaceFailures ? failureLines(cut) : [];
+  const extra = [...failures, ...recoveryHints(cut.filter((l) => !failures.includes(l)))];
+  const hints = extra.map((h) => `\n${clipLine(h)}`).join("");
   return {
     header: `${total} line${total === 1 ? "" : "s"}`,
     body: `${head}${overflow}${hints}`,
@@ -105,10 +110,7 @@ function parseStructured(raw: string): ShellOutput | null {
   return null;
 }
 
-export const shellHandler: Handler = (
-  _toolName: string,
-  output: unknown
-): CompressionResult => {
+function summarizeShell(_toolName: string, output: unknown, surfaceFailures: boolean): CompressionResult {
   const raw = extractText(output);
   const structured = parseStructured(raw);
   // Size the output itself, not the JSON envelope around it (#306).
@@ -133,9 +135,9 @@ export const shellHandler: Handler = (
     }
 
     const exitStr = exitCode !== undefined ? `exit:${exitCode} · ` : "";
-    const stdoutFmt = formatLines(stdout, HEAD_STDOUT);
+    const stdoutFmt = formatLines(stdout, HEAD_STDOUT, surfaceFailures);
     const hasStderr = stderr.trim().length > 0;
-    const stderrFmt = hasStderr ? formatLines(stderr, HEAD_STDERR) : null;
+    const stderrFmt = hasStderr ? formatLines(stderr, HEAD_STDERR, surfaceFailures) : null;
 
     const stderrDesc = stderrFmt ? ` · ${stderrFmt.header} stderr` : "";
     const header = `[bash · ${exitStr}${stdoutFmt.header} stdout${stderrDesc}]`;
@@ -163,9 +165,18 @@ export const shellHandler: Handler = (
     } catch { /* not valid JSON — fall through */ }
   }
 
-  const fmt = formatLines(text, HEAD_STDOUT);
+  const fmt = formatLines(text, HEAD_STDOUT, surfaceFailures);
   return {
     summary: `[bash · ${fmt.header}]\n${fmt.body}`,
     originalSize,
   };
-};
+}
+
+export const shellHandler: Handler = (toolName, output) => summarizeShell(toolName, output, true);
+
+/**
+ * The shell summary without failure lines, for a content read with no dedicated
+ * handler (`cat`, `sed -n`, `head`). It shows a file, not a run, so an `error`
+ * line in it is source or prose, and balanced retention keeps the body (#332).
+ */
+export const contentReadHandler: Handler = (toolName, output) => summarizeShell(toolName, output, false);
