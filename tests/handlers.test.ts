@@ -2041,6 +2041,20 @@ describe("gitLogHandler", () => {
     const { summary } = gitLogHandler("Bash", { stdout: "", stderr: "", exit_code: 0 });
     expect(summary).toContain("no commits");
   });
+
+  it("falls back to the shell handler for a custom format it cannot parse", () => {
+    // git log -3 --format="%H%n%B%n---": neither oneline nor "commit <hash>" blocks (#350)
+    const custom = [
+      "3af300f0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6", "feat: record handler per output", "", "---",
+      "ea341eb0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6", "chore: release v1.16.1", "", "---",
+      "c0cce410c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6", "fix(bash): recognise a sed -n range", "", "---",
+    ].join("\n");
+    const output = { stdout: custom, stderr: "", exit_code: 0 };
+    const { summary } = gitLogHandler("Bash", output);
+    expect(summary).not.toContain("0 commits");
+    expect(summary).toContain("chore: release v1.16.1");
+    expect(summary).toBe(shellHandler("Bash", output).summary);
+  });
 });
 
 // ---------------------------------------------------------------------------

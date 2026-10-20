@@ -73,7 +73,7 @@ export const gitDiffHandler: Handler = (
 // ---------------------------------------------------------------------------
 
 export const gitLogHandler: Handler = (
-  _toolName: string,
+  toolName: string,
   output: unknown
 ): CompressionResult => {
   const stdout = extractStdout(output);
@@ -127,6 +127,9 @@ export const gitLogHandler: Handler = (
       seenBlank = false;
     }
   }
+
+  // A custom --format/--pretty parses to nothing; a count is only stated when parsed (#350)
+  if (commits.length === 0) return shellHandler(toolName, output);
 
   const total = commits.length;
   const shown = commits.slice(0, MAX_LOG_COMMITS);

@@ -6794,7 +6794,7 @@ var gitDiffHandler = (toolName, output) => {
   return { summary: [header, ...fileLines].join(`
 `), originalSize };
 };
-var gitLogHandler = (_toolName, output) => {
+var gitLogHandler = (toolName, output) => {
   const stdout = extractStdout(output);
   const originalSize = Buffer.byteLength(bashOutputText(output), "utf8");
   const lines = stdout.trim().split(`
@@ -6830,6 +6830,8 @@ var gitLogHandler = (_toolName, output) => {
       seenBlank = false;
     }
   }
+  if (commits.length === 0)
+    return shellHandler(toolName, output);
   const total = commits.length;
   const shown = commits.slice(0, MAX_LOG_COMMITS);
   const overflow = total > MAX_LOG_COMMITS ? `
