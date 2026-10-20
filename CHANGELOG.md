@@ -32,6 +32,15 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   workaround. `bun run sandbox:binary` runs the same checks locally in an
   offline Docker container.
 
+### Fixed
+
+- **`mcp-recall install` keeps your edits to recall's entries** (#365). When
+  the launch changed, as on any switch between npm and the binary, install
+  replaced them whole: an `env` on `mcpServers.recall` was lost, and a raised
+  hook `timeout` went back to 10. It now changes only the command. It also
+  finds recall's hook when it is not first in its entry, where it used to
+  rewrite a hook it should have left alone.
+
 ## [1.17.0] — 2026-10-19
 
 ### Added

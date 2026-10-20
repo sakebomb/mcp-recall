@@ -11348,16 +11348,17 @@ function makePostToolUseEntry(cli) {
     hooks: [{ type: "command", command: `${cli} post-tool-use`, timeout: 10 }]
   };
 }
+function isOurHookCommand(hook, marker) {
+  const cmd = hook?.["command"];
+  return typeof cmd === "string" && cmd.includes("recall") && cmd.includes(marker);
+}
 function isOurSessionStartHook(entry) {
   if (!entry || typeof entry !== "object")
     return false;
   const hooks = entry["hooks"];
   if (!Array.isArray(hooks))
     return false;
-  return hooks.some((h) => {
-    const cmd = h["command"];
-    return typeof cmd === "string" && cmd.includes("recall") && cmd.includes(SESSION_START_MARKER);
-  });
+  return hooks.some((h) => isOurHookCommand(h, SESSION_START_MARKER));
 }
 function isOurPostToolUseHook(entry) {
   if (!entry || typeof entry !== "object")
@@ -11368,10 +11369,19 @@ function isOurPostToolUseHook(entry) {
   const hooks = e["hooks"];
   if (!Array.isArray(hooks))
     return false;
-  return hooks.some((h) => {
-    const cmd = h["command"];
-    return typeof cmd === "string" && cmd.includes("recall") && cmd.includes(POST_TOOL_USE_MARKER);
-  });
+  return hooks.some((h) => isOurHookCommand(h, POST_TOOL_USE_MARKER));
+}
+function upsertHook(entries, isOurs, marker, fresh) {
+  const idx = entries.findIndex(isOurs);
+  if (idx === -1)
+    return { entries: [...entries, fresh], result: "added" };
+  const entry = entries[idx];
+  const ours = entry.hooks.find((h) => isOurHookCommand(h, marker));
+  const command = fresh.hooks[0].command;
+  if (ours?.command === command)
+    return { entries, result: "present" };
+  const updated = { ...entry, hooks: entry.hooks.map((h) => h === ours ? { ...h, command } : h) };
+  return { entries: entries.map((e, i) => i === idx ? updated : e), result: "updated" };
 }
 async function installCommand(opts = {}) {
   const {
@@ -11407,7 +11417,7 @@ async function installCommand(opts = {}) {
     anyChange = true;
   } else if (!sameServer) {
     if (!dryRun) {
-      claudeJson["mcpServers"] = { ...mcpServers, recall: newServer };
+      claudeJson["mcpServers"] = { ...mcpServers, recall: { ...existing, ...newServer } };
       await writeJsonFile(claudeJsonPath, claudeJson);
     }
     console.log(`${YELLOW}\u21BA${RESET} MCP server path updated    ${DIM}(${claudeJsonPath})${RESET}`);
@@ -11418,45 +11428,27 @@ async function installCommand(opts = {}) {
   const settings = await readJsonFile(settingsPath);
   const hooks = settings["hooks"] ?? {};
   let settingsChanged = false;
-  const ssHooks = hooks["SessionStart"] ?? [];
-  const ssIdx = ssHooks.findIndex(isOurSessionStartHook);
-  const newSS = makeSessionStartEntry(launch.cli);
-  if (ssIdx === -1) {
-    hooks["SessionStart"] = [...ssHooks, newSS];
-    settingsChanged = true;
-    anyChange = true;
+  const ss = upsertHook(hooks["SessionStart"] ?? [], isOurSessionStartHook, SESSION_START_MARKER, makeSessionStartEntry(launch.cli));
+  hooks["SessionStart"] = ss.entries;
+  if (ss.result === "added") {
     console.log(`${GREEN}\u2713${RESET} SessionStart hook added    ${DIM}(${settingsPath})${RESET}`);
+  } else if (ss.result === "updated") {
+    console.log(`${YELLOW}\u21BA${RESET} SessionStart hook updated   ${DIM}(${settingsPath})${RESET}`);
   } else {
-    const currentCmd = ssHooks[ssIdx].hooks[0]?.command;
-    if (currentCmd !== newSS.hooks[0].command) {
-      ssHooks[ssIdx] = newSS;
-      hooks["SessionStart"] = ssHooks;
-      settingsChanged = true;
-      anyChange = true;
-      console.log(`${YELLOW}\u21BA${RESET} SessionStart hook updated   ${DIM}(${settingsPath})${RESET}`);
-    } else {
-      console.log(`${DIM}\u2139 SessionStart hook already registered${RESET}`);
-    }
+    console.log(`${DIM}\u2139 SessionStart hook already registered${RESET}`);
   }
-  const ptuHooks = hooks["PostToolUse"] ?? [];
-  const ptuIdx = ptuHooks.findIndex(isOurPostToolUseHook);
-  const newPTU = makePostToolUseEntry(launch.cli);
-  if (ptuIdx === -1) {
-    hooks["PostToolUse"] = [...ptuHooks, newPTU];
+  const ptu = upsertHook(hooks["PostToolUse"] ?? [], isOurPostToolUseHook, POST_TOOL_USE_MARKER, makePostToolUseEntry(launch.cli));
+  hooks["PostToolUse"] = ptu.entries;
+  if (ptu.result === "added") {
+    console.log(`${GREEN}\u2713${RESET} PostToolUse hook added     ${DIM}(${settingsPath})${RESET}`);
+  } else if (ptu.result === "updated") {
+    console.log(`${YELLOW}\u21BA${RESET} PostToolUse hook updated    ${DIM}(${settingsPath})${RESET}`);
+  } else {
+    console.log(`${DIM}\u2139 PostToolUse hook already registered${RESET}`);
+  }
+  if (ss.result !== "present" || ptu.result !== "present") {
     settingsChanged = true;
     anyChange = true;
-    console.log(`${GREEN}\u2713${RESET} PostToolUse hook added     ${DIM}(${settingsPath})${RESET}`);
-  } else {
-    const currentCmd = ptuHooks[ptuIdx].hooks[0]?.command;
-    if (currentCmd !== newPTU.hooks[0].command) {
-      ptuHooks[ptuIdx] = newPTU;
-      hooks["PostToolUse"] = ptuHooks;
-      settingsChanged = true;
-      anyChange = true;
-      console.log(`${YELLOW}\u21BA${RESET} PostToolUse hook updated    ${DIM}(${settingsPath})${RESET}`);
-    } else {
-      console.log(`${DIM}\u2139 PostToolUse hook already registered${RESET}`);
-    }
   }
   if (settingsChanged && !dryRun) {
     settings["hooks"] = hooks;

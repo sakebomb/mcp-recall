@@ -453,3 +453,72 @@ describe("install / uninstall / status with a binary launch", () => {
     expect(log.mock.calls.flat().join("\n")).toContain("partial / stale");
   });
 });
+
+describe("install keeps the user's edits to recall's entries (#365)", () => {
+  let claudeMdPath: string;
+  let npm: RecallLaunch;
+  let binary: RecallLaunch;
+  const quiet = () => spyOn(console, "log").mockImplementation(() => {});
+
+  beforeEach(async () => {
+    claudeMdPath = path.join(tmpDir, "CLAUDE.md");
+    const dist = path.join(tmpDir, "dist");
+    const bin = path.join(tmpDir, "bin", "mcp-recall");
+    for (const f of [path.join(dist, "server.js"), path.join(dist, "cli.js"), bin]) await Bun.write(f, "");
+    npm = {
+      cli: `bun ${path.join(dist, "cli.js")}`,
+      server: { type: "stdio", command: "bun", args: [path.join(dist, "server.js")] },
+      artifacts: [{ label: "dist/cli.js", path: path.join(dist, "cli.js") }],
+    };
+    binary = { cli: bin, server: { type: "stdio", command: bin, args: ["serve"] }, artifacts: [{ label: "binary", path: bin }] };
+  });
+
+  afterEach(() => mock.restore());
+
+  /** An install by `from`, then the edits a user makes to recall's entries. */
+  async function editedInstall(from: RecallLaunch) {
+    quiet();
+    await installCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch: from });
+    const claudeJson = await readJsonFile(claudeJsonPath) as any;
+    claudeJson.mcpServers.recall.env = { RECALL_DB_PATH: "/custom/db" };
+    claudeJson.mcpServers.recall.alwaysAllow = ["recall__search"];
+    await writeJsonFile(claudeJsonPath, claudeJson);
+    const settings = await readJsonFile(settingsPath) as any;
+    settings.hooks.SessionStart[0].hooks[0].timeout = 20;
+    // Recall's PostToolUse hook is no longer first in its entry, and shares it.
+    settings.hooks.PostToolUse[0].hooks.unshift({ type: "command", command: "audit-log" });
+    settings.hooks.PostToolUse[0].hooks[1].timeout = 30;
+    await writeJsonFile(settingsPath, settings);
+  }
+
+  for (const [name, from, to] of [["npm -> binary", () => npm, () => binary], ["binary -> npm", () => binary, () => npm]] as const) {
+    it(`${name}: the server keeps its env and other fields, with the new launch`, async () => {
+      await editedInstall(from());
+      await installCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch: to() });
+      const recall = (await readJsonFile(claudeJsonPath) as any).mcpServers.recall;
+      expect(recall).toEqual({ ...to().server, env: { RECALL_DB_PATH: "/custom/db" }, alwaysAllow: ["recall__search"] });
+    });
+
+    it(`${name}: hooks keep their timeout and neighbours, with the new command`, async () => {
+      await editedInstall(from());
+      await installCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch: to() });
+      const hooks = (await readJsonFile(settingsPath) as any).hooks;
+      expect(hooks.SessionStart).toHaveLength(1);
+      expect(hooks.SessionStart[0].hooks).toEqual([{ type: "command", command: `${to().cli} session-start`, timeout: 20 }]);
+      expect(hooks.PostToolUse).toHaveLength(1);
+      expect(hooks.PostToolUse[0].hooks).toEqual([
+        { type: "command", command: "audit-log" },
+        { type: "command", command: `${to().cli} post-tool-use`, timeout: 30 },
+      ]);
+    });
+  }
+
+  it("finds recall's hook when it is not first in its entry, and leaves it alone", async () => {
+    await editedInstall(npm);
+    const before = await Bun.file(settingsPath).text();
+    const log = quiet();
+    await installCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch: npm });
+    expect(log.mock.calls.flat().join("\n")).toContain("PostToolUse hook already registered");
+    expect(await Bun.file(settingsPath).text()).toBe(before);
+  });
+});

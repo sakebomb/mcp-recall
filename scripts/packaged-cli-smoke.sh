@@ -225,10 +225,10 @@ switch_checks() {
     'recallHooks("SessionStart").length === 1 && recallHooks("PostToolUse").length === 1'
   check "npm -> binary: another tool's hook and unrelated settings survive" \
     'hooks("PostToolUse").some((h) => h.command === "other-tool check") && s.model === "opus"'
-  known_defect 365 "npm -> binary keeps the server's env" \
-    js_true 'c.mcpServers.recall.env?.RECALL_DB_PATH === "/custom/db"'
-  known_defect 365 "npm -> binary keeps a raised hook timeout" \
-    js_true 'recallHooks("PostToolUse")[0].timeout === 30'
+  check "npm -> binary: the server keeps its env (#365)" \
+    'c.mcpServers.recall.env?.RECALL_DB_PATH === "/custom/db"'
+  check "npm -> binary: the hook keeps a raised timeout (#365)" \
+    'recallHooks("PostToolUse")[0].timeout === 30'
 
   "${NPM[@]}" install >/dev/null
   check "binary -> npm: the server runs bun and the bundle" \
