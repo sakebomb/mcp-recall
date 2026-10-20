@@ -1550,7 +1550,7 @@ describe("failure lines from a file read versus a run (#358)", () => {
     for (const command of [
       "cat src/x.ts", "head -n 200 x.log", "tail -n 500 /var/log/syslog", "sed -n 1,400p x.ts",
       "cat x.ts | grep -v '^$'", "rtk read src/x.ts", "ssh host cat /etc/x",
-      "cat x.log | grep -v DEBUG | sort | uniq -c | head -50",
+      "cat x.log | grep -v DEBUG | sort | uniq -c | head -50", `cat x.log | grep -E "warn|fail"`,
     ]) expect(isFileRead(command)).toBe(true);
   });
 

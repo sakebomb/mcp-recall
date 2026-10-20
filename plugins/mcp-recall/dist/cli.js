@@ -7941,7 +7941,7 @@ function isContentRead(command) {
 }
 var PIPE_FILTER = /^(grep|egrep|fgrep|rg|head|tail|sed|awk|cut|sort|uniq|wc|tr|nl|column|less|cat)(\s|$)/;
 function isFileRead(command) {
-  const [first = "", ...rest] = command.split("|").map((s) => normalizeCommand(s));
+  const [first = "", ...rest] = splitTopLevel(command).map((s) => normalizeCommand(s));
   if (/^cat\s+<</.test(first))
     return false;
   const reads = /^(cat|head|tail)(\s|$)/.test(first) || SED_LINE_RANGE.test(first) || /^rtk\s+(?:-\S+\s+)*read(\s|$)/.test(first);

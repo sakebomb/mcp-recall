@@ -700,7 +700,7 @@ const PIPE_FILTER = /^(grep|egrep|fgrep|rg|head|tail|sed|awk|cut|sort|uniq|wc|tr
  * runs, so their failure lines still surface (#358).
  */
 export function isFileRead(command: string): boolean {
-  const [first = "", ...rest] = command.split("|").map((s) => normalizeCommand(s));
+  const [first = "", ...rest] = splitTopLevel(command).map((s) => normalizeCommand(s));
   if (/^cat\s+<</.test(first)) return false;
   const reads = /^(cat|head|tail)(\s|$)/.test(first) || SED_LINE_RANGE.test(first) ||
     /^rtk\s+(?:-\S+\s+)*read(\s|$)/.test(first);
