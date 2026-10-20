@@ -42,6 +42,15 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   durations masked; any other line must repeat exactly, so a table of time
   slots or a list of commits never merges. Interleaved repeats keep their order.
 
+### Fixed
+
+- **`git log` no longer claims `0 commits` for a format it can't parse**
+  (#350). Only `--oneline` and the default `commit <hash>` blocks were
+  understood, so `--format="%H%n%B%n---"`, `--oneline --name-only` or an error
+  message was summarized as an empty log. A count is now stated only when
+  commits were parsed; anything else goes to the shell fallback with its lines.
+  On a month of recorded calls, 9 of 32 `git log` summaries made the false claim.
+
 ## [1.16.1] — 2026-10-19
 
 ### Fixed
