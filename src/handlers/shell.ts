@@ -75,7 +75,8 @@ function formatLines(
   const hidden = total - shown.reduce((n, l) => n + l.count, 0);
   const head = shown.map((l) => l.text).join("\n");
   const overflow = hidden > 0 ? `\n… (+${hidden} more lines)` : "";
-  const cut = lines.slice(total - hidden);
+  // Collapsed like the head, so a repeated error costs one line of the cap.
+  const cut = collapseRepeats(lines.slice(total - hidden)).map((l) => l.text);
   const failures = surfaceFailures ? failureLines(cut) : [];
   const extra = [...failures, ...recoveryHints(cut.filter((l) => !failures.includes(l)))];
   const hints = extra.map((h) => `\n${clipLine(h)}`).join("");

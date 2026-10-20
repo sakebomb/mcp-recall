@@ -690,16 +690,21 @@ export function isContentRead(command: string): boolean {
       /^rtk\s+(?:-\S+\s+)*(read|recall)(\s|$)/.test(s));
 }
 
+// Commands that only filter the lines piped into them, so a file read stays one.
+const PIPE_FILTER = /^(grep|egrep|fgrep|rg|head|tail|sed|awk|cut|sort|uniq|wc|tr|nl|column|less|cat)(\s|$)/;
+
 /**
  * True when the output comes from a file rather than a run: the pipeline starts
- * with `cat`, `head`, `tail`, a `sed -n` range or `rtk read`. `journalctl | head`
- * is a run, and so is `cat <<EOF | ssh h`, so their failure lines still surface (#358).
+ * with `cat`, `head`, `tail`, a `sed -n` range or `rtk read`, and only filters
+ * follow. `journalctl | head`, `cat q.sql | psql` and `cat <<EOF | ssh h` are
+ * runs, so their failure lines still surface (#358).
  */
 export function isFileRead(command: string): boolean {
-  const first = normalizeCommand(command.split("|")[0] ?? "");
+  const [first = "", ...rest] = command.split("|").map((s) => normalizeCommand(s));
   if (/^cat\s+<</.test(first)) return false;
-  return /^(cat|head|tail)(\s|$)/.test(first) || SED_LINE_RANGE.test(first) ||
+  const reads = /^(cat|head|tail)(\s|$)/.test(first) || SED_LINE_RANGE.test(first) ||
     /^rtk\s+(?:-\S+\s+)*read(\s|$)/.test(first);
+  return reads && rest.every((s) => PIPE_FILTER.test(s));
 }
 
 /**

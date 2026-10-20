@@ -6656,7 +6656,7 @@ function formatLines(text, max, surfaceFailures) {
 `);
   const overflow = hidden > 0 ? `
 \u2026 (+${hidden} more lines)` : "";
-  const cut = lines.slice(total - hidden);
+  const cut = collapseRepeats(lines.slice(total - hidden)).map((l) => l.text);
   const failures = surfaceFailures ? failureLines(cut) : [];
   const extra = [...failures, ...recoveryHints(cut.filter((l) => !failures.includes(l)))];
   const hints = extra.map((h) => `
@@ -7939,11 +7939,13 @@ function isBoundedRead(command) {
 function isContentRead(command) {
   return isBoundedRead(command) || commandSegments(command).some((s) => /^(cat|git\s+(diff|show))(\s|$)/.test(s) || /^git\s+(log|stash\s+show)(\s.*)?\s(-p|--patch|-u)(\s|$)/.test(s) || /^rtk\s+(?:-\S+\s+)*(read|recall)(\s|$)/.test(s));
 }
+var PIPE_FILTER = /^(grep|egrep|fgrep|rg|head|tail|sed|awk|cut|sort|uniq|wc|tr|nl|column|less|cat)(\s|$)/;
 function isFileRead(command) {
-  const first = normalizeCommand(command.split("|")[0] ?? "");
+  const [first = "", ...rest] = command.split("|").map((s) => normalizeCommand(s));
   if (/^cat\s+<</.test(first))
     return false;
-  return /^(cat|head|tail)(\s|$)/.test(first) || SED_LINE_RANGE.test(first) || /^rtk\s+(?:-\S+\s+)*read(\s|$)/.test(first);
+  const reads = /^(cat|head|tail)(\s|$)/.test(first) || SED_LINE_RANGE.test(first) || /^rtk\s+(?:-\S+\s+)*read(\s|$)/.test(first);
+  return reads && rest.every((s) => PIPE_FILTER.test(s));
 }
 function isCompoundCommand(command) {
   let quote = null;

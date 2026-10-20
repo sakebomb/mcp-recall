@@ -843,6 +843,18 @@ describe("shellHandler", () => {
     expect(summary).not.toContain("error: cut failure 8");
   });
 
+  it("spends one line of the cap on a repeated failure (#358)", () => {
+    const input = [
+      ...Array.from({ length: 25 }, (_, i) => `line${i + 1}`),
+      ...Array.from({ length: 10 }, () => "error: boom"),
+      "error: the other one",
+    ].join("\n");
+    const { summary } = shellHandler("mcp__bash__execute", input);
+    expect(summary).toContain("error: boom  (×10)");
+    expect(summary.split("\n").filter((l) => l.startsWith("error: boom"))).toHaveLength(1);
+    expect(summary).toContain("error: the other one");
+  });
+
   it("routes JSON stdout through the JSON handler (structured)", () => {
     const json = JSON.stringify({ id: 1, name: "foo", tags: ["a", "b"] });
     const input = JSON.stringify({ stdout: json, stderr: "", returncode: 0 });
@@ -1538,13 +1550,21 @@ describe("failure lines from a file read versus a run (#358)", () => {
     for (const command of [
       "cat src/x.ts", "head -n 200 x.log", "tail -n 500 /var/log/syslog", "sed -n 1,400p x.ts",
       "cat x.ts | grep -v '^$'", "rtk read src/x.ts", "ssh host cat /etc/x",
+      "cat x.log | grep -v DEBUG | sort | uniq -c | head -50",
     ]) expect(isFileRead(command)).toBe(true);
   });
 
-  it("treats a command piped to head, and a heredoc fed to a run, as runs", () => {
+  it("treats a command piped to head, and a file fed to a run, as runs", () => {
     for (const command of [
       "journalctl -b -1 | head -200", "cat <<'EOF' | ssh host bash", "concat a b", "python3 x.py",
+      "cat q.sql | psql db", "cat urls | xargs -n1 curl -sS", "head -5 f | python3 x.py",
+      "cat x.log | grep ERR | bash",
     ]) expect(isFileRead(command)).toBe(false);
+  });
+
+  it("adds failure lines to a file fed to a run", () => {
+    const { summary } = getBashHandler({ command: "cat q.sql | psql db" })("Bash", envelope);
+    expect(summary).toContain("Validation failed");
   });
 
   it("adds no failure lines to a file read", () => {
