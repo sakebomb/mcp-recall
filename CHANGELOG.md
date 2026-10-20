@@ -40,6 +40,13 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   hook `timeout` went back to 10. It now changes only the command. It also
   finds recall's hook when it is not first in its entry, where it used to
   rewrite a hook it should have left alone.
+- **`mcp-recall status` checks what is registered, not itself** (#364). It
+  used to check the files of the install running it, so with the binary
+  registered and then deleted, `status` from npm still said "installed" while
+  every hook failed. It now reads the registered server and hook commands and
+  checks the files they run (the binary, or bun and its script), under a
+  "Registered launch" heading that replaces "Build artifacts". When the
+  registered install is not the one running `status`, it says which is which.
 
 ## [1.17.0] — 2026-10-19
 

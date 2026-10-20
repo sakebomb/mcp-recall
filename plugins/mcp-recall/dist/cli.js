@@ -11220,6 +11220,33 @@ function isStandaloneBinary(modulePath = import.meta.path) {
 function shellWord(p) {
   return /[^\w@%+=:,./-]/.test(p) ? `'${p.replace(/'/g, `'\\''`)}'` : p;
 }
+function shellWords(cmd) {
+  const words = [];
+  let i = 0;
+  while (i < cmd.length) {
+    while (cmd[i] === " ")
+      i++;
+    if (i >= cmd.length)
+      break;
+    let word = "";
+    while (i < cmd.length && cmd[i] !== " ") {
+      if (cmd[i] === "'") {
+        const end = cmd.indexOf("'", i + 1);
+        if (end === -1)
+          return words;
+        word += cmd.slice(i + 1, end);
+        i = end + 1;
+      } else if (cmd[i] === "\\") {
+        word += cmd[i + 1] ?? "";
+        i += 2;
+      } else {
+        word += cmd[i++];
+      }
+    }
+    words.push(word);
+  }
+  return words;
+}
 function detectLaunch(standalone = isStandaloneBinary()) {
   if (standalone) {
     const bin = process.execPath;
@@ -11407,7 +11434,7 @@ async function installCommand(opts = {}) {
   const mcpServers = claudeJson["mcpServers"] ?? {};
   const newServer = launch.server;
   const existing = mcpServers["recall"];
-  const sameServer = existing?.["command"] === newServer.command && JSON.stringify(existing?.["args"]) === JSON.stringify(newServer.args);
+  const sameServer = runsServer(existing, newServer);
   if (!existing) {
     if (!dryRun) {
       claudeJson["mcpServers"] = { ...mcpServers, recall: newServer };
@@ -11534,6 +11561,45 @@ async function uninstallCommand(opts = {}) {
 Restart Claude Code to deactivate mcp-recall.`);
   }
 }
+function runsServer(entry, server) {
+  const e = entry;
+  return e?.["command"] === server.command && JSON.stringify(e?.["args"]) === JSON.stringify(server.args);
+}
+function isBunProgram(program) {
+  return /(^|[\\/])bun(\.exe)?$/.test(program);
+}
+function describeLaunch(command) {
+  return typeof command === "string" && !isBunProgram(command) ? `the binary at ${command}` : "the npm install";
+}
+function locate(program) {
+  if (path.isAbsolute(program) || path.win32.isAbsolute(program)) {
+    return { path: program, exists: existsSync3(program) };
+  }
+  const found = Bun.which(program);
+  return { path: found ?? program, exists: found !== null };
+}
+function registeredFiles(launches) {
+  const files = new Map;
+  const add = (label, p) => {
+    if (!files.has(p))
+      files.set(p, { label, ...locate(p) });
+  };
+  for (const [program, script] of launches) {
+    if (!program)
+      continue;
+    if (isBunProgram(program)) {
+      add("bun", program);
+      if (script)
+        add(path.basename(script), script);
+    } else {
+      add("binary", program);
+    }
+  }
+  return [...files.values()];
+}
+function ourHookCommands(entries, isOurs, marker) {
+  return (entries ?? []).filter(isOurs).flatMap((e) => e.hooks.map((h) => h.command)).filter((c) => typeof c === "string" && c.includes(marker));
+}
 async function statusCommand(opts = {}) {
   const {
     claudeJsonPath = defaultClaudeJsonPath(),
@@ -11559,9 +11625,16 @@ async function statusCommand(opts = {}) {
     claudeMdContent = await readFile(claudeMdPath, "utf8");
   } catch {}
   const claudeMdOk = isClaudeMdInjected(claudeMdContent);
-  const artifacts = launch.artifacts.map((a) => ({ ...a, exists: existsSync3(a.path) }));
-  const artifactsOk = artifacts.every((a) => a.exists);
-  const fullyInstalled = serverRegistered && ssRegistered && ptuRegistered && claudeMdOk && artifactsOk;
+  const server = mcpServers?.["recall"];
+  const serverWords = typeof server?.["command"] === "string" ? [[server["command"], ...Array.isArray(server["args"]) ? server["args"].map(String) : []]] : [];
+  const files = registeredFiles([
+    ...serverWords,
+    ...ourHookCommands(hooks["SessionStart"], isOurSessionStartHook, SESSION_START_MARKER).map(shellWords),
+    ...ourHookCommands(hooks["PostToolUse"], isOurPostToolUseHook, POST_TOOL_USE_MARKER).map(shellWords)
+  ]);
+  const filesOk = files.every((f) => f.exists);
+  const elsewhere = server !== undefined && !runsServer(server, launch.server);
+  const fullyInstalled = serverRegistered && ssRegistered && ptuRegistered && claudeMdOk && filesOk;
   const label = fullyInstalled ? `${GREEN}installed${RESET}` : serverRegistered || ssRegistered || ptuRegistered ? `${YELLOW}partial / stale${RESET}` : `${RED}not installed${RESET}`;
   console.log(`
 Installation: ${BOLD}${label}${RESET}
@@ -11570,15 +11643,22 @@ Installation: ${BOLD}${label}${RESET}
   console.log(`  ${pad("~/.claude/settings.json", 30)}  ${tick(ssRegistered)} SessionStart hook`);
   console.log(`  ${pad("", 30)}  ${tick(ptuRegistered)} PostToolUse hook`);
   console.log(`  ${pad("~/.claude/CLAUDE.md", 30)}  ${tick(claudeMdOk)} mcp-recall instructions`);
-  console.log("");
-  console.log(`  ${pad("Build artifacts", 30)}`);
-  for (const a of artifacts) {
-    console.log(`  ${pad(`  ${a.label}`, 30)}  ${tick(a.exists)} ${DIM}${a.path}${RESET}`);
+  if (files.length > 0) {
+    console.log("");
+    console.log(`  ${pad("Registered launch", 30)}`);
+    for (const f of files) {
+      console.log(`  ${pad(`  ${f.label}`, 30)}  ${tick(f.exists)} ${DIM}${f.path}${RESET}`);
+    }
+  }
+  if (elsewhere) {
+    console.log("");
+    console.log(`  Registered: ${describeLaunch(server["command"])}; this is ${describeLaunch(launch.server.command)}.`);
+    console.log(`  Run ${BOLD}mcp-recall install${RESET} from this one to switch Claude Code to it.`);
   }
   if (!fullyInstalled) {
     console.log("");
-    if (!artifactsOk) {
-      console.log(`  Run ${BOLD}bun run build${RESET} then ${BOLD}mcp-recall install${RESET}`);
+    if (!filesOk) {
+      console.log(`  Run ${BOLD}mcp-recall install${RESET} from the install Claude Code should use: what is marked ${RED}\u2717${RESET} is gone`);
     } else {
       console.log(`  Run ${BOLD}mcp-recall install${RESET}`);
     }

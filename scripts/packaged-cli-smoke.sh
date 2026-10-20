@@ -241,7 +241,8 @@ switch_checks() {
   # Positive control: the line below must be reporting #364, not a broken status.
   npm_status_not_installed && fail "switch: npm status does not report installed while the binary is present"
   mv "$copy" "$copy.gone"
-  known_defect 364 "npm status flags a registered binary that is gone" npm_status_not_installed
+  npm_status_not_installed || fail "switch: npm status still reports installed with the registered binary gone (#364)"
+  echo "ok: npm status flags a registered binary that is gone (#364)"
   mv "$copy.gone" "$copy"
 
   # A name without "recall": the hook detectors key on that substring.

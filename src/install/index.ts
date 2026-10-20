@@ -80,6 +80,36 @@ export function shellWord(p: string): string {
   return /[^\w@%+=:,./-]/.test(p) ? `'${p.replace(/'/g, `'\\''`)}'` : p;
 }
 
+/**
+ * The words of a hook command, as a POSIX shell splits them: the reverse of
+ * {@link shellWord}, so `status` can find the files a hook runs (#364).
+ * Handles bare words, single quotes and backslash escapes; nothing else.
+ */
+export function shellWords(cmd: string): string[] {
+  const words: string[] = [];
+  let i = 0;
+  while (i < cmd.length) {
+    while (cmd[i] === " ") i++;
+    if (i >= cmd.length) break;
+    let word = "";
+    while (i < cmd.length && cmd[i] !== " ") {
+      if (cmd[i] === "'") {
+        const end = cmd.indexOf("'", i + 1);
+        if (end === -1) return words; // unterminated: not a command we wrote
+        word += cmd.slice(i + 1, end);
+        i = end + 1;
+      } else if (cmd[i] === "\\") {
+        word += cmd[i + 1] ?? "";
+        i += 2;
+      } else {
+        word += cmd[i++];
+      }
+    }
+    words.push(word);
+  }
+  return words;
+}
+
 export function detectLaunch(standalone = isStandaloneBinary()): RecallLaunch {
   if (standalone) {
     const bin = process.execPath;
@@ -324,8 +354,7 @@ export async function installCommand(opts: InstallOptions = {}): Promise<void> {
   const newServer  = launch.server;
   const existing   = mcpServers["recall"] as Record<string, unknown> | undefined;
   // Compare the whole launch, so moving between npm and a binary is an update.
-  const sameServer = existing?.["command"] === newServer.command
-    && JSON.stringify(existing?.["args"]) === JSON.stringify(newServer.args);
+  const sameServer = runsServer(existing, newServer);
 
   if (!existing) {
     if (!dryRun) {
@@ -490,6 +519,62 @@ export async function uninstallCommand(opts: UninstallOptions = {}): Promise<voi
 
 // ── status ────────────────────────────────────────────────────────────────────
 
+/** True when a registered `mcpServers.recall` entry runs `server`: same command and args. */
+function runsServer(entry: unknown, server: RecallLaunch["server"]): boolean {
+  const e = entry as Record<string, unknown> | undefined;
+  return e?.["command"] === server.command && JSON.stringify(e?.["args"]) === JSON.stringify(server.args);
+}
+
+function isBunProgram(program: string): boolean {
+  return /(^|[\\/])bun(\.exe)?$/.test(program);
+}
+
+/** How status names a launch, from the program its server entry runs. */
+function describeLaunch(command: unknown): string {
+  return typeof command === "string" && !isBunProgram(command) ? `the binary at ${command}` : "the npm install";
+}
+
+/** A program as a shell finds it: an absolute path as is, a bare name on PATH. */
+function locate(program: string): { path: string; exists: boolean } {
+  if (path.isAbsolute(program) || path.win32.isAbsolute(program)) {
+    return { path: program, exists: existsSync(program) };
+  }
+  const found = Bun.which(program);
+  return { path: found ?? program, exists: found !== null };
+}
+
+export interface RegisteredFile { label: string; path: string; exists: boolean }
+
+/**
+ * The files the registered server and hooks run, from each launch's words: its
+ * program and, for bun, the script after it. Status checks these, not its own
+ * files, which say nothing when another install is the one registered (#364).
+ */
+export function registeredFiles(launches: string[][]): RegisteredFile[] {
+  const files = new Map<string, RegisteredFile>();
+  const add = (label: string, p: string) => {
+    if (!files.has(p)) files.set(p, { label, ...locate(p) });
+  };
+  for (const [program, script] of launches) {
+    if (!program) continue;
+    if (isBunProgram(program)) {
+      add("bun", program);
+      if (script) add(path.basename(script), script);
+    } else {
+      add("binary", program);
+    }
+  }
+  return [...files.values()];
+}
+
+/** The commands of recall's own hooks among an event's entries. */
+function ourHookCommands(entries: unknown, isOurs: (e: unknown) => boolean, marker: string): string[] {
+  return ((entries as unknown[] | undefined) ?? [])
+    .filter(isOurs)
+    .flatMap((e) => (e as HookEntry).hooks.map((h) => h.command))
+    .filter((c) => typeof c === "string" && c.includes(marker));
+}
+
 export interface StatusOptions {
   claudeJsonPath?: string;
   settingsPath?: string;
@@ -524,11 +609,20 @@ export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
   try { claudeMdContent = await readFile(claudeMdPath, "utf8"); } catch { /* absent is ok */ }
   const claudeMdOk = isClaudeMdInjected(claudeMdContent);
 
-  // Build artifacts
-  const artifacts    = launch.artifacts.map((a) => ({ ...a, exists: existsSync(a.path) }));
-  const artifactsOk  = artifacts.every((a) => a.exists);
+  // What the registered entries run, which may be another install's (#364)
+  const server = mcpServers?.["recall"] as Record<string, unknown> | undefined;
+  const serverWords = typeof server?.["command"] === "string"
+    ? [[server["command"], ...(Array.isArray(server["args"]) ? server["args"].map(String) : [])]]
+    : [];
+  const files = registeredFiles([
+    ...serverWords,
+    ...ourHookCommands(hooks["SessionStart"], isOurSessionStartHook, SESSION_START_MARKER).map(shellWords),
+    ...ourHookCommands(hooks["PostToolUse"], isOurPostToolUseHook, POST_TOOL_USE_MARKER).map(shellWords),
+  ]);
+  const filesOk   = files.every((f) => f.exists);
+  const elsewhere = server !== undefined && !runsServer(server, launch.server);
 
-  const fullyInstalled = serverRegistered && ssRegistered && ptuRegistered && claudeMdOk && artifactsOk;
+  const fullyInstalled = serverRegistered && ssRegistered && ptuRegistered && claudeMdOk && filesOk;
   const label = fullyInstalled
     ? `${GREEN}installed${RESET}`
     : (serverRegistered || ssRegistered || ptuRegistered)
@@ -541,16 +635,23 @@ export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
   console.log(`  ${pad("~/.claude/settings.json", 30)}  ${tick(ssRegistered)} SessionStart hook`);
   console.log(`  ${pad("", 30)}  ${tick(ptuRegistered)} PostToolUse hook`);
   console.log(`  ${pad("~/.claude/CLAUDE.md", 30)}  ${tick(claudeMdOk)} mcp-recall instructions`);
-  console.log("");
-  console.log(`  ${pad("Build artifacts", 30)}`);
-  for (const a of artifacts) {
-    console.log(`  ${pad(`  ${a.label}`, 30)}  ${tick(a.exists)} ${DIM}${a.path}${RESET}`);
+  if (files.length > 0) {
+    console.log("");
+    console.log(`  ${pad("Registered launch", 30)}`);
+    for (const f of files) {
+      console.log(`  ${pad(`  ${f.label}`, 30)}  ${tick(f.exists)} ${DIM}${f.path}${RESET}`);
+    }
+  }
+  if (elsewhere) {
+    console.log("");
+    console.log(`  Registered: ${describeLaunch(server["command"])}; this is ${describeLaunch(launch.server.command)}.`);
+    console.log(`  Run ${BOLD}mcp-recall install${RESET} from this one to switch Claude Code to it.`);
   }
 
   if (!fullyInstalled) {
     console.log("");
-    if (!artifactsOk) {
-      console.log(`  Run ${BOLD}bun run build${RESET} then ${BOLD}mcp-recall install${RESET}`);
+    if (!filesOk) {
+      console.log(`  Run ${BOLD}mcp-recall install${RESET} from the install Claude Code should use: what is marked ${RED}✗${RESET} is gone`);
     } else {
       console.log(`  Run ${BOLD}mcp-recall install${RESET}`);
     }

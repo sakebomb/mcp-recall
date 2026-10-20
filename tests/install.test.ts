@@ -23,6 +23,7 @@ import {
   detectLaunch,
   isStandaloneBinary,
   shellWord,
+  shellWords,
   type RecallLaunch,
 } from "../src/install/index";
 
@@ -381,6 +382,103 @@ describe("launch detection", () => {
     expect(launch.cli).toMatch(/^bun \S+\/plugins\/mcp-recall\/dist\/cli\.js$/);
     expect(launch.server.command).toBe("bun");
     expect(launch.server.args[0]).toMatch(/\/plugins\/mcp-recall\/dist\/server\.js$/);
+  });
+});
+
+describe("shellWords", () => {
+  it("reads back the words shellWord wrote", () => {
+    const paths = [
+      "/usr/local/bin/mcp-recall",
+      "/Users/a b/Application Support/mcp-recall",
+      "C:\\Program Files\\mcp-recall\\mcp-recall.exe",
+      "C:\\Users\\me\\bin\\mcp-recall.exe",
+      "/opt/it's/mcp-recall",
+    ];
+    for (const p of paths) {
+      expect(shellWords(`${shellWord(p)} post-tool-use`)).toEqual([p, "post-tool-use"]);
+      expect(shellWords(`bun ${shellWord(p)} session-start`)).toEqual(["bun", p, "session-start"]);
+    }
+  });
+});
+
+describe("status checks the launch that is registered, not its own (#364)", () => {
+  let claudeMdPath: string;
+  let npm: RecallLaunch;
+  let binary: RecallLaunch;
+  let bin: string;
+
+  beforeEach(async () => {
+    claudeMdPath = path.join(tmpDir, "CLAUDE.md");
+    const dist = path.join(tmpDir, "dist");
+    bin = path.join(tmpDir, "bin", "mcp-recall");
+    for (const f of [path.join(dist, "server.js"), path.join(dist, "cli.js"), bin]) await Bun.write(f, "");
+    npm = {
+      cli: `bun ${path.join(dist, "cli.js")}`,
+      server: { type: "stdio", command: "bun", args: [path.join(dist, "server.js")] },
+      artifacts: [{ label: "dist/cli.js", path: path.join(dist, "cli.js") }],
+    };
+    binary = { cli: bin, server: { type: "stdio", command: bin, args: ["serve"] }, artifacts: [{ label: "binary", path: bin }] };
+  });
+
+  afterEach(() => mock.restore());
+
+  async function statusOf(launch: RecallLaunch): Promise<string> {
+    const log = spyOn(console, "log").mockImplementation(() => {});
+    await statusCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch });
+    const out = log.mock.calls.flat().join("\n").replace(/\x1b\[[0-9;]*m/g, "");
+    log.mockRestore();
+    return out;
+  }
+
+  async function installAs(launch: RecallLaunch) {
+    const log = spyOn(console, "log").mockImplementation(() => {});
+    await installCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch });
+    log.mockRestore();
+  }
+
+  it("is installed when what is registered exists, with no note when it is this install", async () => {
+    await installAs(npm);
+    const out = await statusOf(npm);
+    expect(out).toContain("Installation: installed");
+    expect(out).toContain(npm.server.args[0]!);
+    expect(out).not.toContain("this is");
+  });
+
+  it("is stale when the registered binary is gone, even run from an intact npm install", async () => {
+    await installAs(binary);
+    await rm(bin);
+    const out = await statusOf(npm);
+    expect(out).not.toContain("Installation: installed");
+    expect(out).toContain("partial / stale");
+    expect(out).toMatch(new RegExp(`✗ .*${bin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  });
+
+  it("says which install is registered when another one runs status", async () => {
+    await installAs(npm);
+    const out = await statusOf(binary);
+    expect(out).toContain("Installation: installed");
+    expect(out).toContain("Registered: the npm install");
+    expect(out).toContain(`this is the binary at ${bin}`);
+  });
+
+  it("is stale when the hooks name an install that is gone, though the server is intact", async () => {
+    await installAs(npm);
+    const settings = await readJsonFile(settingsPath) as any;
+    settings.hooks.PostToolUse[0].hooks[0].command = "bun /gone/mcp-recall/dist/cli.js post-tool-use";
+    await writeJsonFile(settingsPath, settings);
+    const out = await statusOf(npm);
+    expect(out).toContain("partial / stale");
+    expect(out).toContain("✗ /gone/mcp-recall/dist/cli.js");
+  });
+
+  it("is stale when the registered bun itself is gone", async () => {
+    await installAs(npm);
+    const claudeJson = await readJsonFile(claudeJsonPath) as any;
+    claudeJson.mcpServers.recall.command = "/gone/.bun/bin/bun";
+    await writeJsonFile(claudeJsonPath, claudeJson);
+    const out = await statusOf(npm);
+    expect(out).toContain("partial / stale");
+    expect(out).toContain("✗ /gone/.bun/bin/bun");
   });
 });
 
