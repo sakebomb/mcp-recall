@@ -10,7 +10,7 @@
  *   uninstall       — remove hooks + MCP server
  *   status          — show configuration and health
  *   serve           — run the MCP server on stdio (what Claude Code starts)
- *   gc             — reclaim disk from orphaned project databases
+ *   gc              — reclaim disk from orphaned project databases
  *   discover        — report output routed to fallback handlers (missed savings)
  *   profiles        — manage compression profiles
  *   learn           — generate profiles from your installed MCP servers
@@ -46,7 +46,7 @@ Commands:
   uninstall            Remove hooks + MCP server
   status               Show current configuration and health
   serve                Run the MCP server on stdio (Claude Code starts this)
-  gc [--force]       Reclaim disk: list/delete orphaned project DBs
+  gc [--force]         Reclaim disk: list/delete orphaned project DBs
     --stale-days N     Legacy DBs (no recorded path) older than N days are candidates (default 90)
     --vacuum           Full-VACUUM surviving DBs to reclaim free pages
   discover             Rank output routed to fallback handlers: where a new handler would pay

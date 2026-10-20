@@ -11212,14 +11212,18 @@ function defaultClaudeMdPath() {
 }
 function isStandaloneBinary(modulePath = import.meta.path) {
   const flag = Bun.isStandaloneExecutable;
-  return flag ?? /^(\/\$bunfs\/|[A-Za-z]:[\\/]~BUN[\\/])/.test(modulePath);
+  if (typeof flag === "boolean")
+    return flag;
+  return /^(\/\$bunfs\/|[A-Za-z]:[\\/]~BUN[\\/])/.test(modulePath);
 }
-var quoteIfSpaced = (p) => /\s/.test(p) ? JSON.stringify(p) : p;
+function shellWord(p) {
+  return /[^\w@%+=:,./\\-]/.test(p) ? `'${p.replace(/'/g, `'\\''`)}'` : p;
+}
 function detectLaunch(standalone = isStandaloneBinary()) {
   if (standalone) {
     const bin = process.execPath;
     return {
-      cli: quoteIfSpaced(bin),
+      cli: shellWord(bin),
       server: { type: "stdio", command: bin, args: ["serve"] },
       artifacts: [{ label: "binary", path: bin }]
     };
@@ -11229,7 +11233,7 @@ function detectLaunch(standalone = isStandaloneBinary()) {
   const serverJs = path.join(distDir, "server.js");
   const cliJs = path.join(distDir, "cli.js");
   return {
-    cli: `bun ${quoteIfSpaced(cliJs)}`,
+    cli: `bun ${shellWord(cliJs)}`,
     server: { type: "stdio", command: "bun", args: [serverJs] },
     artifacts: [{ label: "dist/server.js", path: serverJs }, { label: "dist/cli.js", path: cliJs }]
   };
@@ -11785,7 +11789,7 @@ Commands:
   uninstall            Remove hooks + MCP server
   status               Show current configuration and health
   serve                Run the MCP server on stdio (Claude Code starts this)
-  gc [--force]       Reclaim disk: list/delete orphaned project DBs
+  gc [--force]         Reclaim disk: list/delete orphaned project DBs
     --stale-days N     Legacy DBs (no recorded path) older than N days are candidates (default 90)
     --vacuum           Full-VACUUM surviving DBs to reclaim free pages
   discover             Rank output routed to fallback handlers: where a new handler would pay

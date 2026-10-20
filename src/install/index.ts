@@ -65,17 +65,25 @@ export interface RecallLaunch {
  * says so directly in newer Bun; the path is the fallback for older ones.
  */
 export function isStandaloneBinary(modulePath = import.meta.path): boolean {
-  const flag = (Bun as { isStandaloneExecutable?: boolean }).isStandaloneExecutable;
-  return flag ?? /^(\/\$bunfs\/|[A-Za-z]:[\\/]~BUN[\\/])/.test(modulePath);
+  const flag = (Bun as { isStandaloneExecutable?: unknown }).isStandaloneExecutable;
+  if (typeof flag === "boolean") return flag;
+  return /^(\/\$bunfs\/|[A-Za-z]:[\\/]~BUN[\\/])/.test(modulePath);
 }
 
-const quoteIfSpaced = (p: string) => (/\s/.test(p) ? JSON.stringify(p) : p);
+/**
+ * `p` as one word of a hook command. Claude Code runs hook commands through a
+ * POSIX shell (Git Bash on Windows), so a path with a space or a quote goes in
+ * single quotes, where a backslash stays literal (`C:\Program Files\…`).
+ */
+export function shellWord(p: string): string {
+  return /[^\w@%+=:,./\\-]/.test(p) ? `'${p.replace(/'/g, `'\\''`)}'` : p;
+}
 
 export function detectLaunch(standalone = isStandaloneBinary()): RecallLaunch {
   if (standalone) {
     const bin = process.execPath;
     return {
-      cli: quoteIfSpaced(bin),
+      cli: shellWord(bin),
       server: { type: "stdio", command: bin, args: ["serve"] },
       artifacts: [{ label: "binary", path: bin }],
     };
@@ -91,7 +99,7 @@ export function detectLaunch(standalone = isStandaloneBinary()): RecallLaunch {
   const cliJs = path.join(distDir, "cli.js");
 
   return {
-    cli: `bun ${quoteIfSpaced(cliJs)}`,
+    cli: `bun ${shellWord(cliJs)}`,
     server: { type: "stdio", command: "bun", args: [serverJs] },
     artifacts: [{ label: "dist/server.js", path: serverJs }, { label: "dist/cli.js", path: cliJs }],
   };

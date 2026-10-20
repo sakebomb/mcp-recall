@@ -22,6 +22,7 @@ import {
   statusCommand,
   detectLaunch,
   isStandaloneBinary,
+  shellWord,
   type RecallLaunch,
 } from "../src/install/index";
 
@@ -29,8 +30,8 @@ import {
 const FAKE_CLI    = "bun /fake/mcp-recall/dist/cli.js";
 const FAKE_SERVER = "/fake/mcp-recall/dist/server.js";
 
-// Stub detectPaths so tests don't depend on the actual build artifacts existing.
-// We achieve this by passing explicit file paths to install/uninstall.
+// Tests pass explicit config paths, and a `launch`, to install/uninstall/status,
+// so they never depend on the real build artifacts or the user's config.
 
 let tmpDir: string;
 let claudeJsonPath: string;
@@ -45,14 +46,6 @@ beforeEach(async () => {
 afterEach(async () => {
   await rm(tmpDir, { recursive: true, force: true });
 });
-
-// Helper: run install with fake paths injected so we bypass detectPaths
-async function install(opts: { dryRun?: boolean } = {}) {
-  // Patch detectPaths by pre-writing a minimal claude.json / settings.json
-  // and calling the exported functions directly.
-  // installCommand calls detectPaths() internally, but we test the JSON logic
-  // via the exported helpers to avoid needing real build artifacts.
-}
 
 // ── isOurSessionStartHook ─────────────────────────────────────────────────────
 
@@ -367,6 +360,15 @@ describe("launch detection", () => {
     expect(launch.cli).toBe(process.execPath);
     expect(launch.server).toEqual({ type: "stdio", command: process.execPath, args: ["serve"] });
     expect(launch.artifacts.map((a) => a.path)).toEqual([process.execPath]);
+  });
+
+  it("quotes a path a shell would split, and round-trips it through bash", () => {
+    expect(shellWord("/usr/local/bin/mcp-recall")).toBe("/usr/local/bin/mcp-recall");
+    const paths = ["/Users/a b/Application Support/mcp-recall", "C:\\Program Files\\mcp-recall\\mcp-recall.exe", "/opt/it's/mcp-recall"];
+    for (const p of paths) {
+      const echoed = Bun.spawnSync(["bash", "-c", `printf %s ${shellWord(p)}`]).stdout.toString();
+      expect(echoed).toBe(p);
+    }
   });
 
   it("launches an npm install through bun and the bundled dist", () => {
