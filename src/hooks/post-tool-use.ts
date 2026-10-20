@@ -211,7 +211,7 @@ export function handlePostToolUse(raw: string): HookOutput {
   //    balanced-tier classification for Bash; output_hash (computed above from
   //    the real content) is passed through so dedup works even when the body is
   //    dropped.
-  const full_retained = shouldRetainFullBody(config.store.retention, tool_name, command) ? 1 : 0;
+  const full_retained = shouldRetainFullBody(config.store.retention, tool_name, command, summary) ? 1 : 0;
   if (!full_retained) log.debug(`summary-only · ${tool_name} · retention=${config.store.retention}`);
 
   const stored = storeOutput(db, {

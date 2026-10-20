@@ -9,6 +9,7 @@ import type { CompressionResult, Handler } from "./types";
 import { extractText } from "./types";
 import { jsonHandler } from "./json";
 import { collapseRepeats } from "./collapse";
+import { MAX_LINE_CHARS } from "./clip";
 
 export const HEAD_STDOUT = 25;
 const HEAD_STDERR = 20;
@@ -57,7 +58,8 @@ function trimTrailingEmpty(lines: string[]): string[] {
 
 /**
  * The first `max` lines after collapsing repeats (#340), so the budget goes to
- * distinct lines. The header and the overflow count input lines, not summary lines.
+ * distinct lines, each clipped to MAX_LINE_CHARS (#349). The header and the
+ * overflow count input lines, not summary lines.
  */
 function formatLines(
   text: string,
@@ -65,7 +67,7 @@ function formatLines(
 ): { header: string; body: string } {
   const lines = trimTrailingEmpty(text.split("\n"));
   const total = lines.length;
-  const shown = collapseRepeats(lines, max);
+  const shown = collapseRepeats(lines, max, MAX_LINE_CHARS);
   const hidden = total - shown.reduce((n, l) => n + l.count, 0);
   const head = shown.map((l) => l.text).join("\n");
   const overflow = hidden > 0 ? `\n… (+${hidden} more lines)` : "";

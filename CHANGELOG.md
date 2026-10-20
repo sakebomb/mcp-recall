@@ -50,6 +50,15 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   message was summarized as an empty log. A count is now stated only when
   commits were parsed; anything else goes to the shell fallback with its lines.
   On a month of recorded calls, 9 of 32 `git log` summaries made the false claim.
+- **One huge line no longer passes through whole** (#349). Summaries capped
+  how many lines they keep, never how wide, so a minified bundle hit by `grep`
+  or a serialized blob arrived verbatim (a 900 KB line gave a 900 KB summary).
+  The shell, generic and compound paths now cut a line at 4,000 chars with
+  `… (+N chars)`, and a summary that cut one keeps its body under `balanced`
+  retention, so the rest stays retrievable. On a month of recorded Bash calls,
+  37 outputs over 8 KB that were delivered whole (2.9 MB) now arrive as 0.4 MB,
+  and no output of 8 KB or less changes. The bench gains a 180 KB minified
+  `grep` line: 97.9% smaller.
 
 ## [1.16.1] — 2026-10-19
 

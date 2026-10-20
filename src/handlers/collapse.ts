@@ -12,6 +12,7 @@
  * Under `balanced` retention a fallback row may keep no body, so the summary is
  * the only copy. Masking is kept narrow for that reason.
  */
+import { clipLine } from "./clip";
 
 const TIMESTAMP_RES = [
   /\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?/g,
@@ -81,9 +82,10 @@ export interface CollapsedLine {
  * `(×N)` when the run is identical, `(×N, until <ts>)` when only volatile
  * tokens differ and the last line has a timestamp, `(×N, varying ids)`
  * otherwise. Blank lines are never collapsed. Stops after `limit` summary lines,
- * for a caller that keeps only the head.
+ * for a caller that keeps only the head. Each line is clipped to `width` before
+ * its count is appended, so a clipped run keeps its `(×N)` (#349).
  */
-export function collapseRepeats(lines: string[], limit = Infinity): CollapsedLine[] {
+export function collapseRepeats(lines: string[], limit = Infinity, width = Infinity): CollapsedLine[] {
   const out: CollapsedLine[] = [];
   let i = 0;
   while (i < lines.length && out.length < limit) {
@@ -93,7 +95,8 @@ export function collapseRepeats(lines: string[], limit = Infinity): CollapsedLin
       const key = repeatKey(first);
       while (end < lines.length && (lines[end] === first || repeatKey(lines[end]!) === key)) end++;
     }
-    out.push({ text: end - i > 1 ? `${first}  ${runNote(lines.slice(i, end))}` : first, count: end - i });
+    const text = clipLine(first, width);
+    out.push({ text: end - i > 1 ? `${text}  ${runNote(lines.slice(i, end))}` : text, count: end - i });
     i = end;
   }
   return out;

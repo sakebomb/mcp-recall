@@ -445,7 +445,8 @@ gc_reminder_mb = 2048
 #              grep with context), whose summaries drop the content; store
 #              other reproducible Bash (git log/status, tests, ls, grep,
 #              docker ps, build/lint) summary-only — an old copy is either
-#              trivially reproducible or misleadingly stale
+#              trivially reproducible or misleadingly stale. A summary that
+#              clipped an over-wide line (`… (+N chars)`) keeps its body
 #   minimal  = drop every intercepted body (summary-only for all)
 # Notes stored via recall__note always keep their body, regardless of this.
 # Only affects future writes; existing bodies are untouched. When a body was

@@ -91,6 +91,14 @@ const FIXTURES: Fixture[] = [
     exit_code: 0,
   },
   {
+    // One minified line: `head` caps lines, not width, so before #349 the whole
+    // 180 KB line was delivered. Now it is clipped with the elided count.
+    label: "`grep -n` piped to `head` (one 180 KB minified line)",
+    command: "grep -n sourceMappingURL dist/app.min.js | head",
+    stdout: "1:" + Array.from({ length: 6000 }, (_, i) => `function a${i}(b){return b+${i}};`).join(""),
+    exit_code: 0,
+  },
+  {
     label: "`find` (400 paths)",
     command: "find . -name '*.ts'",
     stdout: rep("./src/very/deeply/nested/path/segment/file%i.ts", 400),

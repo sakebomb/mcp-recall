@@ -13,6 +13,7 @@
 import type { CompressionResult, Handler } from "./types";
 import { extractText } from "./types";
 import { collapseRepeats } from "./collapse";
+import { clipLine } from "./clip";
 
 const MAX_CHARS = 500; // return unchanged at or below this size
 
@@ -45,8 +46,9 @@ function summarizeLines(lines: string[]): string {
 
 /**
  * First `headLines` and last `tailLines` lines, with a count of the elided
- * middle and any error/warn lines surfaced from it. Callers keep
- * `lines.length > headLines + tailLines` so the windows never overlap.
+ * middle and any error/warn lines surfaced from it, each line clipped to
+ * MAX_LINE_CHARS (#349). Callers keep `lines.length > headLines + tailLines`
+ * so the windows never overlap.
  */
 export function summarizeLineWindow(lines: string[], headLines: number, tailLines: number): string {
   const head = lines.slice(0, headLines);
@@ -58,7 +60,7 @@ export function summarizeLineWindow(lines: string[], headLines: number, tailLine
     ? `…(${middle.length} middle line${plural(middle.length)} elided; ${matches.length} error/warn shown)…`
     : `…(${middle.length} middle line${plural(middle.length)} elided)…`;
 
-  return [...head, note, ...matches, ...tail].join("\n");
+  return [...head, note, ...matches, ...tail].map((l) => clipLine(l)).join("\n");
 }
 
 export const genericHandler: Handler = (

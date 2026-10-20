@@ -1211,6 +1211,13 @@ describe("handlePostToolUse — reads of file and diff content (#332)", () => {
     expect(run(log, "git log --oneline")).not.toEqual({});
     expect(rows().map((r) => r.full_retained)).toEqual([0]);
   });
+
+  it("keeps the body of reproducible Bash whose summary clipped a line (#349)", () => {
+    const bundle = `built dist/app.min.js\n${"x".repeat(200_000)}`;
+    expect(run(bundle, "make bundle")).not.toEqual({});
+    expect(rows().map((r) => r.full_retained)).toEqual([1]);
+    expect(rows()[0]!.full_content).toBe(bundle);
+  });
 });
 
 describe("handlePostToolUse — Bash output cut at ~50 KB (#316)", () => {

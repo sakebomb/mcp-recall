@@ -9,13 +9,15 @@
  *              (#332). Store other reproducible Bash (git log/status, tests, ls,
  *              plain grep, docker ps, build/lint…) summary-only: an old copy is
  *              either trivially reproducible or misleadingly stale, and the
- *              summary already delivered its value.
+ *              summary already delivered its value. A summary that clipped an
+ *              over-wide line keeps its body, since its marker promises the rest.
  *   minimal  — drop every intercepted body (summary-only for all).
  *
  * Notes (`recall__note`) never pass through here — they are stored via the note
  * tool, not the hook — so memory always keeps its body regardless of level.
  */
 import { normalizeCommand, isContentRead } from "./handlers/bash";
+import { hasClippedLine } from "./handlers/clip";
 
 export type RetentionLevel = "full" | "balanced" | "minimal";
 
@@ -37,10 +39,14 @@ const unwrapCommand = normalizeCommand;
 export function shouldRetainFullBody(
   level: RetentionLevel,
   toolName: string,
-  command?: string
+  command?: string,
+  summary = ""
 ): boolean {
   if (level === "full") return true;
   if (level === "minimal") return false;
+
+  // balanced: a clipped line's marker says the rest is retrievable (#349).
+  if (hasClippedLine(summary)) return true;
 
   // balanced:
   if (toolName.startsWith("mcp__")) return true; // web/API/scrape — durable, expensive

@@ -68,7 +68,7 @@ Graduated retrieval across three tiers — escalate only as far as you need:
 - `peek` with a `query` falls back to full content if the item has no matching chunks (e.g. rows stored before chunking).
 - `peek` is bounded independently of `max_bytes` (a few chunks); `max_bytes` caps only `mode: "full"`.
 - Override `max_bytes` when you need more than the default 8 KB from `mode: "full"`.
-- **Summary-only rows:** under `store.retention` (default `balanced`), reproducible Bash/git/test output is stored without its verbatim body. Content reads (`cat`, `git diff`/`show`/`log -p`, `head`/`tail`, `sed -n` ranges, grep with context) keep theirs, since their summary drops the content (#332). `summary` mode is unaffected; `peek`/`full` on such a row return the summary plus a note to re-run the command for current output. See [`store.retention`](../README.md#configuration).
+- **Summary-only rows:** under `store.retention` (default `balanced`), reproducible Bash/git/test output is stored without its verbatim body. Content reads (`cat`, `git diff`/`show`/`log -p`, `head`/`tail`, `sed -n` ranges, grep with context) keep theirs, since their summary drops the content (#332), as does any summary that clipped an over-wide line to `… (+N chars)` (#349). `summary` mode is unaffected; `peek`/`full` on such a row return the summary plus a note to re-run the command for current output. See [`store.retention`](../README.md#configuration).
 - Every call records an access, which informs `sort: "accessed"` and eviction order (a recency-decayed access score, tunable via `eviction_half_life_days` in the [`[store]` config](../README.md#configuration)).
 
 ---

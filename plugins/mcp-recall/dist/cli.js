@@ -6479,6 +6479,19 @@ var jsonHandler = (_toolName, output) => {
   return { summary, originalSize };
 };
 
+// src/handlers/clip.ts
+var MAX_LINE_CHARS = 4000;
+var CLIP_MARKER_RE = /\u2026 \(\+\d+ chars\)$/m;
+function clipLine(line, max = MAX_LINE_CHARS) {
+  if (line.length <= max)
+    return line;
+  const end = /[\uD800-\uDBFF]/.test(line[max - 1]) ? max - 1 : max;
+  return `${line.slice(0, end)}\u2026 (+${line.length - end} chars)`;
+}
+function hasClippedLine(summary) {
+  return CLIP_MARKER_RE.test(summary);
+}
+
 // src/handlers/collapse.ts
 var TIMESTAMP_RES = [
   /\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?/g,
@@ -6520,7 +6533,7 @@ function lastTimestamp(line) {
   }
   return null;
 }
-function collapseRepeats(lines, limit = Infinity) {
+function collapseRepeats(lines, limit = Infinity, width = Infinity) {
   const out = [];
   let i = 0;
   while (i < lines.length && out.length < limit) {
@@ -6531,7 +6544,8 @@ function collapseRepeats(lines, limit = Infinity) {
       while (end < lines.length && (lines[end] === first || repeatKey(lines[end]) === key))
         end++;
     }
-    out.push({ text: end - i > 1 ? `${first}  ${runNote(lines.slice(i, end))}` : first, count: end - i });
+    const text = clipLine(first, width);
+    out.push({ text: end - i > 1 ? `${text}  ${runNote(lines.slice(i, end))}` : text, count: end - i });
     i = end;
   }
   return out;
@@ -6580,7 +6594,7 @@ function formatLines(text, max) {
   const lines = trimTrailingEmpty(text.split(`
 `));
   const total = lines.length;
-  const shown = collapseRepeats(lines, max);
+  const shown = collapseRepeats(lines, max, MAX_LINE_CHARS);
   const hidden = total - shown.reduce((n, l) => n + l.count, 0);
   const head = shown.map((l) => l.text).join(`
 `);
@@ -7449,7 +7463,7 @@ function summarizeLineWindow(lines, headLines, tailLines) {
   const middle = lines.slice(headLines, lines.length - tailLines);
   const matches = middle.filter((l) => MATCH_RE.test(l)).slice(0, MAX_MATCH_LINES);
   const note = matches.length ? `\u2026(${middle.length} middle line${plural(middle.length)} elided; ${matches.length} error/warn shown)\u2026` : `\u2026(${middle.length} middle line${plural(middle.length)} elided)\u2026`;
-  return [...head, note, ...matches, ...tail].join(`
+  return [...head, note, ...matches, ...tail].map((l) => clipLine(l)).join(`
 `);
 }
 var genericHandler = (_toolName, output) => {
@@ -7938,7 +7952,8 @@ var compoundHandler = (_toolName, output) => {
   const lines = text.split(`
 `);
   if (lines.length <= COMPOUND_HEAD_LINES + COMPOUND_TAIL_LINES) {
-    return { summary: text, originalSize };
+    return { summary: lines.map((l) => clipLine(l)).join(`
+`), originalSize };
   }
   const window = summarizeLineWindow(lines, COMPOUND_HEAD_LINES, COMPOUND_TAIL_LINES);
   return { summary: `[bash \xB7 compound command \xB7 ${lines.length} lines]
@@ -9275,11 +9290,13 @@ function extractHints(content, maxHints = DEFAULT_MAX_HINTS) {
 // src/retention.ts
 var NETWORK_BASH_RE = /^(curl|wget|https?|xh)\b|^gh\s+api\b/;
 var unwrapCommand2 = normalizeCommand;
-function shouldRetainFullBody(level, toolName, command) {
+function shouldRetainFullBody(level, toolName, command, summary = "") {
   if (level === "full")
     return true;
   if (level === "minimal")
     return false;
+  if (hasClippedLine(summary))
+    return true;
   if (toolName.startsWith("mcp__"))
     return true;
   if (toolName === "Bash") {
@@ -9399,7 +9416,7 @@ ${cached3.summary}`;
     log.debug(`SKIP no-compression \xB7 ${tool_name} \xB7 ${formatBytes(deliveredSize)} of ${formatBytes(originalSize)}`);
     return {};
   }
-  const full_retained = shouldRetainFullBody(config.store.retention, tool_name, command) ? 1 : 0;
+  const full_retained = shouldRetainFullBody(config.store.retention, tool_name, command, summary) ? 1 : 0;
   if (!full_retained)
     log.debug(`summary-only \xB7 ${tool_name} \xB7 retention=${config.store.retention}`);
   const stored = storeOutput(db, {

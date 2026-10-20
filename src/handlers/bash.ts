@@ -20,6 +20,7 @@ import { dockerPsHandler } from "./bash-docker";
 import { compilerDiagnosticsHandler } from "./bash-compilers";
 import { grepHandler, lsHandler, findHandler } from "./bash-search";
 import { summarizeLineWindow } from "./generic";
+import { clipLine } from "./clip";
 
 export { gitDiffHandler, gitLogHandler, gitStatusHandler, gitRefsHandler } from "./bash-git";
 export { testRunnerHandler } from "./bash-test";
@@ -713,8 +714,9 @@ const COMPOUND_TAIL_LINES = 15;
 /**
  * Several commands produce several outputs, so no single command's handler
  * fits (#308): an `ls` handler on `ls …; git diff | wc -c` dropped the second
- * result. Short output is returned whole (the hook then passes it through
- * unstored); long output keeps head, tail and the error lines between.
+ * result. Short output is returned whole bar its over-wide lines (#349), so
+ * the hook usually passes it through unstored; long output keeps head, tail
+ * and the error lines between.
  */
 export const compoundHandler: Handler = (
   _toolName: string,
@@ -724,7 +726,7 @@ export const compoundHandler: Handler = (
   const originalSize = Buffer.byteLength(text, "utf8");
   const lines = text.split("\n");
   if (lines.length <= COMPOUND_HEAD_LINES + COMPOUND_TAIL_LINES) {
-    return { summary: text, originalSize };
+    return { summary: lines.map((l) => clipLine(l)).join("\n"), originalSize };
   }
   const window = summarizeLineWindow(lines, COMPOUND_HEAD_LINES, COMPOUND_TAIL_LINES);
   return { summary: `[bash · compound command · ${lines.length} lines]\n${window}`, originalSize };
