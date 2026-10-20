@@ -6,6 +6,8 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+## [1.17.0] — 2026-10-23
+
 ### Added
 
 - **`mcp-recall discover`: where a new handler would pay** (#341). Each stored
@@ -19,6 +21,11 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   gains a `By handler` section with the same rates.
   Items stored before this release have no recorded handler. They are
   counted, never attributed to one.
+- **[docs/rtk.md](docs/rtk.md): a measured comparison with rtk** (#351). Both
+  tools on the same bytes, where each one loses, and what running both does.
+  Every table is printed by `bun scripts/compare-rtk.ts`: the bench fixtures
+  with a check of which facts each output kept, your own Bash history
+  (`--transcripts`, totals only), or real commands run both ways (`--both`).
 
 ### Changed
 
@@ -869,7 +876,8 @@ Ten `recall__*` tools available in every Claude session:
 
 ---
 
-[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.16.1...HEAD
+[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.17.0...HEAD
+[1.17.0]: https://github.com/sakebomb/mcp-recall/compare/v1.16.1...v1.17.0
 [1.16.1]: https://github.com/sakebomb/mcp-recall/compare/v1.16.0...v1.16.1
 [1.16.0]: https://github.com/sakebomb/mcp-recall/compare/v1.15.2...v1.16.0
 [1.15.2]: https://github.com/sakebomb/mcp-recall/compare/v1.15.1...v1.15.2
