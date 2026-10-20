@@ -6,7 +6,7 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
-## [1.17.0] — 2026-10-23
+## [1.17.0] — 2026-10-19
 
 ### Added
 
