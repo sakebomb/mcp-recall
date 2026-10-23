@@ -17,9 +17,7 @@ export interface Fixture {
   stdout?: string;
   stderr?: string;
   exit_code?: number;
-  /** `rtk pipe -f` filter for the same output, for scripts/compare-rtk.ts. */
-  rtk?: string;
-  /** Facts a summary must still carry for Claude (regex sources), checked by scripts/compare-rtk.ts. */
+  /** Facts a summary must still carry for Claude (regex sources), checked by `bun run bench`. */
   keep?: string[];
 }
 
@@ -36,7 +34,6 @@ export const FIXTURES: Fixture[] = [
   {
     label: "`tsc --noEmit` (60 errors)",
     command: "tsc --noEmit",
-    rtk: "tsc",
     keep: ["60 errors", "file59\\.ts"],
     stdout:
       rep("src/module%i/file%i.ts(%i,10): error TS2345: Argument of type 'Foo%i' is not assignable to parameter of type 'Bar%i'.", 60) +
@@ -56,7 +53,6 @@ export const FIXTURES: Fixture[] = [
   {
     label: "`git --no-pager diff` (18 files)",
     command: "git --no-pager diff",
-    rtk: "git-diff",
     keep: ["f17\\.ts", "\\+new 6"],
     stdout: DIFF_18_FILES,
     exit_code: 0,
@@ -71,7 +67,6 @@ export const FIXTURES: Fixture[] = [
   {
     label: "`rg` (240 matches, 6 files)",
     command: "rg --no-heading doThing",
-    rtk: "grep",
     keep: ["240 matches", "mod5/"],
     stdout: RG_240_MATCHES,
     exit_code: 0,
@@ -93,7 +88,6 @@ export const FIXTURES: Fixture[] = [
     // last two messages are shown at all; before, the head held only retries.
     label: "`journalctl -n 500` (retry loop, 3 messages)",
     command: "journalctl -u app -n 500 --no-pager",
-    rtk: "log",
     keep: ["FATAL: disk full"],
     stdout: [
       ...Array.from({ length: 300 }, (_, i) => `Oct 19 12:${String(10 + Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")} host app[812]: connection reset by peer, retrying in 1s`),
@@ -114,7 +108,6 @@ export const FIXTURES: Fixture[] = [
       ...Array.from({ length: 10 }, (_, i) => `Oct 05 17:16:22 host kernel: usb 1-${i}: new high-speed USB device number ${i}`),
     ].join("\n"),
     exit_code: 0,
-    rtk: "log",
     keep: ["status=1", "Failed with result"],
   },
   {
@@ -122,14 +115,12 @@ export const FIXTURES: Fixture[] = [
     // 180 KB line was delivered. Now it is clipped with the elided count.
     label: "`grep -n` piped to `head` (one 180 KB minified line)",
     command: "grep -n sourceMappingURL dist/app.min.js | head",
-    rtk: "grep",
     stdout: "1:" + Array.from({ length: 6000 }, (_, i) => `function a${i}(b){return b+${i}};`).join(""),
     exit_code: 0,
   },
   {
     label: "`find` (400 paths)",
     command: "find . -name '*.ts'",
-    rtk: "find",
     keep: ["400", "file399\\.ts"],
     stdout: rep("./src/very/deeply/nested/path/segment/file%i.ts", 400),
     exit_code: 0,
@@ -145,14 +136,20 @@ export function summarize(f: Fixture): { summary: string; original: number } {
   return { summary, original: Buffer.byteLength((f.stdout ?? "") + (f.stderr ?? ""), "utf8") };
 }
 
+/** "kept/listed" for a fixture's `keep` facts, or "—" when it lists none. */
+export function factsKept(f: Fixture, summary: string): string {
+  if (!f.keep?.length) return "—";
+  return `${f.keep.filter((re) => new RegExp(re).test(summary)).length}/${f.keep.length}`;
+}
+
 if (import.meta.main) {
-  console.log("| Command | Original | Delivered | Reduction |");
-  console.log("| --- | --- | --- | --- |");
+  console.log("| Command | Original | Delivered | Reduction | Facts kept |");
+  console.log("| --- | --- | --- | --- | --- |");
   for (const f of FIXTURES) {
     const { summary, original } = summarize(f);
     const delivered = Buffer.byteLength(summary, "utf8");
     const reduction = original > 0 ? ((1 - delivered / original) * 100).toFixed(1) : "0";
-    console.log(`| ${f.label} | ${fmt(original)} | ${fmt(delivered)} | ${reduction}% |`);
+    console.log(`| ${f.label} | ${fmt(original)} | ${fmt(delivered)} | ${reduction}% | ${factsKept(f, summary)} |`);
   }
-  console.log("\nPer-output reduction on representative fixtures. Regenerate with `bun run bench`.");
+  console.log("\nPer-output reduction on representative fixtures. Facts kept: the fixture's listed facts still in the summary. Regenerate with `bun run bench`.");
 }

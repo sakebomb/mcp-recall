@@ -1,18 +1,10 @@
 /**
- * Shared by scripts/compare-rtk.ts and scripts/fidelity.ts: the Bash results
- * recorded in Claude Code transcripts, and mcp-recall's PostToolUse hook run
- * against a throwaway store, so a replay never touches the real one.
+ * Used by scripts/fidelity.ts: the Bash results recorded in Claude Code
+ * transcripts, and mcp-recall's PostToolUse hook run against a throwaway store,
+ * so a replay never touches the real one.
  */
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "fs";
 import { join } from "path";
-
-// Command families rtk has a stdin filter for, matched on the normalised command.
-export const FAMILIES: [RegExp, string][] = [
-  [/^(grep|egrep|rg|git\s+grep)\s/, "grep"], [/^find\s/, "find"], [/^git\s+log\b/, "git-log"],
-  [/^git\s+(diff|show)\b/, "git-diff"], [/^git\s+status\b/, "git-status"],
-  [/^(journalctl|docker\s+logs|kubectl\s+logs)\b/, "log"], [/^(pytest|python3?\s+-m\s+pytest|uv\s+run\s+pytest)\b/, "pytest"],
-  [/^go\s+test\b/, "go-test"], [/^cargo\s+test\b/, "cargo-test"], [/^(npx\s+)?tsc\b/, "tsc"], [/^(npx\s+)?vitest\b/, "vitest"],
-];
 
 export function* transcriptFiles(dir: string): Generator<string> {
   for (const n of readdirSync(dir)) {

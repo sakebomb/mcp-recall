@@ -6,6 +6,17 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Changed
+
+- **The bench reports facts kept beside bytes saved.** `bun run bench` now
+  checks each fixture's listed facts (an error count, the last file, an added
+  line) against its summary, and the README table carries the column. Three
+  fixtures keep one of their two facts: `tsc`, `git diff` and `find`.
+- **Removed the comparison with another tool** (`docs/rtk.md`,
+  `scripts/compare-rtk.ts`, and the `--rtk` option of `bun run fidelity`).
+  mcp-recall's own claims will be measured against built-in baselines instead.
+  Running mcp-recall alongside rtk is still supported and documented.
+
 ### Fixed
 
 - **`git status` summaries keep the paths Claude acts on** (#387). In short

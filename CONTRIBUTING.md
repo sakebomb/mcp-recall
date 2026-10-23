@@ -46,7 +46,7 @@ The pre-commit hook (`bun install` wires it automatically) detects staged `src/`
 
 ### Judging a compression change
 
-Bytes saved rewards dropping content, so judge a change to what Claude receives with `bun run fidelity` as well (#352). It replays the Bash results in your transcripts and scores how much of what Claude went on to use each summary still contains, beside bytes saved, per command family. It prints totals only. To compare two revisions, check each out in a worktree and pass `--root <worktree>`; pass `--rtk <path>` to include rtk. The run fails if its controls do: pass-through must score 100% and the first line alone must score low.
+Bytes saved rewards dropping content, so judge a change to what Claude receives with `bun run fidelity` as well (#352). It replays the Bash results in your transcripts and scores how much of what Claude went on to use each summary still contains, beside bytes saved, per command family. It prints totals only. To compare two revisions, check each out in a worktree and pass `--root <worktree>`. The run fails if its controls do: pass-through must score 100% and the first line alone must score low.
 
 ## Error contract
 
