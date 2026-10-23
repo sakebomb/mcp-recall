@@ -9427,9 +9427,8 @@ function withSavedMcpResult(toolResponse) {
       return null;
     if (typeof toolResponse === "string")
       return saved;
-    if (Array.isArray(toolResponse))
-      return [{ type: "text", text: saved }];
-    return { ...toolResponse, content: [{ type: "text", text: saved }] };
+    const base = Array.isArray(toolResponse) ? {} : toolResponse;
+    return { ...base, content: [{ type: "text", text: saved }] };
   } catch (err) {
     log.debug(`saved MCP result unreadable \xB7 ${path} \xB7 ${String(err)}`);
     return null;

@@ -1358,11 +1358,13 @@ describe("handlePostToolUse — MCP result saved to a file (#391)", () => {
     rmSync(tempDir, { recursive: true });
   });
 
-  // The shapes stored notices show the hook receives: their text is stored plain,
-  // which a top-level block array (kept as JSON by extractText) would not be.
+  // Stored notices show the hook receives a string or a content object. A bare
+  // block array is covered too: extractText keeps a top-level array as JSON, so
+  // the saved result must not be handed on in that shape.
   const shapes: [string, (text: string) => unknown][] = [
     ["string", (text) => text],
     ["content object", (text) => ({ content: [{ type: "text", text }] })],
+    ["bare block array", (text) => [{ type: "text", text }]],
   ];
 
   for (const [name, shape] of shapes) {

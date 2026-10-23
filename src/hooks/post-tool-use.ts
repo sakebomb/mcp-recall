@@ -101,8 +101,9 @@ function withSavedMcpResult(toolResponse: unknown): unknown | null {
     const saved = readFileSync(path, "utf8");
     if (saved.length !== chars) return null;
     if (typeof toolResponse === "string") return saved;
-    if (Array.isArray(toolResponse)) return [{ type: "text", text: saved }];
-    return { ...(toolResponse as Record<string, unknown>), content: [{ type: "text", text: saved }] };
+    // Never a bare array: extractText keeps a top-level array as JSON, not text.
+    const base = Array.isArray(toolResponse) ? {} : (toolResponse as Record<string, unknown>);
+    return { ...base, content: [{ type: "text", text: saved }] };
   } catch (err) {
     log.debug(`saved MCP result unreadable · ${path} · ${String(err)}`);
     return null;
