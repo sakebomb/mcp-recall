@@ -19,6 +19,18 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ### Fixed
 
+- **Large MCP results are stored, not the notice that replaces them** (#391).
+  Above 25,000 tokens or 50,000 characters, Claude Code saves an MCP result to
+  the session's `tool-results` directory and hands the hook a notice naming
+  the file. mcp-recall stored and summarized that notice, so the largest MCP
+  outputs never reached the store, and its summary cut Claude Code's
+  instructions for reading the file. It now reads the file back when the path
+  is in a `tool-results` directory and the file holds exactly the number of
+  characters the notice states. It then summarizes and stores the real
+  result. Otherwise the notice passes through whole. The README and ROADMAP no
+  longer say Claude Code discards MCP output above 25k tokens: it saves it to
+  a file.
+
 - **`git status` summaries keep the paths Claude acts on** (#387). In short
   format, an entry whose staged column is blank (` M file`, the most common)
   was dropped, so a summary could list one untracked directory over a tree

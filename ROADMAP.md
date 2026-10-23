@@ -9,11 +9,12 @@ the system, [docs/architecture.md](docs/architecture.md).
 ## The bet
 
 mcp-recall occupies one specific gap: **layer ③ of the context stack** (see the
-[README](README.md#how-it-compares)). Claude Code's native microcompaction
-offloads *built-in* tool output, but **MCP** tool output is truncated at a
-25k-token ceiling and discarded. mcp-recall intercepts MCP (and Bash) output
-*before* it reaches the window, stores the full payload locally, and keeps it
-retrievable by full-text search across sessions.
+[README](README.md#how-it-compares)). Claude Code delivers an **MCP** result
+below its limit (25,000 tokens or 50,000 characters) into the window whole. A
+larger one is saved to a file that Claude must read in chunks. Neither is
+searchable in a later session. mcp-recall intercepts MCP (and Bash) output
+*before* it reaches the window. It delivers a summary instead, stores the full
+payload locally, and keeps it retrievable by full-text search across sessions.
 
 Everything below is judged against that bet. A change that sharpens the
 MCP-output-capture-and-retrieval story is in scope; a change that turns the
@@ -25,6 +26,12 @@ might be.
 These are the areas active work tends to land in. No dates, no ordering promises —
 they describe *where* effort goes when it goes somewhere.
 
+- **Quality evidence** — a summary is judged on what Claude can still act on, not
+  on bytes saved. The bar is one that can fail: every compressed family keeps at
+  least as much of what Claude went on to use as a same-size cut of the raw
+  output (`bun run fidelity`, [#389](https://github.com/sakebomb/mcp-recall/issues/389)).
+  Public claims rest on a rerunnable benchmark against built-in baselines
+  ([#390](https://github.com/sakebomb/mcp-recall/issues/390)), losses included.
 - **Retrieval quality** — making Claude's first recall land on the right content:
   better summary hints, graduated/peek retrieval, structure-aware fallbacks. The
   store is only as good as the odds a single query finds what's needed.
@@ -66,8 +73,8 @@ closed; reopening one is a direction change, not a feature request.
    verbatim retrieval and secret-safe storage tractable.
 2. **Won't intercept the built-in `Read` / `Grep` / `Glob` tools.** Claude Code's
    `PostToolUse` output-replacement only supports MCP tools and `Bash`; the other
-   built-ins can't be intercepted, and native microcompaction already offloads
-   them. Scope is MCP + Bash, by platform and by design — mcp-recall does not try
+   built-ins can't be intercepted, and Claude Code already manages their output
+   natively. Scope is MCP + Bash, by platform and by design — mcp-recall does not try
    to beat the native path for built-ins.
 3. **No cloud, hosted service, telemetry, or accounts.** Local-first, per-project
    SQLite, no server to run and no phone-home. There is no plan for a sync backend
