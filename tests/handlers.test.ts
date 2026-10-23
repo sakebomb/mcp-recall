@@ -13,6 +13,7 @@ import { genericHandler } from "../src/handlers/generic";
 import { contentBlockHandler } from "../src/handlers/content-blocks";
 import { getHandler, extractText } from "../src/handlers/index";
 import { getBashHandler, normalizeCommand, commandFingerprint, bashFingerprint, isBoundedRead, isContentRead, isFileRead, compoundHandler, gitDiffHandler, gitLogHandler, terraformPlanHandler, gitStatusHandler, gitRefsHandler, packageInstallHandler, testRunnerHandler, dockerPsHandler, buildToolHandler, ghHandler, compilerDiagnosticsHandler, grepHandler, lsHandler, findHandler } from "../src/handlers/bash";
+import { DIFF_BODY_BYTES } from "../src/handlers/bash-git";
 import { tavilyHandler } from "../src/handlers/tavily";
 import { databaseHandler } from "../src/handlers/database";
 import { sentryHandler } from "../src/handlers/sentry";
@@ -2114,10 +2115,13 @@ describe("gitDiffHandler", () => {
     expect(summary).toContain("src/bar.ts");
   });
 
-  it("shows hunk count per file", () => {
-    const { summary } = gitDiffHandler("Bash", { stdout: SAMPLE_DIFF, stderr: "", exit_code: 0 });
-    expect(summary).toContain("2 hunks");
-    expect(summary).toContain("1 hunk");
+  it("lists per-file hunk counts only when the body was cut", () => {
+    expect(gitDiffHandler("Bash", { stdout: SAMPLE_DIFF, stderr: "", exit_code: 0 }).summary).not.toContain("2 hunks");
+    const stdout = `${bigFile("src/a.ts", 40)}\n${SAMPLE_DIFF}`;
+    const { summary } = gitDiffHandler("Bash", { stdout, stderr: "", exit_code: 0 });
+    expect(summary).toContain("(40 hunks)");
+    expect(summary).toContain("(2 hunks)");
+    expect(summary).toContain("(1 hunk)");
   });
 
   it("returns no-changes message for empty diff", () => {
@@ -2129,6 +2133,72 @@ describe("gitDiffHandler", () => {
     const output = { stdout: SAMPLE_DIFF, stderr: "", exit_code: 0 };
     const { originalSize } = gitDiffHandler("Bash", output);
     expect(originalSize).toBeGreaterThan(0);
+  });
+
+  it("keeps the changed and context lines under their hunk header", () => {
+    const { summary } = gitDiffHandler("Bash", { stdout: SAMPLE_DIFF, stderr: "", exit_code: 0 });
+    expect(summary).toContain("@@ -10,7 +10,7 @@ function doThing() {\n context line\n-old line\n+new line");
+    expect(summary).toContain("-remove this");
+  });
+
+  it("drops the index and ---/+++ lines the file header already names", () => {
+    const { summary } = gitDiffHandler("Bash", { stdout: SAMPLE_DIFF, stderr: "", exit_code: 0 });
+    expect(summary).not.toContain("index abc123");
+    expect(summary).not.toContain("+++ b/src/foo.ts");
+  });
+
+  // A file of `hunks` hunks, each `width` added lines naming the file and hunk.
+  const bigFile = (path: string, hunks: number, width = 20) => [
+    `diff --git a/${path} b/${path}`, "index 1111111..2222222 100644", `--- a/${path}`, `+++ b/${path}`,
+    ...Array.from({ length: hunks }, (_, h) => [`@@ -${h * 100},3 +${h * 100},${width} @@`,
+      ...Array.from({ length: width }, (_, i) => `+const ${path.replace(/\W/g, "_")}_h${h}_l${i} = "a line long enough to cost bytes";`)]).flat(),
+  ].join("\n");
+
+  it("stays within the body budget and names what it elided", () => {
+    const stdout = bigFile("src/a.ts", 40);
+    const { summary } = gitDiffHandler("Bash", { stdout, stderr: "", exit_code: 0 });
+    const bytes = Buffer.byteLength(summary, "utf8");
+    expect(bytes).toBeLessThan(DIFF_BODY_BYTES + 1024);
+    // The share left after whole hunks goes to the next one's head, not to waste.
+    expect(bytes).toBeGreaterThan(DIFF_BODY_BYTES * 0.95);
+    expect(summary).toContain("src_a_ts_h0_l0");
+    expect(summary).toMatch(/… \d+ more hunks? \(\+\d+ -0\) in src\/a\.ts/);
+  });
+
+  it("shares the budget so a large first file cannot crowd out a later one", () => {
+    const stdout = `${bigFile("src/a.ts", 40)}\n${bigFile("src/b.ts", 1, 3)}`;
+    const { summary } = gitDiffHandler("Bash", { stdout, stderr: "", exit_code: 0 });
+    expect(summary).toContain("src_b_ts_h0_l2");
+    expect(summary).toContain("src_a_ts_h0_l0");
+  });
+
+  it("costs no more per file than the overview line once the budget is spent", () => {
+    const stdout = Array.from({ length: 200 }, (_, i) => bigFile(`src/f${i}.ts`, 2)).join("\n");
+    const { summary } = gitDiffHandler("Bash", { stdout, stderr: "", exit_code: 0 });
+    const overview = summary.split("\n").filter((l) => /\(\d+ hunks?\)$/.test(l));
+    expect(overview).toHaveLength(200);
+    const overviewBytes = Buffer.byteLength(overview.join("\n"), "utf8");
+    expect(Buffer.byteLength(summary, "utf8")).toBeLessThan(overviewBytes + DIFF_BODY_BYTES + 1024);
+  });
+
+  it("budgets changed lines that arrive without a hunk header", () => {
+    const stdout = "diff --git a/f b/f\n" + "+added line\n".repeat(1000);
+    const { summary } = gitDiffHandler("Bash", { stdout, stderr: "", exit_code: 0 });
+    expect(Buffer.byteLength(summary, "utf8")).toBeLessThan(DIFF_BODY_BYTES + 1024);
+    expect(summary).toContain("+1000 -0");
+  });
+
+  it("keeps the commit header git show prints before the diff", () => {
+    const stdout = `commit 9540379abcdef\nAuthor: A <a@b.c>\nDate:   Thu Oct 23 2026\n\n    fix: store the saved result\n\n${SAMPLE_DIFF}`;
+    const { summary } = gitDiffHandler("Bash", { stdout, stderr: "", exit_code: 0 });
+    expect(summary).toContain("commit 9540379abcdef");
+    expect(summary).toContain("fix: store the saved result");
+  });
+
+  it("clips an over-wide diff line", () => {
+    const stdout = `diff --git a/x.min.js b/x.min.js\n@@ -1 +1 @@\n+${"x".repeat(20_000)}`;
+    const { summary } = gitDiffHandler("Bash", { stdout, stderr: "", exit_code: 0 });
+    expect(summary).toMatch(/… \(\+\d+ chars\)/);
   });
 });
 

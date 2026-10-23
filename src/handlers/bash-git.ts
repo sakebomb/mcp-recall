@@ -1,40 +1,121 @@
 import type { CompressionResult, Handler } from "./types";
 import { shellHandler } from "./shell";
 import { bashOutputText, extractStdout, MAX_LOG_COMMITS } from "./bash-shared";
+import { clipLine } from "./clip";
 
 // ---------------------------------------------------------------------------
 // git diff / git show
 // ---------------------------------------------------------------------------
 
-interface FileDiff {
-  path: string;
-  additions: number;
-  deletions: number;
-  hunks: number;
+/**
+ * Bytes of hunk text a diff summary delivers, shared across files. A diff is
+ * read for its lines: a stats-only summary kept 5 of the 49 added lines Claude
+ * went on to quote (#389). Diffs a little over this pass through whole, since
+ * the hook requires a 25% saving.
+ */
+export const DIFF_BODY_BYTES = 4 * 1024;
+/** Lines of `git show`'s commit header (hash, author, message) kept before the diff. */
+const MAX_PREAMBLE_LINES = 20;
+
+interface Hunk {
+  lines: string[];
+  bytes: number;
 }
 
-export function parseGitDiff(text: string): FileDiff[] {
-  const files: FileDiff[] = [];
-  let current: FileDiff | null = null;
+interface FileDiff {
+  path: string;
+  /** The `diff --git` line plus mode, rename and binary lines; never index or ---/+++. */
+  meta: string[];
+  hunks: Hunk[];
+  additions: number;
+  deletions: number;
+}
 
-  for (const line of text.split("\n")) {
+const lineBytes = (line: string) => Buffer.byteLength(line, "utf8") + 1;
+
+// git's extended header lines, between `diff --git` and the first hunk.
+const EXTENDED_HEADER = /^(old mode|new mode|deleted file mode|new file mode|copy (from|to)|rename (from|to)|(dis)?similarity index|Binary files|GIT binary patch)/;
+
+function countLine(file: FileDiff, line: string): void {
+  if (line.startsWith("+")) file.additions++;
+  else if (line.startsWith("-")) file.deletions++;
+}
+
+export function parseGitDiff(text: string): { preamble: string[]; files: FileDiff[] } {
+  const preamble: string[] = [];
+  const files: FileDiff[] = [];
+  let file: FileDiff | null = null;
+  let hunk: Hunk | null = null;
+
+  for (const raw of text.split("\n")) {
+    const line = clipLine(raw);
     if (line.startsWith("diff --git ")) {
-      if (current) files.push(current);
       const match = line.match(/diff --git a\/.+ b\/(.+)/);
-      const path = match ? match[1]! : line.slice(11);
-      current = { path, additions: 0, deletions: 0, hunks: 0 };
-    } else if (current) {
-      if (line.startsWith("@@ ")) {
-        current.hunks++;
-      } else if (line.startsWith("+") && !line.startsWith("+++")) {
-        current.additions++;
-      } else if (line.startsWith("-") && !line.startsWith("---")) {
-        current.deletions++;
-      }
+      file = { path: match ? match[1]! : line.slice(11), meta: [line], hunks: [], additions: 0, deletions: 0 };
+      files.push(file);
+      hunk = null;
+    } else if (!file) {
+      preamble.push(line);
+    } else if (!hunk && /^(index |--- |\+\+\+ |\s*$)/.test(line)) {
+      // Named by the diff --git line already, or blank.
+    } else if (!hunk && EXTENDED_HEADER.test(line)) {
+      file.meta.push(line);
+    } else if (line.startsWith("@@") || !hunk) {
+      // Anything else before a hunk header opens one, so it stays inside the budget.
+      hunk = { lines: [line], bytes: lineBytes(line) };
+      file.hunks.push(hunk);
+      if (!line.startsWith("@@")) countLine(file, line);
+    } else {
+      hunk.lines.push(line);
+      hunk.bytes += lineBytes(line);
+      countLine(file, line);
     }
   }
-  if (current) files.push(current);
-  return files;
+  return { preamble, files };
+}
+
+/** `budget` split so no file gets more than it needs and the rest share what is left. */
+export function fairShares(sizes: number[], budget: number): number[] {
+  const shares = sizes.map(() => 0);
+  const order = sizes.map((_, i) => i).sort((a, b) => sizes[a]! - sizes[b]!);
+  let left = budget;
+  order.forEach((i, k) => {
+    shares[i] = Math.min(sizes[i]!, Math.floor(left / (order.length - k)));
+    left -= shares[i]!;
+  });
+  return shares;
+}
+
+/**
+ * The file's whole hunks, in order, that fit `share`, then as much of the next
+ * hunk's head as still fits. A file whose share holds no hunk line is left to
+ * the per-file overview, so a many-file diff costs no more than that list.
+ */
+function renderFile(file: FileDiff, share: number): string[] {
+  const out = [...file.meta];
+  let used = 0;
+  let whole = 0;
+  while (whole < file.hunks.length && used + file.hunks[whole]!.bytes <= share) {
+    out.push(...file.hunks[whole]!.lines);
+    used += file.hunks[whole]!.bytes;
+    whole++;
+  }
+  if (whole === file.hunks.length) return out;
+  const fits: string[] = [];
+  for (const line of file.hunks[whole]!.lines) {
+    if (used + lineBytes(line) > share) break;
+    fits.push(line);
+    used += lineBytes(line);
+  }
+  // A hunk header with none of its lines shows nothing.
+  const partial = fits.length > 1 ? fits : [];
+  if (whole === 0 && partial.length === 0) return [];
+  // A cut hunk counts as elided, with only its unshown lines in the stats.
+  const hidden = file.hunks.slice(whole).flatMap((h) => h.lines).slice(partial.length);
+  const add = hidden.filter((l) => l.startsWith("+")).length;
+  const del = hidden.filter((l) => l.startsWith("-")).length;
+  const n = file.hunks.length - whole;
+  return [...out, ...partial, `  … ${n} more hunk${n === 1 ? "" : "s"} (+${add} -${del}) in ${file.path}`];
 }
 
 export const gitDiffHandler: Handler = (
@@ -48,7 +129,7 @@ export const gitDiffHandler: Handler = (
     return { summary: "[git diff — no changes]", originalSize };
   }
 
-  const files = parseGitDiff(stdout);
+  const { preamble, files } = parseGitDiff(stdout);
 
   if (files.length === 0) {
     // Binary diff, submodule change, or unusual output — fall back to shell
@@ -61,11 +142,18 @@ export const gitDiffHandler: Handler = (
 
   const fileLines = files.map((f) => {
     const stats = `+${f.additions} -${f.deletions}`;
-    const hunks = `(${f.hunks} hunk${f.hunks === 1 ? "" : "s"})`;
+    const hunks = `(${f.hunks.length} hunk${f.hunks.length === 1 ? "" : "s"})`;
     return `  ${f.path.padEnd(48)}  ${stats.padEnd(10)}  ${hunks}`;
   });
 
-  return { summary: [header, ...fileLines].join("\n"), originalSize };
+  const sizes = files.map((f) => f.hunks.reduce((s, h) => s + h.bytes, 0));
+  const shares = fairShares(sizes, DIFF_BODY_BYTES);
+  const commit = preamble.slice(0, MAX_PREAMBLE_LINES).join("\n").trim();
+  const body = files.flatMap((f, i) => renderFile(f, shares[i]!));
+  // The per-file list only adds what the body left out; on a whole body it is overhead.
+  const overview = shares.some((s, i) => s < sizes[i]!) ? [...fileLines, ""] : [];
+
+  return { summary: [header, ...overview, ...(commit ? [commit, ""] : []), ...body].join("\n"), originalSize };
 };
 
 // ---------------------------------------------------------------------------

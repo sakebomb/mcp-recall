@@ -10,8 +10,8 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 - **The bench reports facts kept beside bytes saved.** `bun run bench` now
   checks each fixture's listed facts (an error count, the last file, an added
-  line) against its summary, and the README table carries the column. Three
-  fixtures keep one of their two facts: `tsc`, `git diff` and `find`.
+  line) against its summary, and the README table carries the column. Two
+  fixtures keep one of their two facts: `tsc` and `find`.
 - **Removed the comparison with another tool** (`docs/rtk.md`,
   `scripts/compare-rtk.ts`, and the `--rtk` option of `bun run fidelity`).
   mcp-recall's own claims will be measured against built-in baselines instead.
@@ -39,6 +39,16 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   and the branch, upstream and ahead/behind lines are kept. On one developer's
   transcripts, `bun run fidelity` puts `git status` recall at 100%, from
   85.5%; the cost is a lower reduction on that command, 15.6% from 17.0%.
+
+- **`git diff` and `git show` summaries keep the changed lines** (#389). A
+  diff over 8 KB was summarized as a list of files with +/- counts, which kept
+  5 of the 49 added lines Claude went on to quote. The summary now delivers up
+  to 4 KB of hunks, shared across files so one large file cannot crowd out the
+  rest. It drops the `index` and `---`/`+++` lines, keeps `git show`'s commit
+  header, and names what was cut per file. On one developer's transcripts,
+  `bun run fidelity` puts compressed `git diff` recall at 61.8%, from 31.5%,
+  above a same-size head (60.2%). The cost is a lower reduction on that
+  command, 30.2% from 37.5%.
 
 ## [1.18.1] — 2026-10-22
 

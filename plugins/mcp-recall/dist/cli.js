@@ -6835,30 +6835,82 @@ function extractExitCode(output) {
 }
 
 // src/handlers/bash-git.ts
+var DIFF_BODY_BYTES = 4 * 1024;
+var MAX_PREAMBLE_LINES = 20;
+var lineBytes = (line) => Buffer.byteLength(line, "utf8") + 1;
+var EXTENDED_HEADER = /^(old mode|new mode|deleted file mode|new file mode|copy (from|to)|rename (from|to)|(dis)?similarity index|Binary files|GIT binary patch)/;
+function countLine(file, line) {
+  if (line.startsWith("+"))
+    file.additions++;
+  else if (line.startsWith("-"))
+    file.deletions++;
+}
 function parseGitDiff(text) {
+  const preamble = [];
   const files = [];
-  let current = null;
-  for (const line of text.split(`
+  let file = null;
+  let hunk = null;
+  for (const raw of text.split(`
 `)) {
+    const line = clipLine(raw);
     if (line.startsWith("diff --git ")) {
-      if (current)
-        files.push(current);
       const match = line.match(/diff --git a\/.+ b\/(.+)/);
-      const path = match ? match[1] : line.slice(11);
-      current = { path, additions: 0, deletions: 0, hunks: 0 };
-    } else if (current) {
-      if (line.startsWith("@@ ")) {
-        current.hunks++;
-      } else if (line.startsWith("+") && !line.startsWith("+++")) {
-        current.additions++;
-      } else if (line.startsWith("-") && !line.startsWith("---")) {
-        current.deletions++;
-      }
+      file = { path: match ? match[1] : line.slice(11), meta: [line], hunks: [], additions: 0, deletions: 0 };
+      files.push(file);
+      hunk = null;
+    } else if (!file) {
+      preamble.push(line);
+    } else if (!hunk && /^(index |--- |\+\+\+ |\s*$)/.test(line)) {} else if (!hunk && EXTENDED_HEADER.test(line)) {
+      file.meta.push(line);
+    } else if (line.startsWith("@@") || !hunk) {
+      hunk = { lines: [line], bytes: lineBytes(line) };
+      file.hunks.push(hunk);
+      if (!line.startsWith("@@"))
+        countLine(file, line);
+    } else {
+      hunk.lines.push(line);
+      hunk.bytes += lineBytes(line);
+      countLine(file, line);
     }
   }
-  if (current)
-    files.push(current);
-  return files;
+  return { preamble, files };
+}
+function fairShares(sizes, budget) {
+  const shares = sizes.map(() => 0);
+  const order = sizes.map((_, i) => i).sort((a, b) => sizes[a] - sizes[b]);
+  let left = budget;
+  order.forEach((i, k) => {
+    shares[i] = Math.min(sizes[i], Math.floor(left / (order.length - k)));
+    left -= shares[i];
+  });
+  return shares;
+}
+function renderFile(file, share) {
+  const out = [...file.meta];
+  let used = 0;
+  let whole = 0;
+  while (whole < file.hunks.length && used + file.hunks[whole].bytes <= share) {
+    out.push(...file.hunks[whole].lines);
+    used += file.hunks[whole].bytes;
+    whole++;
+  }
+  if (whole === file.hunks.length)
+    return out;
+  const fits = [];
+  for (const line of file.hunks[whole].lines) {
+    if (used + lineBytes(line) > share)
+      break;
+    fits.push(line);
+    used += lineBytes(line);
+  }
+  const partial = fits.length > 1 ? fits : [];
+  if (whole === 0 && partial.length === 0)
+    return [];
+  const hidden = file.hunks.slice(whole).flatMap((h) => h.lines).slice(partial.length);
+  const add = hidden.filter((l) => l.startsWith("+")).length;
+  const del = hidden.filter((l) => l.startsWith("-")).length;
+  const n = file.hunks.length - whole;
+  return [...out, ...partial, `  \u2026 ${n} more hunk${n === 1 ? "" : "s"} (+${add} -${del}) in ${file.path}`];
 }
 var gitDiffHandler = (toolName, output) => {
   const stdout = extractStdout(output);
@@ -6866,7 +6918,7 @@ var gitDiffHandler = (toolName, output) => {
   if (!stdout.trim()) {
     return { summary: "[git diff \u2014 no changes]", originalSize };
   }
-  const files = parseGitDiff(stdout);
+  const { preamble, files } = parseGitDiff(stdout);
   if (files.length === 0) {
     return shellHandler(toolName, output);
   }
@@ -6875,10 +6927,16 @@ var gitDiffHandler = (toolName, output) => {
   const header = `git diff \u2014 ${files.length} file${files.length === 1 ? "" : "s"} changed, +${totalAdded} -${totalDeleted}`;
   const fileLines = files.map((f) => {
     const stats = `+${f.additions} -${f.deletions}`;
-    const hunks = `(${f.hunks} hunk${f.hunks === 1 ? "" : "s"})`;
+    const hunks = `(${f.hunks.length} hunk${f.hunks.length === 1 ? "" : "s"})`;
     return `  ${f.path.padEnd(48)}  ${stats.padEnd(10)}  ${hunks}`;
   });
-  return { summary: [header, ...fileLines].join(`
+  const sizes = files.map((f) => f.hunks.reduce((s, h) => s + h.bytes, 0));
+  const shares = fairShares(sizes, DIFF_BODY_BYTES);
+  const commit = preamble.slice(0, MAX_PREAMBLE_LINES).join(`
+`).trim();
+  const body = files.flatMap((f, i) => renderFile(f, shares[i]));
+  const overview = shares.some((s, i) => s < sizes[i]) ? [...fileLines, ""] : [];
+  return { summary: [header, ...overview, ...commit ? [commit, ""] : [], ...body].join(`
 `), originalSize };
 };
 var gitLogHandler = (toolName, output) => {
@@ -7582,31 +7640,31 @@ ${stderr}`.trim();
     else if (/^(npm error|error |err )/i.test(t))
       errors2.push(t.slice(0, 100));
   }
-  let countLine = null;
+  let countLine2 = null;
   const bunMatch = combined.match(/(\d+)\s+packages?\s+installed/i);
   if (bunMatch)
-    countLine = `${bunMatch[1]} packages installed`;
-  if (!countLine) {
+    countLine2 = `${bunMatch[1]} packages installed`;
+  if (!countLine2) {
     const npmMatch = combined.match(/added\s+(\d+)[^,\n]*/i);
     if (npmMatch)
-      countLine = npmMatch[0].trim().slice(0, 60);
+      countLine2 = npmMatch[0].trim().slice(0, 60);
   }
-  if (!countLine) {
+  if (!countLine2) {
     const pipMatch = combined.match(/Successfully installed (.+)/);
     if (pipMatch) {
       const pkgs = pipMatch[1].trim().split(/\s+/);
-      countLine = `pip: ${pkgs.length} package${pkgs.length === 1 ? "" : "s"} installed`;
+      countLine2 = `pip: ${pkgs.length} package${pkgs.length === 1 ? "" : "s"} installed`;
     }
   }
-  if (!countLine) {
+  if (!countLine2) {
     const yarnMatch = combined.match(/success Saved (\d+) new dependenc/i);
     if (yarnMatch)
-      countLine = `yarn: ${yarnMatch[1]} new dependencies saved`;
+      countLine2 = `yarn: ${yarnMatch[1]} new dependencies saved`;
   }
-  if (!countLine && errors2.length === 0) {
+  if (!countLine2 && errors2.length === 0) {
     return shellHandler(toolName, output);
   }
-  const lines = [countLine ?? "package install"];
+  const lines = [countLine2 ?? "package install"];
   if (warnings.length > 0)
     lines.push(`  ${warnings.length} warning${warnings.length === 1 ? "" : "s"}${warnings.length <= 3 ? ": " + warnings.join("; ") : ""}`);
   if (errors2.length > 0)
