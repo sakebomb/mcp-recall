@@ -1311,3 +1311,94 @@ describe("handlePostToolUse — Bash output cut at ~50 KB (#316)", () => {
     expect(run(envelope({ persistedOutputPath: elsewhere })).row?.original_size).toBe(Buffer.byteLength(cut, "utf8"));
   });
 });
+
+describe("handlePostToolUse — MCP result saved to a file (#391)", () => {
+  // Above 25,000 tokens or 50,000 characters, Claude Code saves an MCP result to
+  // <session>/tool-results/ and hands the hook a notice naming the file instead.
+  const full = JSON.stringify({
+    results: Array.from({ length: 900 }, (_, i) => ({ index: i, status: "success", uri: `hf://models/org/model-${i}`, note: "é ".repeat(20) })),
+  });
+  let tempDir: string;
+  let savedPath: string;
+
+  const notice = (path: string, chars = full.length) =>
+    `Error: result (${chars.toLocaleString("en-US")} characters) exceeds maximum allowed tokens. Output has been saved to ${path}.\n` +
+    "Format: JSON with schema: {results: [{...}]}\n" +
+    "Use offset and limit parameters to read specific portions of the file, search within it for specific content, and jq to make structured queries.\n" +
+    "REQUIREMENTS FOR SUMMARIZATION/ANALYSIS/REVIEW:\n" +
+    `- You MUST read the content from the file at ${path} in sequential chunks until 100% of the content has been read.\n` +
+    "- If you receive truncation warnings when reading the file, reduce the chunk size until you have read 100% of the content without truncation.\n" +
+    "- Before producing ANY summary or analysis, you MUST explicitly describe what portion of the content you have read. ***If you did not read the entire content, you MUST explicitly state this.***\n" +
+    "- If after a few attempts you cannot read the file (file not found, lines too long for Read's offset/limit, no shell access), STOP retrying. Summarize what you were able to read, explicitly state which portion you could not read and why, and proceed.";
+
+  const run = (response: unknown) => {
+    const result = handlePostToolUse(makePostToolUseInput("mcp__hf__hf_fs", response));
+    const delivered = result.updatedMCPToolOutput ?? "";
+    const id = delivered.match(/recall_[0-9a-f]+/)?.[0] ?? "";
+    return { result, delivered, row: retrieveOutput(getDb(":memory:"), id) };
+  };
+
+  beforeEach(() => {
+    process.env.RECALL_DB_PATH = ":memory:";
+    tempDir = mkdtempSync(join(tmpdir(), "recall-hooks-391-"));
+    const configPath = join(tempDir, "config.toml");
+    writeFileSync(configPath, '[store]\nretention = "full"\n');
+    process.env.RECALL_CONFIG_PATH = configPath;
+    resetConfig();
+    mkdirSync(join(tempDir, "tool-results"));
+    savedPath = join(tempDir, "tool-results", "mcp-hf-hf_fs-1792768643441.txt");
+    writeFileSync(savedPath, full);
+  });
+
+  afterEach(() => {
+    closeDb();
+    resetConfig();
+    delete process.env.RECALL_DB_PATH;
+    delete process.env.RECALL_CONFIG_PATH;
+    rmSync(tempDir, { recursive: true });
+  });
+
+  // The shapes stored notices show the hook receives: their text is stored plain,
+  // which a top-level block array (kept as JSON by extractText) would not be.
+  const shapes: [string, (text: string) => unknown][] = [
+    ["string", (text) => text],
+    ["content object", (text) => ({ content: [{ type: "text", text }] })],
+  ];
+
+  for (const [name, shape] of shapes) {
+    it(`stores and summarises the saved result, not the notice, for the ${name} shape`, () => {
+      const { delivered, row } = run(shape(notice(savedPath)));
+      expect(row?.full_content).toBe(full);
+      expect(row?.original_size).toBe(Buffer.byteLength(full, "utf8"));
+      expect(delivered).not.toContain("exceeds maximum allowed tokens");
+    });
+  }
+
+  it("scans the saved result for secrets", () => {
+    const withKey = full.slice(0, -2) + `,"k":"sk-ant-api03-${"A".repeat(95)}"}`;
+    writeFileSync(savedPath, withKey);
+    expect(run(notice(savedPath, withKey.length)).result).toEqual({});
+  });
+
+  it("passes the notice through whole when the saved file is missing", () => {
+    rmSync(savedPath);
+    expect(run(notice(savedPath)).result).toEqual({});
+  });
+
+  it("passes the notice through whole when the character count does not match", () => {
+    expect(run(notice(savedPath, full.length - 1)).result).toEqual({});
+  });
+
+  it("passes the notice through whole when the path is outside a tool-results directory", () => {
+    const elsewhere = join(tempDir, "elsewhere.txt");
+    writeFileSync(elsewhere, full);
+    expect(run(notice(elsewhere)).result).toEqual({});
+  });
+
+  it("treats the same notice text from Bash as output, not a saved MCP result", () => {
+    const result = handlePostToolUse(
+      makePostToolUseInput("Bash", { stdout: notice(savedPath), stderr: "" }, { tool_input: { command: "cat notice.txt" } })
+    );
+    expect(JSON.stringify(result)).not.toContain('"index":899');
+  });
+});

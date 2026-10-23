@@ -9408,6 +9408,33 @@ function withPersistedOutput(toolResponse) {
     return toolResponse;
   }
 }
+var SAVED_RESULT_RE = /^Error: result \(([\d,]+) characters\) exceeds maximum allowed tokens\. Output has been saved to (.+?)\.(?:\n|$)/;
+function withSavedMcpResult(toolResponse) {
+  const blocks = asMcpContentBlocks(toolResponse);
+  const text = blocks ? joinTextBlocks(blocks) : typeof toolResponse === "string" ? toolResponse : "";
+  const match = text.match(SAVED_RESULT_RE);
+  if (!match)
+    return toolResponse;
+  const chars = Number(match[1].replace(/,/g, ""));
+  const path = match[2];
+  if (!isAbsolute2(path) || basename2(dirname3(path)) !== "tool-results")
+    return null;
+  try {
+    if (statSync4(path).size > MAX_PERSISTED_BYTES)
+      return null;
+    const saved = readFileSync3(path, "utf8");
+    if (saved.length !== chars)
+      return null;
+    if (typeof toolResponse === "string")
+      return saved;
+    if (Array.isArray(toolResponse))
+      return [{ type: "text", text: saved }];
+    return { ...toolResponse, content: [{ type: "text", text: saved }] };
+  } catch (err) {
+    log.debug(`saved MCP result unreadable \xB7 ${path} \xB7 ${String(err)}`);
+    return null;
+  }
+}
 function replaceOutput(text, toolResponse) {
   const bash = asBashResponse(toolResponse);
   return {
@@ -9434,10 +9461,18 @@ function handlePostToolUse(raw) {
   const input = parsed;
   const { tool_name, tool_input, tool_response, cwd, session_id } = input;
   const config = loadConfig();
-  const response = tool_name === "Bash" ? withPersistedOutput(tool_response) : tool_response;
+  let response = tool_name === "Bash" ? withPersistedOutput(tool_response) : tool_response;
   if (isDenied(tool_name, config)) {
     log.debug(`SKIP denylist \xB7 ${tool_name}`);
     return {};
+  }
+  if (tool_name.startsWith("mcp__")) {
+    const saved = withSavedMcpResult(tool_response);
+    if (saved === null) {
+      log.debug(`SKIP saved-result-unverified \xB7 ${tool_name}`);
+      return {};
+    }
+    response = saved;
   }
   const fullContent = tool_name === "Bash" ? bashOutputText(response) : extractText(response);
   log.debug(`intercepted ${tool_name} \xB7 ${formatBytes(Buffer.byteLength(fullContent, "utf8"))}`);

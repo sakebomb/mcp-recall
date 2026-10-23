@@ -6,6 +6,7 @@ import { getProjectKey } from "../project-key";
 import { isDenied } from "../denylist";
 import { findSecrets } from "../secrets";
 import { getHandler, extractText } from "../handlers/index";
+import { asMcpContentBlocks, joinTextBlocks } from "../handlers/types";
 import { genericHandler } from "../handlers/generic";
 import { extractHints } from "../hints";
 import { getDb, defaultDbPath, storeOutput, checkOutputDedup, hashContent, evictIfNeeded } from "../db/index";
@@ -73,6 +74,41 @@ function withPersistedOutput(toolResponse: unknown): unknown {
   }
 }
 
+/** The notice Claude Code hands the hook in place of an MCP result it saved to a file. */
+const SAVED_RESULT_RE = /^Error: result \(([\d,]+) characters\) exceeds maximum allowed tokens\. Output has been saved to (.+?)\.(?:\n|$)/;
+
+/**
+ * Above 25,000 tokens or 50,000 characters Claude Code saves a successful MCP
+ * result to a tool-results directory and hands this hook a notice naming the
+ * file, so storing what arrives keeps none of the result (#391). Read the file
+ * back, in the shape the notice came in, when it is plainly the one Claude Code
+ * wrote: absolute, in a tool-results directory, and exactly the stated number
+ * of characters. Returns null for a notice whose file fails those checks: it is
+ * then passed through whole, keeping the path and Claude Code's instructions
+ * for reading it. Any other response is returned as it is.
+ */
+function withSavedMcpResult(toolResponse: unknown): unknown | null {
+  // Not extractText: it keeps a text-only top-level array as JSON, which hides the notice.
+  const blocks = asMcpContentBlocks(toolResponse);
+  const text = blocks ? joinTextBlocks(blocks) : typeof toolResponse === "string" ? toolResponse : "";
+  const match = text.match(SAVED_RESULT_RE);
+  if (!match) return toolResponse;
+  const chars = Number(match[1].replace(/,/g, ""));
+  const path = match[2];
+  if (!isAbsolute(path) || basename(dirname(path)) !== "tool-results") return null;
+  try {
+    if (statSync(path).size > MAX_PERSISTED_BYTES) return null;
+    const saved = readFileSync(path, "utf8");
+    if (saved.length !== chars) return null;
+    if (typeof toolResponse === "string") return saved;
+    if (Array.isArray(toolResponse)) return [{ type: "text", text: saved }];
+    return { ...(toolResponse as Record<string, unknown>), content: [{ type: "text", text: saved }] };
+  } catch (err) {
+    log.debug(`saved MCP result unreadable · ${path} · ${String(err)}`);
+    return null;
+  }
+}
+
 /**
  * Replaces the tool's output with `text` via hookSpecificOutput.updatedToolOutput;
  * the top-level field alone was silently ignored (#298). For a built-in tool the
@@ -109,12 +145,23 @@ export function handlePostToolUse(raw: string): HookOutput {
   const { tool_name, tool_input, tool_response, cwd, session_id } = input;
   const config = loadConfig();
   // The whole output, not the cut Claude Code hands over above ~50 KB (#316).
-  const response = tool_name === "Bash" ? withPersistedOutput(tool_response) : tool_response;
+  let response = tool_name === "Bash" ? withPersistedOutput(tool_response) : tool_response;
 
   // 1. Denylist check
   if (isDenied(tool_name, config)) {
     log.debug(`SKIP denylist · ${tool_name}`);
     return {};
+  }
+
+  // The saved result, not the notice Claude Code hands over in its place (#391).
+  // After the denylist, so a denied tool's saved output is never read.
+  if (tool_name.startsWith("mcp__")) {
+    const saved = withSavedMcpResult(tool_response);
+    if (saved === null) {
+      log.debug(`SKIP saved-result-unverified · ${tool_name}`);
+      return {};
+    }
+    response = saved;
   }
 
   // 2. Extract text and check for secrets. For Bash that is stdout + stderr:
