@@ -2188,6 +2188,24 @@ describe("gitDiffHandler", () => {
     expect(summary).toContain("+1000 -0");
   });
 
+  it("keeps a --binary patch's data out of the summary and the counts", () => {
+    const data = Array.from({ length: 300 }, (_, i) => `zcmV+${i}-Q8bXa+dk-P${"x".repeat(60)}`).join("\n");
+    const stdout = `diff --git a/logo.png b/logo.png\nindex 1111111..2222222 100644\nGIT binary patch\nliteral 9000\n${data}\n\n${SAMPLE_DIFF}`;
+    const { summary } = gitDiffHandler("Bash", { stdout, stderr: "", exit_code: 0 });
+    expect(summary).not.toContain("zcmV+");
+    expect(summary).toContain("GIT binary patch");
+    expect(summary).toContain("3 files changed, +3 -2");
+  });
+
+  it("names the commit header lines it cut", () => {
+    const message = Array.from({ length: 30 }, (_, i) => `    body line ${i}`).join("\n");
+    const stdout = `commit 9540379abcdef\nAuthor: A <a@b.c>\n\n${message}\n\n${SAMPLE_DIFF}`;
+    const { summary } = gitDiffHandler("Bash", { stdout, stderr: "", exit_code: 0 });
+    expect(summary).toContain("body line 0");
+    expect(summary).not.toContain("body line 29");
+    expect(summary).toMatch(/… \d+ more commit header lines/);
+  });
+
   it("keeps the commit header git show prints before the diff", () => {
     const stdout = `commit 9540379abcdef\nAuthor: A <a@b.c>\nDate:   Thu Oct 23 2026\n\n    fix: store the saved result\n\n${SAMPLE_DIFF}`;
     const { summary } = gitDiffHandler("Bash", { stdout, stderr: "", exit_code: 0 });

@@ -6850,6 +6850,7 @@ function parseGitDiff(text) {
   const files = [];
   let file = null;
   let hunk = null;
+  let binary = false;
   for (const raw of text.split(`
 `)) {
     const line = clipLine(raw);
@@ -6858,10 +6859,12 @@ function parseGitDiff(text) {
       file = { path: match ? match[1] : line.slice(11), meta: [line], hunks: [], additions: 0, deletions: 0 };
       files.push(file);
       hunk = null;
+      binary = false;
     } else if (!file) {
       preamble.push(line);
-    } else if (!hunk && /^(index |--- |\+\+\+ |\s*$)/.test(line)) {} else if (!hunk && EXTENDED_HEADER.test(line)) {
+    } else if (binary || !hunk && /^(index |--- |\+\+\+ |\s*$)/.test(line)) {} else if (!hunk && EXTENDED_HEADER.test(line)) {
       file.meta.push(line);
+      binary = line.startsWith("GIT binary patch");
     } else if (line.startsWith("@@") || !hunk) {
       hunk = { lines: [line], bytes: lineBytes(line) };
       file.hunks.push(hunk);
@@ -6932,11 +6935,15 @@ var gitDiffHandler = (toolName, output) => {
   });
   const sizes = files.map((f) => f.hunks.reduce((s, h) => s + h.bytes, 0));
   const shares = fairShares(sizes, DIFF_BODY_BYTES);
-  const commit = preamble.slice(0, MAX_PREAMBLE_LINES).join(`
+  const head = preamble.join(`
 `).trim();
+  const headLines = head ? head.split(`
+`) : [];
+  const cut = headLines.length - MAX_PREAMBLE_LINES;
+  const commit = cut > 0 ? [...headLines.slice(0, MAX_PREAMBLE_LINES), `  \u2026 ${cut} more commit header lines`] : headLines;
   const body = files.flatMap((f, i) => renderFile(f, shares[i]));
   const overview = shares.some((s, i) => s < sizes[i]) ? [...fileLines, ""] : [];
-  return { summary: [header, ...overview, ...commit ? [commit, ""] : [], ...body].join(`
+  return { summary: [header, ...overview, ...commit.length ? [...commit, ""] : [], ...body].join(`
 `), originalSize };
 };
 var gitLogHandler = (toolName, output) => {

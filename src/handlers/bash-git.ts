@@ -46,6 +46,7 @@ export function parseGitDiff(text: string): { preamble: string[]; files: FileDif
   const files: FileDiff[] = [];
   let file: FileDiff | null = null;
   let hunk: Hunk | null = null;
+  let binary = false;
 
   for (const raw of text.split("\n")) {
     const line = clipLine(raw);
@@ -54,12 +55,14 @@ export function parseGitDiff(text: string): { preamble: string[]; files: FileDif
       file = { path: match ? match[1]! : line.slice(11), meta: [line], hunks: [], additions: 0, deletions: 0 };
       files.push(file);
       hunk = null;
+      binary = false;
     } else if (!file) {
       preamble.push(line);
-    } else if (!hunk && /^(index |--- |\+\+\+ |\s*$)/.test(line)) {
-      // Named by the diff --git line already, or blank.
+    } else if (binary || (!hunk && /^(index |--- |\+\+\+ |\s*$)/.test(line))) {
+      // A --binary patch's encoded data, a line the diff --git line already names, or a blank.
     } else if (!hunk && EXTENDED_HEADER.test(line)) {
       file.meta.push(line);
+      binary = line.startsWith("GIT binary patch");
     } else if (line.startsWith("@@") || !hunk) {
       // Anything else before a hunk header opens one, so it stays inside the budget.
       hunk = { lines: [line], bytes: lineBytes(line) };
@@ -148,12 +151,15 @@ export const gitDiffHandler: Handler = (
 
   const sizes = files.map((f) => f.hunks.reduce((s, h) => s + h.bytes, 0));
   const shares = fairShares(sizes, DIFF_BODY_BYTES);
-  const commit = preamble.slice(0, MAX_PREAMBLE_LINES).join("\n").trim();
+  const head = preamble.join("\n").trim();
+  const headLines = head ? head.split("\n") : [];
+  const cut = headLines.length - MAX_PREAMBLE_LINES;
+  const commit = cut > 0 ? [...headLines.slice(0, MAX_PREAMBLE_LINES), `  … ${cut} more commit header lines`] : headLines;
   const body = files.flatMap((f, i) => renderFile(f, shares[i]!));
   // The per-file list only adds what the body left out; on a whole body it is overhead.
   const overview = shares.some((s, i) => s < sizes[i]!) ? [...fileLines, ""] : [];
 
-  return { summary: [header, ...overview, ...(commit ? [commit, ""] : []), ...body].join("\n"), originalSize };
+  return { summary: [header, ...overview, ...(commit.length ? [...commit, ""] : []), ...body].join("\n"), originalSize };
 };
 
 // ---------------------------------------------------------------------------
