@@ -7329,6 +7329,7 @@ var ESLINT_SUM_RE = /[\u2716\u2717x]\s+\d+\s+problems?\s+\((\d+)\s+errors?,\s+(\
 var RUFF_SUM_RE = /Found (\d+) error/i;
 var TSC_SUM_RE = /Found (\d+) errors?\b/i;
 var CARGO_ABORT_RE = /^error: aborting due to \d+ previous error/i;
+var RUFF_FULL_RE = /^([A-Z]+\d+)\s+(?:\[\*\]\s+)?(.+)$/;
 var clip = (s) => s.trim().slice(0, MAX_MESSAGE_LEN);
 var compilerDiagnosticsHandler = (toolName, output) => {
   const stdout = extractStdout(output);
@@ -7389,6 +7390,10 @@ ${stderr}`;
       const last = diagnostics[diagnostics.length - 1];
       if (last && last.location === null)
         last.location = m[1];
+      continue;
+    }
+    if (m = t.match(RUFF_FULL_RE)) {
+      diagnostics.push({ severity: "error", location: null, message: clip(`${m[1]}: ${m[2]}`), labeled: true });
       continue;
     }
     if (ESLINT_FILE_RE.test(t)) {

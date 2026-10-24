@@ -57,6 +57,10 @@ const TSC_SUM_RE = /Found (\d+) errors?\b/i;
 // cargo's boilerplate trailer — redundant with CARGO_ERR_SUM_RE's count, and
 // must not be parsed as another SEVERITY_RE diagnostic ("error: aborting …").
 const CARGO_ABORT_RE = /^error: aborting due to \d+ previous error/i;
+// ruff's default full format: "F401 [*] message" — the rule code first, the
+// location on the " --> file:line:col" line below (attached like cargo's),
+// then the source/context block (#397).
+const RUFF_FULL_RE = /^([A-Z]+\d+)\s+(?:\[\*\]\s+)?(.+)$/;
 
 const clip = (s: string): string => s.trim().slice(0, MAX_MESSAGE_LEN);
 
@@ -110,6 +114,11 @@ export const compilerDiagnosticsHandler: Handler = (
     if ((m = t.match(CARGO_LOC_RE))) {
       const last = diagnostics[diagnostics.length - 1];
       if (last && last.location === null) last.location = m[1]!;
+      continue;
+    }
+    // --- ruff full format: rule code + message, location on the --> line ---
+    if ((m = t.match(RUFF_FULL_RE))) {
+      diagnostics.push({ severity: "error", location: null, message: clip(`${m[1]}: ${m[2]!}`), labeled: true });
       continue;
     }
     // --- eslint file header ---

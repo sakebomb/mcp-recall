@@ -1788,6 +1788,45 @@ describe("compilerDiagnosticsHandler", () => {
     expect(summary).toContain("undefined: doThing");
   });
 
+  it("compresses ruff full-format diagnostics with the --> location", () => {
+    // ruff 0.17+ prints rule-code-first diagnostics in its default full
+    // format; the location arrives on the " --> file:line:col" line (#397).
+    const stdout = [
+      "F401 [*] `os` imported but unused",
+      " --> svc/mod0.py:1:8",
+      "  |",
+      "1 | import os",
+      "help: Remove unused import: `os`",
+      "",
+      "E501 Line too long (95 > 88)",
+      " --> svc/mod1.py:3:89",
+      "",
+      "Found 2 errors.",
+    ].join("\n");
+    const { summary } = compilerDiagnosticsHandler("Bash", makeOutput(stdout, "", 1));
+    expect(summary).toContain("✗");
+    expect(summary).toContain("2 errors");
+    expect(summary).toContain("svc/mod0.py:1:8");
+    expect(summary).toContain("F401");
+    expect(summary).toContain("svc/mod1.py:3:89");
+    expect(summary).toContain("E501");
+  });
+
+  it("still parses ruff's concise file:line:col form", () => {
+    const stdout = [
+      "svc/mod0.py:1:8: F401 `os` imported but unused",
+      "svc/mod1.py:3:89: E501 Line too long (95 > 88)",
+      "Found 2 errors.",
+    ].join("\n");
+    const { summary } = compilerDiagnosticsHandler("Bash", makeOutput(stdout, "", 1));
+    expect(summary).toContain("2 errors");
+    // the concise path renders file:line — the column is not kept
+    expect(summary).toContain("mod0.py:1");
+    expect(summary).toContain("F401 `os` imported but unused");
+    expect(summary).toContain("mod1.py:3");
+    expect(summary).toContain("Line too long");
+  });
+
   it("compresses eslint stylish output with its problem summary", () => {
     const stdout = [
       "/repo/src/a.ts",
