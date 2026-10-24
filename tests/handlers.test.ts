@@ -280,6 +280,16 @@ describe("jsonHandler", () => {
     expect(shown[1]).toEqual({ path: "owner0/dataset-number-0", likes: 0, updated_at: "2026-10-01" });
   });
 
+  it("keeps fields every item shares within the budget when they are large", () => {
+    const schema = "column definition ".repeat(2000);
+    const rows = Array.from({ length: 300 }, (_, i) => ({ id: i, schema }));
+    const { summary } = jsonHandler("mcp__some__tool", JSON.stringify({ rows }));
+    expect(summary.length).toBeLessThanOrEqual(JSON_BUDGET);
+    const shown = JSON.parse(summary).rows;
+    expect(shown[0]["…each of 300 items has"].schema).toMatch(/^column definition .*…\[\+\d+ chars\]$/);
+    expect(shown[1]).toEqual({ id: 0 });
+  });
+
   it("shows the first fields of an object too wide for the budget, and counts the rest", () => {
     const wide = Object.fromEntries(Array.from({ length: 2000 }, (_, i) => [`name_${i}`, { id: i, title: `item number ${i}` }]));
     const shown = JSON.parse(jsonHandler("mcp__some__tool", JSON.stringify(wide)).summary);

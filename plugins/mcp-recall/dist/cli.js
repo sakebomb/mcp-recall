@@ -6460,12 +6460,12 @@ var isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 function fitString(s, budget) {
   if (size(s) <= budget)
     return s;
-  let keep = Math.max(0, budget - 24);
+  let keep = Math.max(0, Math.floor(budget - 24));
   for (;; ) {
     const cut = `${s.slice(0, keep)}\u2026[+${s.length - keep} chars]`;
     if (size(cut) <= budget || keep === 0)
       return cut;
-    keep = Math.max(0, keep - Math.max(1, size(cut) - budget));
+    keep = Math.max(0, keep - Math.max(1, Math.ceil(size(cut) - budget)));
   }
 }
 var share = (remaining, rest) => Math.max(remaining / rest, Math.min(remaining, SHARE_FLOOR));
@@ -6483,7 +6483,7 @@ function sharedFields(items) {
 }
 function fitArray(items, budget) {
   const shared = sharedFields(items);
-  const out = shared ? [{ [`\u2026each of ${items.length} items has`]: shared }] : [];
+  const out = shared ? [fit({ [`\u2026each of ${items.length} items has`]: shared }, budget / 4)] : [];
   const parts = shared ? items.map((item) => Object.fromEntries(Object.entries(item).filter(([k]) => !(k in shared)))) : items;
   let remaining = budget - size(out) - 16;
   let shown = 0;

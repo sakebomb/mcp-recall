@@ -25,11 +25,12 @@ const isObject = (v: Json): v is { [key: string]: Json } => v !== null && typeof
 function fitString(s: string, budget: number): string {
   if (size(s) <= budget) return s;
   // Escapes make the JSON longer than the string, so shrink until it fits.
-  let keep = Math.max(0, budget - 24);
+  // Shares of a budget are fractional; a character count is not.
+  let keep = Math.max(0, Math.floor(budget - 24));
   for (;;) {
     const cut = `${s.slice(0, keep)}…[+${s.length - keep} chars]`;
     if (size(cut) <= budget || keep === 0) return cut;
-    keep = Math.max(0, keep - Math.max(1, size(cut) - budget));
+    keep = Math.max(0, keep - Math.max(1, Math.ceil(size(cut) - budget)));
   }
 }
 
@@ -50,7 +51,8 @@ function sharedFields(items: Json[]): { [key: string]: Json } | null {
 
 function fitArray(items: Json[], budget: number): Json[] {
   const shared = sharedFields(items);
-  const out: Json[] = shared ? [{ [`…each of ${items.length} items has`]: shared }] : [];
+  // Budgeted like any value, and to a quarter of the array's, so a large shared field leaves room for the items.
+  const out: Json[] = shared ? [fit({ [`…each of ${items.length} items has`]: shared }, budget / 4)] : [];
   const parts = shared
     ? items.map((item) => Object.fromEntries(Object.entries(item as object).filter(([k]) => !(k in shared))) as Json)
     : items;
