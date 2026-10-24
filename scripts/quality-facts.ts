@@ -113,6 +113,8 @@ const grepFacts = byLine([[GREP_LINE_RE, (m) => [m[1]]]]);
 const FAMILY_FACTS: Record<string, (lines: string[]) => Fact[]> = {
   "git-status": statusFacts, "git-diff": diffFacts, "git-log": logFacts,
   pytest: pytestFacts, "cargo-test": cargoTestFacts, format: formatFacts, lint: lintFacts, crash: crashFacts, grep: grepFacts,
+  // A `python script.py` run from the public sample: what it can lose is its traceback.
+  python: crashFacts,
 };
 
 // An exception line, as Python prints it bare and pytest prints it after "E".

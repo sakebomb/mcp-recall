@@ -198,7 +198,7 @@ describe("the committed results", () => {
     const cases = loadCorpus();
     expect(cases.length).toBeGreaterThan(0);
     for (const c of cases) {
-      expect(c.source).toStartWith("scripted: ");
+      expect(c.source).toMatch(/^(scripted|public): /);
       expect(c.version).not.toBe("");
       expect(results).toContain(`| ${c.id} | ${c.family} |`);
     }
