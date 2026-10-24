@@ -1321,8 +1321,9 @@ describe("handlePostToolUse — MCP result saved to a file (#391)", () => {
   let tempDir: string;
   let savedPath: string;
 
-  const notice = (path: string, chars = full.length) =>
-    `Error: result (${chars.toLocaleString("en-US")} characters) exceeds maximum allowed tokens. Output has been saved to ${path}.\n` +
+  // Claude Code 2.1.305 adds " across N lines" to the count (#401); `lines` writes that wording.
+  const notice = (path: string, chars = full.length, lines?: number) =>
+    `Error: result (${chars.toLocaleString("en-US")} characters${lines === undefined ? "" : ` across ${lines.toLocaleString("en-US")} lines`}) exceeds maximum allowed tokens. Output has been saved to ${path}.\n` +
     "Format: JSON with schema: {results: [{...}]}\n" +
     "Use offset and limit parameters to read specific portions of the file, search within it for specific content, and jq to make structured queries.\n" +
     "REQUIREMENTS FOR SUMMARIZATION/ANALYSIS/REVIEW:\n" +
@@ -1389,6 +1390,26 @@ describe("handlePostToolUse — MCP result saved to a file (#391)", () => {
 
   it("passes the notice through whole when the character count does not match", () => {
     expect(run(notice(savedPath, full.length - 1)).result).toEqual({});
+  });
+
+  it("stores the saved result when the notice also gives its line count", () => {
+    const multi = `${full}\n${full}\n${full}`;
+    writeFileSync(savedPath, multi);
+    const { delivered, row } = run(notice(savedPath, multi.length, 3));
+    expect(row?.full_content).toBe(multi);
+    expect(delivered).not.toContain("exceeds maximum allowed tokens");
+  });
+
+  it("accepts either line count for a file that ends in a newline", () => {
+    // Whether Claude Code counts the empty segment after a final newline is not known.
+    const ended = `${full}\n${full}\n`;
+    writeFileSync(savedPath, ended);
+    expect(run(notice(savedPath, ended.length, 2)).row?.full_content).toBe(ended);
+    expect(run(notice(savedPath, ended.length, 3)).row?.full_content).toBe(ended);
+  });
+
+  it("passes the notice through whole when its line count does not match the file", () => {
+    expect(run(notice(savedPath, full.length, 2)).result).toEqual({});
   });
 
   it("passes the notice through whole when the path is outside a tool-results directory", () => {

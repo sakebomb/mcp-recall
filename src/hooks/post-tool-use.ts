@@ -74,8 +74,21 @@ function withPersistedOutput(toolResponse: unknown): unknown {
   }
 }
 
-/** The notice Claude Code hands the hook in place of an MCP result it saved to a file. */
-const SAVED_RESULT_RE = /^Error: result \(([\d,]+) characters\) exceeds maximum allowed tokens\. Output has been saved to (.+?)\.(?:\n|$)/;
+/**
+ * The notice Claude Code hands the hook in place of an MCP result it saved to a
+ * file. Since 2.1.305 the count can read "N characters across M lines" (#401).
+ */
+const SAVED_RESULT_RE = /^Error: result \(([\d,]+) characters(?: across ([\d,]+) lines?)?\) exceeds maximum allowed tokens\. Output has been saved to (.+?)\.(?:\n|$)/;
+
+/**
+ * Whether `text` has `lines` lines. A final newline may or may not end a line of
+ * its own in Claude Code's count, so both readings are accepted; the exact
+ * character count already rules out a different file.
+ */
+function hasLines(text: string, lines: number): boolean {
+  const segments = text.split("\n").length;
+  return segments === lines || (text.endsWith("\n") && segments - 1 === lines);
+}
 
 /**
  * Above 25,000 tokens or 50,000 characters Claude Code saves a successful MCP
@@ -83,7 +96,7 @@ const SAVED_RESULT_RE = /^Error: result \(([\d,]+) characters\) exceeds maximum 
  * file, so storing what arrives keeps none of the result (#391). Read the file
  * back, in the shape the notice came in, when it is plainly the one Claude Code
  * wrote: absolute, in a tool-results directory, and exactly the stated number
- * of characters. Returns null for a notice whose file fails those checks: it is
+ * of characters (and of lines, when the notice gives them). Returns null for a notice whose file fails those checks: it is
  * then passed through whole, keeping the path and Claude Code's instructions
  * for reading it. Any other response is returned as it is.
  */
@@ -93,13 +106,15 @@ function withSavedMcpResult(toolResponse: unknown): unknown | null {
   const text = blocks ? joinTextBlocks(blocks) : typeof toolResponse === "string" ? toolResponse : "";
   const match = text.match(SAVED_RESULT_RE);
   if (!match) return toolResponse;
-  const chars = Number(match[1].replace(/,/g, ""));
-  const path = match[2];
+  const count = (s: string) => Number(s.replace(/,/g, ""));
+  const chars = count(match[1]);
+  const lines = match[2] === undefined ? null : count(match[2]);
+  const path = match[3];
   if (!isAbsolute(path) || basename(dirname(path)) !== "tool-results") return null;
   try {
     if (statSync(path).size > MAX_PERSISTED_BYTES) return null;
     const saved = readFileSync(path, "utf8");
-    if (saved.length !== chars) return null;
+    if (saved.length !== chars || (lines !== null && !hasLines(saved, lines))) return null;
     if (typeof toolResponse === "string") return saved;
     // Never a bare array: extractText keeps a top-level array as JSON, not text.
     const base = Array.isArray(toolResponse) ? {} : (toolResponse as Record<string, unknown>);
