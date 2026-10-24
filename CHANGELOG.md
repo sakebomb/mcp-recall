@@ -52,6 +52,20 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   location and rule code. On the quality benchmark's ruff case, facts kept go
   from 0.0% to 22.8%, against 9.8% for a head cut to the same size.
 
+- **JSON summaries keep values, not just keys** (#403). The JSON fallback kept
+  structure to depth 3 and replaced everything deeper with `…`, so an MCP
+  envelope (`results` → item → `result`) kept its keys and no values: a
+  dataset search lost every name, a README `cat` its whole content. It now
+  spends a 4,096-character budget over the document. Wrapper levels cost only
+  their keys. A long string is cut, not dropped, and says how many characters
+  went. An array shows as many items as fit and counts the rest. Fields every
+  item shares are stated once. On the quality benchmark's Hugging Face cases,
+  facts kept go from 0.0% to 35.0%, against 33.3% for a head cut to the same
+  size. The README case alone stays below the head (70.6% against 74.1%): a cut
+  string has no structure to exploit, and the head arm also gets the recall
+  header's bytes. Large JSON from Bash (`gh api`, `curl`) gets the same
+  summary.
+
 - **Large MCP results are stored, not the notice that replaces them** (#391).
   Above 25,000 tokens or 50,000 characters, Claude Code saves an MCP result to
   the session's `tool-results` directory and hands the hook a notice naming
