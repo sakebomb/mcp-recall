@@ -48,7 +48,7 @@ The pre-commit hook (`bun install` wires it automatically) detects staged `src/`
 
 Bytes saved rewards dropping content, so judge a change to what Claude receives with `bun run fidelity` as well (#352). It replays the Bash results in your transcripts and scores how much of what Claude went on to use each summary still contains, beside bytes saved, per command family. It prints totals only. To compare two revisions, check each out in a worktree and pass `--root <worktree>`. The run fails if its controls do: pass-through must score 100% and the first line alone must score low.
 
-`bun run quality` is the public counterpart (#390): the same question, asked over a checked-in corpus in `benchmark/corpus/` rather than your transcripts, so anyone gets the same table. When a change moves it, `bun test` fails until you run `bun run quality --write` and commit `benchmark/results.md`, so the quality effect shows in the PR diff. The corpus cases are built by `scripts/quality-corpus.ts`; rerun it only to add or change a case, and say which tool version made it.
+`bun run quality` is the public counterpart (#390): the same question, asked over a checked-in corpus in `benchmark/corpus/` rather than your transcripts, so anyone gets the same table. When a change moves it, `bun test` fails until you run `bun run quality --write` and commit `benchmark/results.md` and `docs/benchmarks.md`, whose results block it regenerates, so the quality effect shows in the PR diff. [docs/benchmarks.md](docs/benchmarks.md) explains the method and how to read the table. The corpus cases are built by `scripts/quality-corpus.ts`; rerun it only to add or change a case, and say which tool version made it.
 
 ## Error contract
 

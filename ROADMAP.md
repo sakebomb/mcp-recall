@@ -31,7 +31,7 @@ they describe *where* effort goes when it goes somewhere.
   least as much of what Claude went on to use as a same-size cut of the raw
   output (`bun run fidelity`, [#389](https://github.com/sakebomb/mcp-recall/issues/389)).
   Public claims rest on a rerunnable benchmark against built-in baselines
-  ([#390](https://github.com/sakebomb/mcp-recall/issues/390)), losses included.
+  ([#390](https://github.com/sakebomb/mcp-recall/issues/390), [docs/benchmarks.md](docs/benchmarks.md)), losses included.
 - **Retrieval quality** — making Claude's first recall land on the right content:
   better summary hints, graduated/peek retrieval, structure-aware fallbacks. The
   store is only as good as the odds a single query finds what's needed.

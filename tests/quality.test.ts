@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { spawnSync } from "child_process";
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
-import { controlsBroken, loadCorpus, recovery, type FamilyScore } from "../scripts/quality";
+import { BLOCK_BEGIN, BLOCK_END, controlsBroken, fillBlock, loadCorpus, recovery, reportBlock, type FamilyScore } from "../scripts/quality";
 import { contradicts, facts, keptShare, type Fact } from "../scripts/quality-facts";
 
 const texts = (fs: Fact[]) => fs.map((f) => f.text);
@@ -220,6 +220,27 @@ describe("recovery", () => {
   it("finds nothing when the output is not listed, or the search has no results", () => {
     expect(recovery(results, "recall_cccc", { text: "src/a.ts" })).toEqual({ found: false, shown: false });
     expect(recovery('[recall: no results for "x"]', "recall_aaaa", { text: "x" })).toEqual({ found: false, shown: false });
+  });
+});
+
+describe("the report block", () => {
+  const row = (family: string, ours: number, head: number) =>
+    ({ family, ours, head, cases: 1, compressed: 1, facts: 1, first: 0, pass: 1, oursClaims: 0, headClaims: 0, raw: 1, delivered: 1, lost: 0, found: 0, shown: 0 }) as FamilyScore;
+
+  it("replaces only what lies between the markers", () => {
+    const doc = `intro\n${BLOCK_BEGIN}\nold\n${BLOCK_END}\noutro\n`;
+    expect(fillBlock(doc, "new")).toBe(`intro\n${BLOCK_BEGIN}\nnew\n${BLOCK_END}\noutro\n`);
+  });
+
+  it("refuses a page without the markers, so the check cannot pass on a missing block", () => {
+    expect(() => fillBlock("no block here", "new")).toThrow();
+  });
+
+  it("names every family where mcp-recall keeps fewer facts than the head, or ties it", () => {
+    const text = reportBlock([row("lint", 0.5, 0.2), row("format", 0.435, 0.522), row("other", 0.381, 0.381)]);
+    expect(text).toContain("- format: 43.5% against the head's 52.2%");
+    expect(text).toContain("- other: tied at 38.1%");
+    expect(text).not.toContain("- lint");
   });
 });
 
