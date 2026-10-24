@@ -81,6 +81,16 @@ function withPersistedOutput(toolResponse: unknown): unknown {
 const SAVED_RESULT_RE = /^Error: result \(([\d,]+) characters(?: across ([\d,]+) lines?)?\) exceeds maximum allowed tokens\. Output has been saved to (.+?)\.(?:\n|$)/;
 
 /**
+ * Whether `text` has `lines` lines. A final newline may or may not end a line of
+ * its own in Claude Code's count, so both readings are accepted; the exact
+ * character count already rules out a different file.
+ */
+function hasLines(text: string, lines: number): boolean {
+  const segments = text.split("\n").length;
+  return segments === lines || (text.endsWith("\n") && segments - 1 === lines);
+}
+
+/**
  * Above 25,000 tokens or 50,000 characters Claude Code saves a successful MCP
  * result to a tool-results directory and hands this hook a notice naming the
  * file, so storing what arrives keeps none of the result (#391). Read the file
@@ -104,7 +114,7 @@ function withSavedMcpResult(toolResponse: unknown): unknown | null {
   try {
     if (statSync(path).size > MAX_PERSISTED_BYTES) return null;
     const saved = readFileSync(path, "utf8");
-    if (saved.length !== chars || (lines !== null && saved.split("\n").length !== lines)) return null;
+    if (saved.length !== chars || (lines !== null && !hasLines(saved, lines))) return null;
     if (typeof toolResponse === "string") return saved;
     // Never a bare array: extractText keeps a top-level array as JSON, not text.
     const base = Array.isArray(toolResponse) ? {} : (toolResponse as Record<string, unknown>);

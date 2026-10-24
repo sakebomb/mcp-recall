@@ -9480,6 +9480,12 @@ function withPersistedOutput(toolResponse) {
   }
 }
 var SAVED_RESULT_RE = /^Error: result \(([\d,]+) characters(?: across ([\d,]+) lines?)?\) exceeds maximum allowed tokens\. Output has been saved to (.+?)\.(?:\n|$)/;
+function hasLines(text, lines) {
+  const segments = text.split(`
+`).length;
+  return segments === lines || text.endsWith(`
+`) && segments - 1 === lines;
+}
 function withSavedMcpResult(toolResponse) {
   const blocks = asMcpContentBlocks(toolResponse);
   const text = blocks ? joinTextBlocks(blocks) : typeof toolResponse === "string" ? toolResponse : "";
@@ -9496,8 +9502,7 @@ function withSavedMcpResult(toolResponse) {
     if (statSync4(path).size > MAX_PERSISTED_BYTES)
       return null;
     const saved = readFileSync3(path, "utf8");
-    if (saved.length !== chars || lines !== null && saved.split(`
-`).length !== lines)
+    if (saved.length !== chars || lines !== null && !hasLines(saved, lines))
       return null;
     if (typeof toolResponse === "string")
       return saved;

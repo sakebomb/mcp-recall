@@ -1400,6 +1400,14 @@ describe("handlePostToolUse — MCP result saved to a file (#391)", () => {
     expect(delivered).not.toContain("exceeds maximum allowed tokens");
   });
 
+  it("accepts either line count for a file that ends in a newline", () => {
+    // Whether Claude Code counts the empty segment after a final newline is not known.
+    const ended = `${full}\n${full}\n`;
+    writeFileSync(savedPath, ended);
+    expect(run(notice(savedPath, ended.length, 2)).row?.full_content).toBe(ended);
+    expect(run(notice(savedPath, ended.length, 3)).row?.full_content).toBe(ended);
+  });
+
   it("passes the notice through whole when its line count does not match the file", () => {
     expect(run(notice(savedPath, full.length, 2)).result).toEqual({});
   });
