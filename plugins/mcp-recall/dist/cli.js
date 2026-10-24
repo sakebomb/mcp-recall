@@ -7320,6 +7320,7 @@ var MAX_MESSAGE_LEN = 100;
 var TSC_RE = /^(\S+?)\((\d+),(\d+)\):\s+(error|warning)\s+TS\d+:\s+(.+)$/;
 var FILE_LOC_RE = /^(\S*\.\w+):(\d+)(?::(\d+))?:\s+(?:(error|warning|note):\s+)?(.+)$/;
 var SEVERITY_RE = /^(error|warning)(?:\[[A-Za-z]?\d+\])?:\s+(.+)$/;
+var RUFF_CODE_RE = /^[A-Z]{1,4}\d{3,4} \S.*$/;
 var CARGO_LOC_RE = /^\s*-->\s+(\S+:\d+(?::\d+)?)/;
 var ESLINT_FILE_RE = /^(\/?\S+\.\w+)$/;
 var ESLINT_RE = /^\s+(\d+):(\d+)\s+(error|warning)\s+(.+?)(?:\s{2,}[\w./-]+)?$/;
@@ -7383,6 +7384,10 @@ ${stderr}`;
     }
     if (m = t.match(SEVERITY_RE)) {
       diagnostics.push({ severity: m[1], location: null, message: clip(m[2]), labeled: true });
+      continue;
+    }
+    if (RUFF_CODE_RE.test(t)) {
+      diagnostics.push({ severity: "error", location: null, message: clip(t), labeled: true });
       continue;
     }
     if (m = t.match(CARGO_LOC_RE)) {

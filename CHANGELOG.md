@@ -32,6 +32,14 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ### Fixed
 
+- **`ruff check` summaries keep each diagnostic** (#397). Ruff's default
+  output format puts the rule code and message on one line and the location on
+  a ` --> ` line under it. mcp-recall parsed only the one-line
+  `path:line:col: CODE message` form, so a run with 90 diagnostics was
+  summarized to its error count alone. Each diagnostic is now listed with its
+  location and rule code. On the quality benchmark's ruff case, facts kept go
+  from 0.0% to 22.8%, against 9.8% for a head cut to the same size.
+
 - **Large MCP results are stored, not the notice that replaces them** (#391).
   Above 25,000 tokens or 50,000 characters, Claude Code saves an MCP result to
   the session's `tool-results` directory and hands the hook a notice naming
