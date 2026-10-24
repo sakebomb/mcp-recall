@@ -1818,6 +1818,39 @@ describe("compilerDiagnosticsHandler", () => {
     expect(summary).toContain("app.py:1");
   });
 
+  it("keeps each diagnostic of ruff's default full format with its --> location", () => {
+    const stdout = [
+      "F401 [*] `os` imported but unused",
+      " --> svc/mod0.py:1:8",
+      "  |",
+      "1 | import os",
+      "  |        ^^",
+      "help: Remove unused import: `os`",
+      "",
+      "F821 Undefined name `fallback_0`",
+      " --> svc/mod0.py:6:55",
+      "  |",
+      "6 |     return json.loads(open(path).read()) if path else fallback_0",
+      "  |                                                       ^^^^^^^^^^",
+      "",
+      "Found 2 errors.",
+      "[*] 1 fixable with the `--fix` option.",
+    ].join("\n");
+    const { summary } = compilerDiagnosticsHandler("Bash", makeOutput(stdout, "", 1));
+    expect(summary).toContain("2 errors");
+    expect(summary).toContain("svc/mod0.py:1:8 — F401 [*] `os` imported but unused");
+    expect(summary).toContain("svc/mod0.py:6:55 — F821 Undefined name `fallback_0`");
+    expect(summary).not.toContain("help:");
+    expect(summary).not.toContain("^^");
+  });
+
+  it("does not turn a rule-code-shaped line into an error on a run that passed", () => {
+    const stdout = ["D100 checks are advisory in this project", "Build finished."].join("\n");
+    const { summary } = compilerDiagnosticsHandler("Bash", makeOutput(stdout, "", 0));
+    expect(summary).not.toContain("D100");
+    expect(summary).not.toContain("error");
+  });
+
   it("reports a clean run with only warnings as success", () => {
     const stderr = [
       "warning: unused variable: `y`",

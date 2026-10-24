@@ -41,6 +41,9 @@ const TSC_RE = /^(\S+?)\((\d+),(\d+)\):\s+(error|warning)\s+TS\d+:\s+(.+)$/;
 const FILE_LOC_RE = /^(\S*\.\w+):(\d+)(?::(\d+))?:\s+(?:(error|warning|note):\s+)?(.+)$/;
 // rustc / cargo bare severity: "error[E0308]: message" / "warning: message"
 const SEVERITY_RE = /^(error|warning)(?:\[[A-Za-z]?\d+\])?:\s+(.+)$/;
+// ruff's default (full) format: "F401 [*] `os` imported but unused", its location on
+// the "  --> path:line:col" line that follows, as cargo does.
+const RUFF_CODE_RE = /^[A-Z]{1,4}\d{3,4} \S.*$/;
 // cargo location line that follows a bare-severity line: "  --> src/main.rs:10:5"
 const CARGO_LOC_RE = /^\s*-->\s+(\S+:\d+(?::\d+)?)/;
 // eslint stylish file header (a bare path on its own line)
@@ -106,7 +109,14 @@ export const compilerDiagnosticsHandler: Handler = (
       diagnostics.push({ severity: m[1] as Diagnostic["severity"], location: null, message: clip(m[2]!), labeled: true });
       continue;
     }
-    // --- cargo "  --> loc" attaches to the previous locationless diagnostic ---
+    // --- ruff full format: a rule code opens a diagnostic; its --> line follows ---
+    // Unlabeled: the shape is generic enough that another tool can print it, so on a
+    // clean exit it is dropped like a go-style line rather than shown as an error.
+    if (RUFF_CODE_RE.test(t)) {
+      diagnostics.push({ severity: "error", location: null, message: clip(t), labeled: false });
+      continue;
+    }
+    // --- cargo / ruff "  --> loc" attaches to the previous locationless diagnostic ---
     if ((m = t.match(CARGO_LOC_RE))) {
       const last = diagnostics[diagnostics.length - 1];
       if (last && last.location === null) last.location = m[1]!;
