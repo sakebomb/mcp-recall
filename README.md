@@ -12,9 +12,9 @@
 
 **Your context window is finite. Tool outputs aren't. mcp-recall bridges the gap.**
 
-MCP tool outputs (Playwright snapshots, GitHub API responses, Linear queries) and long Bash output can consume tens of kilobytes of context per call, and a busy session fills even a large context window long before the work is done. mcp-recall intercepts those outputs, stores them in full locally, and delivers compressed summaries to Claude instead. When Claude needs more detail, it retrieves exactly what it needs via full-text search, without re-running the tool.
+MCP tool outputs (Playwright snapshots, GitHub API responses, Linear queries) and long Bash output can consume tens of kilobytes of context per call, and a busy session fills even a large context window long before the work is done. mcp-recall intercepts those outputs, stores them in full locally, and delivers compressed summaries to Claude instead. When Claude needs more detail, it can search the stored output and retrieve it, without re-running the tool.
 
-The goal is sessions that run for hours instead of hitting the context limit in minutes. [Results](#results) shows what is measured today.
+The goal is sessions that run for hours instead of hitting the context limit in minutes. [Results](#results) shows what is measured today, and the [quality benchmark](docs/benchmarks.md) what the summaries keep.
 
 ![mcp-recall demo](demo/demo.gif)
 
@@ -110,6 +110,10 @@ Measured on 2026-10-13 across one developer's real store: 121 project stores, 10
 
 **The Bash rows overstate what 1.16.0 saves.** They were recorded by earlier releases. 1.16.0 delivers more Bash output whole: content reads (`cat`, `git diff`) and reads you bounded (`| head`, `sed -n`) of 8 KB or less, and any summary that would save under 25%. Most Bash bodies are not stored, so `measure` cannot replay them under the new rules. In a replay of recorded `gh` and `cd …` results, the 25% rule alone delivered 0.3–0.5% more of the input.
 
+### What the summaries keep
+
+Bytes saved don't show whether a summary kept what mattered. The [quality benchmark](docs/benchmarks.md) scores that on a public corpus anyone can rerun with `bun run quality`: the facts kept against a head cut of the same size, false claims, and how often one search recovers what a summary cut. It names every family where mcp-recall does no better than the head cut.
+
 ### What compresses well, and what doesn't
 
 The reduction depends on the shape of the output, not on how large it is. Long, structured, repetitive output compresses well. Short or one-off output has little to remove.
@@ -152,9 +156,7 @@ Command-aware Bash compression, per-output on representative fixtures (regenerat
 | `git --no-pager diff` (18 files) | 4.1 KB | 3.2 KB | 22.3% | 2/2 |
 | `ssh host 'cd /srv && git diff'` (18 files) | 4.1 KB | 3.2 KB | 22.3% | — |
 
-These show what each handler produces. *Facts kept* counts the facts a fixture lists in `scripts/benchmark.ts` that are still in the summary: the error count and the last error for `tsc`, the last file and an added line for `git diff`, the total and the last path for `find`. A miss is a fact Claude would have to retrieve. From 1.16.0 the hook delivers a diff or file read of 8 KB or less whole, so the `git diff` fixture above would reach Claude unsummarised. The `ssh` rows reach the same handler as the local command since 1.17.0. The `git diff` rows keep the hunks themselves, with only the `index` and `---`/`+++` lines dropped: a larger diff delivers 4 KB of hunks shared across its files, plus a per-file list of what was cut. The `journalctl -b -1` row costs the most for what it keeps: the shell fallback keeps the first 25 lines, then the error/warn lines past them, which carry the failure ([#358](https://github.com/sakebomb/mcp-recall/issues/358)). These are per-output compression ratios, not a whole-session token figure — most outputs are smaller and the generic fallback already caps long output. That is why the measured Bash figure above (59.2%) is lower. For your own session savings, read `recall__stats` (which counts intercepted output only).
-
-Used daily in development of this project since the first release in March 2026. No broken sessions, no data loss.
+These show what each handler produces on hand-written fixtures; the [quality benchmark](docs/benchmarks.md) is the measured fidelity score. *Facts kept* counts the facts a fixture lists in `scripts/benchmark.ts` that are still in the summary: the error count and the last error for `tsc`, the last file and an added line for `git diff`, the total and the last path for `find`. A miss is a fact Claude would have to retrieve. From 1.16.0 the hook delivers a diff or file read of 8 KB or less whole, so the `git diff` fixture above would reach Claude unsummarised. The `ssh` rows reach the same handler as the local command since 1.17.0. The `git diff` rows keep the hunks themselves, with only the `index` and `---`/`+++` lines dropped: a larger diff delivers 4 KB of hunks shared across its files, plus a per-file list of what was cut. The `journalctl -b -1` row costs the most for what it keeps: the shell fallback keeps the first 25 lines, then the error/warn lines past them, which carry the failure ([#358](https://github.com/sakebomb/mcp-recall/issues/358)). These are per-output compression ratios, not a whole-session token figure — most outputs are smaller and the generic fallback already caps long output. That is why the measured Bash figure above (59.2%) is lower. For your own session savings, read `recall__stats` (which counts intercepted output only).
 
 ---
 ## Profiles
@@ -229,7 +231,7 @@ mcp-recall completions zsh > ~/.zfunc/_mcp-recall
 
 ### Scope
 
-**Compression applies to MCP tools and the native Bash built-in.** MCP tools (`mcp__*`, except mcp-recall's own) go through a dedicated handler, a profile, or a structure-aware fallback. Bash output is routed on the command: `git diff`, test runners, compilers and linters, `grep`, `ls` and more each get a summary that keeps what matters, such as failures and errors first. The [handler reference](docs/handlers.md) lists every handler and what it keeps.
+**Compression applies to MCP tools and the native Bash built-in.** MCP tools (`mcp__*`, except mcp-recall's own) go through a dedicated handler, a profile, or a structure-aware fallback. Bash output is routed on the command: `git diff`, test runners, compilers and linters, `grep`, `ls` and more each get a summary built to put failures and errors first ([how well that holds](docs/benchmarks.md)). The [handler reference](docs/handlers.md) lists every handler and what it keeps.
 
 The remaining built-in tools — `Read`, `Grep`, `Glob` — pass through unchanged, and their full output enters context directly. If large file reads are your biggest context consumer, consider the [filesystem MCP server](https://github.com/modelcontextprotocol/servers) instead of the built-in Read tool.
 
