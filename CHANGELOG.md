@@ -49,7 +49,8 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   outputs never reached the store, and its summary cut Claude Code's
   instructions for reading the file. It now reads the file back when the path
   is in a `tool-results` directory and the file holds exactly the number of
-  characters the notice states. It then summarizes and stores the real
+  characters the notice states, and of lines when it gives them, as Claude
+  Code 2.1.305 does (#401). It then summarizes and stores the real
   result. Otherwise the notice passes through whole. The README and ROADMAP no
   longer say Claude Code discards MCP output above 25k tokens: it saves it to
   a file.

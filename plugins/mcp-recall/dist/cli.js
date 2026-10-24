@@ -9479,22 +9479,25 @@ function withPersistedOutput(toolResponse) {
     return toolResponse;
   }
 }
-var SAVED_RESULT_RE = /^Error: result \(([\d,]+) characters\) exceeds maximum allowed tokens\. Output has been saved to (.+?)\.(?:\n|$)/;
+var SAVED_RESULT_RE = /^Error: result \(([\d,]+) characters(?: across ([\d,]+) lines?)?\) exceeds maximum allowed tokens\. Output has been saved to (.+?)\.(?:\n|$)/;
 function withSavedMcpResult(toolResponse) {
   const blocks = asMcpContentBlocks(toolResponse);
   const text = blocks ? joinTextBlocks(blocks) : typeof toolResponse === "string" ? toolResponse : "";
   const match = text.match(SAVED_RESULT_RE);
   if (!match)
     return toolResponse;
-  const chars = Number(match[1].replace(/,/g, ""));
-  const path = match[2];
+  const count = (s) => Number(s.replace(/,/g, ""));
+  const chars = count(match[1]);
+  const lines = match[2] === undefined ? null : count(match[2]);
+  const path = match[3];
   if (!isAbsolute2(path) || basename2(dirname3(path)) !== "tool-results")
     return null;
   try {
     if (statSync4(path).size > MAX_PERSISTED_BYTES)
       return null;
     const saved = readFileSync3(path, "utf8");
-    if (saved.length !== chars)
+    if (saved.length !== chars || lines !== null && saved.split(`
+`).length !== lines)
       return null;
     if (typeof toolResponse === "string")
       return saved;
