@@ -1,8 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import { spawnSync } from "child_process";
 import { readFileSync } from "fs";
-import { join } from "path";
-import { contradicts, controlsBroken, facts, keptShare, loadCorpus, type Fact, type FamilyScore } from "../scripts/quality";
+import { dirname, join } from "path";
+import { controlsBroken, loadCorpus, type FamilyScore } from "../scripts/quality";
+import { contradicts, facts, keptShare, type Fact } from "../scripts/quality-facts";
 
 const texts = (fs: Fact[]) => fs.map((f) => f.text);
 
@@ -42,6 +43,52 @@ describe("facts", () => {
     expect(texts(oneline)).toEqual(["abc1234", "fix: one (#1)", "def5678", "feat: two (#2)"]);
     const full = facts("git-log", "commit 0123456789abcdef0123456789abcdef01234567\nAuthor: A <a@x>\nDate:   Thu\n\n    fix: one (#1)\n\n    Why: body.\n");
     expect(texts(full)).toEqual(["0123456", "fix: one (#1)"]);
+  });
+
+  it("takes failing pytest ids, the exception lines and each count of the final summary", () => {
+    const raw = [
+      "E       AssertionError: compute(44) drifted", "E       assert 133 == 132",
+      "FAILED tests/test_mod4.py::test_compute_4_4 - AssertionError: compute(44) dri...", "ERROR tests/test_billing.py",
+      "=================== 19 failed, 181 passed, 1 error in 0.10s ===================",
+    ].join("\n");
+    expect(texts(facts("pytest", raw))).toEqual([
+      "tests/test_mod4.py::test_compute_4_4", "tests/test_billing.py", "19 failed", "181 passed", "1 error", "AssertionError: compute(44) drifted",
+    ]);
+  });
+
+  it("takes the counts of a quiet pytest summary, which has no banner", () => {
+    expect(texts(facts("pytest", "..F.\n1 failed, 3 passed in 0.10s"))).toEqual(["1 failed", "3 passed"]);
+  });
+
+  it("takes failing cargo tests, each panic's location and message, and the result counts", () => {
+    const raw = [
+      "test tests::scales_input_7 ... FAILED", "test tests::scales_input_8 ... ok",
+      "thread 'tests::scales_input_7' (1000) panicked at src/lib.rs:46:9:", "assertion `left == right` failed: scale(7) is off",
+      "test result: FAILED. 75 passed; 5 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s",
+    ].join("\n");
+    expect(texts(facts("cargo-test", raw))).toEqual([
+      "tests::scales_input_7", "src/lib.rs:46:9", "assertion `left == right` failed: scale(7) is off", "75 passed", "5 failed",
+    ]);
+  });
+
+  it("takes each file a formatter would change and its summary count", () => {
+    const raw = "would reformat /work/app/h1.py\nwould reformat /work/app/h9.py\n\nOh no!\n45 files would be reformatted, 75 files would be left unchanged.";
+    expect(texts(facts("format", raw))).toEqual(["/work/app/h1.py", "/work/app/h9.py", "45 files would be reformatted"]);
+  });
+
+  it("takes each lint location in full or concise format, and each distinct diagnostic", () => {
+    const full = "F401 [*] `os` imported but unused\n --> svc/mod0.py:1:8\n  |\nF401 [*] `os` imported but unused\n --> svc/mod1.py:1:8\nFound 2 errors.";
+    expect(texts(facts("lint", full))).toEqual(["F401 [*] `os` imported but unused", "svc/mod0.py:1:8", "svc/mod1.py:1:8", "Found 2 errors."]);
+    expect(texts(facts("lint", "svc/a.py:3:1: E302 expected 2 blank lines"))).toEqual(["svc/a.py:3:1"]);
+  });
+
+  it("takes each frame of a traceback, the exception and that it crashed, not the log lines before it", () => {
+    const raw = "INFO batch 1: processed 17 records\nTraceback (most recent call last):\n  File \"/work/job.py\", line 48, in step_11\n    return record[\"user_id\"]\nKeyError: 'user_id'";
+    expect(texts(facts("crash", raw))).toEqual(['File "/work/job.py", line 48, in step_11', "KeyError: 'user_id'", "Traceback (most recent call last):"]);
+  });
+
+  it("takes each grep match's file and line", () => {
+    expect(texts(facts("grep", "src/a.ts:7:  // TODO x\nsrc/b.ts:18:  // TODO y"))).toEqual(["src/a.ts:7", "src/b.ts:18"]);
   });
 
   it("adds error lines whatever the family, without duplicates", () => {
@@ -85,6 +132,20 @@ describe("contradicts", () => {
     expect(contradicts(merge, "2 unmerged paths")).toBe(false);
   });
 
+  it("flags a match count that disagrees with the matching lines shown", () => {
+    const grep = "src/a.ts:7:  // TODO x\nsrc/b.ts:18:  // TODO y\nsrc/b.ts:29:  // TODO z";
+    expect(contradicts(grep, "40 matches in 2 files")).toBe(true);
+    expect(contradicts(grep, "3 matches in 2 files")).toBe(false);
+  });
+
+  it("does not check a match count against output that is not all match lines", () => {
+    expect(contradicts("src/a.ts:7:  // TODO x\nnot a match line", "40 matches")).toBe(false);
+  });
+
+  it("does not flag a match count the output itself contains", () => {
+    expect(contradicts("src/a.ts:7:  // keep 40 matches at most", "src/a.ts:7 keep 40 matches at most")).toBe(false);
+  });
+
   it("does not flag a merge summary for naming a file the output lists", () => {
     const withPath = `${merge}\tmodified:   src/clean.ts\n`;
     expect(contradicts(withPath, "conflicts (1): a.ts\nunstaged (1): src/clean.ts")).toBe(false);
@@ -105,6 +166,22 @@ describe("controlsBroken", () => {
 
   it("fails when pass-through misses a fact, which means an extractor invented it", () => {
     expect(controlsBroken([row("git-diff", 0.8, 0.1, 0.99)])).toContain("pass-through");
+  });
+});
+
+describe("the fact rules", () => {
+  it("reach no module under src/ through static imports", () => {
+    const seen = new Set<string>();
+    const walk = (file: string): void => {
+      if (seen.has(file)) return;
+      seen.add(file);
+      const text = readFileSync(file, "utf8");
+      for (const [, spec] of text.matchAll(/^import [^;]*? from "(\.[^"]+)";/gm)) walk(join(dirname(file), `${spec.replace(/\.ts$/, "")}.ts`));
+    };
+    const root = join(import.meta.dir, "../scripts/quality-facts.ts");
+    walk(root);
+    expect([...seen].filter((f) => f.includes("/src/"))).toEqual([]);
+    expect(readFileSync(root, "utf8")).not.toMatch(/\bimport\(/);
   });
 });
 
