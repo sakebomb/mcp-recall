@@ -7387,7 +7387,7 @@ ${stderr}`;
       continue;
     }
     if (RUFF_CODE_RE.test(t)) {
-      diagnostics.push({ severity: "error", location: null, message: clip(t), labeled: true });
+      diagnostics.push({ severity: "error", location: null, message: clip(t), labeled: false });
       continue;
     }
     if (m = t.match(CARGO_LOC_RE)) {

@@ -1844,6 +1844,13 @@ describe("compilerDiagnosticsHandler", () => {
     expect(summary).not.toContain("^^");
   });
 
+  it("does not turn a rule-code-shaped line into an error on a run that passed", () => {
+    const stdout = ["D100 checks are advisory in this project", "Build finished."].join("\n");
+    const { summary } = compilerDiagnosticsHandler("Bash", makeOutput(stdout, "", 0));
+    expect(summary).not.toContain("D100");
+    expect(summary).not.toContain("error");
+  });
+
   it("reports a clean run with only warnings as success", () => {
     const stderr = [
       "warning: unused variable: `y`",

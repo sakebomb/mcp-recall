@@ -110,8 +110,10 @@ export const compilerDiagnosticsHandler: Handler = (
       continue;
     }
     // --- ruff full format: a rule code opens a diagnostic; its --> line follows ---
+    // Unlabeled: the shape is generic enough that another tool can print it, so on a
+    // clean exit it is dropped like a go-style line rather than shown as an error.
     if (RUFF_CODE_RE.test(t)) {
-      diagnostics.push({ severity: "error", location: null, message: clip(t), labeled: true });
+      diagnostics.push({ severity: "error", location: null, message: clip(t), labeled: false });
       continue;
     }
     // --- cargo / ruff "  --> loc" attaches to the previous locationless diagnostic ---
