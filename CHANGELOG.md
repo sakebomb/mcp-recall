@@ -16,8 +16,10 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   output by rules that share no code with the handlers. It also counts false
   claims. The run fails if pass-through loses a fact, or if the first line is
   not below mcp-recall in every family. CI fails when `benchmark/results.md`
-  differs from what the corpus produces. The corpus is scripted git cases so
-  far; more command families and public samples follow.
+  differs from what the corpus produces. The corpus is scripted so far: git
+  status, diff and log, pytest (failures and a collection error), cargo test,
+  black, ruff, a Python crash after a long log, and grep. Public samples and
+  MCP output follow.
 
 ### Changed
 

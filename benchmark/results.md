@@ -7,14 +7,22 @@ Facts kept: the mean, over a family's cases, of the share of each case's facts s
 
 | Family | Cases (compressed) | Facts | mcp-recall | Head, same size | First line | Pass-through | False claims: mcp-recall · head | Reduction |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cargo-test | 1 (1) | 18 | 55.6% | 11.1% | 0.0% | 100.0% | 0 · 0 | 61.9% |
+| crash | 1 (1) | 15 | 53.3% | 0.0% | 0.0% | 100.0% | 0 · 0 | 85.7% |
+| format | 1 (1) | 46 | 43.5% | 52.2% | 0.0% | 100.0% | 0 · 0 | 47.4% |
 | git-diff | 2 (2) | 211 | 17.1% | 19.6% | 1.0% | 100.0% | 0 · 0 | 82.0% |
 | git-log | 2 (2) | 460 | 38.3% | 12.0% | 1.1% | 100.0% | 0 · 0 | 88.1% |
 | git-status | 3 (3) | 255 | 71.7% | 46.8% | 1.3% | 100.0% | 0 · 0 | 49.3% |
+| grep | 1 (1) | 219 | 11.4% | 12.3% | 0.5% | 100.0% | 0 · 0 | 87.6% |
+| lint | 1 (1) | 123 | 22.8% | 9.8% | 0.8% | 100.0% | 0 · 0 | 91.6% |
+| pytest | 2 (2) | 46 | 35.8% | 0.0% | 0.0% | 100.0% | 0 · 0 | 91.0% |
 
 ## Cases
 
 | Case | Family | Command | Bytes | Source | Made with |
 | --- | --- | --- | --- | --- | --- |
+| black-check-would-reformat | format | `black --check --workers 1 app` | 1935 | scripted: `black --check` over 120 modules, 45 of which need reformatting, exiting 1 | black, 25.12.0 (compiled: yes) |
+| cargo-test-failures | cargo-test | `cargo test --offline -- --test-threads=1` | 4325 | scripted: a crate with 80 unit tests, 5 failing on assert_eq with their panic messages | cargo 1.98.0 (797e8a9bc 2026-08-05) |
 | git-diff-many-files | git-diff | `git diff` | 36296 | scripted: an unstaged edit touching 24 files, a few changed lines in each | git version 2.43.0 |
 | git-diff-one-large-file | git-diff | `git diff` | 33861 | scripted: one file rewritten across many hunks | git version 2.43.0 |
 | git-log-oneline-200 | git-log | `git log --oneline` | 8771 | scripted: 200 commits listed one per line | git version 2.43.0 |
@@ -22,9 +30,15 @@ Facts kept: the mean, over a family's cases, of the share of each case's facts s
 | git-status-many-changes | git-status | `git status` | 4241 | scripted: a refactor in progress: 90 modified files over 9 directories, 4 deleted, 1 renamed, 25 untracked | git version 2.43.0 |
 | git-status-merge-conflict | git-status | `git status` | 1666 | scripted: a merge stopped on two conflicts, beside 41 unstaged edits, one staged file and untracked files | git version 2.43.0 |
 | git-status-short-many | git-status | `git status -s` | 2987 | scripted: the same refactor shown with `git status -s` | git version 2.43.0 |
+| grep-todo-many-files | grep | `grep -rn TODO src` | 15595 | scripted: `grep -rn` for TODO across 60 files, 219 matching lines | grep (GNU grep) 3.11 |
+| pytest-collection-error | pytest | `pytest -v -p no:cacheprovider --rootdir=. --continue-on-collection-errors` | 13026 | scripted: 150 passing tests printed verbosely, and one module that fails to import | pytest 8.3.5 |
+| pytest-many-failures | pytest | `pytest -p no:cacheprovider --rootdir=.` | 9988 | scripted: 200 tests over 20 modules, 19 failing on assertions, each with its traceback | pytest 8.3.5 |
+| python-crash-after-logs | crash | `python3 job.py` | 12224 | scripted: a script that logs 300 lines, then dies with a KeyError 12 frames deep | Python 3.12.3 |
+| ruff-check-violations | lint | `ruff check --no-cache svc` | 18456 | scripted: `ruff check` over 30 modules with unused imports and undefined names | ruff 0.17.2 |
 
 ## Limits
 
-- Scripted git cases only so far: this table shows the harness works, not mcp-recall's quality across workloads.
+- Scripted cases only so far, one or a few per family. No public sample and no MCP output yet, so this table
+  shows where mcp-recall gains and loses on known shapes, not its quality across workloads.
 - Matching is literal (or one fixed pattern per state fact), so a correct paraphrase scores as lost.
 - Retrieval is not credited: mcp-recall can return the stored output on request.
