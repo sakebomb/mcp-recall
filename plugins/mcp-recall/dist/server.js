@@ -20003,20 +20003,21 @@ function parseMarks(marked) {
 }
 function retrieveMatchWindow(db, id, query, width) {
   const safeQuery = sanitizeFtsQuery(query);
+  const place = (row) => row.raw.includes(MARK_OPEN) || row.raw.includes(MARK_CLOSE) ? { text: row.raw.slice(0, width), cutStart: false, cutEnd: row.raw.length > width } : windowAroundMatches(row.marked, width);
   try {
     const chunk = db.prepare(`
-      SELECT highlight(content_chunks, 2, ?, ?) AS marked FROM content_chunks
+      SELECT content AS raw, highlight(content_chunks, 2, ?, ?) AS marked FROM content_chunks
       WHERE content_chunks MATCH ? AND output_id = ?
       ORDER BY rank
       LIMIT 1
     `).get(MARK_OPEN, MARK_CLOSE, safeQuery, id);
     if (chunk)
-      return windowAroundMatches(chunk.marked, width);
+      return place(chunk);
     const doc2 = db.prepare(`
-      SELECT highlight(outputs_fts, 3, ?, ?) AS marked FROM outputs_fts
+      SELECT full_content AS raw, highlight(outputs_fts, 3, ?, ?) AS marked FROM outputs_fts
       WHERE outputs_fts MATCH ? AND rowid = (SELECT rowid FROM stored_outputs WHERE id = ?)
     `).get(MARK_OPEN, MARK_CLOSE, safeQuery, id);
-    return doc2 ? windowAroundMatches(doc2.marked, width) : null;
+    return doc2 ? place(doc2) : null;
   } catch {
     return null;
   }

@@ -445,20 +445,26 @@ export function retrieveMatchWindow(
   width: number
 ): MatchWindow | null {
   const safeQuery = sanitizeFtsQuery(query);
+  // Content that already holds a marker code point (nerd-font icons share the
+  // range) cannot be parsed back, so it keeps its opening characters instead.
+  const place = (row: { raw: string; marked: string }): MatchWindow =>
+    row.raw.includes(MARK_OPEN) || row.raw.includes(MARK_CLOSE)
+      ? { text: row.raw.slice(0, width), cutStart: false, cutEnd: row.raw.length > width }
+      : windowAroundMatches(row.marked, width);
   try {
     const chunk = db.prepare(`
-      SELECT highlight(content_chunks, 2, ?, ?) AS marked FROM content_chunks
+      SELECT content AS raw, highlight(content_chunks, 2, ?, ?) AS marked FROM content_chunks
       WHERE content_chunks MATCH ? AND output_id = ?
       ORDER BY rank
       LIMIT 1
-    `).get(MARK_OPEN, MARK_CLOSE, safeQuery, id) as { marked: string } | null;
-    if (chunk) return windowAroundMatches(chunk.marked, width);
+    `).get(MARK_OPEN, MARK_CLOSE, safeQuery, id) as { raw: string; marked: string } | null;
+    if (chunk) return place(chunk);
 
     const doc = db.prepare(`
-      SELECT highlight(outputs_fts, 3, ?, ?) AS marked FROM outputs_fts
+      SELECT full_content AS raw, highlight(outputs_fts, 3, ?, ?) AS marked FROM outputs_fts
       WHERE outputs_fts MATCH ? AND rowid = (SELECT rowid FROM stored_outputs WHERE id = ?)
-    `).get(MARK_OPEN, MARK_CLOSE, safeQuery, id) as { marked: string } | null;
-    return doc ? windowAroundMatches(doc.marked, width) : null;
+    `).get(MARK_OPEN, MARK_CLOSE, safeQuery, id) as { raw: string; marked: string } | null;
+    return doc ? place(doc) : null;
   } catch {
     return null; // FTS parse error
   }

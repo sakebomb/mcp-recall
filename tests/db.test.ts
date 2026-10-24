@@ -1304,6 +1304,15 @@ describe("db", () => {
       expect(w!.text).toContain("spanbeta");
     });
 
+    it("keeps content that already holds the marker code points intact", () => {
+      // Nerd-font icons (e.g. `eza --icons`) live in the same private-use range.
+      const content = " folder " + "z ".repeat(100) + "iconhit";
+      const stored = storeOutput(db, makeInput({ full_content: content }));
+      const w = retrieveMatchWindow(db, stored.id, "iconhit", 40);
+      expect(w!.text).toBe(content.slice(0, 40));
+      expect(w!.cutStart).toBe(false);
+    });
+
     it("places the window on items stored before chunking", () => {
       const now = Math.floor(Date.now() / 1000);
       db.prepare(`
