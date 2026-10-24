@@ -6515,18 +6515,32 @@ function allocate(needs, budget) {
 function fitObject(obj, budget) {
   const entries = Object.entries(obj);
   const keyCosts = entries.map(([k]) => size(k) + 2);
-  const budgets = allocate(entries.map(([, v], i) => keyCosts[i] + size(v)), budget - 2 - 24);
+  const needs = entries.map(([, v], i) => keyCosts[i] + size(v));
+  const available = budget - 2 - 24;
+  const budgets = allocate(needs, available);
+  if (budgets.some((b, i) => b < needs[i] && b - keyCosts[i] < MIN_PART))
+    return fitFieldsInOrder(entries, available);
+  return Object.fromEntries(entries.map(([k, v], i) => [k, fit(v, budgets[i] - keyCosts[i])]));
+}
+function fitFieldsInOrder(entries, budget) {
   const out = {};
-  let dropped = 0;
-  entries.forEach(([k, v], i) => {
-    const valueBudget = budgets[i] - keyCosts[i];
-    if (valueBudget < MIN_PART && size(v) > valueBudget)
-      dropped++;
-    else
-      out[k] = fit(v, valueBudget);
-  });
-  if (dropped > 0)
-    out["\u2026more fields"] = dropped;
+  let remaining = budget;
+  let shown = 0;
+  for (;shown < entries.length && remaining >= MIN_PART; shown++) {
+    const [k, v] = entries[shown];
+    const keyCost = size(k) + 2;
+    const valueBudget = share(remaining, entries.length - shown) - keyCost;
+    if (size(v) > valueBudget && valueBudget < SHARE_FLOOR)
+      break;
+    const fitted = fit(v, valueBudget);
+    const used = keyCost + size(fitted);
+    if (used > remaining)
+      break;
+    out[k] = fitted;
+    remaining -= used;
+  }
+  if (shown < entries.length)
+    out["\u2026more fields"] = entries.length - shown;
   return out;
 }
 function fit(value, budget) {

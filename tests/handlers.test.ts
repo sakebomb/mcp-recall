@@ -280,6 +280,15 @@ describe("jsonHandler", () => {
     expect(shown[1]).toEqual({ path: "owner0/dataset-number-0", likes: 0, updated_at: "2026-10-01" });
   });
 
+  it("shows the first fields of an object too wide for the budget, and counts the rest", () => {
+    const wide = Object.fromEntries(Array.from({ length: 2000 }, (_, i) => [`name_${i}`, { id: i, title: `item number ${i}` }]));
+    const shown = JSON.parse(jsonHandler("mcp__some__tool", JSON.stringify(wide)).summary);
+    expect(shown.name_0).toEqual({ id: 0, title: "item number 0" });
+    const fields = Object.keys(shown).filter((k) => k.startsWith("name_")).length;
+    expect(fields).toBeGreaterThan(50);
+    expect(shown["…more fields"]).toBe(2000 - fields);
+  });
+
   it("preserves a small document unchanged", () => {
     const obj = { items: [1, 2], nested: { list: [{ a: 1 }, { a: 1 }] } };
     const { summary } = jsonHandler("mcp__some__tool", JSON.stringify(obj));
