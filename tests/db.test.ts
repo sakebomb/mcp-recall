@@ -11,6 +11,8 @@ import {
   evictIfNeeded,
   retrievePeek,
   retrieveSnippet,
+  retrieveMatchWindow,
+  windowAroundMatches,
   searchOutputs,
   listOutputs,
   forgetOutputs,
@@ -1229,6 +1231,98 @@ describe("db", () => {
     it("returns null when query matches no chunk and no legacy FTS entry", () => {
       const stored = storeOutput(db, makeInput({ full_content: "completely different content" }));
       expect(retrieveSnippet(db, stored.id, "zzznomatch")).toBeNull();
+    });
+  });
+
+  describe("windowAroundMatches", () => {
+    const mark = (s: string) => `${s}`;
+
+    it("returns the first width characters of unmarked text, cut at the end only", () => {
+      expect(windowAroundMatches("a".repeat(20), 10)).toEqual({ text: "a".repeat(10), cutStart: false, cutEnd: true });
+    });
+
+    it("clamps a match near the end so the window stays full and uncut there", () => {
+      const w = windowAroundMatches("a".repeat(40) + mark("hit"), 10);
+      expect(w).toEqual({ text: "a".repeat(7) + "hit", cutStart: true, cutEnd: false });
+    });
+
+    it("keeps a match at the very start uncut on the left", () => {
+      const w = windowAroundMatches(mark("hit") + "b".repeat(40), 10);
+      expect(w.text.startsWith("hit")).toBe(true);
+      expect(w.cutStart).toBe(false);
+    });
+
+    it("prefers covering more distinct terms over more repeats of one", () => {
+      const w = windowAroundMatches(`${mark("fn")} ${mark("fn")} ${mark("fn")}` + "-".repeat(30) + `${mark("fn")} ${mark("unit7")}`, 12);
+      expect(w.text).toContain("fn unit7");
+    });
+
+    it("breaks a tie on distinct terms with the tightest cluster", () => {
+      // The first line shares every term but the last; the window must not drift onto it.
+      const line = (n: string) => `${mark("export")} ${mark("fn")} ${n}(${mark("x")});`;
+      const w = windowAroundMatches(`${line("a1")} ${line(mark("a2"))} ${"-".repeat(40)}`, 22);
+      expect(w.text).toContain("export fn a2(x);");
+    });
+
+    it("survives a single match wider than the window", () => {
+      const w = windowAroundMatches("a".repeat(20) + mark("b".repeat(30)) + "c".repeat(20), 10);
+      expect(w.text.length).toBe(10);
+    });
+
+    it("stays fast over a document with thousands of matches", () => {
+      const doc = `${mark("hit")} `.repeat(50_000);
+      const t0 = performance.now();
+      windowAroundMatches(doc, 150);
+      expect(performance.now() - t0).toBeLessThan(500);
+    });
+
+    it("centers the match within the window", () => {
+      const w = windowAroundMatches("a".repeat(40) + mark("hit") + "b".repeat(40), 13);
+      expect(w.text).toBe("aaaaahitbbbbb");
+    });
+  });
+
+  describe("retrieveMatchWindow", () => {
+    it("places the window on a match deep in the chunk", () => {
+      const stored = storeOutput(db, makeInput({ full_content: "x ".repeat(150) + "deepword " + "y ".repeat(50) }));
+      const w = retrieveMatchWindow(db, stored.id, "deepword", 40);
+      expect(w!.text).toContain("deepword");
+      expect(w!.cutStart && w!.cutEnd).toBe(true);
+    });
+
+    it("returns null when nothing matches", () => {
+      const stored = storeOutput(db, makeInput({ full_content: "completely different content" }));
+      expect(retrieveMatchWindow(db, stored.id, "zzznomatch", 40)).toBeNull();
+    });
+
+    it("shows a match that straddles a chunk boundary", () => {
+      // Chunks are [0, 512) and [448, 960): spanalpha sits only in the first, spanbeta only in the second.
+      const content = "x".repeat(430) + " spanalpha " + "m".repeat(70) + " spanbeta " + "y".repeat(500);
+      const stored = storeOutput(db, makeInput({ full_content: content }));
+      const w = retrieveMatchWindow(db, stored.id, "spanalpha spanbeta", 120);
+      expect(w!.text).toContain("spanalpha");
+      expect(w!.text).toContain("spanbeta");
+    });
+
+    it("keeps content that already holds the marker code points intact", () => {
+      // Nerd-font icons (e.g. `eza --icons`) live in the same private-use range.
+      const content = " folder " + "z ".repeat(100) + "iconhit";
+      const stored = storeOutput(db, makeInput({ full_content: content }));
+      const w = retrieveMatchWindow(db, stored.id, "iconhit", 40);
+      expect(w!.text).toBe(content.slice(0, 40));
+      expect(w!.cutStart).toBe(false);
+    });
+
+    it("places the window on items stored before chunking", () => {
+      const now = Math.floor(Date.now() / 1000);
+      db.prepare(`
+        INSERT INTO stored_outputs
+          (id, project_key, session_id, tool_name, summary, full_content, original_size, summary_size, created_at)
+        VALUES ('recall_legacy02', ?, 'sess', 'mcp__tool', 'summary', ?, 100, 7, ?)
+      `).run(PROJECT_KEY, "z ".repeat(200) + "legacyhit tail", now);
+      const w = retrieveMatchWindow(db, "recall_legacy02", "legacyhit", 30);
+      expect(w!.text).toContain("legacyhit");
+      expect(w!.cutStart).toBe(true);
     });
   });
 
