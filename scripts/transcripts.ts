@@ -116,17 +116,36 @@ export async function loadHook(scratch: string, session: string, root = join(imp
   process.env.RECALL_DB_PATH = dbPath;
   process.env.RECALL_CONFIG_PATH = join(scratch, "config.toml");
   writeFileSync(process.env.RECALL_CONFIG_PATH, "[store]\nmax_size_mb = 100000\n");
+  // Profiles this machine has installed would beat the built-in handlers; only the bundled ones count.
+  process.env.RECALL_USER_PROFILES_PATH = join(scratch, "user-profiles");
+  process.env.RECALL_COMMUNITY_PROFILES_PATH = join(scratch, "community-profiles");
   const { handlePostToolUse } = await import(join(root, "src/hooks/post-tool-use"));
   const { getDb } = await import(join(root, "src/db/index"));
+  const { toolSearch } = await import(join(root, "src/tools"));
+  const { getProjectKey } = await import(join(root, "src/project-key"));
+
+  /** What Claude receives for a tool result, given what it would receive with no hook. */
+  function call(tool_name: string, tool_input: unknown, tool_response: unknown, unchanged: string): Delivery {
+    const r: any = handlePostToolUse(JSON.stringify({ session_id: session, cwd: scratch, hook_event_name: "PostToolUse", tool_name, tool_input, tool_response }));
+    const replaced = r?.hookSpecificOutput?.updatedToolOutput;
+    const delivered = replaced === undefined ? unchanged : typeof replaced === "object" ? String(replaced.stdout ?? "") : String(replaced);
+    const id = delivered.match(/^\[recall:(recall_[0-9a-f]+)/)?.[1];
+    const row = id ? (getDb(dbPath).query("SELECT full_retained FROM stored_outputs WHERE id = ?").get(id) as { full_retained: number } | null) : null;
+    return { delivered, stored: replaced !== undefined, body: row?.full_retained === 1 };
+  }
+
   return {
     /** What Claude receives for `command`'s output, and whether a row with its body was stored. */
     deliver(command: string, stdout: string, stderr: string): Delivery {
-      const r: any = handlePostToolUse(JSON.stringify({ session_id: session, cwd: scratch, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command }, tool_response: { stdout, stderr, interrupted: false, isImage: false } }));
-      const replaced = r?.hookSpecificOutput?.updatedToolOutput;
-      const delivered = replaced && typeof replaced === "object" ? String(replaced.stdout ?? "") : stderr ? `${stdout}\n${stderr}` : stdout;
-      const id = delivered.match(/^\[recall:(recall_[0-9a-f]+)/)?.[1];
-      const row = id ? (getDb(dbPath).query("SELECT full_retained FROM stored_outputs WHERE id = ?").get(id) as { full_retained: number } | null) : null;
-      return { delivered, stored: replaced !== undefined, body: row?.full_retained === 1 };
+      return call("Bash", { command }, { stdout, stderr, interrupted: false, isImage: false }, stderr ? `${stdout}\n${stderr}` : stdout);
+    },
+    /** The same for an MCP tool whose result Claude Code hands on as `text`. */
+    deliverMcp(tool: string, input: unknown, text: string): Delivery {
+      return call(tool, input, text, text);
+    },
+    /** What one recall__search for `query` returns over everything delivered so far. */
+    search(query: string): string {
+      return toolSearch(getDb(dbPath), getProjectKey(scratch), { query });
     },
   };
 }

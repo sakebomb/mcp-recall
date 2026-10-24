@@ -24,7 +24,12 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   MIT, Apache-2.0 and BSD repositories, credited in
   `benchmark/ATTRIBUTION.md`), drawn by fixed rules before any scoring. On
   its 68 pytest outputs mcp-recall keeps 75.8% of the facts, against 17.4% for
-  a head cut to the same size. MCP output follows.
+  a head cut to the same size. Eight MCP results captured from public sources
+  with no credentials (`scripts/quality-mcp.ts`, credited in
+  `benchmark/ATTRIBUTION-MCP.md`) cover Hugging Face's `hf_fs` JSON and GitHub
+  API responses. A recovery column scores, for each fact a summary cut, whether
+  one `recall__search` for it lists the stored output and whether it shows the
+  fact.
 
 ### Changed
 

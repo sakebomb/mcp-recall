@@ -24,6 +24,12 @@ export interface Case {
   version: string;
   stdout: string;
   stderr: string;
+  /**
+   * An MCP case's tool, as Claude Code names it, and its arguments; `stdout` is then
+   * the text Claude Code hands on. Absent for a shell command.
+   */
+  tool?: string;
+  input?: unknown;
 }
 
 const CORPUS = join(import.meta.dir, "..", "benchmark", "corpus");
