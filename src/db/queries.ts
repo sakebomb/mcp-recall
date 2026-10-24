@@ -370,6 +370,123 @@ export function retrieveSnippet(
   }
 }
 
+/** A bounded excerpt of a search match, and which sides of it were cut. */
+export interface MatchWindow {
+  text: string;
+  cutStart: boolean;
+  cutEnd: boolean;
+}
+
+/** The pair FTS5 highlight() wraps each matched token in. */
+interface Marks { open: string; close: string }
+
+// Private-use code points, rare in tool output but not absent: nerd-font icons
+// share the range, so content holding these gets a pair from markerPairFor().
+const DEFAULT_MARKS: Marks = { open: "", close: "" };
+
+/** The first private-use pair absent from `raw`, or null if every one occurs. */
+function markerPairFor(raw: string): Marks | null {
+  const free: string[] = [];
+  for (let cp = 0xe000; cp <= 0xf8ff && free.length < 2; cp++) {
+    const ch = String.fromCharCode(cp);
+    if (!raw.includes(ch)) free.push(ch);
+  }
+  return free.length === 2 ? { open: free[0], close: free[1] } : null;
+}
+
+/**
+ * Cuts `marked` (text with highlight markers) to `width` characters around the
+ * best run of matches, centered on it. Best covers the most distinct matched
+ * terms, then spans the fewest characters: near-duplicate lines share every term
+ * but the one that tells them apart, so a looser run drifts onto a sibling line.
+ * Text without markers yields its first `width` characters.
+ */
+export function windowAroundMatches(marked: string, width: number, marks: Marks = DEFAULT_MARKS): MatchWindow {
+  const { text, spans } = parseMarks(marked, marks);
+  if (text.length <= width) return { text, cutStart: false, cutEnd: false };
+
+  // Sliding window over the matches: for each right end, drop from the left while
+  // the run is too wide or the leftmost term repeats later in the run.
+  const counts = new Map<string, number>();
+  let best = { terms: 0, start: 0, end: 0 };
+  let left = 0;
+  for (let right = 0; right < spans.length; right++) {
+    counts.set(spans[right].term, (counts.get(spans[right].term) ?? 0) + 1);
+    while (left <= right && (spans[right].end - spans[left].start > width || counts.get(spans[left].term)! > 1)) {
+      const n = counts.get(spans[left].term)! - 1;
+      if (n === 0) counts.delete(spans[left].term); else counts.set(spans[left].term, n);
+      left++;
+    }
+    if (left > right) continue; // one match wider than the window
+    const run = { terms: counts.size, start: spans[left].start, end: spans[right].end };
+    if (run.terms > best.terms || (run.terms === best.terms && run.end - run.start < best.end - best.start)) best = run;
+  }
+  const slack = width - (best.end - best.start);
+  const start = best.terms === 0 ? 0 : Math.max(0, Math.min(best.start - Math.floor(slack / 2), text.length - width));
+  return { text: text.slice(start, start + width), cutStart: start > 0, cutEnd: start + width < text.length };
+}
+
+/** Strips highlight markers, returning the plain text and each match's span and lowercased term. */
+function parseMarks(marked: string, marks: Marks): { text: string; spans: Array<{ start: number; end: number; term: string }> } {
+  const spans: Array<{ start: number; end: number; term: string }> = [];
+  const parts: string[] = [];
+  let length = 0;
+  for (const [i, piece] of marked.split(marks.open).entries()) {
+    const close = i === 0 ? -1 : piece.indexOf(marks.close);
+    if (close >= 0) {
+      const term = piece.slice(0, close);
+      spans.push({ start: length, end: length + term.length, term: term.toLowerCase() });
+    }
+    const plain = close >= 0 ? piece.slice(0, close) + piece.slice(close + 1) : piece;
+    parts.push(plain);
+    length += plain.length;
+  }
+  return { text: parts.join(""), spans };
+}
+
+/**
+ * The search-result excerpt for one stored item: `width` characters of its best
+ * matching chunk, placed on the match. Match positions come from FTS5 itself, so
+ * they agree with the tokenizer that found the item. When no one chunk holds
+ * every term (the match straddles a chunk boundary, or the item predates
+ * chunking), the window is placed over the whole document instead.
+ */
+export function retrieveMatchWindow(
+  db: Database,
+  id: string,
+  query: string,
+  width: number
+): MatchWindow | null {
+  const safeQuery = sanitizeFtsQuery(query);
+  const chunkSql = `
+    SELECT content AS raw, highlight(content_chunks, 2, ?, ?) AS marked FROM content_chunks
+    WHERE content_chunks MATCH ? AND output_id = ?
+    ORDER BY rank
+    LIMIT 1`;
+  const docSql = `
+    SELECT full_content AS raw, highlight(outputs_fts, 3, ?, ?) AS marked FROM outputs_fts
+    WHERE outputs_fts MATCH ? AND rowid = (SELECT rowid FROM stored_outputs WHERE id = ?)`;
+  const run = (sql: string, marks: Marks) =>
+    db.prepare(sql).get(marks.open, marks.close, safeQuery, id) as { raw: string; marked: string } | null;
+
+  // Content already holding a default marker is highlighted again with a pair it lacks.
+  const place = (sql: string): MatchWindow | null => {
+    const row = run(sql, DEFAULT_MARKS);
+    if (!row) return null;
+    if (!row.raw.includes(DEFAULT_MARKS.open) && !row.raw.includes(DEFAULT_MARKS.close)) {
+      return windowAroundMatches(row.marked, width);
+    }
+    const marks = markerPairFor(row.raw);
+    if (!marks) return { text: row.raw.slice(0, width), cutStart: false, cutEnd: row.raw.length > width };
+    return windowAroundMatches(run(sql, marks)!.marked, width, marks);
+  };
+  try {
+    return place(chunkSql) ?? place(docSql);
+  } catch {
+    return null; // FTS parse error
+  }
+}
+
 /** Chunks a "peek" returns — a bounded context window, not the full document. */
 const PEEK_MAX_CHUNKS = 3;
 const PEEK_CHUNK_JOINER = "\n […] \n";

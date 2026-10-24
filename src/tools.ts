@@ -11,6 +11,7 @@ import type { Database } from "bun:sqlite";
 import {
   retrieveOutput,
   retrieveSnippet,
+  retrieveMatchWindow,
   retrievePeek,
   recordAccess,
   pinOutput,
@@ -211,13 +212,11 @@ export function toolSearch(
     const ellipsis = item.summary.length > SEARCH_EXCERPT_LEN ? "…" : "";
     const summaryLine = `${i + 1}. ${item.id} · ${item.tool_name} · ${formatDate(item.created_at)}\n   ${excerpt}${ellipsis}`;
 
-    const snippet = retrieveSnippet(db, item.id, args.query);
-    if (!snippet) return summaryLine;
+    const match = retrieveMatchWindow(db, item.id, args.query, SNIPPET_MAX);
+    if (!match) return summaryLine;
 
-    const snipText = snippet.replace(/\n/g, " ").trim();
-    const capped = snipText.slice(0, SNIPPET_MAX);
-    const trailingEllipsis = snipText.length > SNIPPET_MAX ? "…" : "";
-    return `${summaryLine}\n   > …${capped}${trailingEllipsis}`;
+    const snipText = match.text.replace(/\n/g, " ").trim();
+    return `${summaryLine}\n   > ${match.cutStart ? "…" : ""}${snipText}${match.cutEnd ? "…" : ""}`;
   });
 
   return `Found ${items.length} result${items.length === 1 ? "" : "s"} for "${args.query}":\n\n${lines.join("\n\n")}`;

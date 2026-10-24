@@ -19956,6 +19956,88 @@ function retrieveSnippet(db, id, query) {
     return null;
   }
 }
+var DEFAULT_MARKS = { open: "\uE000", close: "\uE001" };
+function markerPairFor(raw) {
+  const free = [];
+  for (let cp = 57344;cp <= 63743 && free.length < 2; cp++) {
+    const ch = String.fromCharCode(cp);
+    if (!raw.includes(ch))
+      free.push(ch);
+  }
+  return free.length === 2 ? { open: free[0], close: free[1] } : null;
+}
+function windowAroundMatches(marked, width, marks = DEFAULT_MARKS) {
+  const { text, spans } = parseMarks(marked, marks);
+  if (text.length <= width)
+    return { text, cutStart: false, cutEnd: false };
+  const counts = new Map;
+  let best = { terms: 0, start: 0, end: 0 };
+  let left = 0;
+  for (let right = 0;right < spans.length; right++) {
+    counts.set(spans[right].term, (counts.get(spans[right].term) ?? 0) + 1);
+    while (left <= right && (spans[right].end - spans[left].start > width || counts.get(spans[left].term) > 1)) {
+      const n = counts.get(spans[left].term) - 1;
+      if (n === 0)
+        counts.delete(spans[left].term);
+      else
+        counts.set(spans[left].term, n);
+      left++;
+    }
+    if (left > right)
+      continue;
+    const run = { terms: counts.size, start: spans[left].start, end: spans[right].end };
+    if (run.terms > best.terms || run.terms === best.terms && run.end - run.start < best.end - best.start)
+      best = run;
+  }
+  const slack = width - (best.end - best.start);
+  const start = best.terms === 0 ? 0 : Math.max(0, Math.min(best.start - Math.floor(slack / 2), text.length - width));
+  return { text: text.slice(start, start + width), cutStart: start > 0, cutEnd: start + width < text.length };
+}
+function parseMarks(marked, marks) {
+  const spans = [];
+  const parts = [];
+  let length = 0;
+  for (const [i, piece] of marked.split(marks.open).entries()) {
+    const close = i === 0 ? -1 : piece.indexOf(marks.close);
+    if (close >= 0) {
+      const term = piece.slice(0, close);
+      spans.push({ start: length, end: length + term.length, term: term.toLowerCase() });
+    }
+    const plain = close >= 0 ? piece.slice(0, close) + piece.slice(close + 1) : piece;
+    parts.push(plain);
+    length += plain.length;
+  }
+  return { text: parts.join(""), spans };
+}
+function retrieveMatchWindow(db, id, query, width) {
+  const safeQuery = sanitizeFtsQuery(query);
+  const chunkSql = `
+    SELECT content AS raw, highlight(content_chunks, 2, ?, ?) AS marked FROM content_chunks
+    WHERE content_chunks MATCH ? AND output_id = ?
+    ORDER BY rank
+    LIMIT 1`;
+  const docSql = `
+    SELECT full_content AS raw, highlight(outputs_fts, 3, ?, ?) AS marked FROM outputs_fts
+    WHERE outputs_fts MATCH ? AND rowid = (SELECT rowid FROM stored_outputs WHERE id = ?)`;
+  const run = (sql, marks) => db.prepare(sql).get(marks.open, marks.close, safeQuery, id);
+  const place = (sql) => {
+    const row = run(sql, DEFAULT_MARKS);
+    if (!row)
+      return null;
+    if (!row.raw.includes(DEFAULT_MARKS.open) && !row.raw.includes(DEFAULT_MARKS.close)) {
+      return windowAroundMatches(row.marked, width);
+    }
+    const marks = markerPairFor(row.raw);
+    if (!marks)
+      return { text: row.raw.slice(0, width), cutStart: false, cutEnd: row.raw.length > width };
+    return windowAroundMatches(run(sql, marks).marked, width, marks);
+  };
+  try {
+    return place(chunkSql) ?? place(docSql);
+  } catch {
+    return null;
+  }
+}
 var PEEK_MAX_CHUNKS = 3;
 var PEEK_CHUNK_JOINER = `
  [\u2026] 
@@ -21435,14 +21517,12 @@ function toolSearch(db, projectKey, args) {
     const ellipsis = item.summary.length > SEARCH_EXCERPT_LEN ? "\u2026" : "";
     const summaryLine = `${i + 1}. ${item.id} \xB7 ${item.tool_name} \xB7 ${formatDate(item.created_at)}
    ${excerpt}${ellipsis}`;
-    const snippet = retrieveSnippet(db, item.id, args.query);
-    if (!snippet)
+    const match = retrieveMatchWindow(db, item.id, args.query, SNIPPET_MAX);
+    if (!match)
       return summaryLine;
-    const snipText = snippet.replace(/\n/g, " ").trim();
-    const capped = snipText.slice(0, SNIPPET_MAX);
-    const trailingEllipsis = snipText.length > SNIPPET_MAX ? "\u2026" : "";
+    const snipText = match.text.replace(/\n/g, " ").trim();
     return `${summaryLine}
-   > \u2026${capped}${trailingEllipsis}`;
+   > ${match.cutStart ? "\u2026" : ""}${snipText}${match.cutEnd ? "\u2026" : ""}`;
   });
   return `Found ${items.length} result${items.length === 1 ? "" : "s"} for "${args.query}":
 

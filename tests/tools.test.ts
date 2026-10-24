@@ -164,9 +164,50 @@ describe("MCP tool handlers", () => {
       // Snippet line should be present and capped (full chunk is 512 chars)
       expect(result).toContain(">");
       const snippetLine = result.split("\n").find((l) => l.trim().startsWith(">"))!;
-      // Remove the "> …" prefix (4 chars) and trailing "…" to measure content
-      const snippetContent = snippetLine.trim().replace(/^>\s*…/, "").replace(/…$/, "");
+      // Remove the "> " prefix, either ellipsis, to measure content
+      const snippetContent = snippetLine.trim().replace(/^>\s*…?/, "").replace(/…$/, "");
       expect(snippetContent.length).toBeLessThanOrEqual(150);
+    });
+
+    const snippetLine = (result: string) =>
+      result.split("\n").find((l) => l.trim().startsWith(">"))!.trim();
+
+    it("shows the match when it lies past the chunk's first 150 characters", () => {
+      storeOutput(db, makeInput({
+        summary: "item with a deep match",
+        full_content: "alpha ".repeat(60) + "needleword" + " beta".repeat(20),
+      }));
+      const line = snippetLine(toolSearch(db, PROJECT_KEY, { query: "needleword" }));
+      expect(line).toContain("needleword");
+      expect(line.startsWith("> …")).toBe(true);
+      expect(line.endsWith("…")).toBe(true);
+    });
+
+    it("marks no cut when the window holds the whole chunk", () => {
+      storeOutput(db, makeInput({
+        summary: "short item",
+        full_content: "frobnication happens here",
+      }));
+      const line = snippetLine(toolSearch(db, PROJECT_KEY, { query: "frobnication" }));
+      expect(line).toBe("> frobnication happens here");
+    });
+
+    it("shows every term of a multi-term match", () => {
+      storeOutput(db, makeInput({
+        summary: "lint output",
+        full_content: "pad ".repeat(60) + "error in src/foo.ts line 42 unused import" + " pad".repeat(60),
+      }));
+      const line = snippetLine(toolSearch(db, PROJECT_KEY, { query: "src/foo.ts line 42 unused import" }));
+      expect(line).toContain("src/foo.ts line 42 unused import");
+    });
+
+    it("prefers the window holding the most matched terms over an earlier lone hit", () => {
+      storeOutput(db, makeInput({
+        summary: "two hits",
+        full_content: "alpha " + "pad ".repeat(60) + "alpha beta gamma delta" + " pad".repeat(20),
+      }));
+      const line = snippetLine(toolSearch(db, PROJECT_KEY, { query: "alpha beta gamma delta" }));
+      expect(line).toContain("alpha beta gamma delta");
     });
   });
 

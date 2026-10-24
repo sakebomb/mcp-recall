@@ -207,7 +207,8 @@ per project), `searchOutputs`, `listOutputs`, `forgetOutputs` (every branch), an
 those paths.
 
 But **operations that target a specific id are not scoped**: the reads
-`retrieveOutput` (`queries.ts:111`), `retrievePeek`, `retrieveSnippet` — and the
+`retrieveOutput` (`queries.ts:111`), `retrievePeek`, `retrieveSnippet`,
+`retrieveMatchWindow` — and the
 `recordAccess` mutation that bumps `access_count` — are all `WHERE id = ?` only. The
 random id acts as an unguessable capability, so a cross-project access bump is
 deliberately tolerated (`pinOutput` and every `forgetOutputs` branch, by contrast,
