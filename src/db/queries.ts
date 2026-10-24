@@ -377,9 +377,22 @@ export interface MatchWindow {
   cutEnd: boolean;
 }
 
-// Private-use code points: FTS5 highlight() wraps each matched token in these.
-const MARK_OPEN = "";
-const MARK_CLOSE = "";
+/** The pair FTS5 highlight() wraps each matched token in. */
+interface Marks { open: string; close: string }
+
+// Private-use code points, rare in tool output but not absent: nerd-font icons
+// share the range, so content holding these gets a pair from markerPairFor().
+const DEFAULT_MARKS: Marks = { open: "", close: "" };
+
+/** The first private-use pair absent from `raw`, or null if every one occurs. */
+function markerPairFor(raw: string): Marks | null {
+  const free: string[] = [];
+  for (let cp = 0xe000; cp <= 0xf8ff && free.length < 2; cp++) {
+    const ch = String.fromCharCode(cp);
+    if (!raw.includes(ch)) free.push(ch);
+  }
+  return free.length === 2 ? { open: free[0], close: free[1] } : null;
+}
 
 /**
  * Cuts `marked` (text with highlight markers) to `width` characters around the
@@ -388,8 +401,8 @@ const MARK_CLOSE = "";
  * but the one that tells them apart, so a looser run drifts onto a sibling line.
  * Text without markers yields its first `width` characters.
  */
-export function windowAroundMatches(marked: string, width: number): MatchWindow {
-  const { text, spans } = parseMarks(marked);
+export function windowAroundMatches(marked: string, width: number, marks: Marks = DEFAULT_MARKS): MatchWindow {
+  const { text, spans } = parseMarks(marked, marks);
   if (text.length <= width) return { text, cutStart: false, cutEnd: false };
 
   // Sliding window over the matches: for each right end, drop from the left while
@@ -414,12 +427,12 @@ export function windowAroundMatches(marked: string, width: number): MatchWindow 
 }
 
 /** Strips highlight markers, returning the plain text and each match's span and lowercased term. */
-function parseMarks(marked: string): { text: string; spans: Array<{ start: number; end: number; term: string }> } {
+function parseMarks(marked: string, marks: Marks): { text: string; spans: Array<{ start: number; end: number; term: string }> } {
   const spans: Array<{ start: number; end: number; term: string }> = [];
   const parts: string[] = [];
   let length = 0;
-  for (const [i, piece] of marked.split(MARK_OPEN).entries()) {
-    const close = i === 0 ? -1 : piece.indexOf(MARK_CLOSE);
+  for (const [i, piece] of marked.split(marks.open).entries()) {
+    const close = i === 0 ? -1 : piece.indexOf(marks.close);
     if (close >= 0) {
       const term = piece.slice(0, close);
       spans.push({ start: length, end: length + term.length, term: term.toLowerCase() });
@@ -445,26 +458,30 @@ export function retrieveMatchWindow(
   width: number
 ): MatchWindow | null {
   const safeQuery = sanitizeFtsQuery(query);
-  // Content that already holds a marker code point (nerd-font icons share the
-  // range) cannot be parsed back, so it keeps its opening characters instead.
-  const place = (row: { raw: string; marked: string }): MatchWindow =>
-    row.raw.includes(MARK_OPEN) || row.raw.includes(MARK_CLOSE)
-      ? { text: row.raw.slice(0, width), cutStart: false, cutEnd: row.raw.length > width }
-      : windowAroundMatches(row.marked, width);
-  try {
-    const chunk = db.prepare(`
-      SELECT content AS raw, highlight(content_chunks, 2, ?, ?) AS marked FROM content_chunks
-      WHERE content_chunks MATCH ? AND output_id = ?
-      ORDER BY rank
-      LIMIT 1
-    `).get(MARK_OPEN, MARK_CLOSE, safeQuery, id) as { raw: string; marked: string } | null;
-    if (chunk) return place(chunk);
+  const chunkSql = `
+    SELECT content AS raw, highlight(content_chunks, 2, ?, ?) AS marked FROM content_chunks
+    WHERE content_chunks MATCH ? AND output_id = ?
+    ORDER BY rank
+    LIMIT 1`;
+  const docSql = `
+    SELECT full_content AS raw, highlight(outputs_fts, 3, ?, ?) AS marked FROM outputs_fts
+    WHERE outputs_fts MATCH ? AND rowid = (SELECT rowid FROM stored_outputs WHERE id = ?)`;
+  const run = (sql: string, marks: Marks) =>
+    db.prepare(sql).get(marks.open, marks.close, safeQuery, id) as { raw: string; marked: string } | null;
 
-    const doc = db.prepare(`
-      SELECT full_content AS raw, highlight(outputs_fts, 3, ?, ?) AS marked FROM outputs_fts
-      WHERE outputs_fts MATCH ? AND rowid = (SELECT rowid FROM stored_outputs WHERE id = ?)
-    `).get(MARK_OPEN, MARK_CLOSE, safeQuery, id) as { raw: string; marked: string } | null;
-    return doc ? place(doc) : null;
+  // Content already holding a default marker is highlighted again with a pair it lacks.
+  const place = (sql: string): MatchWindow | null => {
+    const row = run(sql, DEFAULT_MARKS);
+    if (!row) return null;
+    if (!row.raw.includes(DEFAULT_MARKS.open) && !row.raw.includes(DEFAULT_MARKS.close)) {
+      return windowAroundMatches(row.marked, width);
+    }
+    const marks = markerPairFor(row.raw);
+    if (!marks) return { text: row.raw.slice(0, width), cutStart: false, cutEnd: row.raw.length > width };
+    return windowAroundMatches(run(sql, marks)!.marked, width, marks);
+  };
+  try {
+    return place(chunkSql) ?? place(docSql);
   } catch {
     return null; // FTS parse error
   }

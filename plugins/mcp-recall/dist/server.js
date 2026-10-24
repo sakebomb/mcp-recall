@@ -19956,10 +19956,18 @@ function retrieveSnippet(db, id, query) {
     return null;
   }
 }
-var MARK_OPEN = "\uE000";
-var MARK_CLOSE = "\uE001";
-function windowAroundMatches(marked, width) {
-  const { text, spans } = parseMarks(marked);
+var DEFAULT_MARKS = { open: "\uE000", close: "\uE001" };
+function markerPairFor(raw) {
+  const free = [];
+  for (let cp = 57344;cp <= 63743 && free.length < 2; cp++) {
+    const ch = String.fromCharCode(cp);
+    if (!raw.includes(ch))
+      free.push(ch);
+  }
+  return free.length === 2 ? { open: free[0], close: free[1] } : null;
+}
+function windowAroundMatches(marked, width, marks = DEFAULT_MARKS) {
+  const { text, spans } = parseMarks(marked, marks);
   if (text.length <= width)
     return { text, cutStart: false, cutEnd: false };
   const counts = new Map;
@@ -19985,12 +19993,12 @@ function windowAroundMatches(marked, width) {
   const start = best.terms === 0 ? 0 : Math.max(0, Math.min(best.start - Math.floor(slack / 2), text.length - width));
   return { text: text.slice(start, start + width), cutStart: start > 0, cutEnd: start + width < text.length };
 }
-function parseMarks(marked) {
+function parseMarks(marked, marks) {
   const spans = [];
   const parts = [];
   let length = 0;
-  for (const [i, piece] of marked.split(MARK_OPEN).entries()) {
-    const close = i === 0 ? -1 : piece.indexOf(MARK_CLOSE);
+  for (const [i, piece] of marked.split(marks.open).entries()) {
+    const close = i === 0 ? -1 : piece.indexOf(marks.close);
     if (close >= 0) {
       const term = piece.slice(0, close);
       spans.push({ start: length, end: length + term.length, term: term.toLowerCase() });
@@ -20003,21 +20011,29 @@ function parseMarks(marked) {
 }
 function retrieveMatchWindow(db, id, query, width) {
   const safeQuery = sanitizeFtsQuery(query);
-  const place = (row) => row.raw.includes(MARK_OPEN) || row.raw.includes(MARK_CLOSE) ? { text: row.raw.slice(0, width), cutStart: false, cutEnd: row.raw.length > width } : windowAroundMatches(row.marked, width);
+  const chunkSql = `
+    SELECT content AS raw, highlight(content_chunks, 2, ?, ?) AS marked FROM content_chunks
+    WHERE content_chunks MATCH ? AND output_id = ?
+    ORDER BY rank
+    LIMIT 1`;
+  const docSql = `
+    SELECT full_content AS raw, highlight(outputs_fts, 3, ?, ?) AS marked FROM outputs_fts
+    WHERE outputs_fts MATCH ? AND rowid = (SELECT rowid FROM stored_outputs WHERE id = ?)`;
+  const run = (sql, marks) => db.prepare(sql).get(marks.open, marks.close, safeQuery, id);
+  const place = (sql) => {
+    const row = run(sql, DEFAULT_MARKS);
+    if (!row)
+      return null;
+    if (!row.raw.includes(DEFAULT_MARKS.open) && !row.raw.includes(DEFAULT_MARKS.close)) {
+      return windowAroundMatches(row.marked, width);
+    }
+    const marks = markerPairFor(row.raw);
+    if (!marks)
+      return { text: row.raw.slice(0, width), cutStart: false, cutEnd: row.raw.length > width };
+    return windowAroundMatches(run(sql, marks).marked, width, marks);
+  };
   try {
-    const chunk = db.prepare(`
-      SELECT content AS raw, highlight(content_chunks, 2, ?, ?) AS marked FROM content_chunks
-      WHERE content_chunks MATCH ? AND output_id = ?
-      ORDER BY rank
-      LIMIT 1
-    `).get(MARK_OPEN, MARK_CLOSE, safeQuery, id);
-    if (chunk)
-      return place(chunk);
-    const doc2 = db.prepare(`
-      SELECT full_content AS raw, highlight(outputs_fts, 3, ?, ?) AS marked FROM outputs_fts
-      WHERE outputs_fts MATCH ? AND rowid = (SELECT rowid FROM stored_outputs WHERE id = ?)
-    `).get(MARK_OPEN, MARK_CLOSE, safeQuery, id);
-    return doc2 ? place(doc2) : null;
+    return place(chunkSql) ?? place(docSql);
   } catch {
     return null;
   }
