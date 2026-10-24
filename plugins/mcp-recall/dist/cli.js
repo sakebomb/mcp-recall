@@ -6452,25 +6452,106 @@ ${head}${truncated ? `
 };
 
 // src/handlers/json.ts
-var MAX_DEPTH = 3;
-var MAX_ARRAY_ITEMS = 3;
-function truncate(value, depth) {
-  if (depth > MAX_DEPTH)
-    return "\u2026";
-  if (Array.isArray(value)) {
-    const items = value.slice(0, MAX_ARRAY_ITEMS).map((v) => truncate(v, depth + 1));
-    const more = value.length - MAX_ARRAY_ITEMS;
-    if (more > 0)
-      items.push(`\u2026${more} more`);
-    return items;
+var JSON_BUDGET = 4096;
+var SHARE_FLOOR = 512;
+var MIN_PART = 24;
+var size = (v) => JSON.stringify(v).length;
+var isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+function fitString(s, budget) {
+  if (size(s) <= budget)
+    return s;
+  let keep = Math.max(0, Math.floor(budget - 24));
+  for (;; ) {
+    const cut = `${s.slice(0, keep)}\u2026[+${s.length - keep} chars]`;
+    if (size(cut) <= budget || keep === 0)
+      return cut;
+    keep = Math.max(0, keep - Math.max(1, Math.ceil(size(cut) - budget)));
   }
-  if (value !== null && typeof value === "object") {
-    const result = {};
-    for (const [k, v] of Object.entries(value)) {
-      result[k] = truncate(v, depth + 1);
-    }
-    return result;
+}
+var share = (remaining, rest) => Math.max(remaining / rest, Math.min(remaining, SHARE_FLOOR));
+function sharedFields(items) {
+  if (items.length < 2 || !items.every(isObject))
+    return null;
+  const [first, ...rest] = items;
+  const shared = {};
+  for (const [k, v] of Object.entries(first)) {
+    const json = JSON.stringify(v);
+    if (rest.every((item) => (k in item) && JSON.stringify(item[k]) === json))
+      shared[k] = v;
   }
+  return Object.keys(shared).length > 0 ? shared : null;
+}
+function fitArray(items, budget) {
+  const shared = sharedFields(items);
+  const out = shared ? [fit({ [`\u2026each of ${items.length} items has`]: shared }, budget / 4)] : [];
+  const parts = shared ? items.map((item) => Object.fromEntries(Object.entries(item).filter(([k]) => !(k in shared)))) : items;
+  let remaining = budget - size(out) - 16;
+  let shown = 0;
+  for (;shown < parts.length && remaining >= MIN_PART; shown++) {
+    const itemBudget = share(remaining, parts.length - shown) - 1;
+    if (size(parts[shown]) > itemBudget && itemBudget < SHARE_FLOOR)
+      break;
+    const fitted = fit(parts[shown], itemBudget);
+    const used = size(fitted) + 1;
+    if (used > remaining)
+      break;
+    out.push(fitted);
+    remaining -= used;
+  }
+  if (shown < parts.length)
+    out.push(`\u2026${parts.length - shown} more`);
+  return out;
+}
+function allocate(needs, budget) {
+  const out = new Array(needs.length);
+  let remaining = budget;
+  const order = needs.map((need, i) => ({ need, i })).sort((a, b) => a.need - b.need);
+  order.forEach(({ need, i }, n) => {
+    out[i] = Math.min(need, remaining / (order.length - n));
+    remaining -= out[i];
+  });
+  return out;
+}
+function fitObject(obj, budget) {
+  const entries = Object.entries(obj);
+  const keyCosts = entries.map(([k]) => size(k) + 2);
+  const needs = entries.map(([, v], i) => keyCosts[i] + size(v));
+  const available = budget - 2 - 24;
+  const budgets = allocate(needs, available);
+  if (budgets.some((b, i) => b < needs[i] && b - keyCosts[i] < MIN_PART))
+    return fitFieldsInOrder(entries, available);
+  return Object.fromEntries(entries.map(([k, v], i) => [k, fit(v, budgets[i] - keyCosts[i])]));
+}
+function fitFieldsInOrder(entries, budget) {
+  const out = {};
+  let remaining = budget;
+  let shown = 0;
+  for (;shown < entries.length && remaining >= MIN_PART; shown++) {
+    const [k, v] = entries[shown];
+    const keyCost = size(k) + 2;
+    const valueBudget = share(remaining, entries.length - shown) - keyCost;
+    if (size(v) > valueBudget && valueBudget < SHARE_FLOOR)
+      break;
+    const fitted = fit(v, valueBudget);
+    const used = keyCost + size(fitted);
+    if (used > remaining)
+      break;
+    out[k] = fitted;
+    remaining -= used;
+  }
+  if (shown < entries.length)
+    out["\u2026more fields"] = entries.length - shown;
+  return out;
+}
+function fit(value, budget) {
+  if (size(value) <= budget)
+    return value;
+  if (typeof value === "string")
+    return fitString(value, budget);
+  if (Array.isArray(value))
+    return fitArray(value, budget);
+  if (isObject(value))
+    return fitObject(value, budget);
   return value;
 }
 var jsonHandler = (_toolName, output) => {
@@ -6487,8 +6568,7 @@ var jsonHandler = (_toolName, output) => {
       originalSize
     };
   }
-  const truncated = truncate(parsed, 0);
-  const summary = JSON.stringify(truncated);
+  const summary = JSON.stringify(fit(parsed, JSON_BUDGET));
   return { summary, originalSize };
 };
 
@@ -6889,11 +6969,11 @@ function fairShares(sizes, budget) {
   });
   return shares;
 }
-function renderFile(file, share) {
+function renderFile(file, share2) {
   const out = [...file.meta];
   let used = 0;
   let whole = 0;
-  while (whole < file.hunks.length && used + file.hunks[whole].bytes <= share) {
+  while (whole < file.hunks.length && used + file.hunks[whole].bytes <= share2) {
     out.push(...file.hunks[whole].lines);
     used += file.hunks[whole].bytes;
     whole++;
@@ -6902,7 +6982,7 @@ function renderFile(file, share) {
     return out;
   const fits = [];
   for (const line of file.hunks[whole].lines) {
-    if (used + lineBytes(line) > share)
+    if (used + lineBytes(line) > share2)
       break;
     fits.push(line);
     used += lineBytes(line);
@@ -9464,14 +9544,14 @@ var MAX_PERSISTED_BYTES = 20 * 1024 * 1024;
 function withPersistedOutput(toolResponse) {
   const bash = asBashResponse(toolResponse);
   const path = bash?.persistedOutputPath;
-  const size = bash?.persistedOutputSize;
-  if (!bash || typeof path !== "string" || typeof size !== "number")
+  const size2 = bash?.persistedOutputSize;
+  if (!bash || typeof path !== "string" || typeof size2 !== "number")
     return toolResponse;
-  if (!isAbsolute2(path) || basename2(dirname3(path)) !== "tool-results" || size > MAX_PERSISTED_BYTES) {
+  if (!isAbsolute2(path) || basename2(dirname3(path)) !== "tool-results" || size2 > MAX_PERSISTED_BYTES) {
     return toolResponse;
   }
   try {
-    if (statSync4(path).size !== size)
+    if (statSync4(path).size !== size2)
       return toolResponse;
     return { ...bash, stdout: readFileSync3(path, "utf8"), stderr: "" };
   } catch (err) {
@@ -11277,9 +11357,9 @@ async function handleImportCommand(args) {
   let raw;
   if (filePath) {
     try {
-      const size = statSync5(filePath).size;
-      if (size > LARGE_FILE_BYTES) {
-        console.error(`Warning: file is ${Math.round(size / 1024 / 1024)} MB \u2014 this may take a while.`);
+      const size2 = statSync5(filePath).size;
+      if (size2 > LARGE_FILE_BYTES) {
+        console.error(`Warning: file is ${Math.round(size2 / 1024 / 1024)} MB \u2014 this may take a while.`);
       }
       raw = readFileSync10(filePath, "utf8");
     } catch {

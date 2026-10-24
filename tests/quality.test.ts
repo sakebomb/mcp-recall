@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { spawnSync } from "child_process";
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
-import { controlsBroken, loadCorpus, type FamilyScore } from "../scripts/quality";
+import { controlsBroken, loadCorpus, recovery, type FamilyScore } from "../scripts/quality";
 import { contradicts, facts, keptShare, type Fact } from "../scripts/quality-facts";
 
 const texts = (fs: Fact[]) => fs.map((f) => f.text);
@@ -95,6 +95,39 @@ describe("facts", () => {
     expect(texts(facts("git-diff", "fatal: bad revision 'nope'\nfatal: bad revision 'nope'"))).toEqual(["fatal: bad revision 'nope'"]);
   });
 
+  it("takes every string value of MCP JSON as it is written there, and each line of a long one", () => {
+    const raw = JSON.stringify({ results: [{ index: 0, status: "success", result: { path: "nvidia/SWE-Hero", likes: 104, content: "# Title line\nshort\nsays \"quoted\" here" } }] });
+    expect(texts(facts("mcp-json", raw))).toEqual(["nvidia/SWE-Hero", "# Title line", 'says \\"quoted\\" here']);
+  });
+
+  it("keeps an MCP JSON fact a summary prints unescaped", () => {
+    const [quoted] = facts("mcp-json", JSON.stringify({ text: 'says "quoted" here' }));
+    expect(keptShare([quoted], 'line: says "quoted" here')).toBe(1);
+  });
+
+  it("does not turn a one-line JSON document with an error in it into one fact", () => {
+    const raw = JSON.stringify({ log: "fatal error: disk full", path: "data/train.parquet" });
+    expect(texts(facts("mcp-json", raw))).toEqual(["fatal error: disk full", "data/train.parquet"]);
+  });
+
+  it("takes each GitHub item's number, title, link, body lines, sha, file, changed lines and labels", () => {
+    const raw = JSON.stringify([
+      { number: 402, title: "fix: read back a saved result", html_url: "https://github.com/o/r/pull/402", body: "## Summary\n- reads the file", labels: [{ name: "bug-fix" }], node_id: "PR_kwDOabc", user: { login: "someone" } },
+      { sha: "504bcf3c83ded17796d8fbba9211f5d09ad9b411", commit: { message: "feat: add a sample\n\nWhy: coverage." } },
+      { filename: "src/hooks/post-tool-use.ts", patch: "@@ -1,2 +1,2 @@\n-const lines = null;\n+const lines = count(m);\n context" },
+    ]);
+    expect(texts(facts("mcp-github", raw))).toEqual([
+      '"number":402', "fix: read back a saved result", "https://github.com/o/r/pull/402", "## Summary", "- reads the file", "bug-fix",
+      "504bcf3", "feat: add a sample", "Why: coverage.", "src/hooks/post-tool-use.ts", "const lines = null;", "const lines = count(m);",
+    ]);
+  });
+
+  it("keeps a GitHub number a summary writes as #N", () => {
+    const [n] = facts("mcp-github", JSON.stringify({ number: 402 }));
+    expect(keptShare([n], "#402 fix: read back")).toBe(1);
+    expect(keptShare([n], "#4021 other")).toBe(0);
+  });
+
   it("returns only facts the raw output satisfies, so pass-through keeps them all", () => {
     const raw = "On branch topic\nYou have unmerged paths.\n\tboth modified:   a.ts\n";
     const fs = facts("git-status", raw);
@@ -154,7 +187,7 @@ describe("contradicts", () => {
 
 describe("controlsBroken", () => {
   const row = (family: string, ours: number, first: number, pass = 1): FamilyScore =>
-    ({ family, cases: 1, compressed: 1, facts: 4, ours, head: ours, first, pass, oursClaims: 0, headClaims: 0, raw: 100, delivered: 50 });
+    ({ family, cases: 1, compressed: 1, facts: 4, ours, head: ours, first, pass, oursClaims: 0, headClaims: 0, raw: 100, delivered: 50, lost: 0, found: 0, shown: 0 });
 
   it("passes when pass-through keeps everything and the first line scores below mcp-recall in every family", () => {
     expect(controlsBroken([row("git-diff", 0.8, 0.1), row("git-log", 0.5, 0.2)])).toBeNull();
@@ -166,6 +199,27 @@ describe("controlsBroken", () => {
 
   it("fails when pass-through misses a fact, which means an extractor invented it", () => {
     expect(controlsBroken([row("git-diff", 0.8, 0.1, 0.99)])).toContain("pass-through");
+  });
+});
+
+describe("recovery", () => {
+  const results = [
+    'Found 2 results for "src/a.ts":',
+    "1. recall_aaaa · Bash · 2026-10-24\n   git diff — 3 files\n   > …diff --git a/src/a.ts b/src/a.ts",
+    "2. recall_bbbb · Bash · 2026-10-24\n   pytest — 1 failed",
+  ].join("\n\n");
+
+  it("finds a stored output the results list, and shows a fact its own entry prints", () => {
+    expect(recovery(results, "recall_aaaa", { text: "src/a.ts" })).toEqual({ found: true, shown: true });
+  });
+
+  it("does not credit a fact another entry prints", () => {
+    expect(recovery(results, "recall_bbbb", { text: "src/a.ts" })).toEqual({ found: true, shown: false });
+  });
+
+  it("finds nothing when the output is not listed, or the search has no results", () => {
+    expect(recovery(results, "recall_cccc", { text: "src/a.ts" })).toEqual({ found: false, shown: false });
+    expect(recovery('[recall: no results for "x"]', "recall_aaaa", { text: "x" })).toEqual({ found: false, shown: false });
   });
 });
 

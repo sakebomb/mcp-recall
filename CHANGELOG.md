@@ -24,7 +24,12 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   MIT, Apache-2.0 and BSD repositories, credited in
   `benchmark/ATTRIBUTION.md`), drawn by fixed rules before any scoring. On
   its 68 pytest outputs mcp-recall keeps 75.8% of the facts, against 17.4% for
-  a head cut to the same size. MCP output follows.
+  a head cut to the same size. Eight MCP results captured from public sources
+  with no credentials (`scripts/quality-mcp.ts`, credited in
+  `benchmark/ATTRIBUTION-MCP.md`) cover Hugging Face's `hf_fs` JSON and GitHub
+  API responses. A recovery column scores, for each fact a summary cut, whether
+  one `recall__search` for it lists the stored output and whether it shows the
+  fact.
 
 ### Changed
 
@@ -46,6 +51,20 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   summarized to its error count alone. Each diagnostic is now listed with its
   location and rule code. On the quality benchmark's ruff case, facts kept go
   from 0.0% to 22.8%, against 9.8% for a head cut to the same size.
+
+- **JSON summaries keep values, not just keys** (#403). The JSON fallback kept
+  structure to depth 3 and replaced everything deeper with `…`, so an MCP
+  envelope (`results` → item → `result`) kept its keys and no values: a
+  dataset search lost every name, a README `cat` its whole content. It now
+  spends a 4,096-character budget over the document. Wrapper levels cost only
+  their keys. A long string is cut, not dropped, and says how many characters
+  went. An array shows as many items as fit and counts the rest. Fields every
+  item shares are stated once. On the quality benchmark's Hugging Face cases,
+  facts kept go from 0.0% to 35.0%, against 33.3% for a head cut to the same
+  size. The README case alone stays below the head (70.6% against 74.1%): a cut
+  string has no structure to exploit, and the head arm also gets the recall
+  header's bytes. Large JSON from Bash (`gh api`, `curl`) gets the same
+  summary.
 
 - **Large MCP results are stored, not the notice that replaces them** (#391).
   Above 25,000 tokens or 50,000 characters, Claude Code saves an MCP result to

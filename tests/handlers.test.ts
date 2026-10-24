@@ -8,7 +8,7 @@ import { shellHandler, contentReadHandler, stripAnsi, stripSshNoise } from "../s
 import { csvHandler, looksLikeCsv } from "../src/handlers/csv";
 import { linearHandler } from "../src/handlers/linear";
 import { slackHandler } from "../src/handlers/slack";
-import { jsonHandler } from "../src/handlers/json";
+import { JSON_BUDGET, jsonHandler } from "../src/handlers/json";
 import { genericHandler } from "../src/handlers/generic";
 import { contentBlockHandler } from "../src/handlers/content-blocks";
 import { getHandler, extractText } from "../src/handlers/index";
@@ -232,36 +232,77 @@ describe("filesystemHandler", () => {
 // ---------------------------------------------------------------------------
 
 describe("jsonHandler", () => {
-  it("truncates JSON at the depth limit", () => {
-    // MAX_DEPTH=3: values at depth 4 are replaced, so a.b.c is visible but a.b.c.d is "…"
-    const obj = { a: { b: { c: { d: "deep" } } } };
+  const envelope = (result: unknown) => ({ results: [{ index: 0, status: "success", result }] });
+  const repo = (i: number) => ({ type: "repo", path: `owner${i}/dataset-number-${i}`, repo_type: "dataset", private: false, likes: i, updated_at: `2026-10-${String(1 + (i % 28)).padStart(2, "0")}` });
+
+  it("keeps every value of a document within the budget, however deep", () => {
+    const obj = envelope({ uri: "hf://datasets/a/b", op: "ls", entries: [{ a: { b: { c: { d: "deep" } } } }] });
     const { summary } = jsonHandler("mcp__some__tool", JSON.stringify(obj));
-    const parsed = JSON.parse(summary);
-    expect(parsed.a.b.c.d).toBe("…");
+    expect(JSON.parse(summary)).toEqual(obj);
   });
 
-  it("emits a compact summary (no pretty-print indentation)", () => {
-    const obj = { a: { b: { c: 1 } }, items: [1, 2, 3, 4, 5] };
+  it("emits compact, valid JSON", () => {
+    const obj = envelope({ entries: Array.from({ length: 300 }, (_, i) => repo(i)) });
     const { summary } = jsonHandler("mcp__some__tool", JSON.stringify(obj));
-    // Compact JSON has no newline + indentation runs; keys remain verbatim.
-    expect(summary).not.toContain("\n  ");
-    expect(summary).toContain('"items"');
-    expect(JSON.parse(summary)).toBeDefined(); // still valid JSON
+    expect(summary).not.toContain("\n");
+    expect(() => JSON.parse(summary)).not.toThrow();
   });
 
-  it("truncates arrays to 3 items with count", () => {
-    const obj = { items: [1, 2, 3, 4, 5] };
+  it("stays within the budget for a large document", () => {
+    const obj = envelope({ entries: Array.from({ length: 300 }, (_, i) => repo(i)), content: "x".repeat(50_000) });
     const { summary } = jsonHandler("mcp__some__tool", JSON.stringify(obj));
-    const parsed = JSON.parse(summary);
-    expect(parsed.items).toHaveLength(4); // 3 items + "…2 more"
-    expect(parsed.items[3]).toContain("2 more");
+    expect(summary.length).toBeLessThanOrEqual(JSON_BUDGET);
   });
 
-  it("preserves short arrays unchanged", () => {
-    const obj = { items: [1, 2] };
+  it("cuts a long string under wrapper levels to the budget, keeping its start and the count it cut", () => {
+    const content = Array.from({ length: 2000 }, (_, i) => `line ${i} of the dataset card`).join("\n");
+    const { summary } = jsonHandler("mcp__hf__hf_fs", JSON.stringify(envelope({ uri: "hf://x/README.md", content })));
+    const kept: string = JSON.parse(summary).results[0].result.content;
+    const cut = Number(kept.match(/…\[\+(\d+) chars\]$/)?.[1]);
+    expect(kept.startsWith("line 0 of the dataset card\nline 1 of")).toBe(true);
+    expect(kept.indexOf("…[+") + cut).toBe(content.length);
+    expect(summary.length).toBeGreaterThan(JSON_BUDGET * 0.9);
+  });
+
+  it("shows as many array items as fit and counts the rest", () => {
+    const entries = Array.from({ length: 300 }, (_, i) => repo(i));
+    const shown: unknown[] = JSON.parse(jsonHandler("mcp__some__tool", JSON.stringify({ entries })).summary).entries;
+    const more = shown.at(-1) as string;
+    const items = shown.filter((e) => typeof e === "object" && e !== null && "path" in e);
+    expect(items.length).toBeGreaterThan(20);
+    expect(more).toBe(`…${300 - items.length} more`);
+  });
+
+  it("states once the fields every item shares, so more items fit", () => {
+    const entries = Array.from({ length: 300 }, (_, i) => repo(i));
+    const shown = JSON.parse(jsonHandler("mcp__some__tool", JSON.stringify({ entries })).summary).entries;
+    expect(shown[0]).toEqual({ "…each of 300 items has": { type: "repo", repo_type: "dataset", private: false } });
+    expect(shown[1]).toEqual({ path: "owner0/dataset-number-0", likes: 0, updated_at: "2026-10-01" });
+  });
+
+  it("keeps fields every item shares within the budget when they are large", () => {
+    const schema = "column definition ".repeat(2000);
+    const rows = Array.from({ length: 300 }, (_, i) => ({ id: i, schema }));
+    const { summary } = jsonHandler("mcp__some__tool", JSON.stringify({ rows }));
+    expect(summary.length).toBeLessThanOrEqual(JSON_BUDGET);
+    const shown = JSON.parse(summary).rows;
+    expect(shown[0]["…each of 300 items has"].schema).toMatch(/^column definition .*…\[\+\d+ chars\]$/);
+    expect(shown[1]).toEqual({ id: 0 });
+  });
+
+  it("shows the first fields of an object too wide for the budget, and counts the rest", () => {
+    const wide = Object.fromEntries(Array.from({ length: 2000 }, (_, i) => [`name_${i}`, { id: i, title: `item number ${i}` }]));
+    const shown = JSON.parse(jsonHandler("mcp__some__tool", JSON.stringify(wide)).summary);
+    expect(shown.name_0).toEqual({ id: 0, title: "item number 0" });
+    const fields = Object.keys(shown).filter((k) => k.startsWith("name_")).length;
+    expect(fields).toBeGreaterThan(50);
+    expect(shown["…more fields"]).toBe(2000 - fields);
+  });
+
+  it("preserves a small document unchanged", () => {
+    const obj = { items: [1, 2], nested: { list: [{ a: 1 }, { a: 1 }] } };
     const { summary } = jsonHandler("mcp__some__tool", JSON.stringify(obj));
-    const parsed = JSON.parse(summary);
-    expect(parsed.items).toEqual([1, 2]);
+    expect(JSON.parse(summary)).toEqual(obj);
   });
 
   it("falls back to plain excerpt for non-JSON", () => {
