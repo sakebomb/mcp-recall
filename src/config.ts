@@ -40,7 +40,19 @@ export const RecallConfigSchema = z.object({
   }),
 });
 
-const PartialConfigSchema = RecallConfigSchema.deepPartial();
+// zod 4 dropped .deepPartial(); every section is a flat object, so one level of
+// .partial() per section plus the outer .partial() is the same shape. `satisfies`
+// fails the build if a section is added above but not here (it would be stripped).
+const sections = RecallConfigSchema.shape;
+const PartialConfigSchema = z
+  .object({
+    store: sections.store.partial(),
+    retrieve: sections.retrieve.partial(),
+    denylist: sections.denylist.partial(),
+    profiles: sections.profiles.partial(),
+    debug: sections.debug.partial(),
+  } satisfies Record<keyof typeof sections, z.ZodType>)
+  .partial();
 
 // When the user sets max_size_mb but not max_pinned_mb, the pinned cap defaults to
 // this fraction of the effective total cap — so lowering max_size_mb alone can never
