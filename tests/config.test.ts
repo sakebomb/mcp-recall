@@ -57,6 +57,23 @@ describe("loadConfig", () => {
     expect(config.retrieve.default_max_bytes).toBe(8192);
   });
 
+  it("keeps a lone denylist.additional without the other denylist keys", () => {
+    writeFileSync(TEST_CONFIG_PATH, '[denylist]\nadditional = ["mcp__foo__*"]\n');
+    const config = loadConfig();
+    expect(config.denylist.additional).toEqual(["mcp__foo__*"]);
+    expect(config.denylist.override_defaults).toEqual([]);
+  });
+
+  it("accepts an empty table for every section without discarding the rest", () => {
+    // Each section must be partial: one that isn't rejects its empty table, and a
+    // rejected config falls back to defaults wholesale, losing max_size_mb here.
+    writeFileSync(
+      TEST_CONFIG_PATH,
+      "[store]\nmax_size_mb = 1024\n[retrieve]\n[denylist]\n[profiles]\n[debug]\n"
+    );
+    expect(loadConfig().store.max_size_mb).toBe(1024);
+  });
+
   it("falls back to defaults when config has an invalid value", () => {
     writeFileSync(TEST_CONFIG_PATH, '[store]\nkey = "invalid_value"\n');
     const config = loadConfig();
