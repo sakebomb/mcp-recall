@@ -6,7 +6,7 @@ import { join } from "path";
 import { storeOutput, pinOutput } from "../src/db/index";
 import { initSchema, closeDb } from "../src/db/schema";
 import { toolExport, toolListStored, toolSearch } from "../src/tools";
-import { handleImportCommand } from "../src/import/index";
+import { handleImportCommand, validateExport, MAX_REPORTED_ISSUES } from "../src/import/index";
 import { getProjectKey } from "../src/project-key";
 import type { StoreInput } from "../src/db/types";
 
@@ -721,5 +721,47 @@ describe("import validation", () => {
     writeFileSync(dumpFile, "[]");
     // Should resolve without throwing
     await handleImportCommand([dumpFile]);
+  });
+
+  test("stops collecting issues after the reported few, however many rows fail (#411)", () => {
+    // An unbounded z.array records one issue per bad row (~100 bytes each), so a
+    // large non-dump could exhaust memory before the first five were printed.
+    const result = validateExport(new Array(1_000_000).fill(1));
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.issues.length).toBe(MAX_REPORTED_ISSUES);
+    expect(result.issues[0]).toStartWith("[0] ");
+  });
+
+  test("reports bad rows by index and field path (#411)", () => {
+    storeOutput(sourceDb, makeInput());
+    const good = JSON.parse(toolExport(sourceDb, SOURCE_PROJECT))[0];
+    const result = validateExport([good, { ...good, id: "" }]);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.issues).toHaveLength(1);
+    expect(result.issues[0]).toStartWith("[1.id] ");
+  });
+
+  test("rejects a non-array top level with one issue (#411)", () => {
+    const result = validateExport({ foo: "bar" });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.issues).toHaveLength(1);
+  });
+
+  test("applies row defaults to a dump predating the optional columns (#411)", () => {
+    storeOutput(sourceDb, makeInput());
+    const row = JSON.parse(toolExport(sourceDb, SOURCE_PROJECT))[0];
+    for (const k of ["full_retained", "command_fp", "delivered_size", "handler"]) delete row[k];
+    const result = validateExport([row]);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.items[0]).toMatchObject({
+      full_retained: 1,
+      command_fp: null,
+      delivered_size: null,
+      handler: null,
+    });
   });
 });

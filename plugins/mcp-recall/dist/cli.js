@@ -26713,7 +26713,28 @@ var StoredOutputSchema = exports_external.object({
   delivered_size: exports_external.number().int().nonnegative().nullable().optional().default(null),
   handler: exports_external.string().nullable().optional().default(null)
 });
-var ExportSchema = exports_external.array(StoredOutputSchema);
+var MAX_REPORTED_ISSUES = 5;
+var formatIssue = (path, message) => `[${path.map(String).join(".")}] ${message}`;
+function validateExport(parsed) {
+  if (!Array.isArray(parsed)) {
+    return { success: false, issues: [formatIssue([], "expected an array of exported rows")] };
+  }
+  const items = [];
+  const issues = [];
+  for (let i = 0;i < parsed.length; i++) {
+    const row = StoredOutputSchema.safeParse(parsed[i]);
+    if (row.success) {
+      items.push(row.data);
+      continue;
+    }
+    for (const issue2 of row.error.issues) {
+      issues.push(formatIssue([i, ...issue2.path], issue2.message));
+      if (issues.length === MAX_REPORTED_ISSUES)
+        return { success: false, issues };
+    }
+  }
+  return issues.length > 0 ? { success: false, issues } : { success: true, items };
+}
 function partitionSecrets(items) {
   const clean = [];
   const patterns = new Set;
@@ -26839,15 +26860,15 @@ async function handleImportCommand(args) {
     console.error("Invalid JSON input.");
     process.exit(1);
   }
-  const validation = ExportSchema.safeParse(parsed);
+  const validation = validateExport(parsed);
   if (!validation.success) {
     console.error("Input does not look like a recall__export dump:");
-    for (const issue2 of validation.error.issues.slice(0, 5)) {
-      console.error(`  [${issue2.path.join(".")}] ${issue2.message}`);
+    for (const issue2 of validation.issues) {
+      console.error(`  ${issue2}`);
     }
     process.exit(1);
   }
-  const items = validation.data;
+  const items = validation.items;
   if (items.length === 0) {
     console.log("Nothing to import (empty export).");
     return;
