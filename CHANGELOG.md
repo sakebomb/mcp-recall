@@ -17,6 +17,9 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   single zod 4.6.7. Exposure was local: only Claude Code on the same machine
   talks to the server. The patch only covers arrays with a declared size
   limit; see `import` below for the one unbounded array a user can feed in.
+  The cost: zod 4 starts more slowly, so each hook call takes about 10 ms
+  longer (median 33.6 to 43.4 ms) and the hook bundle grows from 420 KB to
+  1.05 MB. Loading zod only when it's needed is tracked in #416.
 
 ### Added
 
