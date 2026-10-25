@@ -173,7 +173,7 @@ deliberately out of scope and is now the project's statement of direction;
 
 When adding a config key, it must land in three places or it is undiscoverable: the Zod
 schema (`src/config-schema.ts`), `DEFAULTS`, and the user-facing docs. The audit for this is mechanical — compare
-`grep -oE "^ {4}[a-z_]+:" src/config.ts` (portable; `\s` is GNU-only) against `README.md` and `docs/`.
+`grep -oE "^ {4}[a-z_]+:" src/config-schema.ts src/config.ts` (schema and `DEFAULTS`; portable; `\s` is GNU-only) against `README.md` and `docs/`.
 
 ## Denylist Defaults (never store outputs from)
 
