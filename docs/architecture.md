@@ -105,7 +105,7 @@ so a change lands in the right file.
 | Retrieval logic | `tools.ts` | Pure handlers for every `recall__*` tool; `server.ts` only wires them |
 | Identity | `project-key.ts` | Resolving cwd → stable per-project key and path |
 | Lifecycle | `gc/`, `import/`, `install/` | Disk reclamation, dump restore, and config install/uninstall/status |
-| Support | `config.ts`, `hints.ts`, `log.ts`, `format.ts` | TOML config (Zod), search-term extraction, stderr logging, formatting |
+| Support | `config.ts`, `config-schema.ts`, `hints.ts`, `log.ts`, `format.ts` | TOML config (Zod), search-term extraction, stderr logging, formatting |
 
 The `db/` layer is deliberately many small files behind one re-export barrel
 (`db/index.ts`): `schema.ts` (DDL + migrations), `queries.ts` (CRUD), `chunking.ts`,
@@ -240,8 +240,8 @@ and tests should reference the registry, not a tally.
   code seam is `handlers/index.ts` (`HANDLER_REGISTRY`) plus a new `handlers/*.ts`.
 - **New `recall__*` tool** → a pure handler in `tools.ts`, wired in `server.ts`,
   documented in `docs/tools.md`.
-- **New config key** → three places or it's undiscoverable: the Zod schema and
-  `DEFAULTS` in `config.ts`, and the user-facing docs (README + `docs/`). See
+- **New config key** → three places or it's undiscoverable: the Zod schema in
+  `config-schema.ts`, `DEFAULTS` in `config.ts`, and the user-facing docs (README + `docs/`). See
   CLAUDE.md for the mechanical audit.
 - **Anything near an invariant above** → build a store with the edge shapes and
   assert behaviour; these are the places where "it looks right" has been wrong.

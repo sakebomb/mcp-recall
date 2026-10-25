@@ -19,7 +19,7 @@
 import { readFileSync, statSync, existsSync } from "fs";
 import { resolve } from "path";
 import { Database } from "bun:sqlite";
-import { z } from "zod";
+import * as z from "zod";
 import { getDb, defaultDbPath } from "../db/schema";
 import { chunkText } from "../db/chunking";
 import { getProjectKey } from "../project-key";

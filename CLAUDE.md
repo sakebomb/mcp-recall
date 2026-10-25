@@ -43,6 +43,7 @@ src/
                         Built by scripts/build-binary.ts (`bun run build:binary`) into dist/bin/.
                         install/ detects the binary (detectLaunch) and registers it as hooks + server
   config.ts             TOML config loader (Zod-validated, cached)
+  config-schema.ts      The Zod config schema, required only once a config file is read (#416)
   project-key.ts        Git root detection + SHA256 path hash
   log.ts                Unified stderr logging — info/warn/error/debug, gated on RECALL_DEBUG=1
   format.ts             Shared byte-size and relative-time formatting utilities
@@ -171,7 +172,7 @@ deliberately out of scope and is now the project's statement of direction;
   currently undocumented for users — only the env var appears in `docs/troubleshooting.md`
 
 When adding a config key, it must land in three places or it is undiscoverable: the Zod
-schema, `DEFAULTS`, and the user-facing docs. The audit for this is mechanical — compare
+schema (`src/config-schema.ts`), `DEFAULTS`, and the user-facing docs. The audit for this is mechanical — compare
 `grep -oE "^ {4}[a-z_]+:" src/config.ts` (portable; `\s` is GNU-only) against `README.md` and `docs/`.
 
 ## Denylist Defaults (never store outputs from)

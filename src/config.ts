@@ -2,65 +2,16 @@ import { parse } from "smol-toml";
 import { readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
-import { z } from "zod";
 import { log, setDebugEnabled } from "./log";
+import type { RecallConfig } from "./config-schema";
 
-export const RecallConfigSchema = z.object({
-  store: z.object({
-    expire_after_session_days: z.number().positive(),
-    key: z.enum(["git_root", "cwd"]),
-    max_size_mb: z.number().positive(),
-    max_pinned_mb: z.number().positive(),
-    pin_recommendation_threshold: z.number().int().positive(),
-    stale_item_days: z.number().int().positive(),
-    // .finite() rejects `inf` (legal TOML that passes bare .positive() since Infinity > 0);
-    // a non-finite half-life would collapse decay eviction to plain LFU. See #228.
-    eviction_half_life_days: z.number().positive().finite(),
-    gc_reminder_mb: z.number().nonnegative(),
-    // Which intercepted outputs keep a retrievable full body vs. summary-only.
-    // full = keep every body; balanced = keep MCP/web/API, network Bash and
-    // content reads (cat, git diff/show/log -p, head/tail, sed -n), drop other
-    // reproducible Bash (git log/tests/ls/grep…); minimal = drop all intercepted
-    // bodies. Notes always keep their body regardless. See #-retention.
-    retention: z.enum(["full", "balanced", "minimal"]),
-  }),
-  retrieve: z.object({
-    default_max_bytes: z.number().positive(),
-  }),
-  denylist: z.object({
-    additional: z.array(z.string()),
-    override_defaults: z.array(z.string()),
-    allowlist: z.array(z.string()),
-  }),
-  profiles: z.object({
-    verify_signature: z.enum(["warn", "error", "skip"]),
-  }),
-  debug: z.object({
-    enabled: z.boolean(),
-  }),
-});
-
-// zod 4 dropped .deepPartial(); every section is a flat object, so one level of
-// .partial() per section plus the outer .partial() is the same shape. `satisfies`
-// fails the build if a section is added above but not here (it would be stripped).
-const sections = RecallConfigSchema.shape;
-const PartialConfigSchema = z
-  .object({
-    store: sections.store.partial(),
-    retrieve: sections.retrieve.partial(),
-    denylist: sections.denylist.partial(),
-    profiles: sections.profiles.partial(),
-    debug: sections.debug.partial(),
-  } satisfies Record<keyof typeof sections, z.ZodType>)
-  .partial();
+export type { RecallConfig };
 
 // When the user sets max_size_mb but not max_pinned_mb, the pinned cap defaults to
 // this fraction of the effective total cap — so lowering max_size_mb alone can never
 // manufacture a max_pinned_mb > max_size_mb contradiction. (The static DEFAULTS value
 // below covers the no-config and fallback paths, where max_size_mb is also default.)
 const DEFAULT_PINNED_FRACTION = 0.5;
-
-export type RecallConfig = z.infer<typeof RecallConfigSchema>;
 
 const DEFAULTS: RecallConfig = {
   store: {
@@ -132,6 +83,8 @@ export function loadConfig(): RecallConfig {
 
   try {
     const raw = readFileSync(getConfigPath(), "utf8");
+    // Required only after the read succeeds: with no config file, zod never loads (#416).
+    const { PartialConfigSchema } = require("./config-schema") as typeof import("./config-schema");
     const result = PartialConfigSchema.safeParse(parse(raw));
     if (result.success) {
       const base = deepMerge(DEFAULTS, result.data);
@@ -146,7 +99,7 @@ export function loadConfig(): RecallConfig {
       // (max_pinned_mb can never bind before max_size_mb does). Only reachable when
       // the user set both explicitly. Reject the whole config to defaults, consistent
       // with how a schema-invalid value is handled. This lives here rather than as a
-      // schema .refine() because RecallConfigSchema is deepPartial()'d for user
+      // schema .refine() because the schema is made partial for user
       // parsing, where a refine would see one or both fields absent.
       if (merged.store.max_pinned_mb > merged.store.max_size_mb) {
         log.warn(

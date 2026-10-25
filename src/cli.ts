@@ -21,12 +21,6 @@
 
 import { handleSessionStart } from "./hooks/session-start";
 import { handlePostToolUse } from "./hooks/post-tool-use";
-import { handleProfilesCommand } from "./profiles/commands";
-import { handleLearnCommand } from "./learn/index";
-import { handleImportCommand } from "./import/index";
-import { installCommand, uninstallCommand, statusCommand } from "./install/index";
-import { gcCommand } from "./gc/index";
-import { discoverCommand, parseSince } from "./discover/index";
 import { log } from "./log";
 import { join } from "path";
 
@@ -309,7 +303,8 @@ export async function main(): Promise<void> {
     process.exit(0);
   }
 
-  // User-facing commands — do not read stdin (not hook handlers)
+  // User-facing commands — do not read stdin (not hook handlers). Each is imported
+  // where it runs, so the hook never loads them or the zod schemas they build (#416).
   if (subcommand === "completions") {
     const shell = process.argv[3];
     if (!shell) {
@@ -326,37 +321,44 @@ export async function main(): Promise<void> {
   }
 
   if (subcommand === "profiles") {
+    const { handleProfilesCommand } = await import("./profiles/commands");
     await handleProfilesCommand(process.argv.slice(3));
     process.exit(0);
   }
 
   if (subcommand === "learn") {
+    const { handleLearnCommand } = await import("./learn/index");
     await handleLearnCommand(process.argv.slice(3));
     process.exit(0);
   }
 
   if (subcommand === "import") {
+    const { handleImportCommand } = await import("./import/index");
     await handleImportCommand(process.argv.slice(3));
     process.exit(0);
   }
 
   if (subcommand === "install") {
+    const { installCommand } = await import("./install/index");
     const dryRun = process.argv.includes("--dry-run");
     await installCommand({ dryRun });
     process.exit(0);
   }
 
   if (subcommand === "uninstall") {
+    const { uninstallCommand } = await import("./install/index");
     await uninstallCommand();
     process.exit(0);
   }
 
   if (subcommand === "status") {
+    const { statusCommand } = await import("./install/index");
     await statusCommand();
     process.exit(0);
   }
 
   if (subcommand === "discover") {
+    const { discoverCommand, parseSince } = await import("./discover/index");
     const sinceIdx = process.argv.indexOf("--since");
     let since: number | undefined;
     if (sinceIdx !== -1) {
@@ -387,6 +389,7 @@ export async function main(): Promise<void> {
   }
 
   if (subcommand === "gc") {
+    const { gcCommand } = await import("./gc/index");
     const staleIdx = process.argv.indexOf("--stale-days");
     const staleDays =
       staleIdx !== -1 && process.argv[staleIdx + 1]

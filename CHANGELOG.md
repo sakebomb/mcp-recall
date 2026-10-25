@@ -17,9 +17,12 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   single zod 4.6.7. Exposure was local: only Claude Code on the same machine
   talks to the server. The patch only covers arrays with a declared size
   limit; see `import` below for the one unbounded array a user can feed in.
-  The cost: zod 4 starts more slowly, so each hook call takes about 10 ms
-  longer (median 33.6 to 43.4 ms) and the hook bundle grows from 420 KB to
-  1.05 MB. Loading zod only when it's needed is tracked in #416.
+  zod 4 starts more slowly, which on its own made each hook call about 10 ms
+  slower. The hook now loads zod only when a config file exists or a
+  user-facing command needs it, and imports it in a form the bundler can trim
+  (#416), so hook time is unchanged: median 33.7 ms with zod 3 against 33.8 ms
+  now, over 40 alternating runs of one Bash event. The hook bundle grows from
+  420 KB to 502 KB.
 
 ### Added
 
