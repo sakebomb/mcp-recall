@@ -63,7 +63,38 @@ const StoredOutputSchema = z.object({
 
 type StoredOutputRow = z.infer<typeof StoredOutputSchema>;
 
-const ExportSchema = z.array(StoredOutputSchema);
+export const MAX_REPORTED_ISSUES = 5;
+
+export type ExportValidation =
+  | { success: true; items: StoredOutputRow[] }
+  | { success: false; issues: string[] };
+
+const formatIssue = (path: PropertyKey[], message: string) =>
+  `[${path.map(String).join(".")}] ${message}`;
+
+// Rows are validated one at a time rather than with z.array(StoredOutputSchema):
+// an unbounded array schema records an issue for every failing row, so a large
+// non-dump could exhaust memory before the first few were printed (#411). A
+// dump has no natural size, so a .max() bound would reject real exports.
+export function validateExport(parsed: unknown): ExportValidation {
+  if (!Array.isArray(parsed)) {
+    return { success: false, issues: [formatIssue([], "expected an array of exported rows")] };
+  }
+  const items: StoredOutputRow[] = [];
+  const issues: string[] = [];
+  for (let i = 0; i < parsed.length; i++) {
+    const row = StoredOutputSchema.safeParse(parsed[i]);
+    if (row.success) {
+      items.push(row.data);
+      continue;
+    }
+    for (const issue of row.error.issues) {
+      issues.push(formatIssue([i, ...issue.path], issue.message));
+      if (issues.length === MAX_REPORTED_ISSUES) return { success: false, issues };
+    }
+  }
+  return issues.length > 0 ? { success: false, issues } : { success: true, items };
+}
 
 // ── Secret scan ───────────────────────────────────────────────────────────────
 
@@ -303,16 +334,16 @@ export async function handleImportCommand(args: string[]): Promise<void> {
   }
 
   // Validate schema
-  const validation = ExportSchema.safeParse(parsed);
+  const validation = validateExport(parsed);
   if (!validation.success) {
     console.error("Input does not look like a recall__export dump:");
-    for (const issue of validation.error.issues.slice(0, 5)) {
-      console.error(`  [${issue.path.join(".")}] ${issue.message}`);
+    for (const issue of validation.issues) {
+      console.error(`  ${issue}`);
     }
     process.exit(1);
   }
 
-  const items = validation.data;
+  const items = validation.items;
 
   if (items.length === 0) {
     console.log("Nothing to import (empty export).");
