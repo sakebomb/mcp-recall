@@ -1,4 +1,6 @@
 import { describe, test, expect } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 import { getVersion, printHelp, completionScript } from "../src/cli";
 
@@ -134,5 +136,62 @@ describe("completionScript", () => {
 
   test("throws on unknown shell", () => {
     expect(() => completionScript("elvish")).toThrow(/Unknown shell/);
+  });
+});
+
+// ── hook startup (#416) ───────────────────────────────────────────────────────
+
+// zod 4 adds ~10 ms to every hook call when it loads, so a hook call with no config
+// file must not load it. A preload plugin reports when zod's entry module loads.
+describe("hook startup", () => {
+  const ZOD_PROBE = `Bun.plugin({ name: "zod-probe", setup(b) {
+  // Synchronous: an async onLoad makes zod an async module, which require() rejects.
+  b.onLoad({ filter: /node_modules\\/zod\\/index\\.js$/ }, ({ path }) => {
+    process.stderr.write("ZOD-LOADED\\n");
+    return { contents: require("fs").readFileSync(path, "utf8"), loader: "js" };
+  });
+} });`;
+  const EVENT = JSON.stringify({
+    session_id: "startup", cwd: tmpdir(), hook_event_name: "PostToolUse", tool_name: "Bash",
+    tool_input: { command: "echo hi" },
+    tool_response: { stdout: "hi", stderr: "", interrupted: false, isImage: false },
+  });
+
+  function runHook(configToml: string | null): string {
+    const dir = mkdtempSync(join(tmpdir(), "recall-startup-"));
+    try {
+      writeFileSync(join(dir, "probe.ts"), ZOD_PROBE);
+      const configPath = join(dir, "config.toml");
+      if (configToml !== null) writeFileSync(configPath, configToml);
+      const proc = Bun.spawnSync(
+        [process.execPath, "--preload", join(dir, "probe.ts"), join(import.meta.dir, "..", "src", "cli.ts"), "post-tool-use"],
+        {
+          stdin: new TextEncoder().encode(EVENT),
+          env: { ...process.env, RECALL_DB_PATH: join(dir, "recall.db"), RECALL_CONFIG_PATH: configPath },
+        }
+      );
+      expect(proc.exitCode).toBe(0);
+      return proc.stderr.toString();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  test("does not load zod when no config file exists", () => {
+    expect(runHook(null)).not.toContain("ZOD-LOADED");
+  });
+
+  test("loads zod and warns on a bad value when a config file exists", () => {
+    const stderr = runHook("[store]\nmax_size_mb = -1\n");
+    expect(stderr).toContain("ZOD-LOADED");
+    expect(stderr).toContain("invalid config (store.max_size_mb:");
+  });
+
+  // Bun 1.3's bundler keeps all 64 zod locales for `import { z } from "zod"`, about
+  // 600 KB the hook parses on every call, and drops them for `import * as z`.
+  test("bundled CLI carries no more than zod's default locale", async () => {
+    const bundle = await Bun.file(join(import.meta.dir, "..", "plugins", "mcp-recall", "dist", "cli.js")).text();
+    const locales = bundle.match(/^\/\/ node_modules\/zod\/v4\/locales\/[^\n]+/gm) ?? [];
+    expect(locales.length).toBeLessThanOrEqual(2);
   });
 });

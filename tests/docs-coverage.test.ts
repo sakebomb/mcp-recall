@@ -2,7 +2,7 @@ import { test, expect, describe } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { Glob } from "bun";
-import { RecallConfigSchema } from "../src/config";
+import { RecallConfigSchema } from "../src/config-schema";
 import { printHelp } from "../src/cli";
 
 // Doc-coverage guard (#227). Derives four inventories from source of truth and
