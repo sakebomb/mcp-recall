@@ -19,15 +19,13 @@ var __toESM = (mod, isNodeMode, target) => {
       return cached;
   }
   target = mod != null ? __create(__getProtoOf(mod)) : {};
-  const to = isNodeMode || !mod || !mod.__esModule || !__hasOwnProp.call(mod, "default") ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
-  if (mod && typeof mod === "object" || typeof mod === "function") {
-    for (let key of __getOwnPropNames(mod))
-      if (!__hasOwnProp.call(to, key))
-        __defProp(to, key, {
-          get: __accessProp.bind(mod, key),
-          enumerable: true
-        });
-  }
+  const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
+  for (let key of __getOwnPropNames(mod))
+    if (!__hasOwnProp.call(to, key))
+      __defProp(to, key, {
+        get: __accessProp.bind(mod, key),
+        enumerable: true
+      });
   if (canCache)
     cache.set(mod, to);
   return to;
@@ -63,19 +61,102 @@ var __export = (target, all) => {
       set: __exportSetter.bind(all, name)
     });
 };
-var __esm = (fn, res, err) => () => {
-  if (fn)
-    try {
-      res = fn(fn = 0);
-    } catch (e) {
-      err = [e];
-    }
-  if (err)
-    throw err[0];
-  return res;
-};
+var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 
 // node_modules/zod/v4/core/util.js
+var exports_util = {};
+__export(exports_util, {
+  unwrapMessage: () => unwrapMessage,
+  uint8ArrayToHex: () => uint8ArrayToHex,
+  uint8ArrayToBase64url: () => uint8ArrayToBase64url,
+  uint8ArrayToBase64: () => uint8ArrayToBase64,
+  toZod: () => toZod,
+  stringifyPrimitive: () => stringifyPrimitive,
+  slugify: () => slugify,
+  sizeCaps: () => sizeCaps,
+  shallowClone: () => shallowClone,
+  safeExtend: () => safeExtend,
+  required: () => required,
+  rawShape: () => rawShape,
+  randomString: () => randomString,
+  propertyKeyTypes: () => propertyKeyTypes,
+  promiseAllObject: () => promiseAllObject,
+  primitiveTypes: () => primitiveTypes,
+  prefixIssues: () => prefixIssues,
+  pick: () => pick,
+  partial: () => partial,
+  parsedType: () => parsedType,
+  own: () => own,
+  optionalKeys: () => optionalKeys,
+  omit: () => omit,
+  objectClone: () => objectClone,
+  numKeys: () => numKeys,
+  nullish: () => nullish,
+  normalizeParams: () => normalizeParams,
+  mergeDefs: () => mergeDefs,
+  merge: () => merge,
+  members: () => members,
+  jsonStringifyReplacer: () => jsonStringifyReplacer,
+  joinValues: () => joinValues,
+  issue: () => issue,
+  isPlainObject: () => isPlainObject,
+  isObject: () => isObject,
+  installLazyProp: () => installLazyProp,
+  hide: () => hide,
+  hexToUint8Array: () => hexToUint8Array,
+  getSizableOrigin: () => getSizableOrigin,
+  getParsedType: () => getParsedType2,
+  getLengthableOrigin: () => getLengthableOrigin,
+  getEnumValues: () => getEnumValues,
+  getElementAtPath: () => getElementAtPath,
+  floatSafeRemainder: () => floatSafeRemainder2,
+  finalizeIssue: () => finalizeIssue,
+  extend: () => extend,
+  explicitlyAborted: () => explicitlyAborted,
+  escapeRegex: () => escapeRegex,
+  esc: () => esc,
+  derived: () => derived,
+  defineLazyInternal: () => defineLazyInternal,
+  defineLazy: () => defineLazy,
+  createTransparentProxy: () => createTransparentProxy,
+  constantCatch: () => constantCatch,
+  codePointLength: () => codePointLength,
+  cloneDef: () => cloneDef,
+  clone: () => clone,
+  cleanRegex: () => cleanRegex,
+  cleanEnum: () => cleanEnum,
+  captureStackTrace: () => captureStackTrace,
+  cached: () => cached,
+  base64urlToUint8Array: () => base64urlToUint8Array,
+  base64ToUint8Array: () => base64ToUint8Array,
+  attachSchema: () => attachSchema,
+  assignProp: () => assignProp,
+  assertNotEqual: () => assertNotEqual,
+  assertNever: () => assertNever,
+  assertIs: () => assertIs,
+  assertEqual: () => assertEqual,
+  assert: () => assert,
+  allowsEval: () => allowsEval,
+  aborted: () => aborted,
+  NUMBER_FORMAT_RANGES: () => NUMBER_FORMAT_RANGES,
+  Class: () => Class,
+  CONSTANT_CATCH: () => CONSTANT_CATCH,
+  BIGINT_FORMAT_RANGES: () => BIGINT_FORMAT_RANGES
+});
+function assertEqual(val) {
+  return val;
+}
+function assertNotEqual(val) {
+  return val;
+}
+function toZod() {
+  return (schema) => schema;
+}
+function assertIs(_arg) {}
+function assertNever(_x) {
+  throw new Error("Unexpected value in exhaustive check");
+}
+function assert(_) {}
 function getEnumValues(entries) {
   const numericValues = Object.values(entries).filter((v) => typeof v === "number");
   const values = Object.entries(entries).filter(([k, _]) => numericValues.indexOf(+k) === -1).map(([_, v]) => v);
@@ -122,6 +203,30 @@ function floatSafeRemainder2(val, step) {
   if (Math.abs(ratio - roundedRatio) < tolerance)
     return 0;
   return ratio - roundedRatio;
+}
+function defineLazy(object, key, getter) {
+  let value = undefined;
+  Object.defineProperty(object, key, {
+    get() {
+      if (value === EVALUATING) {
+        return;
+      }
+      if (value === undefined) {
+        value = EVALUATING;
+        value = getter();
+      }
+      return value;
+    },
+    set(v) {
+      Object.defineProperty(object, key, {
+        value: v
+      });
+    },
+    configurable: true
+  });
+}
+function objectClone(obj) {
+  return Object.create(Object.getPrototypeOf(obj), Object.getOwnPropertyDescriptors(obj));
 }
 function assignProp(target, prop, value) {
   Object.defineProperty(target, prop, {
@@ -189,6 +294,33 @@ function mergeDefs(...defs) {
   }
   return Object.defineProperties({}, mergedDescriptors);
 }
+function cloneDef(schema) {
+  return mergeDefs(schema._zod.def);
+}
+function getElementAtPath(obj, path) {
+  if (!path)
+    return obj;
+  return path.reduce((acc, key) => acc?.[key], obj);
+}
+function promiseAllObject(promisesObj) {
+  const keys = Object.keys(promisesObj);
+  const promises = keys.map((key) => promisesObj[key]);
+  return Promise.all(promises).then((results) => {
+    const resolvedObj = {};
+    for (let i = 0;i < keys.length; i++) {
+      resolvedObj[keys[i]] = results[i];
+    }
+    return resolvedObj;
+  });
+}
+function randomString(length = 10) {
+  const chars = "abcdefghijklmnopqrstuvwxyz";
+  let str = "";
+  for (let i = 0;i < length; i++) {
+    str += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return str;
+}
 function esc(str) {
   return JSON.stringify(str);
 }
@@ -225,6 +357,15 @@ function shallowClone(o) {
     return new Set(o);
   return o;
 }
+function numKeys(data) {
+  let keyCount = 0;
+  for (const key in data) {
+    if (Object.prototype.hasOwnProperty.call(data, key)) {
+      keyCount++;
+    }
+  }
+  return keyCount;
+}
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -249,6 +390,39 @@ function normalizeParams(_params) {
   if (typeof params.error === "string")
     return { ...params, error: () => params.error };
   return params;
+}
+function createTransparentProxy(getter) {
+  let target;
+  return new Proxy({}, {
+    get(_, prop, receiver) {
+      target ?? (target = getter());
+      return Reflect.get(target, prop, receiver);
+    },
+    set(_, prop, value, receiver) {
+      target ?? (target = getter());
+      return Reflect.set(target, prop, value, receiver);
+    },
+    has(_, prop) {
+      target ?? (target = getter());
+      return Reflect.has(target, prop);
+    },
+    deleteProperty(_, prop) {
+      target ?? (target = getter());
+      return Reflect.deleteProperty(target, prop);
+    },
+    ownKeys(_) {
+      target ?? (target = getter());
+      return Reflect.ownKeys(target);
+    },
+    getOwnPropertyDescriptor(_, prop) {
+      target ?? (target = getter());
+      return Reflect.getOwnPropertyDescriptor(target, prop);
+    },
+    defineProperty(_, prop, descriptor) {
+      target ?? (target = getter());
+      return Reflect.defineProperty(target, prop, descriptor);
+    }
+  });
 }
 function stringifyPrimitive(value) {
   if (typeof value === "bigint")
@@ -435,6 +609,15 @@ function finalizeIssue(iss, ctx, config) {
   }
   return full;
 }
+function getSizableOrigin(input) {
+  if (input instanceof Set)
+    return "set";
+  if (input instanceof Map)
+    return "map";
+  if (input instanceof File)
+    return "file";
+  return "unknown";
+}
 function codePointLength(str) {
   const units = str.length;
   if (!highSurrogate.test(str))
@@ -487,6 +670,52 @@ function issue(...args) {
     };
   }
   return { ...iss };
+}
+function cleanEnum(obj) {
+  return Object.entries(obj).filter(([k, _]) => {
+    return Number.isNaN(Number.parseInt(k, 10));
+  }).map((el) => el[1]);
+}
+function base64ToUint8Array(base64) {
+  const binaryString = atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0;i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+function uint8ArrayToBase64(bytes) {
+  let binaryString = "";
+  for (let i = 0;i < bytes.length; i++) {
+    binaryString += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binaryString);
+}
+function base64urlToUint8Array(base64url) {
+  const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
+  const padding = "=".repeat((4 - base64.length % 4) % 4);
+  return base64ToUint8Array(base64 + padding);
+}
+function uint8ArrayToBase64url(bytes) {
+  return uint8ArrayToBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+}
+function hexToUint8Array(hex) {
+  const cleanHex = hex.replace(/^0x/, "");
+  if (cleanHex.length % 2 !== 0) {
+    throw new Error("Invalid hex string length");
+  }
+  const bytes = new Uint8Array(cleanHex.length / 2);
+  for (let i = 0;i < cleanHex.length; i += 2) {
+    bytes[i / 2] = Number.parseInt(cleanHex.slice(i, i + 2), 16);
+  }
+  return bytes;
+}
+function uint8ArrayToHex(bytes) {
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+class Class {
+  constructor(..._args) {}
 }
 function members(proto, table) {
   for (const key in table) {
@@ -590,9 +819,53 @@ function constantCatch(value) {
   fn[CONSTANT_CATCH] = true;
   return fn;
 }
-var captureStackTrace, allowsEval, propertyKeyTypes, NUMBER_FORMAT_RANGES, BIGINT_FORMAT_RANGES, highSurrogate, installing, broke = false, breaker, CONSTANT_CATCH = "~constantCatch";
+var EVALUATING, captureStackTrace, allowsEval, getParsedType2 = (data) => {
+  const t = typeof data;
+  switch (t) {
+    case "undefined":
+      return "undefined";
+    case "string":
+      return "string";
+    case "number":
+      return Number.isNaN(data) ? "nan" : "number";
+    case "boolean":
+      return "boolean";
+    case "function":
+      return "function";
+    case "bigint":
+      return "bigint";
+    case "symbol":
+      return "symbol";
+    case "object":
+      if (Array.isArray(data)) {
+        return "array";
+      }
+      if (data === null) {
+        return "null";
+      }
+      if (data.then && typeof data.then === "function" && data.catch && typeof data.catch === "function") {
+        return "promise";
+      }
+      if (typeof Map !== "undefined" && data instanceof Map) {
+        return "map";
+      }
+      if (typeof Set !== "undefined" && data instanceof Set) {
+        return "set";
+      }
+      if (typeof Date !== "undefined" && data instanceof Date) {
+        return "date";
+      }
+      if (typeof File !== "undefined" && data instanceof File) {
+        return "file";
+      }
+      return "object";
+    default:
+      throw new Error(`Unknown data type: ${t}`);
+  }
+}, propertyKeyTypes, primitiveTypes, NUMBER_FORMAT_RANGES, BIGINT_FORMAT_RANGES, highSurrogate, installing, broke = false, breaker, CONSTANT_CATCH = "~constantCatch";
 var init_util = __esm(() => {
   init_core();
+  EVALUATING = /* @__PURE__ */ Symbol("evaluating");
   captureStackTrace = "captureStackTrace" in Error ? Error.captureStackTrace : (..._args) => {};
   allowsEval = /* @__PURE__ */ cached(() => {
     if (globalConfig.jitless) {
@@ -610,6 +883,14 @@ var init_util = __esm(() => {
     }
   });
   propertyKeyTypes = /* @__PURE__ */ new Set(["string", "number", "symbol"]);
+  primitiveTypes = /* @__PURE__ */ new Set([
+    "string",
+    "number",
+    "bigint",
+    "boolean",
+    "symbol",
+    "undefined"
+  ]);
   NUMBER_FORMAT_RANGES = /* @__PURE__ */ (() => ({
     safeint: [Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
     int32: [-2147483648, 2147483647],
@@ -676,23 +957,23 @@ function $constructor(name, initializer, proto, params) {
     inst._zod.traits.add(name);
     initializer(inst, def);
     if (initialized) {
-      const own = Object.getPrototypeOf(inst);
+      const own2 = Object.getPrototypeOf(inst);
       const ctorProto = inst._zod.constr.prototype;
-      let up = own;
+      let up = own2;
       while (up && up !== ctorProto)
         up = Object.getPrototypeOf(up);
-      const target = up ?? own;
+      const target = up ?? own2;
       if (!initialized.has(target)) {
         initialized.add(target);
         members(target, protoMembers);
       }
     }
-    const proto = _.prototype;
-    for (const k in proto) {
-      if (!Object.prototype.hasOwnProperty.call(proto, k))
+    const proto2 = _.prototype;
+    for (const k in proto2) {
+      if (!Object.prototype.hasOwnProperty.call(proto2, k))
         continue;
       if (!(k in inst)) {
-        inst[k] = proto[k].bind(inst);
+        inst[k] = proto2[k].bind(inst);
       }
     }
   }
@@ -771,7 +1052,7 @@ function node(obj, key, make) {
   }
   return obj[key];
 }
-function flattenError(error, mapper = (issue) => issue.message) {
+function flattenError(error, mapper = (issue2) => issue2.message) {
   const fieldErrors = {};
   const formErrors = [];
   for (const sub of error.issues) {
@@ -783,20 +1064,20 @@ function flattenError(error, mapper = (issue) => issue.message) {
   }
   return { formErrors, fieldErrors };
 }
-function formatError(error, mapper = (issue) => issue.message) {
+function formatError(error, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error, path = []) => {
-    for (const issue of error.issues) {
-      if (issue.code === "invalid_union" && issue.errors.length) {
-        issue.errors.map((issues) => processError({ issues }, [...path, ...issue.path]));
-      } else if (issue.code === "invalid_key") {
-        processError({ issues: issue.issues }, [...path, ...issue.path]);
-      } else if (issue.code === "invalid_element") {
-        processError({ issues: issue.issues }, [...path, ...issue.path]);
+  const processError = (error2, path = []) => {
+    for (const issue2 of error2.issues) {
+      if (issue2.code === "invalid_union" && issue2.errors.length) {
+        issue2.errors.map((issues) => processError({ issues }, [...path, ...issue2.path]));
+      } else if (issue2.code === "invalid_key") {
+        processError({ issues: issue2.issues }, [...path, ...issue2.path]);
+      } else if (issue2.code === "invalid_element") {
+        processError({ issues: issue2.issues }, [...path, ...issue2.path]);
       } else {
-        const fullpath = [...path, ...issue.path];
+        const fullpath = [...path, ...issue2.path];
         if (fullpath.length === 0) {
-          fieldErrors._errors.push(mapper(issue));
+          fieldErrors._errors.push(mapper(issue2));
         } else {
           let curr = fieldErrors;
           let i = 0;
@@ -805,7 +1086,7 @@ function formatError(error, mapper = (issue) => issue.message) {
             const terminal = i === fullpath.length - 1;
             if (el === "_errors") {
               if (terminal)
-                curr._errors.push(mapper(issue));
+                curr._errors.push(mapper(issue2));
               i++;
               continue;
             }
@@ -817,11 +1098,11 @@ function formatError(error, mapper = (issue) => issue.message) {
                 configurable: true
               });
             }
-            const node = curr[el];
+            const node2 = curr[el];
             if (terminal) {
-              node._errors.push(mapper(issue));
+              node2._errors.push(mapper(issue2));
             }
-            curr = node;
+            curr = node2;
             i++;
           }
         }
@@ -967,29 +1248,29 @@ var _parse = (_Err) => {
     result = await result;
   return result.issues.length === 0;
 }, _encode = (_Err) => {
-  const parse = _parse(_Err);
+  const parse2 = _parse(_Err);
   const fn = (schema, value, _ctx, _params) => {
     const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
-    return parse(schema, value, ctx, finalizeParams(fn, _params));
+    return parse2(schema, value, ctx, finalizeParams(fn, _params));
   };
   return fn;
 }, _decode = (_Err) => {
-  const parse = _parse(_Err);
+  const parse2 = _parse(_Err);
   const fn = (schema, value, _ctx, _params) => {
-    return parse(schema, value, _ctx, finalizeParams(fn, _params));
+    return parse2(schema, value, _ctx, finalizeParams(fn, _params));
   };
   return fn;
 }, _encodeAsync = (_Err) => {
-  const parseAsync = _parseAsync(_Err);
+  const parseAsync2 = _parseAsync(_Err);
   const fn = async (schema, value, _ctx, _params) => {
     const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
-    return await parseAsync(schema, value, ctx, finalizeParams(fn, _params));
+    return await parseAsync2(schema, value, ctx, finalizeParams(fn, _params));
   };
   return fn;
 }, _decodeAsync = (_Err) => {
-  const parseAsync = _parseAsync(_Err);
+  const parseAsync2 = _parseAsync(_Err);
   const fn = async (schema, value, _ctx, _params) => {
-    return await parseAsync(schema, value, _ctx, finalizeParams(fn, _params));
+    return await parseAsync2(schema, value, _ctx, finalizeParams(fn, _params));
   };
   return fn;
 }, _safeEncode = (_Err) => (schema, value, _ctx) => {
@@ -1038,8 +1319,8 @@ function datetime(args) {
   if (args.offset)
     opts.push(`([+-](?:[01]\\d|2[0-3]):[0-5]\\d)`);
   const qualified = `${timeSource({ precision: args.precision, seconds: true })}(?:${opts.join("|")})`;
-  const timeRegex = args.local ? `${qualified}|${timeSource({ precision: args.precision })}` : qualified;
-  return new RegExp(`^${dateSource}T(?:${timeRegex})$`);
+  const timeRegex2 = args.local ? `${qualified}|${timeSource({ precision: args.precision })}` : qualified;
+  return new RegExp(`^${dateSource}T(?:${timeRegex2})$`);
 }
 var cuid, cuid2, ulid, xid, ksuid, nanoid, duration, guid, uuid = (version) => {
   if (!version)
@@ -1084,10 +1365,10 @@ var init_checks = __esm(() => {
   init_regexes();
   init_util();
   $ZodCheck = /* @__PURE__ */ $constructor("$ZodCheck", (inst, def) => {
-    var _a;
+    var _a2;
     inst._zod ?? (inst._zod = {});
     inst._zod.def = def;
-    (_a = inst._zod).onattach ?? (_a.onattach = []);
+    (_a2 = inst._zod).onattach ?? (_a2.onattach = []);
   });
   numericOriginMap = {
     number: "number",
@@ -1220,9 +1501,9 @@ var init_checks = __esm(() => {
     };
   });
   $ZodCheckMaxLength = /* @__PURE__ */ $constructor("$ZodCheckMaxLength", (inst, def) => {
-    var _a;
+    var _a2;
     $ZodCheck.init(inst, def);
-    (_a = inst._zod.def).when ?? (_a.when = _whenHasLength);
+    (_a2 = inst._zod.def).when ?? (_a2.when = _whenHasLength);
     inst._zod.check = (payload) => {
       const input = payload.value;
       const units = input.length;
@@ -1242,9 +1523,9 @@ var init_checks = __esm(() => {
     };
   });
   $ZodCheckMinLength = /* @__PURE__ */ $constructor("$ZodCheckMinLength", (inst, def) => {
-    var _a;
+    var _a2;
     $ZodCheck.init(inst, def);
-    (_a = inst._zod.def).when ?? (_a.when = _whenHasLength);
+    (_a2 = inst._zod.def).when ?? (_a2.when = _whenHasLength);
     inst._zod.check = (payload) => {
       const input = payload.value;
       const units = input.length;
@@ -1264,9 +1545,9 @@ var init_checks = __esm(() => {
     };
   });
   $ZodCheckLengthEquals = /* @__PURE__ */ $constructor("$ZodCheckLengthEquals", (inst, def) => {
-    var _a;
+    var _a2;
     $ZodCheck.init(inst, def);
-    (_a = inst._zod.def).when ?? (_a.when = _whenHasLength);
+    (_a2 = inst._zod.def).when ?? (_a2.when = _whenHasLength);
     inst._zod.check = (payload) => {
       const input = payload.value;
       const units = input.length;
@@ -1287,10 +1568,10 @@ var init_checks = __esm(() => {
     };
   });
   $ZodCheckStringFormat = /* @__PURE__ */ $constructor("$ZodCheckStringFormat", (inst, def) => {
-    var _a, _b;
+    var _a2, _b;
     $ZodCheck.init(inst, def);
     if (def.pattern)
-      (_a = inst._zod).check ?? (_a.check = (payload) => {
+      (_a2 = inst._zod).check ?? (_a2.check = (payload) => {
         def.pattern.lastIndex = 0;
         if (def.pattern.test(payload.value))
           return;
@@ -1545,8 +1826,8 @@ function isValidBase64(data) {
 function isValidBase64URL(data) {
   if (!base64urlCharset.test(data))
     return false;
-  const base64 = data.replace(/[-_]/g, (c) => c === "-" ? "+" : "/");
-  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+  const base642 = data.replace(/[-_]/g, (c) => c === "-" ? "+" : "/");
+  const padded = base642.padEnd(Math.ceil(base642.length / 4) * 4, "=");
   return isValidBase64(padded);
 }
 function isValidJWT2(token, algorithm = null) {
@@ -1574,7 +1855,7 @@ function capSize(inst, size) {
   if (!caps.length)
     return;
   const cap = Math.min(...caps.map((c) => c[0]));
-  const parse = inst._zod.parse;
+  const parse2 = inst._zod.parse;
   inst._zod.parse = (payload, ctx) => {
     const n = size(payload.value);
     if (n > cap && !ctx?.skipChecks && ctx?.direction !== "backward") {
@@ -1588,7 +1869,7 @@ function capSize(inst, size) {
         }
       }
     }
-    return parse(payload, ctx);
+    return parse2(payload, ctx);
   };
 }
 function handleArrayResult(result, final, index) {
@@ -1675,7 +1956,7 @@ function handleCatchall(proms, input, payload, ctx, def, inst, abortEarly) {
     }
     const r = _catchall.run({ value: input[key], issues: [] }, ctx);
     if (r instanceof Promise) {
-      proms.push(r.then((r) => handlePropertyResult(r, payload, key, input, optin, optout)));
+      proms.push(r.then((r2) => handlePropertyResult(r2, payload, key, input, optin, optout)));
     } else {
       handlePropertyResult(r, payload, key, input, optin, optout);
     }
@@ -1905,7 +2186,7 @@ var init_schemas = __esm(() => {
   init_versions();
   init_util();
   $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
-    var _a;
+    var _a2;
     inst ?? (inst = {});
     inst._zod.def = def;
     inst._zod.bag = inst._zod.bag || {};
@@ -1918,24 +2199,24 @@ var init_schemas = __esm(() => {
       }
     }
     if (checks.length === 0) {
-      (_a = inst._zod).deferred ?? (_a.deferred = []);
+      (_a2 = inst._zod).deferred ?? (_a2.deferred = []);
       inst._zod.deferred?.push(() => {
         inst._zod.run = inst._zod.parse;
       });
     } else {
-      const runChecks = (payload, checks, ctx) => {
+      const runChecks = (payload, checks2, ctx) => {
         if (payload.memo)
           return payload;
-        let isAborted = aborted(payload);
+        let isAborted2 = aborted(payload);
         let asyncResult;
-        for (const ch of checks) {
+        for (const ch of checks2) {
           if (ch._zod.def.when) {
             if (explicitlyAborted(payload))
               continue;
             const shouldRun = ch._zod.def.when(payload);
             if (!shouldRun)
               continue;
-          } else if (isAborted) {
+          } else if (isAborted2) {
             continue;
           }
           const currLen = payload.issues.length;
@@ -1950,16 +2231,16 @@ var init_schemas = __esm(() => {
               if (nextLen === currLen)
                 return;
               attachSchema(payload.issues, currLen, inst);
-              if (!isAborted)
-                isAborted = aborted(payload, currLen);
+              if (!isAborted2)
+                isAborted2 = aborted(payload, currLen);
             });
           } else {
             const nextLen = payload.issues.length;
             if (nextLen === currLen)
               continue;
             attachSchema(payload.issues, currLen, inst);
-            if (!isAborted)
-              isAborted = aborted(payload, currLen);
+            if (!isAborted2)
+              isAborted2 = aborted(payload, currLen);
           }
         }
         if (asyncResult) {
@@ -1978,7 +2259,7 @@ var init_schemas = __esm(() => {
         if (checkResult instanceof Promise) {
           if (ctx.async === false)
             throw new $ZodAsyncError;
-          return checkResult.then((checkResult) => inst._zod.parse(checkResult, ctx));
+          return checkResult.then((checkResult2) => inst._zod.parse(checkResult2, ctx));
         }
         return inst._zod.parse(checkResult, ctx);
       };
@@ -1989,8 +2270,8 @@ var init_schemas = __esm(() => {
         if (ctx.direction === "backward") {
           const canary = inst._zod.parse({ value: payload.value, issues: [] }, { ...ctx, skipChecks: true });
           if (canary instanceof Promise) {
-            return canary.then((canary) => {
-              return handleCanaryResult(canary, payload, ctx);
+            return canary.then((canary2) => {
+              return handleCanaryResult(canary2, payload, ctx);
             });
           }
           return handleCanaryResult(canary, payload, ctx);
@@ -1999,7 +2280,7 @@ var init_schemas = __esm(() => {
         if (result instanceof Promise) {
           if (ctx.async === false)
             throw new $ZodAsyncError;
-          return result.then((result) => runChecks(result, checks, ctx));
+          return result.then((result2) => runChecks(result2, checks, ctx));
         }
         return runChecks(result, checks, ctx);
       };
@@ -2019,7 +2300,7 @@ var init_schemas = __esm(() => {
       if (def.coerce)
         try {
           payload.value = String(payload.value);
-        } catch (_) {}
+        } catch (_2) {}
       if (typeof payload.value === "string")
         return payload;
       payload.issues.push({
@@ -2370,7 +2651,7 @@ var init_schemas = __esm(() => {
           issues: []
         }, ctx);
         if (result instanceof Promise) {
-          proms.push(result.then((result) => handleArrayResult(result, payload, i)));
+          proms.push(result.then((result2) => handleArrayResult(result2, payload, i)));
         } else {
           handleArrayResult(result, payload, i);
           if (abortEarly && result.issues.length !== 0 && aborted(result))
@@ -2452,7 +2733,7 @@ var init_schemas = __esm(() => {
         const optout = el._zod.optout;
         const r = el._zod.run({ value: input[key], issues: [] }, ctx);
         if (r instanceof Promise) {
-          proms.push(r.then((r) => handlePropertyResult(r, payload, key, input, optin, optout)));
+          proms.push(r.then((r2) => handlePropertyResult(r2, payload, key, input, optin, optout)));
         } else {
           handlePropertyResult(r, payload, key, input, optin, optout);
         }
@@ -2630,8 +2911,8 @@ var init_schemas = __esm(() => {
       }
       if (!async)
         return handleUnionResults(results, payload, inst, ctx);
-      return Promise.all(results).then((results) => {
-        return handleUnionResults(results, payload, inst, ctx);
+      return Promise.all(results).then((results2) => {
+        return handleUnionResults(results2, payload, inst, ctx);
       });
     };
   });
@@ -2692,7 +2973,7 @@ var init_schemas = __esm(() => {
         errors: [],
         note: "No matching discriminator",
         discriminator: def.discriminator,
-        options: Array.from(disc.value.keys()).filter((value) => disc.value.get(value) !== null),
+        options: Array.from(disc.value.keys()).filter((value2) => disc.value.get(value2) !== null),
         input,
         path: [def.discriminator],
         inst
@@ -2708,8 +2989,8 @@ var init_schemas = __esm(() => {
       const right = def.right._zod.run({ value: input, issues: [] }, ctx);
       const async = left instanceof Promise || right instanceof Promise;
       if (async) {
-        return Promise.all([left, right]).then(([left, right]) => {
-          return handleIntersectionResults(payload, left, right);
+        return Promise.all([left, right]).then(([left2, right2]) => {
+          return handleIntersectionResults(payload, left2, right2);
         });
       }
       return handleIntersectionResults(payload, left, right);
@@ -2760,11 +3041,11 @@ var init_schemas = __esm(() => {
               continue;
             const result = def.valueType._zod.run({ value: input[key], issues: [] }, ctx);
             if (result instanceof Promise) {
-              proms.push(result.then((result) => {
-                if (result.issues.length) {
-                  payload.issues.push(...prefixIssues(key, result.issues));
+              proms.push(result.then((result2) => {
+                if (result2.issues.length) {
+                  payload.issues.push(...prefixIssues(key, result2.issues));
                 }
-                payload.value[outKey] = result.value;
+                payload.value[outKey] = result2.value;
               }));
             } else {
               if (result.issues.length) {
@@ -2841,11 +3122,11 @@ var init_schemas = __esm(() => {
             continue;
           const result = def.valueType._zod.run({ value: input[key], issues: [] }, ctx);
           if (result instanceof Promise) {
-            proms.push(result.then((result) => {
-              if (result.issues.length) {
-                payload.issues.push(...prefixIssues(key, result.issues));
+            proms.push(result.then((result2) => {
+              if (result2.issues.length) {
+                payload.issues.push(...prefixIssues(key, result2.issues));
               }
-              payload.value[outKey] = result.value;
+              payload.value[outKey] = result2.value;
             }));
           } else {
             if (result.issues.length) {
@@ -2926,8 +3207,8 @@ var init_schemas = __esm(() => {
       const _out = def.transform(payload.value, payload);
       if (ctx.async) {
         const output = _out instanceof Promise ? _out : Promise.resolve(_out);
-        return output.then((output) => {
-          payload.value = output;
+        return output.then((output2) => {
+          payload.value = output2;
           return payload;
         });
       }
@@ -2956,7 +3237,7 @@ var init_schemas = __esm(() => {
           return payload;
         const result = def.innerType._zod.run({ value: payload.value, issues: [] }, ctx);
         if (result instanceof Promise)
-          return result.then((result) => handleOptionalResult(payload, result));
+          return result.then((result2) => handleOptionalResult(payload, result2));
         return handleOptionalResult(payload, result);
       }
       return def.innerType._zod.run(payload, ctx);
@@ -3001,7 +3282,7 @@ var init_schemas = __esm(() => {
       }
       const result = def.innerType._zod.run(payload, ctx);
       if (result instanceof Promise) {
-        return result.then((result) => handleDefaultResult(result, def));
+        return result.then((result2) => handleDefaultResult(result2, def));
       }
       return handleDefaultResult(result, def);
     };
@@ -3029,7 +3310,7 @@ var init_schemas = __esm(() => {
     inst._zod.parse = (payload, ctx) => {
       const result = def.innerType._zod.run(payload, ctx);
       if (result instanceof Promise) {
-        return result.then((result) => handleNonOptionalResult(result, inst));
+        return result.then((result2) => handleNonOptionalResult(result2, inst));
       }
       return handleNonOptionalResult(result, inst);
     };
@@ -3045,7 +3326,7 @@ var init_schemas = __esm(() => {
       }
       const result = def.innerType._zod.run({ value: payload.value, issues: [] }, ctx);
       if (result instanceof Promise) {
-        return result.then((result) => handleCatchResult(payload, result, def, ctx));
+        return result.then((result2) => handleCatchResult(payload, result2, def, ctx));
       }
       return handleCatchResult(payload, result, def, ctx);
     };
@@ -3060,13 +3341,13 @@ var init_schemas = __esm(() => {
       if (ctx.direction === "backward") {
         const right = def.out._zod.run(payload, ctx);
         if (right instanceof Promise) {
-          return right.then((right) => handlePipeResult(right, def.in, ctx));
+          return right.then((right2) => handlePipeResult(right2, def.in, ctx));
         }
         return handlePipeResult(right, def.in, ctx);
       }
       const left = def.in._zod.run(payload, ctx);
       if (left instanceof Promise) {
-        return left.then((left) => handlePipeResult(left, def.out, ctx));
+        return left.then((left2) => handlePipeResult(left2, def.out, ctx));
       }
       return handlePipeResult(left, def.out, ctx);
     };
@@ -3101,7 +3382,7 @@ var init_schemas = __esm(() => {
       const input = payload.value;
       const r = def.fn(input);
       if (r instanceof Promise) {
-        return r.then((r) => handleRefineResult(r, payload, input, inst));
+        return r.then((r2) => handleRefineResult(r2, payload, input, inst));
       }
       handleRefineResult(r, payload, input, inst);
       return;
@@ -3117,9 +3398,9 @@ function cloneIssues(issues) {
   return issues.map((iss) => iss.path ? { ...iss, path: iss.path.slice() } : { ...iss });
 }
 function isRecursive(inst, stack, resolve) {
-  const cached = recursive.get(inst);
-  if (cached !== undefined)
-    return cached ? PROVEN : NONE;
+  const cached2 = recursive.get(inst);
+  if (cached2 !== undefined)
+    return cached2 ? PROVEN : NONE;
   if (stack.has(inst))
     return PROVEN;
   stack.add(inst);
@@ -3143,7 +3424,7 @@ function isRecursive(inst, stack, resolve) {
     }
     return answer;
   };
-  const merge = (answer) => {
+  const merge2 = (answer) => {
     if (answer > result)
       result = answer;
   };
@@ -3152,7 +3433,7 @@ function isRecursive(inst, stack, resolve) {
   switch (kind) {
     case "object": {
       const raw = rawShape(def);
-      merge(raw ? shape(raw, true) : ASSUMED);
+      merge2(raw ? shape(raw, true) : ASSUMED);
       check(def.catchall);
       break;
     }
@@ -3201,7 +3482,7 @@ function isRecursive(inst, stack, resolve) {
       break;
     case "lazy": {
       const inner = def._cachedInner ?? (resolve ? inst._zod.innerType : undefined);
-      merge(inner ? isRecursive(inner, stack, false) : ASSUMED);
+      merge2(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
     case "template_literal":
@@ -3288,8 +3569,8 @@ var init_memoizer = __esm(() => {
       return empty;
     },
     guard(inst) {
-      var _a;
-      (_a = inst._zod).deferred ?? (_a.deferred = []);
+      var _a2;
+      (_a2 = inst._zod).deferred ?? (_a2.deferred = []);
       inst._zod.deferred.push(() => {
         const base = inst._zod.parse;
         const wrapped = (payload, ctx) => {
@@ -3303,12 +3584,12 @@ var init_memoizer = __esm(() => {
       });
     },
     attach(inst) {
-      var _a;
+      var _a2;
       let isRecursiveInst;
       let rechecked = false;
       let lastCtx;
       let lastBucket;
-      (_a = inst._zod).deferred ?? (_a.deferred = []);
+      (_a2 = inst._zod).deferred ?? (_a2.deferred = []);
       inst._zod.deferred.push(() => {
         const base = inst._zod.parse;
         const wrapped = (payload, ctx) => {
@@ -3438,35 +3719,35 @@ var error = () => {
     }
     return TypeDictionary[type] ?? type;
   }
-  return (issue) => {
-    switch (issue.code) {
+  return (issue2) => {
+    switch (issue2.code) {
       case "invalid_type": {
-        const expected = getTypeName(issue.expected);
-        const receivedType = parsedType(issue.input);
-        const received = getTypeName(receivedType, issue.input);
+        const expected = getTypeName(issue2.expected);
+        const receivedType = parsedType(issue2.input);
+        const received = getTypeName(receivedType, issue2.input);
         return `Invalid input: expected ${expected}, received ${received}`;
       }
       case "invalid_value":
-        if (issue.values.length === 1)
-          return `Invalid input: expected ${stringifyPrimitive(issue.values[0])}`;
-        return `Invalid option: expected one of ${joinValues(issue.values, "|")}`;
+        if (issue2.values.length === 1)
+          return `Invalid input: expected ${stringifyPrimitive(issue2.values[0])}`;
+        return `Invalid option: expected one of ${joinValues(issue2.values, "|")}`;
       case "too_big": {
-        const adj = issue.exact ? "exactly " : issue.inclusive ? "<=" : "<";
-        const sizing = getSizing(issue.origin);
+        const adj = issue2.exact ? "exactly " : issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
         if (sizing)
-          return `Too big: expected ${issue.origin ?? "value"} to have ${adj}${issue.maximum.toString()} ${sizing.unit ?? "elements"}`;
-        return `Too big: expected ${issue.origin ?? "value"} to be ${adj}${issue.maximum.toString()}`;
+          return `Too big: expected ${issue2.origin ?? "value"} to have ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "elements"}`;
+        return `Too big: expected ${issue2.origin ?? "value"} to be ${adj}${issue2.maximum.toString()}`;
       }
       case "too_small": {
-        const adj = issue.exact ? "exactly " : issue.inclusive ? ">=" : ">";
-        const sizing = getSizing(issue.origin);
+        const adj = issue2.exact ? "exactly " : issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
         if (sizing) {
-          return `Too small: expected ${issue.origin} to have ${adj}${issue.minimum.toString()} ${sizing.unit}`;
+          return `Too small: expected ${issue2.origin} to have ${adj}${issue2.minimum.toString()} ${sizing.unit}`;
         }
-        return `Too small: expected ${issue.origin} to be ${adj}${issue.minimum.toString()}`;
+        return `Too small: expected ${issue2.origin} to be ${adj}${issue2.minimum.toString()}`;
       }
       case "invalid_format": {
-        const _issue = issue;
+        const _issue = issue2;
         if (_issue.format === "starts_with") {
           return `Invalid string: must start with "${_issue.prefix}"`;
         }
@@ -3476,25 +3757,25 @@ var error = () => {
           return `Invalid string: must include "${_issue.includes}"`;
         if (_issue.format === "regex")
           return `Invalid string: must match pattern ${_issue.pattern}`;
-        return `Invalid ${FormatDictionary[_issue.format] ?? issue.format}`;
+        return `Invalid ${FormatDictionary[_issue.format] ?? issue2.format}`;
       }
       case "not_multiple_of":
-        return `Invalid number: must be a multiple of ${issue.divisor}`;
+        return `Invalid number: must be a multiple of ${issue2.divisor}`;
       case "unrecognized_keys":
-        return `Unrecognized key${issue.keys.length > 1 ? "s" : ""}: ${joinValues(issue.keys, ", ")}`;
+        return `Unrecognized key${issue2.keys.length > 1 ? "s" : ""}: ${joinValues(issue2.keys, ", ")}`;
       case "invalid_key":
-        return `Invalid key in ${issue.origin}`;
+        return `Invalid key in ${issue2.origin}`;
       case "invalid_union":
-        if (issue.options && Array.isArray(issue.options) && issue.options.length > 0) {
-          const opts = issue.options.map((o) => `'${o}'`).join(" | ");
+        if (issue2.options && Array.isArray(issue2.options) && issue2.options.length > 0) {
+          const opts = issue2.options.map((o) => `'${o}'`).join(" | ");
           return `Invalid discriminator value. Expected ${opts}`;
         }
-        if (issue.inclusive === false) {
+        if (issue2.inclusive === false) {
           return "Invalid input: more than one option matched";
         }
         return "Invalid input";
       case "invalid_element":
-        return `Invalid value in ${issue.origin}`;
+        return `Invalid value in ${issue2.origin}`;
       default:
         return `Invalid input`;
     }
@@ -3604,11 +3885,11 @@ function snapshotChecks(def) {
     def.checks = [...def.checks];
   return def;
 }
-function _string(Class, params) {
-  return new Class(snapshotChecks({ type: "string", ...normalizeParams(params) }));
+function _string(Class2, params) {
+  return new Class2(snapshotChecks({ type: "string", ...normalizeParams(params) }));
 }
-function _email(Class, params) {
-  return new Class({
+function _email(Class2, params) {
+  return new Class2({
     type: "string",
     format: "email",
     check: "string_format",
@@ -3616,8 +3897,8 @@ function _email(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _guid(Class, params) {
-  return new Class({
+function _guid(Class2, params) {
+  return new Class2({
     type: "string",
     format: "guid",
     check: "string_format",
@@ -3625,8 +3906,8 @@ function _guid(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _uuid(Class, params) {
-  return new Class({
+function _uuid(Class2, params) {
+  return new Class2({
     type: "string",
     format: "uuid",
     check: "string_format",
@@ -3634,8 +3915,8 @@ function _uuid(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _uuidv4(Class, params) {
-  return new Class({
+function _uuidv4(Class2, params) {
+  return new Class2({
     type: "string",
     format: "uuid",
     check: "string_format",
@@ -3644,8 +3925,8 @@ function _uuidv4(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _uuidv6(Class, params) {
-  return new Class({
+function _uuidv6(Class2, params) {
+  return new Class2({
     type: "string",
     format: "uuid",
     check: "string_format",
@@ -3654,8 +3935,8 @@ function _uuidv6(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _uuidv7(Class, params) {
-  return new Class({
+function _uuidv7(Class2, params) {
+  return new Class2({
     type: "string",
     format: "uuid",
     check: "string_format",
@@ -3664,8 +3945,8 @@ function _uuidv7(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _url(Class, params) {
-  return new Class({
+function _url(Class2, params) {
+  return new Class2({
     type: "string",
     format: "url",
     check: "string_format",
@@ -3673,8 +3954,8 @@ function _url(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _emoji2(Class, params) {
-  return new Class({
+function _emoji2(Class2, params) {
+  return new Class2({
     type: "string",
     format: "emoji",
     check: "string_format",
@@ -3682,8 +3963,8 @@ function _emoji2(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _nanoid(Class, params) {
-  return new Class({
+function _nanoid(Class2, params) {
+  return new Class2({
     type: "string",
     format: "nanoid",
     check: "string_format",
@@ -3691,8 +3972,8 @@ function _nanoid(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _cuid(Class, params) {
-  return new Class({
+function _cuid(Class2, params) {
+  return new Class2({
     type: "string",
     format: "cuid",
     check: "string_format",
@@ -3700,8 +3981,8 @@ function _cuid(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _cuid2(Class, params) {
-  return new Class({
+function _cuid2(Class2, params) {
+  return new Class2({
     type: "string",
     format: "cuid2",
     check: "string_format",
@@ -3709,8 +3990,8 @@ function _cuid2(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _ulid(Class, params) {
-  return new Class({
+function _ulid(Class2, params) {
+  return new Class2({
     type: "string",
     format: "ulid",
     check: "string_format",
@@ -3718,8 +3999,8 @@ function _ulid(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _xid(Class, params) {
-  return new Class({
+function _xid(Class2, params) {
+  return new Class2({
     type: "string",
     format: "xid",
     check: "string_format",
@@ -3727,8 +4008,8 @@ function _xid(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _ksuid(Class, params) {
-  return new Class({
+function _ksuid(Class2, params) {
+  return new Class2({
     type: "string",
     format: "ksuid",
     check: "string_format",
@@ -3736,8 +4017,8 @@ function _ksuid(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _ipv4(Class, params) {
-  return new Class({
+function _ipv4(Class2, params) {
+  return new Class2({
     type: "string",
     format: "ipv4",
     check: "string_format",
@@ -3745,8 +4026,8 @@ function _ipv4(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _ipv6(Class, params) {
-  return new Class({
+function _ipv6(Class2, params) {
+  return new Class2({
     type: "string",
     format: "ipv6",
     check: "string_format",
@@ -3754,8 +4035,8 @@ function _ipv6(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _cidrv4(Class, params) {
-  return new Class({
+function _cidrv4(Class2, params) {
+  return new Class2({
     type: "string",
     format: "cidrv4",
     check: "string_format",
@@ -3763,8 +4044,8 @@ function _cidrv4(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _cidrv6(Class, params) {
-  return new Class({
+function _cidrv6(Class2, params) {
+  return new Class2({
     type: "string",
     format: "cidrv6",
     check: "string_format",
@@ -3772,8 +4053,8 @@ function _cidrv6(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _base64(Class, params) {
-  return new Class({
+function _base64(Class2, params) {
+  return new Class2({
     type: "string",
     format: "base64",
     check: "string_format",
@@ -3781,8 +4062,8 @@ function _base64(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _base64url(Class, params) {
-  return new Class({
+function _base64url(Class2, params) {
+  return new Class2({
     type: "string",
     format: "base64url",
     check: "string_format",
@@ -3790,8 +4071,8 @@ function _base64url(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _e164(Class, params) {
-  return new Class({
+function _e164(Class2, params) {
+  return new Class2({
     type: "string",
     format: "e164",
     check: "string_format",
@@ -3799,8 +4080,8 @@ function _e164(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _jwt(Class, params) {
-  return new Class({
+function _jwt(Class2, params) {
+  return new Class2({
     type: "string",
     format: "jwt",
     check: "string_format",
@@ -3808,8 +4089,8 @@ function _jwt(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _isoDateTime(Class, params) {
-  return new Class({
+function _isoDateTime(Class2, params) {
+  return new Class2({
     type: "string",
     format: "datetime",
     check: "string_format",
@@ -3819,16 +4100,16 @@ function _isoDateTime(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _isoDate(Class, params) {
-  return new Class({
+function _isoDate(Class2, params) {
+  return new Class2({
     type: "string",
     format: "date",
     check: "string_format",
     ...normalizeParams(params)
   });
 }
-function _isoTime(Class, params) {
-  return new Class({
+function _isoTime(Class2, params) {
+  return new Class2({
     type: "string",
     format: "time",
     check: "string_format",
@@ -3836,19 +4117,19 @@ function _isoTime(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _isoDuration(Class, params) {
-  return new Class({
+function _isoDuration(Class2, params) {
+  return new Class2({
     type: "string",
     format: "duration",
     check: "string_format",
     ...normalizeParams(params)
   });
 }
-function _number(Class, params) {
-  return new Class(snapshotChecks({ type: "number", checks: [], ...normalizeParams(params) }));
+function _number(Class2, params) {
+  return new Class2(snapshotChecks({ type: "number", checks: [], ...normalizeParams(params) }));
 }
-function _int(Class, params) {
-  return new Class({
+function _int(Class2, params) {
+  return new Class2({
     type: "number",
     check: "number_format",
     abort: false,
@@ -3856,25 +4137,25 @@ function _int(Class, params) {
     ...normalizeParams(params)
   });
 }
-function _boolean(Class, params) {
-  return new Class({
+function _boolean(Class2, params) {
+  return new Class2({
     type: "boolean",
     ...normalizeParams(params)
   });
 }
-function _null2(Class, params) {
-  return new Class({
+function _null2(Class2, params) {
+  return new Class2({
     type: "null",
     ...normalizeParams(params)
   });
 }
-function _unknown(Class) {
-  return new Class({
+function _unknown(Class2) {
+  return new Class2({
     type: "unknown"
   });
 }
-function _never(Class, params) {
-  return new Class({
+function _never(Class2, params) {
+  return new Class2({
     type: "never",
     ...normalizeParams(params)
   });
@@ -4007,17 +4288,17 @@ function _toUpperCase() {
 function _slugify() {
   return _overwrite((input) => slugify(input));
 }
-function _array(Class, element, params) {
-  return new Class({
+function _array(Class2, element, params) {
+  return new Class2({
     type: "array",
     element,
     ...normalizeParams(params)
   });
 }
-function _custom(Class, fn, _params) {
+function _custom(Class2, fn, _params) {
   const norm = normalizeParams(_params);
   norm.abort ?? (norm.abort = true);
-  const schema = new Class({
+  const schema = new Class2({
     type: "custom",
     check: "custom",
     fn,
@@ -4025,8 +4306,8 @@ function _custom(Class, fn, _params) {
   });
   return schema;
 }
-function _refine(Class, fn, _params) {
-  const schema = new Class({
+function _refine(Class2, fn, _params) {
+  const schema = new Class2({
     type: "custom",
     check: "custom",
     fn,
@@ -4113,7 +4394,7 @@ function handleUnrepresentable(schema, ctx, json, params, message) {
   return true;
 }
 function processSchema(schema, ctx, _params = { path: [], schemaPath: [] }) {
-  var _a;
+  var _a3;
   const def = schema._zod.def;
   const seen = ctx.seen.get(schema);
   if (seen) {
@@ -4163,7 +4444,7 @@ function processSchema(schema, ctx, _params = { path: [], schemaPath: [] }) {
     delete result.schema.default;
   }
   if (ctx.io === "input" && "_prefault" in result.schema)
-    (_a = result.schema).default ?? (_a.default = result.schema._prefault);
+    (_a3 = result.schema).default ?? (_a3.default = result.schema._prefault);
   delete result.schema._prefault;
   const _result = ctx.seen.get(schema);
   return _result.schema;
@@ -4192,7 +4473,7 @@ function extractDefs(ctx, schema) {
     const defsSegment = ctx.target === "draft-2020-12" ? "$defs" : "definitions";
     if (ctx.external) {
       const externalId = ctx.external.registry.get(entry[0])?.id;
-      const uriGenerator = ctx.external.uri ?? ((id) => id);
+      const uriGenerator = ctx.external.uri ?? ((id2) => id2);
       if (externalId) {
         return { ref: uriGenerator(externalId) };
       }
@@ -4217,11 +4498,11 @@ function extractDefs(ctx, schema) {
     seen.def = { ...seen.schema };
     if (defId)
       seen.defId = defId;
-    const schema = seen.schema;
-    for (const key in schema) {
-      delete schema[key];
+    const schema2 = seen.schema;
+    for (const key in schema2) {
+      delete schema2[key];
     }
-    schema.$ref = ref;
+    schema2.$ref = ref;
   };
   if (ctx.cycles === "throw") {
     for (const entry of ctx.seen.entries()) {
@@ -4291,9 +4572,9 @@ function undeclaredConstraint(member) {
     return null;
   return Object.keys(extra).length ? extra : null;
 }
-function foldObjects(members) {
+function foldObjects(members2) {
   const objects = [];
-  for (const member of members) {
+  for (const member of members2) {
     if (typeof member !== "object" || member.type !== "object")
       return null;
     for (const key in member) {
@@ -4303,7 +4584,7 @@ function foldObjects(members) {
     objects.push(member);
   }
   const properties = {};
-  const required = new Set;
+  const required2 = new Set;
   for (const object of objects) {
     for (const key in object.properties) {
       if (Object.prototype.hasOwnProperty.call(properties, key))
@@ -4320,11 +4601,11 @@ function foldObjects(members) {
       assignProp(properties, key, merged);
     }
     for (const key of object.required ?? [])
-      required.add(key);
+      required2.add(key);
   }
   const folded = { type: "object", properties };
-  if (required.size)
-    folded.required = [...required];
+  if (required2.size)
+    folded.required = [...required2];
   if (objects.every((object) => object.additionalProperties === false)) {
     folded.additionalProperties = false;
   } else {
@@ -4376,8 +4657,8 @@ function finalize(ctx, schema) {
     const seen = ctx.seen.get(zodSchema);
     if (seen.ref === null)
       return;
-    const schema = seen.def ?? seen.schema;
-    const _cached = { ...schema };
+    const schema2 = seen.def ?? seen.schema;
+    const _cached = { ...schema2 };
     const ref = seen.ref;
     seen.ref = null;
     if (ref) {
@@ -4385,28 +4666,28 @@ function finalize(ctx, schema) {
       const refSeen = ctx.seen.get(ref);
       const refSchema = refSeen.schema;
       if (refSchema.$ref && (ctx.target === "draft-07" || ctx.target === "draft-04" || ctx.target === "openapi-3.0")) {
-        schema.allOf = schema.allOf ?? [];
-        schema.allOf.push(refSchema);
+        schema2.allOf = schema2.allOf ?? [];
+        schema2.allOf.push(refSchema);
       } else {
-        assignProps(schema, refSchema);
+        assignProps(schema2, refSchema);
       }
-      assignProps(schema, _cached);
+      assignProps(schema2, _cached);
       const isParentRef = zodSchema._zod.parent === ref;
       if (isParentRef) {
-        for (const key in schema) {
+        for (const key in schema2) {
           if (key === "$ref" || key === "allOf")
             continue;
           if (!(key in _cached)) {
-            delete schema[key];
+            delete schema2[key];
           }
         }
       }
       if (refSchema.$ref && refSeen.def) {
-        for (const key in schema) {
+        for (const key in schema2) {
           if (key === "$ref" || key === "allOf")
             continue;
-          if (key in refSeen.def && JSON.stringify(schema[key]) === JSON.stringify(refSeen.def[key])) {
-            delete schema[key];
+          if (key in refSeen.def && JSON.stringify(schema2[key]) === JSON.stringify(refSeen.def[key])) {
+            delete schema2[key];
           }
         }
       }
@@ -4416,13 +4697,13 @@ function finalize(ctx, schema) {
       flattenRef(parent);
       const parentSeen = ctx.seen.get(parent);
       if (parentSeen?.schema.$ref) {
-        schema.$ref = parentSeen.schema.$ref;
+        schema2.$ref = parentSeen.schema.$ref;
         if (parentSeen.def) {
-          for (const key in schema) {
+          for (const key in schema2) {
             if (key === "$ref" || key === "allOf")
               continue;
-            if (key in parentSeen.def && JSON.stringify(schema[key]) === JSON.stringify(parentSeen.def[key])) {
-              delete schema[key];
+            if (key in parentSeen.def && JSON.stringify(schema2[key]) === JSON.stringify(parentSeen.def[key])) {
+              delete schema2[key];
             }
           }
         }
@@ -4430,7 +4711,7 @@ function finalize(ctx, schema) {
     }
     ctx.override({
       zodSchema,
-      jsonSchema: schema,
+      jsonSchema: schema2,
       path: seen.path ?? []
     });
   };
@@ -4711,27 +4992,27 @@ function serializeDefaultValue(value, schema, ctx, json, params) {
 }
 function toJSONSchema(input, params) {
   if ("_idmap" in input) {
-    const registry = input;
-    const ctx = initializeContext({ ...params, processors: allProcessors });
+    const registry2 = input;
+    const ctx2 = initializeContext({ ...params, processors: allProcessors });
     const defs = {};
-    for (const entry of registry._idmap.entries()) {
+    for (const entry of registry2._idmap.entries()) {
       const [_, schema] = entry;
-      processSchema(schema, ctx);
+      processSchema(schema, ctx2);
     }
     const schemas = {};
     const external = {
-      registry,
+      registry: registry2,
       uri: params?.uri,
       defs
     };
-    ctx.external = external;
-    for (const entry of registry._idmap.entries()) {
+    ctx2.external = external;
+    for (const entry of registry2._idmap.entries()) {
       const [key, schema] = entry;
-      extractDefs(ctx, schema);
-      assignProp(schemas, key, finalize(ctx, schema));
+      extractDefs(ctx2, schema);
+      assignProp(schemas, key, finalize(ctx2, schema));
     }
     if (Object.keys(defs).length > 0) {
-      const defsSegment = ctx.target === "draft-2020-12" ? "$defs" : "definitions";
+      const defsSegment = ctx2.target === "draft-2020-12" ? "$defs" : "definitions";
       schemas.__shared = {
         [defsSegment]: defs
       };
@@ -5347,12 +5628,12 @@ var _installedErrorProtos, initializer2 = (inst, issues) => {
   _installedErrorProtos.add(proto);
   _lazyMethod(proto, "format", (self) => (mapper) => formatError(self, mapper));
   _lazyMethod(proto, "flatten", (self) => (mapper) => flattenError(self, mapper));
-  _lazyMethod(proto, "addIssue", (self) => (issue) => {
-    self.issues.push(issue);
+  _lazyMethod(proto, "addIssue", (self) => (issue2) => {
+    self.issues.push(issue2);
     self.message = JSON.stringify(self.issues, jsonStringifyReplacer, 2);
   });
-  _lazyMethod(proto, "addIssues", (self) => (issues) => {
-    self.issues.push(...issues);
+  _lazyMethod(proto, "addIssues", (self) => (issues2) => {
+    self.issues.push(...issues2);
     self.message = JSON.stringify(self.issues, jsonStringifyReplacer, 2);
   });
   Object.defineProperty(proto, "isEmpty", {
@@ -5430,7 +5711,7 @@ function object2(shape, params) {
   const def = {
     type: "object",
     shape: shape ?? {},
-    ...normalizeParams(params)
+    ...exports_util.normalizeParams(params)
   };
   return new ZodObject2(def);
 }
@@ -5439,14 +5720,14 @@ function looseObject(shape, params) {
     type: "object",
     shape,
     catchall: unknown(),
-    ...normalizeParams(params)
+    ...exports_util.normalizeParams(params)
   });
 }
 function union(options, params) {
   return new ZodUnion2({
     type: "union",
     options,
-    ...normalizeParams(params)
+    ...exports_util.normalizeParams(params)
   });
 }
 function discriminatedUnion(discriminator, options, params) {
@@ -5454,7 +5735,7 @@ function discriminatedUnion(discriminator, options, params) {
     type: "union",
     options,
     discriminator,
-    ...normalizeParams(params)
+    ...exports_util.normalizeParams(params)
   });
 }
 function intersection(left, right) {
@@ -5470,14 +5751,14 @@ function record(keyType, valueType, params) {
       type: "record",
       keyType: string2(),
       valueType: keyType,
-      ...normalizeParams(valueType)
+      ...exports_util.normalizeParams(valueType)
     });
   }
   return new ZodRecord2({
     type: "record",
     keyType,
     valueType,
-    ...normalizeParams(params)
+    ...exports_util.normalizeParams(params)
   });
 }
 function _enum(values, params) {
@@ -5485,14 +5766,14 @@ function _enum(values, params) {
   return new ZodEnum2({
     type: "enum",
     entries,
-    ...normalizeParams(params)
+    ...exports_util.normalizeParams(params)
   });
 }
 function literal(value, params) {
   return new ZodLiteral2({
     type: "literal",
     values: Array.isArray(value) ? value : [value],
-    ...normalizeParams(params)
+    ...exports_util.normalizeParams(params)
   });
 }
 function transform(fn) {
@@ -5524,7 +5805,7 @@ function _default(innerType, defaultValue) {
     type: "default",
     innerType,
     get defaultValue() {
-      return typeof defaultValue === "function" ? defaultValue() : shallowClone(defaultValue);
+      return typeof defaultValue === "function" ? defaultValue() : exports_util.shallowClone(defaultValue);
     }
   });
 }
@@ -5533,7 +5814,7 @@ function prefault(innerType, defaultValue) {
     type: "prefault",
     innerType,
     get defaultValue() {
-      return typeof defaultValue === "function" ? defaultValue() : shallowClone(defaultValue);
+      return typeof defaultValue === "function" ? defaultValue() : exports_util.shallowClone(defaultValue);
     }
   });
 }
@@ -5541,14 +5822,14 @@ function nonoptional(innerType, params) {
   return new ZodNonOptional({
     type: "nonoptional",
     innerType,
-    ...normalizeParams(params)
+    ...exports_util.normalizeParams(params)
   });
 }
 function _catch(innerType, catchValue) {
   return new ZodCatch2({
     type: "catch",
     innerType,
-    catchValue: typeof catchValue === "function" ? catchValue : constantCatch(catchValue)
+    catchValue: typeof catchValue === "function" ? catchValue : exports_util.constantCatch(catchValue)
   });
 }
 function pipe(in_, out) {
@@ -5598,7 +5879,7 @@ var init_schemas2 = __esm(() => {
   }, {
     check(...chks) {
       const def = this.def;
-      return this.clone(mergeDefs(def, {
+      return this.clone(exports_util.mergeDefs(def, {
         checks: [
           ...def.checks ?? [],
           ...chks.map((ch) => typeof ch === "function" ? { _zod: { check: ch, def: { check: "custom" }, onattach: [] } } : ch)
@@ -5614,8 +5895,8 @@ var init_schemas2 = __esm(() => {
     brand() {
       return this;
     },
-    register(reg, meta) {
-      reg.add(this, meta);
+    register(reg, meta2) {
+      reg.add(this, meta2);
       return this;
     },
     refine(check, params) {
@@ -5691,7 +5972,7 @@ var init_schemas2 = __esm(() => {
       return args.length === 0 ? fn(this) : fn(this, ...args);
     },
     get "~standard"() {
-      return hide(this, "~standard", {
+      return exports_util.hide(this, "~standard", {
         ...standardProps(this),
         jsonSchema: {
           input: createStandardJSONSchemaMethod(this, "input"),
@@ -5700,13 +5981,13 @@ var init_schemas2 = __esm(() => {
       });
     },
     set "~standard"(value) {
-      own(this, "~standard", value);
+      exports_util.own(this, "~standard", value);
     },
-    parse: function _parse(data, params) {
-      return parse4(this, data, params, { callee: _parse });
+    parse: function _parse2(data, params) {
+      return parse4(this, data, params, { callee: _parse2 });
     },
-    parseAsync: async function _parseAsync(data, params) {
-      return await parseAsync2(this, data, params, { callee: _parseAsync });
+    parseAsync: async function _parseAsync2(data, params) {
+      return await parseAsync2(this, data, params, { callee: _parseAsync2 });
     },
     safeParse(data, params) {
       return safeParse3(this, data, params);
@@ -5718,7 +5999,7 @@ var init_schemas2 = __esm(() => {
       return this?.safeParseAsync;
     },
     set spa(value) {
-      own(this, "spa", value);
+      exports_util.own(this, "spa", value);
     },
     validate(data, params) {
       return validate(this, data, params);
@@ -5726,17 +6007,17 @@ var init_schemas2 = __esm(() => {
     validateAsync(data, params) {
       return validateAsync(this, data, params);
     },
-    encode: function _encode(data, params) {
-      return encode2(this, data, params, { callee: _encode });
+    encode: function _encode2(data, params) {
+      return encode2(this, data, params, { callee: _encode2 });
     },
-    decode: function _decode(data, params) {
-      return decode2(this, data, params, { callee: _decode });
+    decode: function _decode2(data, params) {
+      return decode2(this, data, params, { callee: _decode2 });
     },
-    encodeAsync: async function _encodeAsync(data, params) {
-      return await encodeAsync2(this, data, params, { callee: _encodeAsync });
+    encodeAsync: async function _encodeAsync2(data, params) {
+      return await encodeAsync2(this, data, params, { callee: _encodeAsync2 });
     },
-    decodeAsync: async function _decodeAsync(data, params) {
-      return await decodeAsync2(this, data, params, { callee: _decodeAsync });
+    decodeAsync: async function _decodeAsync2(data, params) {
+      return await decodeAsync2(this, data, params, { callee: _decodeAsync2 });
     },
     safeEncode(data, params) {
       return safeEncode2(this, data, params);
@@ -5764,7 +6045,7 @@ var init_schemas2 = __esm(() => {
     $ZodString.init(inst, def);
     ZodType2.init(inst, def);
     inst._zod.processJSONSchema = (ctx, json, params) => stringProcessor(inst, ctx, json, params);
-  }, /* @__PURE__ */ derived({
+  }, /* @__PURE__ */ exports_util.derived({
     format: (inst) => aggregateChecks(inst).format ?? null,
     minLength: (inst) => aggregateChecks(inst).minimum ?? null,
     maxLength: (inst) => aggregateChecks(inst).maximum ?? null
@@ -5999,7 +6280,7 @@ var init_schemas2 = __esm(() => {
     ZodType2.init(inst, def);
     inst._zod.processJSONSchema = (ctx, json, params) => numberProcessor(inst, ctx, json, params);
     inst.isFinite = true;
-  }, /* @__PURE__ */ derived({
+  }, /* @__PURE__ */ exports_util.derived({
     minValue: (inst) => {
       const { minimum, exclusiveMinimum } = aggregateChecks(inst);
       return Math.max(minimum ?? Number.NEGATIVE_INFINITY, exclusiveMinimum ?? Number.NEGATIVE_INFINITY);
@@ -6112,49 +6393,49 @@ var init_schemas2 = __esm(() => {
     $ZodObjectJIT.init(inst, def);
     ZodType2.init(inst, def);
     inst._zod.processJSONSchema = (ctx, json, params) => objectProcessor(inst, ctx, json, params);
-    installLazyProp(inst, "shape", (self) => self._zod.def.shape, false);
+    exports_util.installLazyProp(inst, "shape", (self) => self._zod.def.shape, false);
   }, {
     keyof() {
       return _enum(Object.keys(this._zod.def.shape));
     },
     catchall(catchall) {
-      return this.clone(mergeDefs(this._zod.def, { catchall }));
+      return this.clone(exports_util.mergeDefs(this._zod.def, { catchall }));
     },
     passthrough() {
-      return this.clone(mergeDefs(this._zod.def, { catchall: unknown() }));
+      return this.clone(exports_util.mergeDefs(this._zod.def, { catchall: unknown() }));
     },
     loose() {
-      return this.clone(mergeDefs(this._zod.def, { catchall: unknown() }));
+      return this.clone(exports_util.mergeDefs(this._zod.def, { catchall: unknown() }));
     },
     strict() {
-      return this.clone(mergeDefs(this._zod.def, { catchall: never() }));
+      return this.clone(exports_util.mergeDefs(this._zod.def, { catchall: never() }));
     },
     strip() {
-      return this.clone(mergeDefs(this._zod.def, { catchall: undefined }));
+      return this.clone(exports_util.mergeDefs(this._zod.def, { catchall: undefined }));
     },
     extend(incoming) {
-      return extend(this, incoming);
+      return exports_util.extend(this, incoming);
     },
     safeExtend(incoming) {
-      return safeExtend(this, incoming);
+      return exports_util.safeExtend(this, incoming);
     },
     merge(other) {
-      return merge(this, other);
+      return exports_util.merge(this, other);
     },
     pick(mask) {
-      return pick(this, mask);
+      return exports_util.pick(this, mask);
     },
     omit(mask) {
-      return omit(this, mask);
+      return exports_util.omit(this, mask);
     },
     partial(...args) {
-      return partial(ZodOptional2, this, args[0]);
+      return exports_util.partial(ZodOptional2, this, args[0]);
     },
     exactPartial(...args) {
-      return partial(ZodExactOptional, this, args[0], "exactPartial");
+      return exports_util.partial(ZodExactOptional, this, args[0], "exactPartial");
     },
     required(...args) {
-      return required(ZodNonOptional, this, args[0]);
+      return exports_util.required(ZodNonOptional, this, args[0]);
     }
   });
   ZodUnion2 = /* @__PURE__ */ $constructor("ZodUnion", (inst, def) => {
@@ -6198,7 +6479,7 @@ var init_schemas2 = __esm(() => {
       return new ZodEnum2({
         ...def,
         checks: [],
-        ...normalizeParams(params),
+        ...exports_util.normalizeParams(params),
         entries: newEntries
       });
     };
@@ -6213,7 +6494,7 @@ var init_schemas2 = __esm(() => {
       return new ZodEnum2({
         ...def,
         checks: [],
-        ...normalizeParams(params),
+        ...exports_util.normalizeParams(params),
         entries: newEntries
       });
     };
@@ -6243,7 +6524,7 @@ var init_schemas2 = __esm(() => {
       }
       payload.addIssue = (issue2) => {
         if (typeof issue2 === "string") {
-          payload.issues.push(issue(issue2, payload.value, def));
+          payload.issues.push(exports_util.issue(issue2, payload.value, def));
         } else {
           const _issue = issue2;
           if (_issue.fatal)
@@ -6252,13 +6533,13 @@ var init_schemas2 = __esm(() => {
           if (!("input" in _issue))
             _issue.input = payload.value;
           _issue.inst ?? (_issue.inst = inst);
-          payload.issues.push(issue(_issue));
+          payload.issues.push(exports_util.issue(_issue));
         }
       };
       const output = def.transform(payload.value, payload);
       if (output instanceof Promise) {
-        return output.then((output) => {
-          payload.value = output;
+        return output.then((output2) => {
+          payload.value = output2;
           return payload;
         });
       }
@@ -6337,15 +6618,36 @@ var init_schemas2 = __esm(() => {
 // node_modules/zod/v4/classic/compat.js
 var ZodFirstPartyTypeKind2;
 var init_compat = __esm(() => {
-  (function(ZodFirstPartyTypeKind) {})(ZodFirstPartyTypeKind2 || (ZodFirstPartyTypeKind2 = {}));
+  (function(ZodFirstPartyTypeKind3) {})(ZodFirstPartyTypeKind2 || (ZodFirstPartyTypeKind2 = {}));
 });
 
 // node_modules/zod/v4/classic/iso.js
+var exports_iso2 = {};
+__export(exports_iso2, {
+  time: () => time2,
+  duration: () => duration2,
+  datetime: () => datetime2,
+  date: () => date2,
+  ZodISOTime: () => ZodISOTime,
+  ZodISODuration: () => ZodISODuration,
+  ZodISODateTime: () => ZodISODateTime,
+  ZodISODate: () => ZodISODate
+});
 function datetime2(params) {
   return _isoDateTime(ZodISODateTime, params);
 }
+function date2(params) {
+  return _isoDate(ZodISODate, params);
+}
+function time2(params) {
+  return _isoTime(ZodISOTime, params);
+}
+function duration2(params) {
+  return _isoDuration(ZodISODuration, params);
+}
 var init_iso = __esm(() => {
   init_core2();
+  init_schemas2();
   init_schemas2();
 });
 
@@ -6366,7 +6668,7 @@ var init_external = __esm(() => {
 });
 
 // node_modules/ajv/dist/compile/codegen/code.js
-var require_code = __commonJS(function(exports) {
+var require_code = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.regexpCode = exports.getEsmExportName = exports.getProperty = exports.safeStringify = exports.stringify = exports.strConcat = exports.addCodeArg = exports.str = exports._ = exports.nil = exports._Code = exports.Name = exports.IDENTIFIER = exports._CodeOrName = undefined;
 
@@ -6409,12 +6711,12 @@ var require_code = __commonJS(function(exports) {
       return item === "" || item === '""';
     }
     get str() {
-      var _a;
-      return (_a = this._str) !== null && _a !== undefined ? _a : this._str = this._items.reduce((s, c) => `${s}${c}`, "");
+      var _a3;
+      return (_a3 = this._str) !== null && _a3 !== undefined ? _a3 : this._str = this._items.reduce((s, c) => `${s}${c}`, "");
     }
     get names() {
-      var _a;
-      return (_a = this._names) !== null && _a !== undefined ? _a : this._names = this._items.reduce((names, c) => {
+      var _a3;
+      return (_a3 = this._names) !== null && _a3 !== undefined ? _a3 : this._names = this._items.reduce((names, c) => {
         if (c instanceof Name)
           names[c.str] = (names[c.str] || 0) + 1;
         return names;
@@ -6520,7 +6822,7 @@ var require_code = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/compile/codegen/scope.js
-var require_scope = __commonJS(function(exports) {
+var require_scope = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ValueScope = exports.ValueScopeName = exports.Scope = exports.varKinds = exports.UsedValueState = undefined;
   var code_1 = require_code();
@@ -6532,9 +6834,9 @@ var require_scope = __commonJS(function(exports) {
     }
   }
   var UsedValueState;
-  (function(UsedValueState) {
-    UsedValueState[UsedValueState["Started"] = 0] = "Started";
-    UsedValueState[UsedValueState["Completed"] = 1] = "Completed";
+  (function(UsedValueState2) {
+    UsedValueState2[UsedValueState2["Started"] = 0] = "Started";
+    UsedValueState2[UsedValueState2["Completed"] = 1] = "Completed";
   })(UsedValueState || (exports.UsedValueState = UsedValueState = {}));
   exports.varKinds = {
     const: new code_1.Name("const"),
@@ -6559,8 +6861,8 @@ var require_scope = __commonJS(function(exports) {
       return `${prefix}${ng.index++}`;
     }
     _nameGroup(prefix) {
-      var _a, _b;
-      if (((_b = (_a = this._parent) === null || _a === undefined ? undefined : _a._prefixes) === null || _b === undefined ? undefined : _b.has(prefix)) || this._prefixes && !this._prefixes.has(prefix)) {
+      var _a3, _b;
+      if (((_b = (_a3 = this._parent) === null || _a3 === undefined ? undefined : _a3._prefixes) === null || _b === undefined ? undefined : _b.has(prefix)) || this._prefixes && !this._prefixes.has(prefix)) {
         throw new Error(`CodeGen: prefix "${prefix}" is not allowed in this scope`);
       }
       return this._names[prefix] = { prefix, index: 0 };
@@ -6595,12 +6897,12 @@ var require_scope = __commonJS(function(exports) {
       return new ValueScopeName(prefix, this._newName(prefix));
     }
     value(nameOrPrefix, value) {
-      var _a;
+      var _a3;
       if (value.ref === undefined)
         throw new Error("CodeGen: ref must be passed in value");
       const name = this.toName(nameOrPrefix);
       const { prefix } = name;
-      const valueKey = (_a = value.key) !== null && _a !== undefined ? _a : value.ref;
+      const valueKey = (_a3 = value.key) !== null && _a3 !== undefined ? _a3 : value.ref;
       let vs = this._values[prefix];
       if (vs) {
         const _name = vs.get(valueKey);
@@ -6666,7 +6968,7 @@ var require_scope = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/compile/codegen/index.js
-var require_codegen = __commonJS(function(exports) {
+var require_codegen = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.or = exports.and = exports.not = exports.CodeGen = exports.operators = exports.varKinds = exports.ValueScopeName = exports.ValueScope = exports.Scope = exports.Name = exports.regexpCode = exports.stringify = exports.getProperty = exports.nil = exports.strConcat = exports.str = exports._ = undefined;
   var code_1 = require_code();
@@ -6811,9 +7113,9 @@ var require_codegen = __commonJS(function(exports) {
   }
 
   class Throw extends Node {
-    constructor(error) {
+    constructor(error2) {
       super();
-      this.error = error;
+      this.error = error2;
     }
     render({ _n }) {
       return `throw ${this.error};` + _n;
@@ -6928,8 +7230,8 @@ var require_codegen = __commonJS(function(exports) {
       return this;
     }
     optimizeNames(names, constants) {
-      var _a;
-      this.else = (_a = this.else) === null || _a === undefined ? undefined : _a.optimizeNames(names, constants);
+      var _a3;
+      this.else = (_a3 = this.else) === null || _a3 === undefined ? undefined : _a3.optimizeNames(names, constants);
       if (!(super.optimizeNames(names, constants) || this.else))
         return;
       this.condition = optimizeExpr(this.condition, names, constants);
@@ -7040,16 +7342,16 @@ var require_codegen = __commonJS(function(exports) {
       return code;
     }
     optimizeNodes() {
-      var _a, _b;
+      var _a3, _b;
       super.optimizeNodes();
-      (_a = this.catch) === null || _a === undefined || _a.optimizeNodes();
+      (_a3 = this.catch) === null || _a3 === undefined || _a3.optimizeNodes();
       (_b = this.finally) === null || _b === undefined || _b.optimizeNodes();
       return this;
     }
     optimizeNames(names, constants) {
-      var _a, _b;
+      var _a3, _b;
       super.optimizeNames(names, constants);
-      (_a = this.catch) === null || _a === undefined || _a.optimizeNames(names, constants);
+      (_a3 = this.catch) === null || _a3 === undefined || _a3.optimizeNames(names, constants);
       (_b = this.finally) === null || _b === undefined || _b.optimizeNames(names, constants);
       return this;
     }
@@ -7064,9 +7366,9 @@ var require_codegen = __commonJS(function(exports) {
   }
 
   class Catch extends BlockNode {
-    constructor(error) {
+    constructor(error2) {
       super();
-      this.error = error;
+      this.error = error2;
     }
     render(opts) {
       return `catch(${this.error})` + super.render(opts);
@@ -7179,8 +7481,8 @@ var require_codegen = __commonJS(function(exports) {
     endIf() {
       return this._endBlockNode(If, Else);
     }
-    _for(node, forBody) {
-      this._blockNode(node);
+    _for(node2, forBody) {
+      this._blockNode(node2);
       if (forBody)
         this.code(forBody).endFor();
       return this;
@@ -7220,32 +7522,32 @@ var require_codegen = __commonJS(function(exports) {
       return this._leafNode(new Break(label));
     }
     return(value) {
-      const node = new Return;
-      this._blockNode(node);
+      const node2 = new Return;
+      this._blockNode(node2);
       this.code(value);
-      if (node.nodes.length !== 1)
+      if (node2.nodes.length !== 1)
         throw new Error('CodeGen: "return" should have one node');
       return this._endBlockNode(Return);
     }
     try(tryBody, catchCode, finallyCode) {
       if (!catchCode && !finallyCode)
         throw new Error('CodeGen: "try" without "catch" and "finally"');
-      const node = new Try;
-      this._blockNode(node);
+      const node2 = new Try;
+      this._blockNode(node2);
       this.code(tryBody);
       if (catchCode) {
-        const error = this.name("e");
-        this._currNode = node.catch = new Catch(error);
-        catchCode(error);
+        const error2 = this.name("e");
+        this._currNode = node2.catch = new Catch(error2);
+        catchCode(error2);
       }
       if (finallyCode) {
-        this._currNode = node.finally = new Finally;
+        this._currNode = node2.finally = new Finally;
         this.code(finallyCode);
       }
       return this._endBlockNode(Catch, Finally);
     }
-    throw(error) {
-      return this._leafNode(new Throw(error));
+    throw(error2) {
+      return this._leafNode(new Throw(error2));
     }
     block(body, nodeCount) {
       this._blockStarts.push(this._nodes.length);
@@ -7279,13 +7581,13 @@ var require_codegen = __commonJS(function(exports) {
         this._root.optimizeNames(this._root.names, this._constants);
       }
     }
-    _leafNode(node) {
-      this._currNode.nodes.push(node);
+    _leafNode(node2) {
+      this._currNode.nodes.push(node2);
       return this;
     }
-    _blockNode(node) {
-      this._currNode.nodes.push(node);
-      this._nodes.push(node);
+    _blockNode(node2) {
+      this._currNode.nodes.push(node2);
+      this._nodes.push(node2);
     }
     _endBlockNode(N1, N2) {
       const n = this._currNode;
@@ -7295,12 +7597,12 @@ var require_codegen = __commonJS(function(exports) {
       }
       throw new Error(`CodeGen: not in block "${N2 ? `${N1.kind}/${N2.kind}` : N1.kind}"`);
     }
-    _elseNode(node) {
+    _elseNode(node2) {
       const n = this._currNode;
       if (!(n instanceof If)) {
         throw new Error('CodeGen: "else" without "if"');
       }
-      this._currNode = n.else = node;
+      this._currNode = n.else = node2;
       return this;
     }
     get _root() {
@@ -7310,9 +7612,9 @@ var require_codegen = __commonJS(function(exports) {
       const ns = this._nodes;
       return ns[ns.length - 1];
     }
-    set _currNode(node) {
+    set _currNode(node2) {
       const ns = this._nodes;
-      ns[ns.length - 1] = node;
+      ns[ns.length - 1] = node2;
     }
   }
   exports.CodeGen = CodeGen;
@@ -7376,7 +7678,7 @@ var require_codegen = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/compile/util.js
-var require_util = __commonJS(function(exports) {
+var require_util = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.checkStrictMode = exports.getErrorPath = exports.Type = exports.useFunc = exports.setEvaluated = exports.evaluatedPropsToName = exports.mergeEvaluated = exports.eachItem = exports.unescapeJsonPointer = exports.escapeJsonPointer = exports.escapeFragment = exports.unescapeFragment = exports.schemaRefOrVal = exports.schemaHasRulesButRef = exports.schemaHasRules = exports.checkUnknownRules = exports.alwaysValidSchema = exports.toHash = undefined;
   var codegen_1 = require_codegen();
@@ -7465,9 +7767,9 @@ var require_util = __commonJS(function(exports) {
     }
   }
   exports.eachItem = eachItem;
-  function makeMergeEvaluated({ mergeNames, mergeToName, mergeValues, resultToName }) {
+  function makeMergeEvaluated({ mergeNames, mergeToName, mergeValues: mergeValues3, resultToName }) {
     return (gen, from, to, toName) => {
-      const res = to === undefined ? from : to instanceof codegen_1.Name ? (from instanceof codegen_1.Name ? mergeNames(gen, from, to) : mergeToName(gen, from, to), to) : from instanceof codegen_1.Name ? (mergeToName(gen, to, from), from) : mergeValues(from, to);
+      const res = to === undefined ? from : to instanceof codegen_1.Name ? (from instanceof codegen_1.Name ? mergeNames(gen, from, to) : mergeToName(gen, from, to), to) : from instanceof codegen_1.Name ? (mergeToName(gen, to, from), from) : mergeValues3(from, to);
       return toName === codegen_1.Name && !(res instanceof codegen_1.Name) ? resultToName(gen, res) : res;
     };
   }
@@ -7516,9 +7818,9 @@ var require_util = __commonJS(function(exports) {
   }
   exports.useFunc = useFunc;
   var Type;
-  (function(Type) {
-    Type[Type["Num"] = 0] = "Num";
-    Type[Type["Str"] = 1] = "Str";
+  (function(Type2) {
+    Type2[Type2["Num"] = 0] = "Num";
+    Type2[Type2["Str"] = 1] = "Str";
   })(Type || (exports.Type = Type = {}));
   function getErrorPath(dataProp, dataPropType, jsPropertySyntax) {
     if (dataProp instanceof codegen_1.Name) {
@@ -7540,7 +7842,7 @@ var require_util = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/compile/names.js
-var require_names = __commonJS(function(exports) {
+var require_names = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
   var names = {
@@ -7565,7 +7867,7 @@ var require_names = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/compile/errors.js
-var require_errors = __commonJS(function(exports) {
+var require_errors = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.extendErrors = exports.resetErrorsCount = exports.reportExtraError = exports.reportError = exports.keyword$DataError = exports.keywordError = undefined;
   var codegen_1 = require_codegen();
@@ -7577,10 +7879,10 @@ var require_errors = __commonJS(function(exports) {
   exports.keyword$DataError = {
     message: ({ keyword, schemaType }) => schemaType ? (0, codegen_1.str)`"${keyword}" keyword must be ${schemaType} ($data)` : (0, codegen_1.str)`"${keyword}" keyword is invalid ($data)`
   };
-  function reportError(cxt, error = exports.keywordError, errorPaths, overrideAllErrors) {
+  function reportError(cxt, error2 = exports.keywordError, errorPaths, overrideAllErrors) {
     const { it } = cxt;
     const { gen, compositeRule, allErrors } = it;
-    const errObj = errorObjectCode(cxt, error, errorPaths);
+    const errObj = errorObjectCode(cxt, error2, errorPaths);
     if (overrideAllErrors !== null && overrideAllErrors !== undefined ? overrideAllErrors : compositeRule || allErrors) {
       addError(gen, errObj);
     } else {
@@ -7588,10 +7890,10 @@ var require_errors = __commonJS(function(exports) {
     }
   }
   exports.reportError = reportError;
-  function reportExtraError(cxt, error = exports.keywordError, errorPaths) {
+  function reportExtraError(cxt, error2 = exports.keywordError, errorPaths) {
     const { it } = cxt;
     const { gen, compositeRule, allErrors } = it;
-    const errObj = errorObjectCode(cxt, error, errorPaths);
+    const errObj = errorObjectCode(cxt, error2, errorPaths);
     addError(gen, errObj);
     if (!(compositeRule || allErrors)) {
       returnErrors(it, names_1.default.vErrors);
@@ -7641,19 +7943,19 @@ var require_errors = __commonJS(function(exports) {
     schema: new codegen_1.Name("schema"),
     parentSchema: new codegen_1.Name("parentSchema")
   };
-  function errorObjectCode(cxt, error, errorPaths) {
+  function errorObjectCode(cxt, error2, errorPaths) {
     const { createErrors } = cxt.it;
     if (createErrors === false)
       return (0, codegen_1._)`{}`;
-    return errorObject(cxt, error, errorPaths);
+    return errorObject(cxt, error2, errorPaths);
   }
-  function errorObject(cxt, error, errorPaths = {}) {
+  function errorObject(cxt, error2, errorPaths = {}) {
     const { gen, it } = cxt;
     const keyValues = [
       errorInstancePath(it, errorPaths),
       errorSchemaPath(cxt, errorPaths)
     ];
-    extraErrorProps(cxt, error, keyValues);
+    extraErrorProps(cxt, error2, keyValues);
     return gen.object(...keyValues);
   }
   function errorInstancePath({ errorPath }, { instancePath }) {
@@ -7683,7 +7985,7 @@ var require_errors = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/compile/validate/boolSchema.js
-var require_boolSchema = __commonJS(function(exports) {
+var require_boolSchema = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.boolOrEmptySchema = exports.topBoolOrEmptySchema = undefined;
   var errors_1 = require_errors();
@@ -7731,7 +8033,7 @@ var require_boolSchema = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/compile/rules.js
-var require_rules = __commonJS(function(exports) {
+var require_rules = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.getRules = exports.isJSONType = undefined;
   var _jsonTypes = ["string", "number", "integer", "boolean", "null", "object", "array"];
@@ -7759,7 +8061,7 @@ var require_rules = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/compile/validate/applicability.js
-var require_applicability = __commonJS(function(exports) {
+var require_applicability = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.shouldUseRule = exports.shouldUseGroup = exports.schemaHasRulesForType = undefined;
   function schemaHasRulesForType({ schema, self }, type) {
@@ -7772,14 +8074,14 @@ var require_applicability = __commonJS(function(exports) {
   }
   exports.shouldUseGroup = shouldUseGroup;
   function shouldUseRule(schema, rule) {
-    var _a;
-    return schema[rule.keyword] !== undefined || ((_a = rule.definition.implements) === null || _a === undefined ? undefined : _a.some((kwd) => schema[kwd] !== undefined));
+    var _a3;
+    return schema[rule.keyword] !== undefined || ((_a3 = rule.definition.implements) === null || _a3 === undefined ? undefined : _a3.some((kwd) => schema[kwd] !== undefined));
   }
   exports.shouldUseRule = shouldUseRule;
 });
 
 // node_modules/ajv/dist/compile/validate/dataType.js
-var require_dataType = __commonJS(function(exports) {
+var require_dataType = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reportTypeError = exports.checkDataTypes = exports.checkDataType = exports.coerceAndCheckDataType = exports.getJSONTypes = exports.getSchemaTypes = exports.DataType = undefined;
   var rules_1 = require_rules();
@@ -7788,9 +8090,9 @@ var require_dataType = __commonJS(function(exports) {
   var codegen_1 = require_codegen();
   var util_1 = require_util();
   var DataType;
-  (function(DataType) {
-    DataType[DataType["Correct"] = 0] = "Correct";
-    DataType[DataType["Wrong"] = 1] = "Wrong";
+  (function(DataType2) {
+    DataType2[DataType2["Correct"] = 0] = "Correct";
+    DataType2[DataType2["Wrong"] = 1] = "Wrong";
   })(DataType || (exports.DataType = DataType = {}));
   function getSchemaTypes(schema) {
     const types = getJSONTypes(schema.type);
@@ -7960,7 +8262,7 @@ var require_dataType = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/compile/validate/defaults.js
-var require_defaults = __commonJS(function(exports) {
+var require_defaults = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.assignDefaults = undefined;
   var codegen_1 = require_codegen();
@@ -7994,7 +8296,7 @@ var require_defaults = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/code.js
-var require_code2 = __commonJS(function(exports) {
+var require_code2 = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.validateUnion = exports.validateArray = exports.usePattern = exports.callValidateCode = exports.schemaProperties = exports.allSchemaProperties = exports.noPropertyInData = exports.propertyInData = exports.isOwnProperty = exports.hasPropFunc = exports.reportMissingProp = exports.checkMissingProp = exports.checkReportMissingProp = undefined;
   var codegen_1 = require_codegen();
@@ -8123,7 +8425,7 @@ var require_code2 = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/compile/validate/keyword.js
-var require_keyword = __commonJS(function(exports) {
+var require_keyword = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.validateKeywordUsage = exports.validSchemaType = exports.funcKeywordCode = exports.macroKeywordCode = undefined;
   var codegen_1 = require_codegen();
@@ -8148,14 +8450,14 @@ var require_keyword = __commonJS(function(exports) {
   }
   exports.macroKeywordCode = macroKeywordCode;
   function funcKeywordCode(cxt, def) {
-    var _a;
+    var _a3;
     const { gen, keyword, schema, parentSchema, $data, it } = cxt;
     checkAsyncKeyword(it, def);
-    const validate = !$data && def.compile ? def.compile.call(it.self, schema, parentSchema, it) : def.validate;
-    const validateRef = useKeyword(gen, keyword, validate);
+    const validate2 = !$data && def.compile ? def.compile.call(it.self, schema, parentSchema, it) : def.validate;
+    const validateRef = useKeyword(gen, keyword, validate2);
     const valid = gen.let("valid");
     cxt.block$data(valid, validateKeyword);
-    cxt.ok((_a = def.valid) !== null && _a !== undefined ? _a : valid);
+    cxt.ok((_a3 = def.valid) !== null && _a3 !== undefined ? _a3 : valid);
     function validateKeyword() {
       if (def.errors === false) {
         assignValid();
@@ -8163,13 +8465,13 @@ var require_keyword = __commonJS(function(exports) {
           modifyData(cxt);
         reportErrs(() => cxt.error());
       } else {
-        const ruleErrs = def.async ? validateAsync() : validateSync();
+        const ruleErrs = def.async ? validateAsync3() : validateSync();
         if (def.modifying)
           modifyData(cxt);
         reportErrs(() => addErrs(cxt, ruleErrs));
       }
     }
-    function validateAsync() {
+    function validateAsync3() {
       const ruleErrs = gen.let("ruleErrs", null);
       gen.try(() => assignValid((0, codegen_1._)`await `), (e) => gen.assign(valid, false).if((0, codegen_1._)`${e} instanceof ${it.ValidationError}`, () => gen.assign(ruleErrs, (0, codegen_1._)`${e}.errors`), () => gen.throw(e)));
       return ruleErrs;
@@ -8185,9 +8487,9 @@ var require_keyword = __commonJS(function(exports) {
       const passSchema = !(("compile" in def) && !$data || def.schema === false);
       gen.assign(valid, (0, codegen_1._)`${_await}${(0, code_1.callValidateCode)(cxt, validateRef, passCxt, passSchema)}`, def.modifying);
     }
-    function reportErrs(errors) {
-      var _a;
-      gen.if((0, codegen_1.not)((_a = def.valid) !== null && _a !== undefined ? _a : valid), errors);
+    function reportErrs(errors3) {
+      var _a4;
+      gen.if((0, codegen_1.not)((_a4 = def.valid) !== null && _a4 !== undefined ? _a4 : valid), errors3);
     }
   }
   exports.funcKeywordCode = funcKeywordCode;
@@ -8238,7 +8540,7 @@ var require_keyword = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/compile/validate/subschema.js
-var require_subschema = __commonJS(function(exports) {
+var require_subschema = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.extendSubschemaMode = exports.extendSubschemaData = exports.getSubschema = undefined;
   var codegen_1 = require_codegen();
@@ -8318,7 +8620,7 @@ var require_subschema = __commonJS(function(exports) {
 });
 
 // node_modules/fast-deep-equal/index.js
-var require_fast_deep_equal = __commonJS(function(exports, module) {
+var require_fast_deep_equal = __commonJS((exports, module) => {
   module.exports = function equal(a, b) {
     if (a === b)
       return true;
@@ -8360,7 +8662,7 @@ var require_fast_deep_equal = __commonJS(function(exports, module) {
 });
 
 // node_modules/json-schema-traverse/index.js
-var require_json_schema_traverse = __commonJS(function(exports, module) {
+var require_json_schema_traverse = __commonJS((exports, module) => {
   var traverse = module.exports = function(schema, opts, cb) {
     if (typeof opts == "function") {
       cb = opts;
@@ -8443,7 +8745,7 @@ var require_json_schema_traverse = __commonJS(function(exports, module) {
 });
 
 // node_modules/ajv/dist/compile/resolve.js
-var require_resolve = __commonJS(function(exports) {
+var require_resolve = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.getSchemaRefs = exports.resolveUrl = exports.normalizeId = exports._getFullPath = exports.getFullPath = exports.inlineRef = undefined;
   var util_1 = require_util();
@@ -8575,11 +8877,11 @@ var require_resolve = __commonJS(function(exports) {
         }
         return ref;
       }
-      function addAnchor(anchor) {
-        if (typeof anchor == "string") {
-          if (!ANCHOR.test(anchor))
-            throw new Error(`invalid anchor "${anchor}"`);
-          addRef.call(this, `#${anchor}`);
+      function addAnchor(anchor2) {
+        if (typeof anchor2 == "string") {
+          if (!ANCHOR.test(anchor2))
+            throw new Error(`invalid anchor "${anchor2}"`);
+          addRef.call(this, `#${anchor2}`);
         }
       }
     });
@@ -8596,7 +8898,7 @@ var require_resolve = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/compile/validate/index.js
-var require_validate = __commonJS(function(exports) {
+var require_validate = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.getData = exports.KeywordCxt = exports.validateFunctionCode = undefined;
   var boolSchema_1 = require_boolSchema();
@@ -9101,13 +9403,13 @@ var require_validate = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/runtime/validation_error.js
-var require_validation_error = __commonJS(function(exports) {
+var require_validation_error = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
 
   class ValidationError extends Error {
-    constructor(errors) {
+    constructor(errors3) {
       super("validation failed");
-      this.errors = errors;
+      this.errors = errors3;
       this.ajv = this.validation = true;
     }
   }
@@ -9115,7 +9417,7 @@ var require_validation_error = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/compile/ref_error.js
-var require_ref_error = __commonJS(function(exports) {
+var require_ref_error = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var resolve_1 = require_resolve();
 
@@ -9130,7 +9432,7 @@ var require_ref_error = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/compile/index.js
-var require_compile = __commonJS(function(exports) {
+var require_compile = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.resolveSchema = exports.getCompilingSchema = exports.resolveRef = exports.compileSchema = exports.SchemaEnv = undefined;
   var codegen_1 = require_codegen();
@@ -9142,7 +9444,7 @@ var require_compile = __commonJS(function(exports) {
 
   class SchemaEnv {
     constructor(env) {
-      var _a;
+      var _a3;
       this.refs = {};
       this.dynamicAnchors = {};
       let schema;
@@ -9151,7 +9453,7 @@ var require_compile = __commonJS(function(exports) {
       this.schema = env.schema;
       this.schemaId = env.schemaId;
       this.root = env.root || this;
-      this.baseId = (_a = env.baseId) !== null && _a !== undefined ? _a : (0, resolve_1.normalizeId)(schema === null || schema === undefined ? undefined : schema[env.schemaId || "$id"]);
+      this.baseId = (_a3 = env.baseId) !== null && _a3 !== undefined ? _a3 : (0, resolve_1.normalizeId)(schema === null || schema === undefined ? undefined : schema[env.schemaId || "$id"]);
       this.schemaPath = env.schemaPath;
       this.localRefs = env.localRefs;
       this.meta = env.meta;
@@ -9211,28 +9513,28 @@ var require_compile = __commonJS(function(exports) {
       if (this.opts.code.process)
         sourceCode = this.opts.code.process(sourceCode, sch);
       const makeValidate = new Function(`${names_1.default.self}`, `${names_1.default.scope}`, sourceCode);
-      const validate = makeValidate(this, this.scope.get());
-      this.scope.value(validateName, { ref: validate });
-      validate.errors = null;
-      validate.schema = sch.schema;
-      validate.schemaEnv = sch;
+      const validate2 = makeValidate(this, this.scope.get());
+      this.scope.value(validateName, { ref: validate2 });
+      validate2.errors = null;
+      validate2.schema = sch.schema;
+      validate2.schemaEnv = sch;
       if (sch.$async)
-        validate.$async = true;
+        validate2.$async = true;
       if (this.opts.code.source === true) {
-        validate.source = { validateName, validateCode, scopeValues: gen._values };
+        validate2.source = { validateName, validateCode, scopeValues: gen._values };
       }
       if (this.opts.unevaluated) {
         const { props, items } = schemaCxt;
-        validate.evaluated = {
+        validate2.evaluated = {
           props: props instanceof codegen_1.Name ? undefined : props,
           items: items instanceof codegen_1.Name ? undefined : items,
           dynamicProps: props instanceof codegen_1.Name,
           dynamicItems: items instanceof codegen_1.Name
         };
-        if (validate.source)
-          validate.source.evaluated = (0, codegen_1.stringify)(validate.evaluated);
+        if (validate2.source)
+          validate2.source.evaluated = (0, codegen_1.stringify)(validate2.evaluated);
       }
-      sch.validate = validate;
+      sch.validate = validate2;
       return sch;
     } catch (e) {
       delete sch.validate;
@@ -9246,14 +9548,14 @@ var require_compile = __commonJS(function(exports) {
   }
   exports.compileSchema = compileSchema;
   function resolveRef(root, baseId, ref) {
-    var _a;
+    var _a3;
     ref = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, ref);
     const schOrFunc = root.refs[ref];
     if (schOrFunc)
       return schOrFunc;
     let _sch = resolve.call(this, root, ref);
     if (_sch === undefined) {
-      const schema = (_a = root.localRefs) === null || _a === undefined ? undefined : _a[ref];
+      const schema = (_a3 = root.localRefs) === null || _a3 === undefined ? undefined : _a3[ref];
       const { schemaId } = this.opts;
       if (schema)
         _sch = new SchemaEnv({ schema, schemaId, root, baseId });
@@ -9322,8 +9624,8 @@ var require_compile = __commonJS(function(exports) {
     "definitions"
   ]);
   function getJsonPointer(parsedRef, { baseId, schema, root }) {
-    var _a;
-    if (((_a = parsedRef.fragment) === null || _a === undefined ? undefined : _a[0]) !== "/")
+    var _a3;
+    if (((_a3 = parsedRef.fragment) === null || _a3 === undefined ? undefined : _a3[0]) !== "/")
       return;
     for (const part of parsedRef.fragment.slice(1).split("/")) {
       if (typeof schema === "boolean")
@@ -9351,7 +9653,7 @@ var require_compile = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/refs/data.json
-var require_data = __commonJS(function(exports, module) {
+var require_data = __commonJS((exports, module) => {
   module.exports = {
     $id: "https://raw.githubusercontent.com/ajv-validator/ajv/master/lib/refs/data.json#",
     description: "Meta-schema for $data reference (JSON AnySchema extension proposal)",
@@ -9368,7 +9670,7 @@ var require_data = __commonJS(function(exports, module) {
 });
 
 // node_modules/fast-uri/lib/utils.js
-var require_utils = __commonJS(function(exports, module) {
+var require_utils = __commonJS((exports, module) => {
   var isUUID = RegExp.prototype.test.bind(/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/iu);
   var isIPv4 = RegExp.prototype.test.bind(/^(?:(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)$/u);
   function stringArrayToHexStripped(input) {
@@ -9468,13 +9770,13 @@ var require_utils = __commonJS(function(exports, module) {
     if (findToken(host, ":") < 2) {
       return { host, isIPV6: false };
     }
-    const ipv6 = getIPV6(host);
-    if (!ipv6.error) {
-      let newHost = ipv6.address;
-      let escapedHost = ipv6.address;
-      if (ipv6.zone) {
-        newHost += "%" + ipv6.zone;
-        escapedHost += "%25" + ipv6.zone;
+    const ipv62 = getIPV6(host);
+    if (!ipv62.error) {
+      let newHost = ipv62.address;
+      let escapedHost = ipv62.address;
+      if (ipv62.zone) {
+        newHost += "%" + ipv62.zone;
+        escapedHost += "%25" + ipv62.zone;
       }
       return { host: newHost, isIPV6: true, escapedHost };
     } else {
@@ -9564,8 +9866,8 @@ var require_utils = __commonJS(function(exports, module) {
     }
     return output.join("");
   }
-  function normalizeComponentEncoding(component, esc) {
-    const func = esc !== true ? escape : unescape;
+  function normalizeComponentEncoding(component, esc2) {
+    const func = esc2 !== true ? escape : unescape;
     if (component.scheme !== undefined) {
       component.scheme = func(component.scheme);
     }
@@ -9623,7 +9925,7 @@ var require_utils = __commonJS(function(exports, module) {
 });
 
 // node_modules/fast-uri/lib/schemes.js
-var require_schemes = __commonJS(function(exports, module) {
+var require_schemes = __commonJS((exports, module) => {
   var { isUUID } = require_utils();
   var URN_REG = /([\da-z][\d\-a-z]{0,31}):((?:[\w!$'()*+,\-.:;=@]|%[\da-f]{2})+)/iu;
   var supportedSchemeNames = [
@@ -9797,28 +10099,28 @@ var require_schemes = __commonJS(function(exports, module) {
 });
 
 // node_modules/fast-uri/index.js
-var require_fast_uri = __commonJS(function(exports, module) {
+var require_fast_uri = __commonJS((exports, module) => {
   var { normalizeIPv6, removeDotSegments, recomposeAuthority, normalizeComponentEncoding, isIPv4, nonSimpleDomain } = require_utils();
   var { SCHEMES, getSchemeHandler } = require_schemes();
   function normalize(uri, options) {
     if (typeof uri === "string") {
-      uri = serialize(parse(uri, options), options);
+      uri = serialize(parse6(uri, options), options);
     } else if (typeof uri === "object") {
-      uri = parse(serialize(uri, options), options);
+      uri = parse6(serialize(uri, options), options);
     }
     return uri;
   }
   function resolve(baseURI, relativeURI, options) {
     const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
-    const resolved = resolveComponent(parse(baseURI, schemelessOptions), parse(relativeURI, schemelessOptions), schemelessOptions, true);
+    const resolved = resolveComponent(parse6(baseURI, schemelessOptions), parse6(relativeURI, schemelessOptions), schemelessOptions, true);
     schemelessOptions.skipEscape = true;
     return serialize(resolved, schemelessOptions);
   }
   function resolveComponent(base, relative, options, skipNormalization) {
     const target = {};
     if (!skipNormalization) {
-      base = parse(serialize(base, options), options);
-      relative = parse(serialize(relative, options), options);
+      base = parse6(serialize(base, options), options);
+      relative = parse6(serialize(relative, options), options);
     }
     options = options || {};
     if (!options.tolerant && relative.scheme) {
@@ -9870,13 +10172,13 @@ var require_fast_uri = __commonJS(function(exports, module) {
   function equal(uriA, uriB, options) {
     if (typeof uriA === "string") {
       uriA = unescape(uriA);
-      uriA = serialize(normalizeComponentEncoding(parse(uriA, options), true), { ...options, skipEscape: true });
+      uriA = serialize(normalizeComponentEncoding(parse6(uriA, options), true), { ...options, skipEscape: true });
     } else if (typeof uriA === "object") {
       uriA = serialize(normalizeComponentEncoding(uriA, true), { ...options, skipEscape: true });
     }
     if (typeof uriB === "string") {
       uriB = unescape(uriB);
-      uriB = serialize(normalizeComponentEncoding(parse(uriB, options), true), { ...options, skipEscape: true });
+      uriB = serialize(normalizeComponentEncoding(parse6(uriB, options), true), { ...options, skipEscape: true });
     } else if (typeof uriB === "object") {
       uriB = serialize(normalizeComponentEncoding(uriB, true), { ...options, skipEscape: true });
     }
@@ -9946,7 +10248,7 @@ var require_fast_uri = __commonJS(function(exports, module) {
     return uriTokens.join("");
   }
   var URI_PARSE = /^(?:([^#/:?]+):)?(?:\/\/((?:([^#/?@]*)@)?(\[[^#/?\]]+\]|[^#/:?]*)(?::(\d*))?))?([^#?]*)(?:\?([^#]*))?(?:#((?:.|[\n\r])*))?/u;
-  function parse(uri, opts) {
+  function parse6(uri, opts) {
     const options = Object.assign({}, opts);
     const parsed = {
       scheme: undefined,
@@ -10040,7 +10342,7 @@ var require_fast_uri = __commonJS(function(exports, module) {
     resolveComponent,
     equal,
     serialize,
-    parse
+    parse: parse6
   };
   module.exports = fastUri;
   module.exports.default = fastUri;
@@ -10048,7 +10350,7 @@ var require_fast_uri = __commonJS(function(exports, module) {
 });
 
 // node_modules/ajv/dist/runtime/uri.js
-var require_uri = __commonJS(function(exports) {
+var require_uri = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var uri = require_fast_uri();
   uri.code = 'require("ajv/dist/runtime/uri").default';
@@ -10056,7 +10358,7 @@ var require_uri = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/core.js
-var require_core = __commonJS(function(exports) {
+var require_core = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.CodeGen = exports.Name = exports.nil = exports.stringify = exports.str = exports._ = exports.KeywordCxt = undefined;
   var validate_1 = require_validate();
@@ -10134,9 +10436,9 @@ var require_core = __commonJS(function(exports) {
   };
   var MAX_EXPRESSION = 200;
   function requiredOptions(o) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0;
+    var _a3, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0;
     const s = o.strict;
-    const _optz = (_a = o.code) === null || _a === undefined ? undefined : _a.optimize;
+    const _optz = (_a3 = o.code) === null || _a3 === undefined ? undefined : _a3.optimize;
     const optimize = _optz === true || _optz === undefined ? 1 : _optz || 0;
     const regExp = (_c = (_b = o.code) === null || _b === undefined ? undefined : _b.regExp) !== null && _c !== undefined ? _c : defaultRegExp;
     const uriResolver = (_d = o.uriResolver) !== null && _d !== undefined ? _d : uri_1.default;
@@ -10195,19 +10497,19 @@ var require_core = __commonJS(function(exports) {
       this.addKeyword("$async");
     }
     _addDefaultMetaSchema() {
-      const { $data, meta, schemaId } = this.opts;
+      const { $data, meta: meta2, schemaId } = this.opts;
       let _dataRefSchema = $dataRefSchema;
       if (schemaId === "id") {
         _dataRefSchema = { ...$dataRefSchema };
         _dataRefSchema.id = _dataRefSchema.$id;
         delete _dataRefSchema.$id;
       }
-      if (meta && $data)
+      if (meta2 && $data)
         this.addMetaSchema(_dataRefSchema, _dataRefSchema[schemaId], false);
     }
     defaultMeta() {
-      const { meta, schemaId } = this.opts;
-      return this.opts.defaultMeta = typeof meta == "object" ? meta[schemaId] || meta : undefined;
+      const { meta: meta2, schemaId } = this.opts;
+      return this.opts.defaultMeta = typeof meta2 == "object" ? meta2[schemaId] || meta2 : undefined;
     }
     validate(schemaKeyRef, data) {
       let v;
@@ -10227,12 +10529,12 @@ var require_core = __commonJS(function(exports) {
       const sch = this._addSchema(schema, _meta);
       return sch.validate || this._compileSchemaEnv(sch);
     }
-    compileAsync(schema, meta) {
+    compileAsync(schema, meta2) {
       if (typeof this.opts.loadSchema != "function") {
         throw new Error("options.loadSchema should be a function");
       }
       const { loadSchema } = this.opts;
-      return runCompileAsync.call(this, schema, meta);
+      return runCompileAsync.call(this, schema, meta2);
       async function runCompileAsync(_schema, _meta) {
         await loadMetaSchema.call(this, _schema.$schema);
         const sch = this._addSchema(_schema, _meta);
@@ -10264,7 +10566,7 @@ var require_core = __commonJS(function(exports) {
         if (!this.refs[ref])
           await loadMetaSchema.call(this, _schema.$schema);
         if (!this.refs[ref])
-          this.addSchema(_schema, ref, meta);
+          this.addSchema(_schema, ref, meta2);
       }
       async function _loadSchema(ref) {
         const p = this._loading[ref];
@@ -10430,10 +10732,10 @@ var require_core = __commonJS(function(exports) {
       this.formats[name] = format;
       return this;
     }
-    errorsText(errors = this.errors, { separator = ", ", dataVar = "data" } = {}) {
-      if (!errors || errors.length === 0)
+    errorsText(errors3 = this.errors, { separator = ", ", dataVar = "data" } = {}) {
+      if (!errors3 || errors3.length === 0)
         return "No errors";
-      return errors.map((e) => `${dataVar}${e.instancePath} ${e.message}`).reduce((text, msg) => text + separator + msg);
+      return errors3.map((e) => `${dataVar}${e.instancePath} ${e.message}`).reduce((text, msg) => text + separator + msg);
     }
     $dataMetaSchema(metaSchema, keywordsJsonPointers) {
       const rules = this.RULES.all;
@@ -10455,20 +10757,20 @@ var require_core = __commonJS(function(exports) {
       }
       return metaSchema;
     }
-    _removeAllSchemas(schemas, regex) {
-      for (const keyRef in schemas) {
-        const sch = schemas[keyRef];
+    _removeAllSchemas(schemas4, regex) {
+      for (const keyRef in schemas4) {
+        const sch = schemas4[keyRef];
         if (!regex || regex.test(keyRef)) {
           if (typeof sch == "string") {
-            delete schemas[keyRef];
+            delete schemas4[keyRef];
           } else if (sch && !sch.meta) {
             this._cache.delete(sch.schema);
-            delete schemas[keyRef];
+            delete schemas4[keyRef];
           }
         }
       }
     }
-    _addSchema(schema, meta, baseId, validateSchema = this.opts.validateSchema, addSchema = this.opts.addUsedSchema) {
+    _addSchema(schema, meta2, baseId, validateSchema = this.opts.validateSchema, addSchema = this.opts.addUsedSchema) {
       let id;
       const { schemaId } = this.opts;
       if (typeof schema == "object") {
@@ -10484,7 +10786,7 @@ var require_core = __commonJS(function(exports) {
         return sch;
       baseId = (0, resolve_1.normalizeId)(id || baseId);
       const localRefs = resolve_1.getSchemaRefs.call(this, schema, baseId);
-      sch = new compile_1.SchemaEnv({ schema, schemaId, meta, baseId, localRefs });
+      sch = new compile_1.SchemaEnv({ schema, schemaId, meta: meta2, baseId, localRefs });
       this._cache.set(sch.schema, sch);
       if (addSchema && !baseId.startsWith("#")) {
         if (baseId)
@@ -10595,7 +10897,7 @@ var require_core = __commonJS(function(exports) {
     }
   }
   function addRule(keyword, definition, dataType) {
-    var _a;
+    var _a3;
     const post = definition === null || definition === undefined ? undefined : definition.post;
     if (dataType && post)
       throw new Error('keyword with "post" flag cannot have "type"');
@@ -10621,7 +10923,7 @@ var require_core = __commonJS(function(exports) {
     else
       ruleGroup.rules.push(rule);
     RULES.all[keyword] = rule;
-    (_a = definition.implements) === null || _a === undefined || _a.forEach((kwd) => this.addKeyword(kwd));
+    (_a3 = definition.implements) === null || _a3 === undefined || _a3.forEach((kwd) => this.addKeyword(kwd));
   }
   function addBeforeRule(ruleGroup, rule, before) {
     const i = ruleGroup.rules.findIndex((_rule) => _rule.keyword === before);
@@ -10649,7 +10951,7 @@ var require_core = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/core/id.js
-var require_id = __commonJS(function(exports) {
+var require_id = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var def = {
     keyword: "id",
@@ -10661,7 +10963,7 @@ var require_id = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/core/ref.js
-var require_ref = __commonJS(function(exports) {
+var require_ref = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.callRef = exports.getValidate = undefined;
   var ref_error_1 = require_ref_error();
@@ -10749,10 +11051,10 @@ var require_ref = __commonJS(function(exports) {
       gen.assign(names_1.default.errors, (0, codegen_1._)`${names_1.default.vErrors}.length`);
     }
     function addEvaluatedFrom(source) {
-      var _a;
+      var _a3;
       if (!it.opts.unevaluated)
         return;
-      const schEvaluated = (_a = sch === null || sch === undefined ? undefined : sch.validate) === null || _a === undefined ? undefined : _a.evaluated;
+      const schEvaluated = (_a3 = sch === null || sch === undefined ? undefined : sch.validate) === null || _a3 === undefined ? undefined : _a3.evaluated;
       if (it.props !== true) {
         if (schEvaluated && !schEvaluated.dynamicProps) {
           if (schEvaluated.props !== undefined) {
@@ -10780,11 +11082,11 @@ var require_ref = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/core/index.js
-var require_core2 = __commonJS(function(exports) {
+var require_core2 = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var id_1 = require_id();
   var ref_1 = require_ref();
-  var core = [
+  var core2 = [
     "$schema",
     "$id",
     "$defs",
@@ -10794,11 +11096,11 @@ var require_core2 = __commonJS(function(exports) {
     id_1.default,
     ref_1.default
   ];
-  exports.default = core;
+  exports.default = core2;
 });
 
 // node_modules/ajv/dist/vocabularies/validation/limitNumber.js
-var require_limitNumber = __commonJS(function(exports) {
+var require_limitNumber = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
   var ops = codegen_1.operators;
@@ -10808,7 +11110,7 @@ var require_limitNumber = __commonJS(function(exports) {
     exclusiveMaximum: { okStr: "<", ok: ops.LT, fail: ops.GTE },
     exclusiveMinimum: { okStr: ">", ok: ops.GT, fail: ops.LTE }
   };
-  var error = {
+  var error2 = {
     message: ({ keyword, schemaCode }) => (0, codegen_1.str)`must be ${KWDs[keyword].okStr} ${schemaCode}`,
     params: ({ keyword, schemaCode }) => (0, codegen_1._)`{comparison: ${KWDs[keyword].okStr}, limit: ${schemaCode}}`
   };
@@ -10817,7 +11119,7 @@ var require_limitNumber = __commonJS(function(exports) {
     type: "number",
     schemaType: "number",
     $data: true,
-    error,
+    error: error2,
     code(cxt) {
       const { keyword, data, schemaCode } = cxt;
       cxt.fail$data((0, codegen_1._)`${data} ${KWDs[keyword].fail} ${schemaCode} || isNaN(${data})`);
@@ -10827,10 +11129,10 @@ var require_limitNumber = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/validation/multipleOf.js
-var require_multipleOf = __commonJS(function(exports) {
+var require_multipleOf = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
-  var error = {
+  var error2 = {
     message: ({ schemaCode }) => (0, codegen_1.str)`must be multiple of ${schemaCode}`,
     params: ({ schemaCode }) => (0, codegen_1._)`{multipleOf: ${schemaCode}}`
   };
@@ -10839,7 +11141,7 @@ var require_multipleOf = __commonJS(function(exports) {
     type: "number",
     schemaType: "number",
     $data: true,
-    error,
+    error: error2,
     code(cxt) {
       const { gen, data, schemaCode, it } = cxt;
       const prec = it.opts.multipleOfPrecision;
@@ -10852,7 +11154,7 @@ var require_multipleOf = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/runtime/ucs2length.js
-var require_ucs2length = __commonJS(function(exports) {
+var require_ucs2length = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   function ucs2length(str) {
     const len = str.length;
@@ -10875,12 +11177,12 @@ var require_ucs2length = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/validation/limitLength.js
-var require_limitLength = __commonJS(function(exports) {
+var require_limitLength = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
   var util_1 = require_util();
   var ucs2length_1 = require_ucs2length();
-  var error = {
+  var error2 = {
     message({ keyword, schemaCode }) {
       const comp = keyword === "maxLength" ? "more" : "fewer";
       return (0, codegen_1.str)`must NOT have ${comp} than ${schemaCode} characters`;
@@ -10892,7 +11194,7 @@ var require_limitLength = __commonJS(function(exports) {
     type: "string",
     schemaType: "number",
     $data: true,
-    error,
+    error: error2,
     code(cxt) {
       const { keyword, data, schemaCode, it } = cxt;
       const op = keyword === "maxLength" ? codegen_1.operators.GT : codegen_1.operators.LT;
@@ -10904,12 +11206,12 @@ var require_limitLength = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/validation/pattern.js
-var require_pattern = __commonJS(function(exports) {
+var require_pattern = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var code_1 = require_code2();
   var util_1 = require_util();
   var codegen_1 = require_codegen();
-  var error = {
+  var error2 = {
     message: ({ schemaCode }) => (0, codegen_1.str)`must match pattern "${schemaCode}"`,
     params: ({ schemaCode }) => (0, codegen_1._)`{pattern: ${schemaCode}}`
   };
@@ -10918,7 +11220,7 @@ var require_pattern = __commonJS(function(exports) {
     type: "string",
     schemaType: "string",
     $data: true,
-    error,
+    error: error2,
     code(cxt) {
       const { gen, data, $data, schema, schemaCode, it } = cxt;
       const u = it.opts.unicodeRegExp ? "u" : "";
@@ -10938,10 +11240,10 @@ var require_pattern = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/validation/limitProperties.js
-var require_limitProperties = __commonJS(function(exports) {
+var require_limitProperties = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
-  var error = {
+  var error2 = {
     message({ keyword, schemaCode }) {
       const comp = keyword === "maxProperties" ? "more" : "fewer";
       return (0, codegen_1.str)`must NOT have ${comp} than ${schemaCode} properties`;
@@ -10953,7 +11255,7 @@ var require_limitProperties = __commonJS(function(exports) {
     type: "object",
     schemaType: "number",
     $data: true,
-    error,
+    error: error2,
     code(cxt) {
       const { keyword, data, schemaCode } = cxt;
       const op = keyword === "maxProperties" ? codegen_1.operators.GT : codegen_1.operators.LT;
@@ -10964,12 +11266,12 @@ var require_limitProperties = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/validation/required.js
-var require_required = __commonJS(function(exports) {
+var require_required = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var code_1 = require_code2();
   var codegen_1 = require_codegen();
   var util_1 = require_util();
-  var error = {
+  var error2 = {
     message: ({ params: { missingProperty } }) => (0, codegen_1.str)`must have required property '${missingProperty}'`,
     params: ({ params: { missingProperty } }) => (0, codegen_1._)`{missingProperty: ${missingProperty}}`
   };
@@ -10978,7 +11280,7 @@ var require_required = __commonJS(function(exports) {
     type: "object",
     schemaType: "array",
     $data: true,
-    error,
+    error: error2,
     code(cxt) {
       const { gen, schema, schemaCode, data, $data, it } = cxt;
       const { opts } = it;
@@ -11043,10 +11345,10 @@ var require_required = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/validation/limitItems.js
-var require_limitItems = __commonJS(function(exports) {
+var require_limitItems = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
-  var error = {
+  var error2 = {
     message({ keyword, schemaCode }) {
       const comp = keyword === "maxItems" ? "more" : "fewer";
       return (0, codegen_1.str)`must NOT have ${comp} than ${schemaCode} items`;
@@ -11058,7 +11360,7 @@ var require_limitItems = __commonJS(function(exports) {
     type: "array",
     schemaType: "number",
     $data: true,
-    error,
+    error: error2,
     code(cxt) {
       const { keyword, data, schemaCode } = cxt;
       const op = keyword === "maxItems" ? codegen_1.operators.GT : codegen_1.operators.LT;
@@ -11069,7 +11371,7 @@ var require_limitItems = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/runtime/equal.js
-var require_equal = __commonJS(function(exports) {
+var require_equal = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var equal = require_fast_deep_equal();
   equal.code = 'require("ajv/dist/runtime/equal").default';
@@ -11077,13 +11379,13 @@ var require_equal = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/validation/uniqueItems.js
-var require_uniqueItems = __commonJS(function(exports) {
+var require_uniqueItems = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var dataType_1 = require_dataType();
   var codegen_1 = require_codegen();
   var util_1 = require_util();
   var equal_1 = require_equal();
-  var error = {
+  var error2 = {
     message: ({ params: { i, j } }) => (0, codegen_1.str)`must NOT have duplicate items (items ## ${j} and ${i} are identical)`,
     params: ({ params: { i, j } }) => (0, codegen_1._)`{i: ${i}, j: ${j}}`
   };
@@ -11092,7 +11394,7 @@ var require_uniqueItems = __commonJS(function(exports) {
     type: "array",
     schemaType: "boolean",
     $data: true,
-    error,
+    error: error2,
     code(cxt) {
       const { gen, data, $data, schema, parentSchema, schemaCode, it } = cxt;
       if (!$data && !schema)
@@ -11141,19 +11443,19 @@ var require_uniqueItems = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/validation/const.js
-var require_const = __commonJS(function(exports) {
+var require_const = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
   var util_1 = require_util();
   var equal_1 = require_equal();
-  var error = {
+  var error2 = {
     message: "must be equal to constant",
     params: ({ schemaCode }) => (0, codegen_1._)`{allowedValue: ${schemaCode}}`
   };
   var def = {
     keyword: "const",
     $data: true,
-    error,
+    error: error2,
     code(cxt) {
       const { gen, data, $data, schemaCode, schema } = cxt;
       if ($data || schema && typeof schema == "object") {
@@ -11167,12 +11469,12 @@ var require_const = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/validation/enum.js
-var require_enum = __commonJS(function(exports) {
+var require_enum = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
   var util_1 = require_util();
   var equal_1 = require_equal();
-  var error = {
+  var error2 = {
     message: "must be equal to one of the allowed values",
     params: ({ schemaCode }) => (0, codegen_1._)`{allowedValues: ${schemaCode}}`
   };
@@ -11180,7 +11482,7 @@ var require_enum = __commonJS(function(exports) {
     keyword: "enum",
     schemaType: "array",
     $data: true,
-    error,
+    error: error2,
     code(cxt) {
       const { gen, data, $data, schema, schemaCode, it } = cxt;
       if (!$data && schema.length === 0)
@@ -11213,7 +11515,7 @@ var require_enum = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/validation/index.js
-var require_validation = __commonJS(function(exports) {
+var require_validation = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var limitNumber_1 = require_limitNumber();
   var multipleOf_1 = require_multipleOf();
@@ -11243,12 +11545,12 @@ var require_validation = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/applicator/additionalItems.js
-var require_additionalItems = __commonJS(function(exports) {
+var require_additionalItems = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.validateAdditionalItems = undefined;
   var codegen_1 = require_codegen();
   var util_1 = require_util();
-  var error = {
+  var error2 = {
     message: ({ params: { len } }) => (0, codegen_1.str)`must NOT have more than ${len} items`,
     params: ({ params: { len } }) => (0, codegen_1._)`{limit: ${len}}`
   };
@@ -11257,7 +11559,7 @@ var require_additionalItems = __commonJS(function(exports) {
     type: "array",
     schemaType: ["boolean", "object"],
     before: "uniqueItems",
-    error,
+    error: error2,
     code(cxt) {
       const { parentSchema, it } = cxt;
       const { items } = parentSchema;
@@ -11293,7 +11595,7 @@ var require_additionalItems = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/applicator/items.js
-var require_items = __commonJS(function(exports) {
+var require_items = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.validateTuple = undefined;
   var codegen_1 = require_codegen();
@@ -11347,7 +11649,7 @@ var require_items = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/applicator/prefixItems.js
-var require_prefixItems = __commonJS(function(exports) {
+var require_prefixItems = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var items_1 = require_items();
   var def = {
@@ -11361,13 +11663,13 @@ var require_prefixItems = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/applicator/items2020.js
-var require_items2020 = __commonJS(function(exports) {
+var require_items2020 = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
   var util_1 = require_util();
   var code_1 = require_code2();
   var additionalItems_1 = require_additionalItems();
-  var error = {
+  var error2 = {
     message: ({ params: { len } }) => (0, codegen_1.str)`must NOT have more than ${len} items`,
     params: ({ params: { len } }) => (0, codegen_1._)`{limit: ${len}}`
   };
@@ -11376,7 +11678,7 @@ var require_items2020 = __commonJS(function(exports) {
     type: "array",
     schemaType: ["object", "boolean"],
     before: "uniqueItems",
-    error,
+    error: error2,
     code(cxt) {
       const { schema, parentSchema, it } = cxt;
       const { prefixItems } = parentSchema;
@@ -11393,11 +11695,11 @@ var require_items2020 = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/applicator/contains.js
-var require_contains = __commonJS(function(exports) {
+var require_contains = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
   var util_1 = require_util();
-  var error = {
+  var error2 = {
     message: ({ params: { min, max } }) => max === undefined ? (0, codegen_1.str)`must contain at least ${min} valid item(s)` : (0, codegen_1.str)`must contain at least ${min} and no more than ${max} valid item(s)`,
     params: ({ params: { min, max } }) => max === undefined ? (0, codegen_1._)`{minContains: ${min}}` : (0, codegen_1._)`{minContains: ${min}, maxContains: ${max}}`
   };
@@ -11407,7 +11709,7 @@ var require_contains = __commonJS(function(exports) {
     schemaType: ["object", "boolean"],
     before: "uniqueItems",
     trackErrors: true,
-    error,
+    error: error2,
     code(cxt) {
       const { gen, schema, parentSchema, data, it } = cxt;
       let min;
@@ -11484,7 +11786,7 @@ var require_contains = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/applicator/dependencies.js
-var require_dependencies = __commonJS(function(exports) {
+var require_dependencies = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.validateSchemaDeps = exports.validatePropertyDeps = exports.error = undefined;
   var codegen_1 = require_codegen();
@@ -11569,11 +11871,11 @@ var require_dependencies = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/applicator/propertyNames.js
-var require_propertyNames = __commonJS(function(exports) {
+var require_propertyNames = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
   var util_1 = require_util();
-  var error = {
+  var error2 = {
     message: "property name must be valid",
     params: ({ params }) => (0, codegen_1._)`{propertyName: ${params.propertyName}}`
   };
@@ -11581,7 +11883,7 @@ var require_propertyNames = __commonJS(function(exports) {
     keyword: "propertyNames",
     type: "object",
     schemaType: ["object", "boolean"],
-    error,
+    error: error2,
     code(cxt) {
       const { gen, schema, data, it } = cxt;
       if ((0, util_1.alwaysValidSchema)(it, schema))
@@ -11609,13 +11911,13 @@ var require_propertyNames = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js
-var require_additionalProperties = __commonJS(function(exports) {
+var require_additionalProperties = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var code_1 = require_code2();
   var codegen_1 = require_codegen();
   var names_1 = require_names();
   var util_1 = require_util();
-  var error = {
+  var error2 = {
     message: "must NOT have additional properties",
     params: ({ params }) => (0, codegen_1._)`{additionalProperty: ${params.additionalProperty}}`
   };
@@ -11625,7 +11927,7 @@ var require_additionalProperties = __commonJS(function(exports) {
     schemaType: ["boolean", "object"],
     allowUndefined: true,
     trackErrors: true,
-    error,
+    error: error2,
     code(cxt) {
       const { gen, schema, parentSchema, data, errsCount, it } = cxt;
       if (!errsCount)
@@ -11691,13 +11993,13 @@ var require_additionalProperties = __commonJS(function(exports) {
           }
         }
       }
-      function applyAdditionalSchema(key, valid, errors) {
+      function applyAdditionalSchema(key, valid, errors3) {
         const subschema = {
           keyword: "additionalProperties",
           dataProp: key,
           dataPropType: util_1.Type.Str
         };
-        if (errors === false) {
+        if (errors3 === false) {
           Object.assign(subschema, {
             compositeRule: true,
             createErrors: false,
@@ -11712,7 +12014,7 @@ var require_additionalProperties = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/applicator/properties.js
-var require_properties = __commonJS(function(exports) {
+var require_properties = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var validate_1 = require_validate();
   var code_1 = require_code2();
@@ -11767,7 +12069,7 @@ var require_properties = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/applicator/patternProperties.js
-var require_patternProperties = __commonJS(function(exports) {
+var require_patternProperties = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var code_1 = require_code2();
   var codegen_1 = require_codegen();
@@ -11838,7 +12140,7 @@ var require_patternProperties = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/applicator/not.js
-var require_not = __commonJS(function(exports) {
+var require_not = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var util_1 = require_util();
   var def = {
@@ -11866,7 +12168,7 @@ var require_not = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/applicator/anyOf.js
-var require_anyOf = __commonJS(function(exports) {
+var require_anyOf = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var code_1 = require_code2();
   var def = {
@@ -11880,11 +12182,11 @@ var require_anyOf = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/applicator/oneOf.js
-var require_oneOf = __commonJS(function(exports) {
+var require_oneOf = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
   var util_1 = require_util();
-  var error = {
+  var error2 = {
     message: "must match exactly one schema in oneOf",
     params: ({ params }) => (0, codegen_1._)`{passingSchemas: ${params.passing}}`
   };
@@ -11892,7 +12194,7 @@ var require_oneOf = __commonJS(function(exports) {
     keyword: "oneOf",
     schemaType: "array",
     trackErrors: true,
-    error,
+    error: error2,
     code(cxt) {
       const { gen, schema, parentSchema, it } = cxt;
       if (!Array.isArray(schema))
@@ -11935,7 +12237,7 @@ var require_oneOf = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/applicator/allOf.js
-var require_allOf = __commonJS(function(exports) {
+var require_allOf = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var util_1 = require_util();
   var def = {
@@ -11959,11 +12261,11 @@ var require_allOf = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/applicator/if.js
-var require_if = __commonJS(function(exports) {
+var require_if = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
   var util_1 = require_util();
-  var error = {
+  var error2 = {
     message: ({ params }) => (0, codegen_1.str)`must match "${params.ifClause}" schema`,
     params: ({ params }) => (0, codegen_1._)`{failingKeyword: ${params.ifClause}}`
   };
@@ -11971,7 +12273,7 @@ var require_if = __commonJS(function(exports) {
     keyword: "if",
     schemaType: ["object", "boolean"],
     trackErrors: true,
-    error,
+    error: error2,
     code(cxt) {
       const { gen, parentSchema, it } = cxt;
       if (parentSchema.then === undefined && parentSchema.else === undefined) {
@@ -12025,7 +12327,7 @@ var require_if = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/applicator/thenElse.js
-var require_thenElse = __commonJS(function(exports) {
+var require_thenElse = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var util_1 = require_util();
   var def = {
@@ -12040,7 +12342,7 @@ var require_thenElse = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/applicator/index.js
-var require_applicator = __commonJS(function(exports) {
+var require_applicator = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var additionalItems_1 = require_additionalItems();
   var prefixItems_1 = require_prefixItems();
@@ -12083,10 +12385,10 @@ var require_applicator = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/format/format.js
-var require_format = __commonJS(function(exports) {
+var require_format = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
-  var error = {
+  var error2 = {
     message: ({ schemaCode }) => (0, codegen_1.str)`must match format "${schemaCode}"`,
     params: ({ schemaCode }) => (0, codegen_1._)`{format: ${schemaCode}}`
   };
@@ -12095,7 +12397,7 @@ var require_format = __commonJS(function(exports) {
     type: ["number", "string"],
     schemaType: "string",
     $data: true,
-    error,
+    error: error2,
     code(cxt, ruleType) {
       const { gen, data, $data, schema, schemaCode, it } = cxt;
       const { opts, errSchemaPath, schemaEnv, self } = it;
@@ -12170,7 +12472,7 @@ var require_format = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/format/index.js
-var require_format2 = __commonJS(function(exports) {
+var require_format2 = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var format_1 = require_format();
   var format = [format_1.default];
@@ -12178,7 +12480,7 @@ var require_format2 = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/metadata.js
-var require_metadata = __commonJS(function(exports) {
+var require_metadata = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.contentVocabulary = exports.metadataVocabulary = undefined;
   exports.metadataVocabulary = [
@@ -12198,7 +12500,7 @@ var require_metadata = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/draft7.js
-var require_draft7 = __commonJS(function(exports) {
+var require_draft7 = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var core_1 = require_core2();
   var validation_1 = require_validation();
@@ -12217,25 +12519,25 @@ var require_draft7 = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/vocabularies/discriminator/types.js
-var require_types = __commonJS(function(exports) {
+var require_types = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.DiscrError = undefined;
   var DiscrError;
-  (function(DiscrError) {
-    DiscrError["Tag"] = "tag";
-    DiscrError["Mapping"] = "mapping";
+  (function(DiscrError2) {
+    DiscrError2["Tag"] = "tag";
+    DiscrError2["Mapping"] = "mapping";
   })(DiscrError || (exports.DiscrError = DiscrError = {}));
 });
 
 // node_modules/ajv/dist/vocabularies/discriminator/index.js
-var require_discriminator = __commonJS(function(exports) {
+var require_discriminator = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
   var types_1 = require_types();
   var compile_1 = require_compile();
   var ref_error_1 = require_ref_error();
   var util_1 = require_util();
-  var error = {
+  var error2 = {
     message: ({ params: { discrError, tagName } }) => discrError === types_1.DiscrError.Tag ? `tag "${tagName}" must be string` : `value of tag "${tagName}" must be in oneOf`,
     params: ({ params: { discrError, tag, tagName } }) => (0, codegen_1._)`{error: ${discrError}, tag: ${tagName}, tagValue: ${tag}}`
   };
@@ -12243,7 +12545,7 @@ var require_discriminator = __commonJS(function(exports) {
     keyword: "discriminator",
     type: "object",
     schemaType: "object",
-    error,
+    error: error2,
     code(cxt) {
       const { gen, data, schema, parentSchema, it } = cxt;
       const { oneOf } = parentSchema;
@@ -12279,7 +12581,7 @@ var require_discriminator = __commonJS(function(exports) {
         return _valid;
       }
       function getMapping() {
-        var _a;
+        var _a3;
         const oneOfMapping = {};
         const topRequired = hasRequired(parentSchema);
         let tagRequired = true;
@@ -12293,7 +12595,7 @@ var require_discriminator = __commonJS(function(exports) {
             if (sch === undefined)
               throw new ref_error_1.default(it.opts.uriResolver, it.baseId, ref);
           }
-          const propSch = (_a = sch === null || sch === undefined ? undefined : sch.properties) === null || _a === undefined ? undefined : _a[tagName];
+          const propSch = (_a3 = sch === null || sch === undefined ? undefined : sch.properties) === null || _a3 === undefined ? undefined : _a3[tagName];
           if (typeof propSch != "object") {
             throw new Error(`discriminator: oneOf subschemas (or referenced schemas) must have "properties/${tagName}"`);
           }
@@ -12303,8 +12605,8 @@ var require_discriminator = __commonJS(function(exports) {
         if (!tagRequired)
           throw new Error(`discriminator: "${tagName}" must be required`);
         return oneOfMapping;
-        function hasRequired({ required }) {
-          return Array.isArray(required) && required.includes(tagName);
+        function hasRequired({ required: required2 }) {
+          return Array.isArray(required2) && required2.includes(tagName);
         }
         function addMappings(sch, i) {
           if (sch.const) {
@@ -12330,7 +12632,7 @@ var require_discriminator = __commonJS(function(exports) {
 });
 
 // node_modules/ajv/dist/refs/json-schema-draft-07.json
-var require_json_schema_draft_07 = __commonJS(function(exports, module) {
+var require_json_schema_draft_07 = __commonJS((exports, module) => {
   module.exports = {
     $schema: "http://json-schema.org/draft-07/schema#",
     $id: "http://json-schema.org/draft-07/schema#",
@@ -12485,7 +12787,7 @@ var require_json_schema_draft_07 = __commonJS(function(exports, module) {
 });
 
 // node_modules/ajv/dist/ajv.js
-var require_ajv = __commonJS(function(exports, module) {
+var require_ajv = __commonJS((exports, module) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.MissingRefError = exports.ValidationError = exports.CodeGen = exports.Name = exports.nil = exports.stringify = exports.str = exports._ = exports.KeywordCxt = exports.Ajv = undefined;
   var core_1 = require_core();
@@ -12553,14 +12855,14 @@ var require_ajv = __commonJS(function(exports, module) {
 });
 
 // node_modules/ajv-formats/dist/formats.js
-var require_formats = __commonJS(function(exports) {
+var require_formats = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.formatNames = exports.fastFormats = exports.fullFormats = undefined;
-  function fmtDef(validate, compare) {
-    return { validate, compare };
+  function fmtDef(validate2, compare) {
+    return { validate: validate2, compare };
   }
   exports.fullFormats = {
-    date: fmtDef(date, compareDate),
+    date: fmtDef(date4, compareDate),
     time: fmtDef(getTime(true), compareTime),
     "date-time": fmtDef(getDateTime(true), compareDateTime),
     "iso-time": fmtDef(getTime(), compareIsoTime),
@@ -12604,7 +12906,7 @@ var require_formats = __commonJS(function(exports) {
   }
   var DATE = /^(\d\d\d\d)-(\d\d)-(\d\d)$/;
   var DAYS = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  function date(str) {
+  function date4(str) {
     const matches = DATE.exec(str);
     if (!matches)
       return false;
@@ -12624,7 +12926,7 @@ var require_formats = __commonJS(function(exports) {
   }
   var TIME = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?)(z|([+-])(\d\d)(?::?(\d\d))?)?$/i;
   function getTime(strictTimeZone) {
-    return function time(str) {
+    return function time3(str) {
       const matches = TIME.exec(str);
       if (!matches)
         return false;
@@ -12670,10 +12972,10 @@ var require_formats = __commonJS(function(exports) {
   }
   var DATE_TIME_SEPARATOR = /t|\s/i;
   function getDateTime(strictTimeZone) {
-    const time = getTime(strictTimeZone);
+    const time3 = getTime(strictTimeZone);
     return function date_time(str) {
       const dateTime = str.split(DATE_TIME_SEPARATOR);
-      return dateTime.length === 2 && date(dateTime[0]) && time(dateTime[1]);
+      return dateTime.length === 2 && date4(dateTime[0]) && time3(dateTime[1]);
     };
   }
   function compareDateTime(dt1, dt2) {
@@ -12730,7 +13032,7 @@ var require_formats = __commonJS(function(exports) {
 });
 
 // node_modules/ajv-formats/dist/limit.js
-var require_limit = __commonJS(function(exports) {
+var require_limit = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.formatLimitDefinition = undefined;
   var ajv_1 = require_ajv();
@@ -12742,7 +13044,7 @@ var require_limit = __commonJS(function(exports) {
     formatExclusiveMaximum: { okStr: "<", ok: ops.LT, fail: ops.GTE },
     formatExclusiveMinimum: { okStr: ">", ok: ops.GT, fail: ops.LTE }
   };
-  var error = {
+  var error2 = {
     message: ({ keyword, schemaCode }) => (0, codegen_1.str)`should be ${KWDs[keyword].okStr} ${schemaCode}`,
     params: ({ keyword, schemaCode }) => (0, codegen_1._)`{comparison: ${KWDs[keyword].okStr}, limit: ${schemaCode}}`
   };
@@ -12751,7 +13053,7 @@ var require_limit = __commonJS(function(exports) {
     type: "string",
     schemaType: "string",
     $data: true,
-    error,
+    error: error2,
     code(cxt) {
       const { gen, data, schemaCode, keyword, it } = cxt;
       const { opts, self } = it;
@@ -12799,7 +13101,7 @@ var require_limit = __commonJS(function(exports) {
 });
 
 // node_modules/ajv-formats/dist/index.js
-var require_dist = __commonJS(function(exports, module) {
+var require_dist = __commonJS((exports, module) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var formats_1 = require_formats();
   var limit_1 = require_limit();
@@ -12826,9 +13128,9 @@ var require_dist = __commonJS(function(exports, module) {
     return f;
   };
   function addFormats(ajv, list, fs, exportName) {
-    var _a;
+    var _a3;
     var _b;
-    (_a = (_b = ajv.opts.code).formats) !== null && _a !== undefined || (_b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`);
+    (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== undefined || (_b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`);
     for (const f of list)
       ajv.addFormat(f, fs[f]);
   }
@@ -12845,6 +13147,7 @@ var init_zod = __esm(() => {
 // src/config-schema.ts
 var exports_config_schema = {};
 __export(exports_config_schema, {
+  RecallConfigSchema: () => RecallConfigSchema,
   PartialConfigSchema: () => PartialConfigSchema
 });
 var RecallConfigSchema, sections, PartialConfigSchema;
@@ -12888,7 +13191,7 @@ var init_config_schema = __esm(() => {
 });
 
 // package.json
-var require_package = __commonJS(function(exports, module) {
+var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "mcp-recall",
     version: "1.18.1",
@@ -12968,35 +13271,35 @@ var require_package = __commonJS(function(exports, module) {
 
 // node_modules/zod/v3/helpers/util.js
 var util;
-(function(util) {
-  util.assertEqual = (_) => {};
+(function(util2) {
+  util2.assertEqual = (_) => {};
   function assertIs(_arg) {}
-  util.assertIs = assertIs;
+  util2.assertIs = assertIs;
   function assertNever(_x) {
     throw new Error;
   }
-  util.assertNever = assertNever;
-  util.arrayToEnum = (items) => {
+  util2.assertNever = assertNever;
+  util2.arrayToEnum = (items) => {
     const obj = {};
     for (const item of items) {
       obj[item] = item;
     }
     return obj;
   };
-  util.getValidEnumValues = (obj) => {
-    const validKeys = util.objectKeys(obj).filter((k) => typeof obj[obj[k]] !== "number");
+  util2.getValidEnumValues = (obj) => {
+    const validKeys = util2.objectKeys(obj).filter((k) => typeof obj[obj[k]] !== "number");
     const filtered = {};
     for (const k of validKeys) {
       filtered[k] = obj[k];
     }
-    return util.objectValues(filtered);
+    return util2.objectValues(filtered);
   };
-  util.objectValues = (obj) => {
-    return util.objectKeys(obj).map(function(e) {
+  util2.objectValues = (obj) => {
+    return util2.objectKeys(obj).map(function(e) {
       return obj[e];
     });
   };
-  util.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object) => {
+  util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object) => {
     const keys = [];
     for (const key in object) {
       if (Object.prototype.hasOwnProperty.call(object, key)) {
@@ -13005,19 +13308,19 @@ var util;
     }
     return keys;
   };
-  util.find = (arr, checker) => {
+  util2.find = (arr, checker) => {
     for (const item of arr) {
       if (checker(item))
         return item;
     }
     return;
   };
-  util.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && Number.isFinite(val) && Math.floor(val) === val;
+  util2.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && Number.isFinite(val) && Math.floor(val) === val;
   function joinValues(array, separator = " | ") {
     return array.map((val) => typeof val === "string" ? `'${val}'` : val).join(separator);
   }
-  util.joinValues = joinValues;
-  util.jsonStringifyReplacer = (_, value) => {
+  util2.joinValues = joinValues;
+  util2.jsonStringifyReplacer = (_, value) => {
     if (typeof value === "bigint") {
       return value.toString();
     }
@@ -13025,8 +13328,8 @@ var util;
   };
 })(util || (util = {}));
 var objectUtil;
-(function(objectUtil) {
-  objectUtil.mergeShapes = (first, second) => {
+(function(objectUtil2) {
+  objectUtil2.mergeShapes = (first, second) => {
     return {
       ...first,
       ...second
@@ -13443,9 +13746,9 @@ var isAsync = (x) => typeof Promise !== "undefined" && x instanceof Promise;
 
 // node_modules/zod/v3/helpers/errorUtil.js
 var errorUtil;
-(function(errorUtil) {
-  errorUtil.errToObj = (message) => typeof message === "string" ? { message } : message || {};
-  errorUtil.toString = (message) => typeof message === "string" ? message : message?.message;
+(function(errorUtil2) {
+  errorUtil2.errToObj = (message) => typeof message === "string" ? { message } : message || {};
+  errorUtil2.toString = (message) => typeof message === "string" ? message : message?.message;
 })(errorUtil || (errorUtil = {}));
 
 // node_modules/zod/v3/types.js
@@ -13490,12 +13793,12 @@ var handleResult = (ctx, result) => {
 function processCreateParams(params) {
   if (!params)
     return {};
-  const { errorMap, invalid_type_error, required_error, description } = params;
-  if (errorMap && (invalid_type_error || required_error)) {
+  const { errorMap: errorMap2, invalid_type_error, required_error, description } = params;
+  if (errorMap2 && (invalid_type_error || required_error)) {
     throw new Error(`Can't use "invalid_type_error" or "required_error" in conjunction with custom error map.`);
   }
-  if (errorMap)
-    return { errorMap, description };
+  if (errorMap2)
+    return { errorMap: errorMap2, description };
   const customMap = (iss, ctx) => {
     const { message } = params;
     if (iss.code === "invalid_enum_value") {
@@ -13882,11 +14185,11 @@ class ZodString extends ZodType {
     }
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.string) {
-      const ctx = this._getOrReturnCtx(input);
-      addIssueToContext(ctx, {
+      const ctx2 = this._getOrReturnCtx(input);
+      addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.string,
-        received: ctx.parsedType
+        received: ctx2.parsedType
       });
       return INVALID;
     }
@@ -14440,11 +14743,11 @@ class ZodNumber extends ZodType {
     }
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.number) {
-      const ctx = this._getOrReturnCtx(input);
-      addIssueToContext(ctx, {
+      const ctx2 = this._getOrReturnCtx(input);
+      addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.number,
-        received: ctx.parsedType
+        received: ctx2.parsedType
       });
       return INVALID;
     }
@@ -14866,17 +15169,17 @@ class ZodDate extends ZodType {
     }
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.date) {
-      const ctx = this._getOrReturnCtx(input);
-      addIssueToContext(ctx, {
+      const ctx2 = this._getOrReturnCtx(input);
+      addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.date,
-        received: ctx.parsedType
+        received: ctx2.parsedType
       });
       return INVALID;
     }
     if (Number.isNaN(input.data.getTime())) {
-      const ctx = this._getOrReturnCtx(input);
-      addIssueToContext(ctx, {
+      const ctx2 = this._getOrReturnCtx(input);
+      addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_date
       });
       return INVALID;
@@ -15164,8 +15467,8 @@ class ZodArray extends ZodType {
     if (ctx.common.async) {
       return Promise.all([...ctx.data].map((item, i) => {
         return def.type._parseAsync(new ParseInputLazyPath(ctx, item, ctx.path, i));
-      })).then((result) => {
-        return ParseStatus.mergeArray(status, result);
+      })).then((result2) => {
+        return ParseStatus.mergeArray(status, result2);
       });
     }
     const result = [...ctx.data].map((item, i) => {
@@ -15253,11 +15556,11 @@ class ZodObject extends ZodType {
   _parse(input) {
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.object) {
-      const ctx = this._getOrReturnCtx(input);
-      addIssueToContext(ctx, {
+      const ctx2 = this._getOrReturnCtx(input);
+      addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.object,
-        received: ctx.parsedType
+        received: ctx2.parsedType
       });
       return INVALID;
     }
@@ -15561,7 +15864,7 @@ class ZodUnion extends ZodType {
         ctx.common.issues.push(...dirty.ctx.common.issues);
         return dirty.result;
       }
-      const unionErrors = issues.map((issues) => new ZodError(issues));
+      const unionErrors = issues.map((issues2) => new ZodError(issues2));
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_union,
         unionErrors
@@ -16005,9 +16308,9 @@ class ZodSet extends ZodType {
       }
     }
     const valueType = this._def.valueType;
-    function finalizeSet(elements) {
+    function finalizeSet(elements2) {
       const parsedSet = new Set;
-      for (const element of elements) {
+      for (const element of elements2) {
         if (element.status === "aborted")
           return INVALID;
         if (element.status === "dirty")
@@ -16018,7 +16321,7 @@ class ZodSet extends ZodType {
     }
     const elements = [...ctx.data.values()].map((item, i) => valueType._parse(new ParseInputLazyPath(ctx, item, ctx.path, i)));
     if (ctx.common.async) {
-      return Promise.all(elements).then((elements) => finalizeSet(elements));
+      return Promise.all(elements).then((elements2) => finalizeSet(elements2));
     } else {
       return finalizeSet(elements);
     }
@@ -16371,11 +16674,11 @@ class ZodEffects extends ZodType {
     if (effect.type === "preprocess") {
       const processed = effect.transform(ctx.data, checkCtx);
       if (ctx.common.async) {
-        return Promise.resolve(processed).then(async (processed) => {
+        return Promise.resolve(processed).then(async (processed2) => {
           if (status.value === "aborted")
             return INVALID;
           const result = await this._def.schema._parseAsync({
-            data: processed,
+            data: processed2,
             path: ctx.path,
             parent: ctx
           });
@@ -16567,10 +16870,10 @@ class ZodCatch extends ZodType {
       }
     });
     if (isAsync(result)) {
-      return result.then((result) => {
+      return result.then((result2) => {
         return {
           status: "valid",
-          value: result.status === "valid" ? result.value : this._def.catchValue({
+          value: result2.status === "valid" ? result2.value : this._def.catchValue({
             get error() {
               return new ZodError(newCtx.common.issues);
             },
@@ -16723,43 +17026,43 @@ var late = {
   object: ZodObject.lazycreate
 };
 var ZodFirstPartyTypeKind;
-(function(ZodFirstPartyTypeKind) {
-  ZodFirstPartyTypeKind["ZodString"] = "ZodString";
-  ZodFirstPartyTypeKind["ZodNumber"] = "ZodNumber";
-  ZodFirstPartyTypeKind["ZodNaN"] = "ZodNaN";
-  ZodFirstPartyTypeKind["ZodBigInt"] = "ZodBigInt";
-  ZodFirstPartyTypeKind["ZodBoolean"] = "ZodBoolean";
-  ZodFirstPartyTypeKind["ZodDate"] = "ZodDate";
-  ZodFirstPartyTypeKind["ZodSymbol"] = "ZodSymbol";
-  ZodFirstPartyTypeKind["ZodUndefined"] = "ZodUndefined";
-  ZodFirstPartyTypeKind["ZodNull"] = "ZodNull";
-  ZodFirstPartyTypeKind["ZodAny"] = "ZodAny";
-  ZodFirstPartyTypeKind["ZodUnknown"] = "ZodUnknown";
-  ZodFirstPartyTypeKind["ZodNever"] = "ZodNever";
-  ZodFirstPartyTypeKind["ZodVoid"] = "ZodVoid";
-  ZodFirstPartyTypeKind["ZodArray"] = "ZodArray";
-  ZodFirstPartyTypeKind["ZodObject"] = "ZodObject";
-  ZodFirstPartyTypeKind["ZodUnion"] = "ZodUnion";
-  ZodFirstPartyTypeKind["ZodDiscriminatedUnion"] = "ZodDiscriminatedUnion";
-  ZodFirstPartyTypeKind["ZodIntersection"] = "ZodIntersection";
-  ZodFirstPartyTypeKind["ZodTuple"] = "ZodTuple";
-  ZodFirstPartyTypeKind["ZodRecord"] = "ZodRecord";
-  ZodFirstPartyTypeKind["ZodMap"] = "ZodMap";
-  ZodFirstPartyTypeKind["ZodSet"] = "ZodSet";
-  ZodFirstPartyTypeKind["ZodFunction"] = "ZodFunction";
-  ZodFirstPartyTypeKind["ZodLazy"] = "ZodLazy";
-  ZodFirstPartyTypeKind["ZodLiteral"] = "ZodLiteral";
-  ZodFirstPartyTypeKind["ZodEnum"] = "ZodEnum";
-  ZodFirstPartyTypeKind["ZodEffects"] = "ZodEffects";
-  ZodFirstPartyTypeKind["ZodNativeEnum"] = "ZodNativeEnum";
-  ZodFirstPartyTypeKind["ZodOptional"] = "ZodOptional";
-  ZodFirstPartyTypeKind["ZodNullable"] = "ZodNullable";
-  ZodFirstPartyTypeKind["ZodDefault"] = "ZodDefault";
-  ZodFirstPartyTypeKind["ZodCatch"] = "ZodCatch";
-  ZodFirstPartyTypeKind["ZodPromise"] = "ZodPromise";
-  ZodFirstPartyTypeKind["ZodBranded"] = "ZodBranded";
-  ZodFirstPartyTypeKind["ZodPipeline"] = "ZodPipeline";
-  ZodFirstPartyTypeKind["ZodReadonly"] = "ZodReadonly";
+(function(ZodFirstPartyTypeKind2) {
+  ZodFirstPartyTypeKind2["ZodString"] = "ZodString";
+  ZodFirstPartyTypeKind2["ZodNumber"] = "ZodNumber";
+  ZodFirstPartyTypeKind2["ZodNaN"] = "ZodNaN";
+  ZodFirstPartyTypeKind2["ZodBigInt"] = "ZodBigInt";
+  ZodFirstPartyTypeKind2["ZodBoolean"] = "ZodBoolean";
+  ZodFirstPartyTypeKind2["ZodDate"] = "ZodDate";
+  ZodFirstPartyTypeKind2["ZodSymbol"] = "ZodSymbol";
+  ZodFirstPartyTypeKind2["ZodUndefined"] = "ZodUndefined";
+  ZodFirstPartyTypeKind2["ZodNull"] = "ZodNull";
+  ZodFirstPartyTypeKind2["ZodAny"] = "ZodAny";
+  ZodFirstPartyTypeKind2["ZodUnknown"] = "ZodUnknown";
+  ZodFirstPartyTypeKind2["ZodNever"] = "ZodNever";
+  ZodFirstPartyTypeKind2["ZodVoid"] = "ZodVoid";
+  ZodFirstPartyTypeKind2["ZodArray"] = "ZodArray";
+  ZodFirstPartyTypeKind2["ZodObject"] = "ZodObject";
+  ZodFirstPartyTypeKind2["ZodUnion"] = "ZodUnion";
+  ZodFirstPartyTypeKind2["ZodDiscriminatedUnion"] = "ZodDiscriminatedUnion";
+  ZodFirstPartyTypeKind2["ZodIntersection"] = "ZodIntersection";
+  ZodFirstPartyTypeKind2["ZodTuple"] = "ZodTuple";
+  ZodFirstPartyTypeKind2["ZodRecord"] = "ZodRecord";
+  ZodFirstPartyTypeKind2["ZodMap"] = "ZodMap";
+  ZodFirstPartyTypeKind2["ZodSet"] = "ZodSet";
+  ZodFirstPartyTypeKind2["ZodFunction"] = "ZodFunction";
+  ZodFirstPartyTypeKind2["ZodLazy"] = "ZodLazy";
+  ZodFirstPartyTypeKind2["ZodLiteral"] = "ZodLiteral";
+  ZodFirstPartyTypeKind2["ZodEnum"] = "ZodEnum";
+  ZodFirstPartyTypeKind2["ZodEffects"] = "ZodEffects";
+  ZodFirstPartyTypeKind2["ZodNativeEnum"] = "ZodNativeEnum";
+  ZodFirstPartyTypeKind2["ZodOptional"] = "ZodOptional";
+  ZodFirstPartyTypeKind2["ZodNullable"] = "ZodNullable";
+  ZodFirstPartyTypeKind2["ZodDefault"] = "ZodDefault";
+  ZodFirstPartyTypeKind2["ZodCatch"] = "ZodCatch";
+  ZodFirstPartyTypeKind2["ZodPromise"] = "ZodPromise";
+  ZodFirstPartyTypeKind2["ZodBranded"] = "ZodBranded";
+  ZodFirstPartyTypeKind2["ZodPipeline"] = "ZodPipeline";
+  ZodFirstPartyTypeKind2["ZodReadonly"] = "ZodReadonly";
 })(ZodFirstPartyTypeKind || (ZodFirstPartyTypeKind = {}));
 var stringType = ZodString.create;
 var numberType = ZodNumber.create;
@@ -16829,13 +17132,13 @@ var ZodMiniType = /* @__PURE__ */ $constructor("ZodMiniType", (inst, def) => {
   safeParseAsync(data, params) {
     return safeParseAsync(this, data, params);
   },
-  check(...checks) {
+  check(...checks2) {
     const def = this.def;
     return this.clone({
       ...def,
       checks: [
         ...def.checks ?? [],
-        ...checks.map((ch) => typeof ch === "function" ? { _zod: { check: ch, def: { check: "custom" }, onattach: [] } } : ch)
+        ...checks2.map((ch) => typeof ch === "function" ? { _zod: { check: ch, def: { check: "custom" }, onattach: [] } } : ch)
       ]
     }, { parent: true });
   },
@@ -16845,8 +17148,8 @@ var ZodMiniType = /* @__PURE__ */ $constructor("ZodMiniType", (inst, def) => {
   brand() {
     return this;
   },
-  register(reg, meta) {
-    reg.add(this, meta);
+  register(reg, meta2) {
+    reg.add(this, meta2);
     return this;
   },
   apply(fn, ...args) {
@@ -16888,8 +17191,8 @@ function objectFromShape(shape) {
 }
 function safeParse2(schema, data) {
   if (isZ4Schema(schema)) {
-    const result = safeParse(schema, data);
-    return result;
+    const result2 = safeParse(schema, data);
+    return result2;
   }
   const v3Schema = schema;
   const result = v3Schema.safeParse(data);
@@ -16897,8 +17200,8 @@ function safeParse2(schema, data) {
 }
 async function safeParseAsync2(schema, data) {
   if (isZ4Schema(schema)) {
-    const result = await safeParseAsync(schema, data);
-    return result;
+    const result2 = await safeParseAsync(schema, data);
+    return result2;
   }
   const v3Schema = schema;
   const result = await v3Schema.safeParseAsync(data);
@@ -16907,24 +17210,24 @@ async function safeParseAsync2(schema, data) {
 function getObjectShape(schema) {
   if (!schema)
     return;
-  let rawShape;
+  let rawShape2;
   if (isZ4Schema(schema)) {
     const v4Schema = schema;
-    rawShape = v4Schema._zod?.def?.shape;
+    rawShape2 = v4Schema._zod?.def?.shape;
   } else {
     const v3Schema = schema;
-    rawShape = v3Schema.shape;
+    rawShape2 = v3Schema.shape;
   }
-  if (!rawShape)
+  if (!rawShape2)
     return;
-  if (typeof rawShape === "function") {
+  if (typeof rawShape2 === "function") {
     try {
-      return rawShape();
+      return rawShape2();
     } catch {
       return;
     }
   }
-  return rawShape;
+  return rawShape2;
 }
 function normalizeObjectSchema(schema) {
   if (!schema)
@@ -16967,10 +17270,10 @@ function getDotPath(path) {
     return `${acc}.${seg}`;
   }, "");
 }
-function getParseErrorMessage(error) {
-  if (error && typeof error === "object") {
-    if ("issues" in error && Array.isArray(error.issues) && error.issues.length > 0) {
-      return error.issues.map((i) => {
+function getParseErrorMessage(error2) {
+  if (error2 && typeof error2 === "object") {
+    if ("issues" in error2 && Array.isArray(error2.issues) && error2.issues.length > 0) {
+      return error2.issues.map((i) => {
         if (!i.path?.length) {
           return i.message;
         }
@@ -16978,16 +17281,16 @@ function getParseErrorMessage(error) {
       }).join(`
 `);
     }
-    if ("message" in error && typeof error.message === "string") {
-      return error.message;
+    if ("message" in error2 && typeof error2.message === "string") {
+      return error2.message;
     }
     try {
-      return JSON.stringify(error);
+      return JSON.stringify(error2);
     } catch {
-      return String(error);
+      return String(error2);
     }
   }
-  return String(error);
+  return String(error2);
 }
 function getSchemaDescription(schema) {
   return schema.description;
@@ -17006,12 +17309,12 @@ function isSchemaOptional(schema) {
 function getLiteralValue(schema) {
   if (isZ4Schema(schema)) {
     const v4Schema = schema;
-    const def = v4Schema._zod?.def;
-    if (def) {
-      if (def.value !== undefined)
-        return def.value;
-      if (Array.isArray(def.values) && def.values.length > 0) {
-        return def.values[0];
+    const def2 = v4Schema._zod?.def;
+    if (def2) {
+      if (def2.value !== undefined)
+        return def2.value;
+      if (Array.isArray(def2.values) && def2.values.length > 0) {
+        return def2.values[0];
       }
     }
   }
@@ -17092,15 +17395,15 @@ var JSONRPCResultResponseSchema = object2({
 }).strict();
 var isJSONRPCResultResponse = (value) => JSONRPCResultResponseSchema.safeParse(value).success;
 var ErrorCode;
-(function(ErrorCode) {
-  ErrorCode[ErrorCode["ConnectionClosed"] = -32000] = "ConnectionClosed";
-  ErrorCode[ErrorCode["RequestTimeout"] = -32001] = "RequestTimeout";
-  ErrorCode[ErrorCode["ParseError"] = -32700] = "ParseError";
-  ErrorCode[ErrorCode["InvalidRequest"] = -32600] = "InvalidRequest";
-  ErrorCode[ErrorCode["MethodNotFound"] = -32601] = "MethodNotFound";
-  ErrorCode[ErrorCode["InvalidParams"] = -32602] = "InvalidParams";
-  ErrorCode[ErrorCode["InternalError"] = -32603] = "InternalError";
-  ErrorCode[ErrorCode["UrlElicitationRequired"] = -32042] = "UrlElicitationRequired";
+(function(ErrorCode2) {
+  ErrorCode2[ErrorCode2["ConnectionClosed"] = -32000] = "ConnectionClosed";
+  ErrorCode2[ErrorCode2["RequestTimeout"] = -32001] = "RequestTimeout";
+  ErrorCode2[ErrorCode2["ParseError"] = -32700] = "ParseError";
+  ErrorCode2[ErrorCode2["InvalidRequest"] = -32600] = "InvalidRequest";
+  ErrorCode2[ErrorCode2["MethodNotFound"] = -32601] = "MethodNotFound";
+  ErrorCode2[ErrorCode2["InvalidParams"] = -32602] = "InvalidParams";
+  ErrorCode2[ErrorCode2["InternalError"] = -32603] = "InternalError";
+  ErrorCode2[ErrorCode2["UrlElicitationRequired"] = -32042] = "UrlElicitationRequired";
 })(ErrorCode || (ErrorCode = {}));
 var JSONRPCErrorResponseSchema = object2({
   jsonrpc: literal(JSONRPC_VERSION),
@@ -17327,7 +17630,7 @@ var RoleSchema = _enum(["user", "assistant"]);
 var AnnotationsSchema = object2({
   audience: array(RoleSchema).optional(),
   priority: number2().min(0).max(1).optional(),
-  lastModified: datetime2({ offset: true }).optional()
+  lastModified: exports_iso2.datetime({ offset: true }).optional()
 });
 var ResourceSchema = object2({
   ...BaseMetadataSchema.shape,
@@ -18169,20 +18472,20 @@ function parseIntersectionDef(def, refs) {
 
 // node_modules/zod-to-json-schema/dist/esm/parsers/literal.js
 function parseLiteralDef(def, refs) {
-  const parsedType = typeof def.value;
-  if (parsedType !== "bigint" && parsedType !== "number" && parsedType !== "boolean" && parsedType !== "string") {
+  const parsedType2 = typeof def.value;
+  if (parsedType2 !== "bigint" && parsedType2 !== "number" && parsedType2 !== "boolean" && parsedType2 !== "string") {
     return {
       type: Array.isArray(def.value) ? "array" : "object"
     };
   }
   if (refs.target === "openApi3") {
     return {
-      type: parsedType === "bigint" ? "integer" : parsedType,
+      type: parsedType2 === "bigint" ? "integer" : parsedType2,
       enum: [def.value]
     };
   }
   return {
-    type: parsedType === "bigint" ? "integer" : parsedType,
+    type: parsedType2 === "bigint" ? "integer" : parsedType2,
     const: def.value
   };
 }
@@ -18339,8 +18642,8 @@ function parseStringDef(def, refs) {
   }
   return res;
 }
-function escapeLiteralCheckValue(literal, refs) {
-  return refs.patternStrategy === "escape" ? escapeNonAlphaNumeric(literal) : literal;
+function escapeLiteralCheckValue(literal2, refs) {
+  return refs.patternStrategy === "escape" ? escapeNonAlphaNumeric(literal2) : literal2;
 }
 var ALPHA_NUMERIC = new Set("ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvxyz0123456789");
 function escapeNonAlphaNumeric(source) {
@@ -18563,11 +18866,11 @@ function parseMapDef(def, refs) {
 
 // node_modules/zod-to-json-schema/dist/esm/parsers/nativeEnum.js
 function parseNativeEnumDef(def) {
-  const object = def.values;
+  const object3 = def.values;
   const actualKeys = Object.keys(def.values).filter((key) => {
-    return typeof object[object[key]] !== "number";
+    return typeof object3[object3[key]] !== "number";
   });
-  const actualValues = actualKeys.map((key) => object[key]);
+  const actualValues = actualKeys.map((key) => object3[key]);
   const parsedTypes = Array.from(new Set(actualValues.map((values) => typeof values)));
   return {
     type: parsedTypes.length === 1 ? parsedTypes[0] === "string" ? "string" : "number" : ["string", "number"],
@@ -18608,9 +18911,9 @@ function parseUnionDef(def, refs) {
     return asAnyOf(def, refs);
   const options = def.options instanceof Map ? Array.from(def.options.values()) : def.options;
   if (options.every((x) => (x._def.typeName in primitiveMappings) && (!x._def.checks || !x._def.checks.length))) {
-    const types = options.reduce((types, x) => {
+    const types = options.reduce((types2, x) => {
       const type = primitiveMappings[x._def.typeName];
-      return type && !types.includes(type) ? [...types, type] : types;
+      return type && !types2.includes(type) ? [...types2, type] : types2;
     }, []);
     return {
       type: types.length > 1 ? types : types[0]
@@ -18649,7 +18952,7 @@ function parseUnionDef(def, refs) {
       type: "string",
       enum: options.reduce((acc, x) => [
         ...acc,
-        ...x._def.values.filter((x) => !acc.includes(x))
+        ...x._def.values.filter((x2) => !acc.includes(x2))
       ], [])
     };
   }
@@ -18680,13 +18983,13 @@ function parseNullableDef(def, refs) {
     };
   }
   if (refs.target === "openApi3") {
-    const base = parseDef(def.innerType._def, {
+    const base2 = parseDef(def.innerType._def, {
       ...refs,
       currentPath: [...refs.currentPath]
     });
-    if (base && "$ref" in base)
-      return { allOf: [base], nullable: true };
-    return base && { ...base, nullable: true };
+    if (base2 && "$ref" in base2)
+      return { allOf: [base2], nullable: true };
+    return base2 && { ...base2, nullable: true };
   }
   const base = parseDef(def.innerType._def, {
     ...refs,
@@ -18751,7 +19054,7 @@ function parseObjectDef(def, refs) {
     type: "object",
     properties: {}
   };
-  const required = [];
+  const required2 = [];
   const shape = def.shape();
   for (const propName in shape) {
     let propDef = shape[propName];
@@ -18778,11 +19081,11 @@ function parseObjectDef(def, refs) {
     }
     result.properties[propName] = parsedDef;
     if (!propOptional) {
-      required.push(propName);
+      required2.push(propName);
     }
   }
-  if (required.length) {
-    result.required = required;
+  if (required2.length) {
+    result.required = required2;
   }
   const additionalProperties = decideAdditionalProperties(def, refs);
   if (additionalProperties !== undefined) {
@@ -19059,11 +19362,11 @@ var addMeta = (def, refs, jsonSchema) => {
 // node_modules/zod-to-json-schema/dist/esm/zodToJsonSchema.js
 var zodToJsonSchema = (schema, options) => {
   const refs = getRefs(options);
-  let definitions = typeof options === "object" && options.definitions ? Object.entries(options.definitions).reduce((acc, [name, schema]) => ({
+  let definitions = typeof options === "object" && options.definitions ? Object.entries(options.definitions).reduce((acc, [name2, schema2]) => ({
     ...acc,
-    [name]: parseDef(schema._def, {
+    [name2]: parseDef(schema2._def, {
       ...refs,
-      currentPath: [...refs.basePath, refs.definitionPath, name]
+      currentPath: [...refs.basePath, refs.definitionPath, name2]
     }, true) ?? parseAnyDef(refs)
   }), {}) : undefined;
   const name = typeof options === "string" ? options : options?.nameStrategy === "title" ? undefined : options?.name;
@@ -19209,8 +19512,8 @@ class Protocol {
                     resolver(message);
                   } else {
                     const errorMessage = message;
-                    const error = new McpError(errorMessage.error.code, errorMessage.error.message, errorMessage.error.data);
-                    resolver(error);
+                    const error2 = new McpError(errorMessage.error.code, errorMessage.error.message, errorMessage.error.data);
+                    resolver(error2);
                   }
                 } else {
                   const messageType = queuedMessage.type === "response" ? "Response" : "Error";
@@ -19254,8 +19557,8 @@ class Protocol {
             nextCursor,
             _meta: {}
           };
-        } catch (error) {
-          throw new McpError(ErrorCode.InvalidParams, `Failed to list tasks: ${error instanceof Error ? error.message : String(error)}`);
+        } catch (error2) {
+          throw new McpError(ErrorCode.InvalidParams, `Failed to list tasks: ${error2 instanceof Error ? error2.message : String(error2)}`);
         }
       });
       this.setRequestHandler(CancelTaskRequestSchema, async (request, extra) => {
@@ -19277,11 +19580,11 @@ class Protocol {
             _meta: {},
             ...cancelledTask
           };
-        } catch (error) {
-          if (error instanceof McpError) {
-            throw error;
+        } catch (error2) {
+          if (error2 instanceof McpError) {
+            throw error2;
           }
-          throw new McpError(ErrorCode.InvalidRequest, `Failed to cancel task: ${error instanceof Error ? error.message : String(error)}`);
+          throw new McpError(ErrorCode.InvalidRequest, `Failed to cancel task: ${error2 instanceof Error ? error2.message : String(error2)}`);
         }
       });
     }
@@ -19337,9 +19640,9 @@ class Protocol {
       this._onclose();
     };
     const _onerror = this.transport?.onerror;
-    this._transport.onerror = (error) => {
-      _onerror?.(error);
-      this._onerror(error);
+    this._transport.onerror = (error2) => {
+      _onerror?.(error2);
+      this._onerror(error2);
     };
     const _onmessage = this._transport?.onmessage;
     this._transport.onmessage = (message, extra) => {
@@ -19370,22 +19673,22 @@ class Protocol {
       controller.abort();
     }
     this._requestHandlerAbortControllers.clear();
-    const error = McpError.fromError(ErrorCode.ConnectionClosed, "Connection closed");
+    const error2 = McpError.fromError(ErrorCode.ConnectionClosed, "Connection closed");
     this._transport = undefined;
     this.onclose?.();
     for (const handler of responseHandlers.values()) {
-      handler(error);
+      handler(error2);
     }
   }
-  _onerror(error) {
-    this.onerror?.(error);
+  _onerror(error2) {
+    this.onerror?.(error2);
   }
   _onnotification(notification) {
     const handler = this._notificationHandlers.get(notification.method) ?? this.fallbackNotificationHandler;
     if (handler === undefined) {
       return;
     }
-    Promise.resolve().then(() => handler(notification)).catch((error) => this._onerror(new Error(`Uncaught error in notification handler: ${error}`)));
+    Promise.resolve().then(() => handler(notification)).catch((error2) => this._onerror(new Error(`Uncaught error in notification handler: ${error2}`)));
   }
   _onrequest(request, extra) {
     const handler = this._requestHandlers.get(request.method) ?? this.fallbackRequestHandler;
@@ -19405,9 +19708,9 @@ class Protocol {
           type: "error",
           message: errorResponse,
           timestamp: Date.now()
-        }, capturedTransport?.sessionId).catch((error) => this._onerror(new Error(`Failed to enqueue error response: ${error}`)));
+        }, capturedTransport?.sessionId).catch((error2) => this._onerror(new Error(`Failed to enqueue error response: ${error2}`)));
       } else {
-        capturedTransport?.send(errorResponse).catch((error) => this._onerror(new Error(`Failed to send an error response: ${error}`)));
+        capturedTransport?.send(errorResponse).catch((error2) => this._onerror(new Error(`Failed to send an error response: ${error2}`)));
       }
       return;
     }
@@ -19473,7 +19776,7 @@ class Protocol {
       } else {
         await capturedTransport?.send(response);
       }
-    }, async (error) => {
+    }, async (error2) => {
       if (abortController.signal.aborted) {
         return;
       }
@@ -19481,9 +19784,9 @@ class Protocol {
         jsonrpc: "2.0",
         id: request.id,
         error: {
-          code: Number.isSafeInteger(error["code"]) ? error["code"] : ErrorCode.InternalError,
-          message: error.message ?? "Internal error",
-          ...error["data"] !== undefined && { data: error["data"] }
+          code: Number.isSafeInteger(error2["code"]) ? error2["code"] : ErrorCode.InternalError,
+          message: error2.message ?? "Internal error",
+          ...error2["data"] !== undefined && { data: error2["data"] }
         }
       };
       if (relatedTaskId && this._taskMessageQueue) {
@@ -19495,7 +19798,7 @@ class Protocol {
       } else {
         await capturedTransport?.send(errorResponse);
       }
-    }).catch((error) => this._onerror(new Error(`Failed to send response: ${error}`))).finally(() => {
+    }).catch((error2) => this._onerror(new Error(`Failed to send response: ${error2}`))).finally(() => {
       if (this._requestHandlerAbortControllers.get(request.id) === abortController) {
         this._requestHandlerAbortControllers.delete(request.id);
       }
@@ -19514,11 +19817,11 @@ class Protocol {
     if (timeoutInfo && responseHandler && timeoutInfo.resetTimeoutOnProgress) {
       try {
         this._resetTimeout(messageId);
-      } catch (error) {
+      } catch (error2) {
         this._responseHandlers.delete(messageId);
         this._progressHandlers.delete(messageId);
         this._cleanupTimeout(messageId);
-        responseHandler(error);
+        responseHandler(error2);
         return;
       }
     }
@@ -19532,8 +19835,8 @@ class Protocol {
       if (isJSONRPCResultResponse(response)) {
         resolver(response);
       } else {
-        const error = new McpError(response.error.code, response.error.message, response.error.data);
-        resolver(error);
+        const error2 = new McpError(response.error.code, response.error.message, response.error.data);
+        resolver(error2);
       }
       return;
     }
@@ -19561,8 +19864,8 @@ class Protocol {
     if (isJSONRPCResultResponse(response)) {
       handler(response);
     } else {
-      const error = McpError.fromError(response.error.code, response.error.message, response.error.data);
-      handler(error);
+      const error2 = McpError.fromError(response.error.code, response.error.message, response.error.data);
+      handler(error2);
     }
   }
   get transport() {
@@ -19577,10 +19880,10 @@ class Protocol {
       try {
         const result = await this.request(request, resultSchema, options);
         yield { type: "result", result };
-      } catch (error) {
+      } catch (error2) {
         yield {
           type: "error",
-          error: error instanceof McpError ? error : new McpError(ErrorCode.InternalError, String(error))
+          error: error2 instanceof McpError ? error2 : new McpError(ErrorCode.InternalError, String(error2))
         };
       }
       return;
@@ -19595,18 +19898,18 @@ class Protocol {
         throw new McpError(ErrorCode.InternalError, "Task creation did not return a task");
       }
       while (true) {
-        const task = await this.getTask({ taskId }, options);
-        yield { type: "taskStatus", task };
-        if (isTerminal(task.status)) {
-          if (task.status === "completed") {
+        const task2 = await this.getTask({ taskId }, options);
+        yield { type: "taskStatus", task: task2 };
+        if (isTerminal(task2.status)) {
+          if (task2.status === "completed") {
             const result = await this.getTaskResult({ taskId }, resultSchema, options);
             yield { type: "result", result };
-          } else if (task.status === "failed") {
+          } else if (task2.status === "failed") {
             yield {
               type: "error",
               error: new McpError(ErrorCode.InternalError, `Task ${taskId} failed`)
             };
-          } else if (task.status === "cancelled") {
+          } else if (task2.status === "cancelled") {
             yield {
               type: "error",
               error: new McpError(ErrorCode.InternalError, `Task ${taskId} was cancelled`)
@@ -19614,27 +19917,27 @@ class Protocol {
           }
           return;
         }
-        if (task.status === "input_required") {
+        if (task2.status === "input_required") {
           const result = await this.getTaskResult({ taskId }, resultSchema, options);
           yield { type: "result", result };
           return;
         }
-        const pollInterval = task.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1000;
+        const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1000;
         await new Promise((resolve) => setTimeout(resolve, pollInterval));
         options?.signal?.throwIfAborted();
       }
-    } catch (error) {
+    } catch (error2) {
       yield {
         type: "error",
-        error: error instanceof McpError ? error : new McpError(ErrorCode.InternalError, String(error))
+        error: error2 instanceof McpError ? error2 : new McpError(ErrorCode.InternalError, String(error2))
       };
     }
   }
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
     return new Promise((resolve, reject) => {
-      const earlyReject = (error) => {
-        reject(error);
+      const earlyReject = (error2) => {
+        reject(error2);
       };
       if (!this._transport) {
         earlyReject(new Error("Not connected"));
@@ -19694,9 +19997,9 @@ class Protocol {
             requestId: messageId,
             reason: String(reason)
           }
-        }, { relatedRequestId, resumptionToken, onresumptiontoken }).catch((error) => this._onerror(new Error(`Failed to send cancellation: ${error}`)));
-        const error = reason instanceof McpError ? reason : new McpError(ErrorCode.RequestTimeout, String(reason));
-        reject(error);
+        }, { relatedRequestId, resumptionToken, onresumptiontoken }).catch((error3) => this._onerror(new Error(`Failed to send cancellation: ${error3}`)));
+        const error2 = reason instanceof McpError ? reason : new McpError(ErrorCode.RequestTimeout, String(reason));
+        reject(error2);
       };
       this._responseHandlers.set(messageId, (response) => {
         if (options?.signal?.aborted) {
@@ -19712,8 +20015,8 @@ class Protocol {
           } else {
             resolve(parseResult.data);
           }
-        } catch (error) {
-          reject(error);
+        } catch (error2) {
+          reject(error2);
         }
       });
       options?.signal?.addEventListener("abort", () => {
@@ -19737,14 +20040,14 @@ class Protocol {
           type: "request",
           message: jsonrpcRequest,
           timestamp: Date.now()
-        }).catch((error) => {
+        }).catch((error2) => {
           this._cleanupTimeout(messageId);
-          reject(error);
+          reject(error2);
         });
       } else {
-        this._transport.send(jsonrpcRequest, { relatedRequestId, resumptionToken, onresumptiontoken }).catch((error) => {
+        this._transport.send(jsonrpcRequest, { relatedRequestId, resumptionToken, onresumptiontoken }).catch((error2) => {
           this._cleanupTimeout(messageId);
-          reject(error);
+          reject(error2);
         });
       }
     });
@@ -19768,7 +20071,7 @@ class Protocol {
     this.assertNotificationCapability(notification.method);
     const relatedTaskId = options?.relatedTask?.taskId;
     if (relatedTaskId) {
-      const jsonrpcNotification = {
+      const jsonrpcNotification2 = {
         ...notification,
         jsonrpc: "2.0",
         params: {
@@ -19781,7 +20084,7 @@ class Protocol {
       };
       await this._enqueueTaskMessage(relatedTaskId, {
         type: "notification",
-        message: jsonrpcNotification,
+        message: jsonrpcNotification2,
         timestamp: Date.now()
       });
       return;
@@ -19798,23 +20101,23 @@ class Protocol {
         if (!this._transport) {
           return;
         }
-        let jsonrpcNotification = {
+        let jsonrpcNotification2 = {
           ...notification,
           jsonrpc: "2.0"
         };
         if (options?.relatedTask) {
-          jsonrpcNotification = {
-            ...jsonrpcNotification,
+          jsonrpcNotification2 = {
+            ...jsonrpcNotification2,
             params: {
-              ...jsonrpcNotification.params,
+              ...jsonrpcNotification2.params,
               _meta: {
-                ...jsonrpcNotification.params?._meta || {},
+                ...jsonrpcNotification2.params?._meta || {},
                 [RELATED_TASK_META_KEY]: options.relatedTask
               }
             }
           };
         }
-        this._transport?.send(jsonrpcNotification, options).catch((error) => this._onerror(error));
+        this._transport?.send(jsonrpcNotification2, options).catch((error2) => this._onerror(error2));
       });
       return;
     }
@@ -20425,11 +20728,11 @@ class Server extends Protocol {
             if (!validationResult.valid) {
               throw new McpError(ErrorCode.InvalidParams, `Elicitation response content does not match requested schema: ${validationResult.errorMessage}`);
             }
-          } catch (error) {
-            if (error instanceof McpError) {
-              throw error;
+          } catch (error2) {
+            if (error2 instanceof McpError) {
+              throw error2;
             }
-            throw new McpError(ErrorCode.InternalError, `Error validating elicitation response: ${error instanceof Error ? error.message : String(error)}`);
+            throw new McpError(ErrorCode.InternalError, `Error validating elicitation response: ${error2 instanceof Error ? error2.message : String(error2)}`);
           }
         }
         return result;
@@ -20482,12 +20785,12 @@ function isCompletable(schema) {
   return !!schema && typeof schema === "object" && COMPLETABLE_SYMBOL in schema;
 }
 function getCompleter(schema) {
-  const meta = schema[COMPLETABLE_SYMBOL];
-  return meta?.complete;
+  const meta2 = schema[COMPLETABLE_SYMBOL];
+  return meta2?.complete;
 }
 var McpZodTypeKind;
-(function(McpZodTypeKind) {
-  McpZodTypeKind["Completable"] = "McpCompletable";
+(function(McpZodTypeKind2) {
+  McpZodTypeKind2["Completable"] = "McpCompletable";
 })(McpZodTypeKind || (McpZodTypeKind = {}));
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/shared/toolNameValidation.js
@@ -20553,13 +20856,13 @@ class ExperimentalMcpServerTasks {
   constructor(_mcpServer) {
     this._mcpServer = _mcpServer;
   }
-  registerToolTask(name, config, handler) {
-    const execution = { taskSupport: "required", ...config.execution };
+  registerToolTask(name, config2, handler) {
+    const execution = { taskSupport: "required", ...config2.execution };
     if (execution.taskSupport === "forbidden") {
       throw new Error(`Cannot register task-based tool '${name}' with taskSupport 'forbidden'. Use registerTool() instead.`);
     }
     const mcpServerInternal = this._mcpServer;
-    return mcpServerInternal._createRegisteredTool(name, config.title, config.description, config.inputSchema, config.outputSchema, config.annotations, execution, config._meta, handler);
+    return mcpServerInternal._createRegisteredTool(name, config2.title, config2.description, config2.inputSchema, config2.outputSchema, config2.annotations, execution, config2._meta, handler);
   }
 }
 
@@ -20660,13 +20963,13 @@ class McpServer {
         }
         await this.validateToolOutput(tool, result, request.params.name);
         return result;
-      } catch (error) {
-        if (error instanceof McpError) {
-          if (error.code === ErrorCode.UrlElicitationRequired) {
-            throw error;
+      } catch (error2) {
+        if (error2 instanceof McpError) {
+          if (error2.code === ErrorCode.UrlElicitationRequired) {
+            throw error2;
           }
         }
-        return this.createToolError(error instanceof Error ? error.message : String(error));
+        return this.createToolError(error2 instanceof Error ? error2.message : String(error2));
       }
     });
     this._toolHandlersInitialized = true;
@@ -20690,8 +20993,8 @@ class McpServer {
     const schemaToParse = inputObj ?? tool.inputSchema;
     const parseResult = await safeParseAsync2(schemaToParse, args);
     if (!parseResult.success) {
-      const error = "error" in parseResult ? parseResult.error : "Unknown error";
-      const errorMessage = getParseErrorMessage(error);
+      const error2 = "error" in parseResult ? parseResult.error : "Unknown error";
+      const errorMessage = getParseErrorMessage(error2);
       throw new McpError(ErrorCode.InvalidParams, `Input validation error: Invalid arguments for tool ${toolName}: ${errorMessage}`);
     }
     return parseResult.data;
@@ -20712,8 +21015,8 @@ class McpServer {
     const outputObj = normalizeObjectSchema(tool.outputSchema);
     const parseResult = await safeParseAsync2(outputObj, result.structuredContent);
     if (!parseResult.success) {
-      const error = "error" in parseResult ? parseResult.error : "Unknown error";
-      const errorMessage = getParseErrorMessage(error);
+      const error2 = "error" in parseResult ? parseResult.error : "Unknown error";
+      const errorMessage = getParseErrorMessage(error2);
       throw new McpError(ErrorCode.InvalidParams, `Output validation error: Invalid structured content for tool ${toolName}: ${errorMessage}`);
     }
   }
@@ -20915,8 +21218,8 @@ class McpServer {
         const argsObj = normalizeObjectSchema(prompt.argsSchema);
         const parseResult = await safeParseAsync2(argsObj, request.params.arguments);
         if (!parseResult.success) {
-          const error = "error" in parseResult ? parseResult.error : "Unknown error";
-          const errorMessage = getParseErrorMessage(error);
+          const error2 = "error" in parseResult ? parseResult.error : "Unknown error";
+          const errorMessage = getParseErrorMessage(error2);
           throw new McpError(ErrorCode.InvalidParams, `Invalid arguments for prompt ${request.params.name}: ${errorMessage}`);
         }
         const args = parseResult.data;
@@ -20953,12 +21256,12 @@ class McpServer {
       return registeredResourceTemplate;
     }
   }
-  registerResource(name, uriOrTemplate, config, readCallback) {
+  registerResource(name, uriOrTemplate, config2, readCallback) {
     if (typeof uriOrTemplate === "string") {
       if (this._registeredResources[uriOrTemplate]) {
         throw new Error(`Resource ${uriOrTemplate} is already registered`);
       }
-      const registeredResource = this._createRegisteredResource(name, config.title, uriOrTemplate, config, readCallback);
+      const registeredResource = this._createRegisteredResource(name, config2.title, uriOrTemplate, config2, readCallback);
       this.setResourceRequestHandlers();
       this.sendResourceListChanged();
       return registeredResource;
@@ -20966,7 +21269,7 @@ class McpServer {
       if (this._registeredResourceTemplates[name]) {
         throw new Error(`Resource template ${name} is already registered`);
       }
-      const registeredResourceTemplate = this._createRegisteredResourceTemplate(name, config.title, uriOrTemplate, config, readCallback);
+      const registeredResourceTemplate = this._createRegisteredResourceTemplate(name, config2.title, uriOrTemplate, config2, readCallback);
       this.setResourceRequestHandlers();
       this.sendResourceListChanged();
       return registeredResourceTemplate;
@@ -21158,11 +21461,11 @@ class McpServer {
     const callback = rest[0];
     return this._createRegisteredTool(name, undefined, description, inputSchema, outputSchema, annotations, { taskSupport: "forbidden" }, undefined, callback);
   }
-  registerTool(name, config, cb) {
+  registerTool(name, config2, cb) {
     if (this._registeredTools[name]) {
       throw new Error(`Tool ${name} is already registered`);
     }
-    const { title, description, inputSchema, outputSchema, annotations, _meta } = config;
+    const { title, description, inputSchema, outputSchema, annotations, _meta } = config2;
     return this._createRegisteredTool(name, title, description, inputSchema, outputSchema, annotations, { taskSupport: "forbidden" }, _meta, cb);
   }
   prompt(name, ...rest) {
@@ -21183,11 +21486,11 @@ class McpServer {
     this.sendPromptListChanged();
     return registeredPrompt;
   }
-  registerPrompt(name, config, cb) {
+  registerPrompt(name, config2, cb) {
     if (this._registeredPrompts[name]) {
       throw new Error(`Prompt ${name} is already registered`);
     }
-    const { title, description, argsSchema } = config;
+    const { title, description, argsSchema } = config2;
     const registeredPrompt = this._createRegisteredPrompt(name, title, description, argsSchema, cb);
     this.setPromptRequestHandlers();
     this.sendPromptListChanged();
@@ -21344,13 +21647,13 @@ class StdioServerTransport {
       try {
         this._readBuffer.append(chunk);
         this.processReadBuffer();
-      } catch (error) {
-        this.onerror?.(error);
+      } catch (error2) {
+        this.onerror?.(error2);
         this.close().catch(() => {});
       }
     };
-    this._onerror = (error) => {
-      this.onerror?.(error);
+    this._onerror = (error2) => {
+      this.onerror?.(error2);
     };
     this._readBuffer = new ReadBuffer({ maxBufferSize: options?.maxBufferSize });
   }
@@ -21370,8 +21673,8 @@ class StdioServerTransport {
           break;
         }
         this.onmessage?.(message);
-      } catch (error) {
-        this.onerror?.(error);
+      } catch (error2) {
+        this.onerror?.(error2);
       }
     }
   }
@@ -21410,9 +21713,9 @@ function getProjectKey(cwd) {
   return hashPath(resolved);
 }
 function resolveProjectPath(cwd) {
-  const cached = pathCache.get(cwd);
-  if (cached !== undefined)
-    return cached;
+  const cached2 = pathCache.get(cwd);
+  if (cached2 !== undefined)
+    return cached2;
   const result = spawnSync("git", ["rev-parse", "--show-toplevel"], {
     cwd,
     encoding: "utf8",
@@ -21860,12 +22163,12 @@ function retrievePeek(db, id, query, maxChunks = PEEK_MAX_CHUNKS) {
   if (query) {
     const safeQuery = sanitizeFtsQuery(query);
     try {
-      const rows = db.prepare(`SELECT content, chunk_index FROM content_chunks
+      const rows2 = db.prepare(`SELECT content, chunk_index FROM content_chunks
            WHERE content_chunks MATCH ? AND output_id = ?
            ORDER BY rank
            LIMIT ?`).all(safeQuery, id, maxChunks);
-      if (rows.length > 0) {
-        return [...rows].sort((a, b) => a.chunk_index - b.chunk_index).map((r) => r.content).join(PEEK_CHUNK_JOINER);
+      if (rows2.length > 0) {
+        return [...rows2].sort((a, b) => a.chunk_index - b.chunk_index).map((r) => r.content).join(PEEK_CHUNK_JOINER);
       }
     } catch {}
     return null;
@@ -22058,12 +22361,12 @@ function getSessionSummary(db, project_key, opts = {}) {
     filterParams = [opts.session_id];
     label = opts.session_id;
   } else {
-    const date = opts.date ?? new Date().toISOString().slice(0, 10);
-    const startOfDay = Math.floor(new Date(`${date}T00:00:00Z`).getTime() / 1000);
+    const date4 = opts.date ?? new Date().toISOString().slice(0, 10);
+    const startOfDay = Math.floor(new Date(`${date4}T00:00:00Z`).getTime() / 1000);
     const endOfDay = startOfDay + 86400;
     filter = "created_at >= ? AND created_at < ?";
     filterParams = [startOfDay, endOfDay];
-    label = date;
+    label = date4;
   }
   const base = `WHERE project_key = ? AND ${filter}`;
   const bp = [project_key, ...filterParams];
@@ -22181,32 +22484,32 @@ class TomlDate extends Date {
   #hasDate = false;
   #hasTime = false;
   #offset = null;
-  constructor(date) {
+  constructor(date4) {
     let hasDate = true;
     let hasTime = true;
     let offset = "Z";
-    if (typeof date === "string") {
-      let match = date.match(DATE_TIME_RE);
+    if (typeof date4 === "string") {
+      let match = date4.match(DATE_TIME_RE);
       if (match) {
         if (!match[1]) {
           hasDate = false;
-          date = `0000-01-01T${date}`;
+          date4 = `0000-01-01T${date4}`;
         }
         hasTime = !!match[2];
-        hasTime && date[10] === " " && (date = date.replace(" ", "T"));
+        hasTime && date4[10] === " " && (date4 = date4.replace(" ", "T"));
         if (match[2] && +match[2] > 23) {
-          date = "";
+          date4 = "";
         } else {
           offset = match[3] || null;
-          date = date.toUpperCase();
+          date4 = date4.toUpperCase();
           if (!offset && hasTime)
-            date += "Z";
+            date4 += "Z";
         }
       } else {
-        date = "";
+        date4 = "";
       }
     }
-    super(date);
+    super(date4);
     if (!isNaN(this.getTime())) {
       this.#hasDate = hasDate;
       this.#hasTime = hasTime;
@@ -22244,26 +22547,26 @@ class TomlDate extends Date {
     return offsetDate.toISOString().slice(0, -1) + this.#offset;
   }
   static wrapAsOffsetDateTime(jsDate, offset = "Z") {
-    let date = new TomlDate(jsDate);
-    date.#offset = offset;
-    return date;
+    let date4 = new TomlDate(jsDate);
+    date4.#offset = offset;
+    return date4;
   }
   static wrapAsLocalDateTime(jsDate) {
-    let date = new TomlDate(jsDate);
-    date.#offset = null;
-    return date;
+    let date4 = new TomlDate(jsDate);
+    date4.#offset = null;
+    return date4;
   }
   static wrapAsLocalDate(jsDate) {
-    let date = new TomlDate(jsDate);
-    date.#hasTime = false;
-    date.#offset = null;
-    return date;
+    let date4 = new TomlDate(jsDate);
+    date4.#hasTime = false;
+    date4.#offset = null;
+    return date4;
   }
   static wrapAsLocalTime(jsDate) {
-    let date = new TomlDate(jsDate);
-    date.#hasDate = false;
-    date.#offset = null;
-    return date;
+    let date4 = new TomlDate(jsDate);
+    date4.#hasDate = false;
+    date4.#offset = null;
+    return date4;
   }
 }
 
@@ -22295,12 +22598,12 @@ class TomlDate extends Date {
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-function getLineColFromPtr(string, ptr) {
-  let lines = string.slice(0, ptr).split(/\r\n|\n|\r/g);
+function getLineColFromPtr(string4, ptr) {
+  let lines = string4.slice(0, ptr).split(/\r\n|\n|\r/g);
   return [lines.length, lines.pop().length + 1];
 }
-function makeCodeBlock(string, line, column) {
-  let lines = string.split(/\r\n|\n|\r/g);
+function makeCodeBlock(string4, line, column) {
+  let lines = string4.split(/\r\n|\n|\r/g);
   let codeblock = "";
   let numberLen = (Math.log10(line + 1) | 0) + 1;
   for (let i = line - 1;i <= line + 1; i++) {
@@ -22589,10 +22892,10 @@ function parseValue(ctx, integersAsBigInt, end) {
     }
     return numeric;
   }
-  const date = new TomlDate(value);
-  if (!date.isValid())
+  const date4 = new TomlDate(value);
+  if (!date4.isValid())
     throw new TomlError("invalid value", err);
-  return date;
+  return date4;
 }
 
 // node_modules/smol-toml/dist/extract.js
@@ -22852,9 +23155,9 @@ function parseArray(ctx, integersAsBigInt) {
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-function peekTable(key, table, meta, type) {
+function peekTable(key, table, meta2, type) {
   let t = table;
-  let m = meta;
+  let m = meta2;
   let k;
   let hasOwn = false;
   let state;
@@ -22914,10 +23217,10 @@ function peekTable(key, table, meta, type) {
 function parse6(toml, { maxDepth = 1000, integersAsBigInt } = {}) {
   let ctx = { s: toml, p: 0, d: maxDepth };
   let res = {};
-  let meta = {};
+  let meta2 = {};
   let tmp;
   let tbl = res;
-  let m = meta;
+  let m = meta2;
   skipVoid(ctx);
   while (ctx.p < toml.length) {
     if (toml.charCodeAt(ctx.p) === 91) {
@@ -22933,7 +23236,7 @@ function parse6(toml, { maxDepth = 1000, integersAsBigInt } = {}) {
         }
         ctx.p++;
       }
-      let p = peekTable(k, res, meta, isTableArray ? 2 : 1);
+      let p = peekTable(k, res, meta2, isTableArray ? 2 : 1);
       if (!p) {
         throw new TomlError("trying to redefine an already defined table or value", {
           toml,
@@ -23078,8 +23381,8 @@ function loadConfig() {
     return cached2;
   try {
     const raw = readFileSync(getConfigPath(), "utf8");
-    const { PartialConfigSchema } = (init_config_schema(), __toCommonJS(exports_config_schema));
-    const result = PartialConfigSchema.safeParse(parse6(raw));
+    const { PartialConfigSchema: PartialConfigSchema2 } = (init_config_schema(), __toCommonJS(exports_config_schema));
+    const result = PartialConfigSchema2.safeParse(parse6(raw));
     if (result.success) {
       const base = deepMerge(DEFAULTS, result.data);
       const userSetPinned = result.data.store?.max_pinned_mb !== undefined;
@@ -23247,8 +23550,8 @@ function itemHeader(item) {
   return `[recall:${item.id} \xB7 ${item.tool_name} \xB7 ${formatDate(item.created_at)} \xB7 ${formatBytes(item.original_size)}\u2192${formatBytes(item.summary_size)}]`;
 }
 function toolRetrieve(db, args) {
-  const config = loadConfig();
-  const cap = args.max_bytes ?? config.retrieve.default_max_bytes;
+  const config2 = loadConfig();
+  const cap = args.max_bytes ?? config2.retrieve.default_max_bytes;
   const item = retrieveOutput(db, args.id);
   if (!item) {
     return `[recall: no item found with id "${args.id}"]`;
@@ -23488,8 +23791,8 @@ function toolContext(db, projectKey, args) {
     }
   }
   if (data.hot.length > 0) {
-    const date = data.last_session?.date ?? "";
-    lines.push("", `Hot from last session (${date}, ${data.hot.length} item${data.hot.length === 1 ? "" : "s"}):`);
+    const date4 = data.last_session?.date ?? "";
+    lines.push("", `Hot from last session (${date4}, ${data.hot.length} item${data.hot.length === 1 ? "" : "s"}):`);
     for (const item of data.hot) {
       const excerpt = item.summary.slice(0, CONTEXT_EXCERPT_LEN).replace(/\n/g, " ");
       const ellipsis = item.summary.length > CONTEXT_EXCERPT_LEN ? "\u2026" : "";
@@ -23648,10 +23951,10 @@ function toolStats(db, projectKey, args = {}) {
 `);
 }
 function toolSuggest(db, projectKey, args = {}) {
-  const config = loadConfig();
+  const config2 = loadConfig();
   const suggestions = getSuggestions(db, projectKey, {
-    pin_threshold: args.pin_threshold ?? config.store.pin_recommendation_threshold,
-    stale_days: args.stale_days ?? config.store.stale_item_days,
+    pin_threshold: args.pin_threshold ?? config2.store.pin_recommendation_threshold,
+    stale_days: args.stale_days ?? config2.store.stale_item_days,
     limit: args.limit
   });
   const hasPin = suggestions.pin_candidates.length > 0;
@@ -23756,11 +24059,11 @@ server.tool("recall__list_stored", "Browse stored items by recency, access frequ
   content: [{ type: "text", text: toolListStored(db, projectKey, args) }]
 })));
 server.tool("recall__stats", "Aggregate session efficiency stats \u2014 total savings, compression ratio, token savings, session days. Use to understand the big picture.", {}, safeTool(() => {
-  const config = loadConfig();
+  const config2 = loadConfig();
   return {
     content: [{ type: "text", text: toolStats(db, projectKey, {
-      pin_threshold: config.store.pin_recommendation_threshold,
-      stale_days: config.store.stale_item_days
+      pin_threshold: config2.store.pin_recommendation_threshold,
+      stale_days: config2.store.stale_item_days
     }) }]
   };
 }));
