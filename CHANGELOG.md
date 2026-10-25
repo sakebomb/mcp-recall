@@ -6,6 +6,18 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Security
+
+- **zod 4.6.7, so the MCP SDK validates messages with the patched core**
+  (#409, CVE-2023-54404). Before 4.6.6, zod parsed every element of an array,
+  set or map before checking its declared size limit, so an oversized input
+  built one validation issue per element and could exhaust memory. The MCP SDK
+  validates JSON-RPC messages with zod's v4 core, and mcp-recall pinned zod
+  3.25.76, which installed the vulnerable core for it. The SDK now shares a
+  single zod 4.6.7. Exposure was local: only Claude Code on the same machine
+  talks to the server. The patch only covers arrays with a declared size
+  limit; see `import` below for the one unbounded array a user can feed in.
+
 ### Added
 
 - **A rerunnable quality benchmark** (#390, first part). `bun run quality`
@@ -97,6 +109,23 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   `bun run fidelity` puts compressed `git diff` recall at 61.8%, from 31.5%,
   above a same-size head (60.2%). The cost is a lower reduction on that
   command, 30.2% from 37.5%.
+
+- **`recall__search` shows the line that matched** (#405). A result's snippet
+  was the first 150 characters of the best chunk, so it named the right output
+  without printing the match, and the agent needed a second call to see it.
+  The snippet is now placed on the match: it covers the most distinct query
+  terms, then the tightest run of them, and falls back to the whole document
+  when the terms span a chunk boundary. On the quality benchmark's recovery
+  column, the share of cut facts a search prints goes from 23.6% to 98.9% on
+  MCP JSON, 17.0% to 82.0% on GitHub API results, and 14.9% to 70.1% on
+  `git diff`.
+
+- **`mcp-recall import` stops at the first few bad rows** (#411). It
+  validated the whole dump at once and recorded an issue for every bad row
+  before printing five, so a large file that was not a dump could run out of
+  memory instead of saying so: a 10 MB file of numbers peaked at 2.0 GB. Rows
+  are now checked one at a time and validation stops at the five it reports
+  (191 MB, the same message). A valid dump imports as before.
 
 ## [1.18.1] — 2026-10-22
 
