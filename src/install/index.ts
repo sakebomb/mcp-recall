@@ -60,14 +60,22 @@ export interface RecallLaunch {
 }
 
 /**
- * True inside a `bun build --compile` binary, whose modules live under a virtual
- * root: `/$bunfs/` on POSIX, `B:\~BUN\` on Windows. `Bun.isStandaloneExecutable`
- * says so directly in newer Bun; the path is the fallback for older ones.
+ * True for a module path under a compiled binary's virtual root: `/$bunfs/` on
+ * POSIX, `B:\~BUN\` on Windows. Kept apart from {@link isStandaloneBinary} so the
+ * regex is tested on every Bun, including ones whose flag short-circuits it (#419).
+ */
+export function isBunfsPath(modulePath: string): boolean {
+  return /^(\/\$bunfs\/|[A-Za-z]:[\\/]~BUN[\\/])/.test(modulePath);
+}
+
+/**
+ * True inside a `bun build --compile` binary. `Bun.isStandaloneExecutable` says
+ * so directly in newer Bun; the module path is the fallback for older ones.
  */
 export function isStandaloneBinary(modulePath = import.meta.path): boolean {
   const flag = (Bun as { isStandaloneExecutable?: unknown }).isStandaloneExecutable;
   if (typeof flag === "boolean") return flag;
-  return /^(\/\$bunfs\/|[A-Za-z]:[\\/]~BUN[\\/])/.test(modulePath);
+  return isBunfsPath(modulePath);
 }
 
 /**
