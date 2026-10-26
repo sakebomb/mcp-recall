@@ -21,6 +21,7 @@ import {
   CLAUDE_MD_BLOCK,
   statusCommand,
   detectLaunch,
+  isBunfsPath,
   isStandaloneBinary,
   shellWord,
   shellWords,
@@ -409,10 +410,14 @@ describe("removeClaudeMd", () => {
 
 describe("launch detection", () => {
   it("recognises a compiled binary's module root on POSIX and Windows", () => {
-    expect(isStandaloneBinary("/$bunfs/root/mcp-recall")).toBe(true);
-    expect(isStandaloneBinary("B:\\~BUN\\root\\mcp-recall.exe")).toBe(true);
-    expect(isStandaloneBinary("/home/u/mcp-recall/src/install/index.ts")).toBe(false);
-    expect(isStandaloneBinary("/usr/lib/node_modules/mcp-recall/plugins/mcp-recall/dist/cli.js")).toBe(false);
+    expect(isBunfsPath("/$bunfs/root/mcp-recall")).toBe(true);
+    expect(isBunfsPath("B:\\~BUN\\root\\mcp-recall.exe")).toBe(true);
+    expect(isBunfsPath("/home/u/mcp-recall/src/install/index.ts")).toBe(false);
+    expect(isBunfsPath("/usr/lib/node_modules/mcp-recall/plugins/mcp-recall/dist/cli.js")).toBe(false);
+  });
+
+  it("reports a test run as not a standalone binary", () => {
+    expect(isStandaloneBinary()).toBe(false);
   });
 
   it("launches a binary as itself, with `serve` for the server", () => {
