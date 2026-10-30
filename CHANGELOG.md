@@ -6,6 +6,8 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+## [1.19.0] — 2026-10-30
+
 ### Security
 
 - **zod 4.6.7, so the MCP SDK validates messages with the patched core**
@@ -1081,7 +1083,8 @@ Ten `recall__*` tools available in every Claude session:
 
 ---
 
-[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.18.1...HEAD
+[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.19.0...HEAD
+[1.19.0]: https://github.com/sakebomb/mcp-recall/compare/v1.18.1...v1.19.0
 [1.18.1]: https://github.com/sakebomb/mcp-recall/compare/v1.18.0...v1.18.1
 [1.18.0]: https://github.com/sakebomb/mcp-recall/compare/v1.17.0...v1.18.0
 [1.17.0]: https://github.com/sakebomb/mcp-recall/compare/v1.16.1...v1.17.0
