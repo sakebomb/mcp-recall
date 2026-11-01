@@ -35,17 +35,26 @@ DATASET = "SWE-bench/SWE-bench_Verified"
 
 # Per-run ceiling passed to claude --max-budget-usd. The whole-run cap is
 # enforced separately against the LiteLLM key's recorded spend.
-RUN_BUDGET = {"claude-haiku-5-5": 0.75, "claude-sonnet-5-5": 2.0, "claude-opus-5-5": 3.0}
+RUN_BUDGET = {"claude-haiku-5-5": 1.0, "claude-sonnet-5-5": 3.0, "claude-opus-5-5": 6.0}
 
 PROMPT = """You are working in the git repository at /testbed. Resolve the issue below by
 editing the repository's non-test source files. The Python environment is already
 active; you may run the existing tests to check your work. Do not modify or add
-test files. When the fix is complete, stop.
+test files.{extra} When the fix is complete, stop.
 
 <issue>
 {problem}
 </issue>
 """
+
+# The same instruction goes to both arms. verify-full makes the agent produce the
+# large tool outputs that medium tasks never reach (the smoke round stored 1 output
+# in 12 recall-arm runs).
+PROMPT_EXTRA = {
+    "default": "",
+    "verify-full": (" Before you finish, run the complete test file for every module you"
+                    " changed, not only the tests nearest your change, and read the output."),
+}
 
 
 def load_tasks(path):
@@ -72,12 +81,17 @@ def sh(args, **kw):
     return subprocess.run(args, capture_output=True, text=True, **kw)
 
 
-def run_one(task, model, arm, out_dir, timeout):
+def run_one(task, model, arm, out_dir, a):
     iid = task["instance_id"]
     out = out_dir / model / arm
     out.mkdir(parents=True, exist_ok=True)
     if (out / f"{iid}.json").exists():
         return f"skip {model} {arm} {iid}"
+    # Start only if every job now in flight could hit its own ceiling and the
+    # total would still stay under the cap.
+    spend = key_spend()
+    if spend + a.jobs * RUN_BUDGET[model] > a.cap:
+        return f"CAP {model} {arm} {iid}: spend ${spend:.2f} + in-flight worst case exceeds ${a.cap:.2f}"
     name = f"bench-{out_dir.name}-{model}-{arm}-{iid}".replace("_", "-")[:120]
     claude_bin = os.path.realpath(shutil.which("claude") or sys.exit("claude not on PATH"))
     sh(["docker", "rm", "-f", name])
@@ -94,14 +108,15 @@ def run_one(task, model, arm, out_dir, timeout):
             inst = sh(["docker", "exec", name, "mcp-recall", "install"])
             if inst.returncode:
                 return f"FAIL install {iid}: {inst.stderr.strip()[:200]}"
-        (out / f"{iid}.prompt.txt").write_text(PROMPT.format(problem=task["problem_statement"]))
+        prompt = PROMPT.format(extra=PROMPT_EXTRA[a.prompt], problem=task["problem_statement"])
+        (out / f"{iid}.prompt.txt").write_text(prompt)
         sh(["docker", "cp", str(out / f"{iid}.prompt.txt"), f"{name}:/tmp/prompt.txt"])
         cmd = ("source /opt/miniconda3/bin/activate testbed && "
                f"claude -p \"$(cat /tmp/prompt.txt)\" --model {model} --output-format json "
                f"--dangerously-skip-permissions --max-budget-usd {RUN_BUDGET[model]}")
         t0 = time.time()
         try:
-            res = sh(["docker", "exec", "-w", "/testbed", name, "bash", "-lc", cmd], timeout=timeout)
+            res = sh(["docker", "exec", "-w", "/testbed", name, "bash", "-lc", cmd], timeout=a.timeout)
             raw, rc = res.stdout, res.returncode
         except subprocess.TimeoutExpired:
             raw, rc = "", "timeout"
@@ -122,7 +137,7 @@ def run_one(task, model, arm, out_dir, timeout):
                     "print(json.dumps([list(r) for f in fs for r in sqlite3.connect(f).execute("
                     "'select tool_name, original_size, summary_size, access_count from stored_outputs')]))"])
             stored = json.loads(q.stdout) if q.returncode == 0 else q.stderr[-300:]
-        record = {"instance_id": iid, "model": model, "arm": arm, "rc": rc, "wall_s": round(wall, 1),
+        record = {"instance_id": iid, "model": model, "arm": arm, "prompt": a.prompt, "rc": rc, "wall_s": round(wall, 1),
                   "patch_bytes": len(diff.stdout), "recall_stored": stored, "claude": result}
         (out / f"{iid}.json").write_text(json.dumps(record, indent=1))
         return (f"done {model} {arm} {iid}: ${result.get('total_cost_usd', 0):.3f} "
@@ -146,7 +161,7 @@ def cmd_run(a):
         print(f"== {model} (key spend so far ${spend:.2f})", flush=True)
         jobs = [(t, model, arm) for t in tasks for arm in ARMS]
         with ThreadPoolExecutor(a.jobs) as pool:
-            for line in pool.map(lambda j: run_one(j[0], j[1], j[2], out_dir, a.timeout), jobs):
+            for line in pool.map(lambda j: run_one(j[0], j[1], j[2], out_dir, a), jobs):
                 print(line, flush=True)
     print(f"key spend after run ${key_spend():.2f}")
 
@@ -223,9 +238,11 @@ def main():
     r.add_argument("--tasks", required=True)
     r.add_argument("--models", nargs="+", required=True, choices=sorted(RUN_BUDGET))
     r.add_argument("--run-id", required=True)
-    r.add_argument("--cap", type=float, default=40.0, help="stop before a model once key spend reaches this")
+    r.add_argument("--cap", type=float, default=40.0,
+                   help="never start a run that could take key spend past this, counting in-flight runs")
+    r.add_argument("--prompt", choices=sorted(PROMPT_EXTRA), default="default")
     r.add_argument("--jobs", type=int, default=4)
-    r.add_argument("--timeout", type=int, default=1800, help="seconds per agent run")
+    r.add_argument("--timeout", type=int, default=3600, help="seconds per agent run")
     g = sub.add_parser("grade")
     g.add_argument("--run-id", required=True)
     g.add_argument("--jobs", type=int, default=4)

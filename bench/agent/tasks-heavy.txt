@@ -1,0 +1,11 @@
+# Pilot (#414) large-output set: every 4th task of tasks-hard.txt, run with --prompt verify-full.
+astropy__astropy-13398
+django__django-11138
+django__django-12708
+django__django-13449
+django__django-14631
+django__django-15629
+django__django-16631
+pylint-dev__pylint-8898
+scikit-learn__scikit-learn-25102
+sphinx-doc__sphinx-9229
