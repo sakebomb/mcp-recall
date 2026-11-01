@@ -12,6 +12,7 @@ both arms run identical versions.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -21,7 +22,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from urllib.request import Request, urlopen
 
 HERE = Path(__file__).resolve().parent
@@ -81,6 +82,76 @@ def sh(args, **kw):
     return subprocess.run(args, capture_output=True, text=True, **kw)
 
 
+def now_utc():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def as_text(b):
+    return b.decode(errors="replace") if isinstance(b, bytes) else (b or "")
+
+
+def sha256(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def image_id(image):
+    r = sh(["docker", "image", "inspect", "--format", "{{.Id}} {{join .RepoDigests \",\"}}", image])
+    return r.stdout.strip()
+
+
+def last_result_event(stream):
+    """The final `result` event of a stream-json run: the same fields the json
+    output format prints (cost, usage, turns, subtype)."""
+    for line in reversed(stream.splitlines()):
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") == "result":
+            return event
+    return {"is_error": True, "raw_tail": stream[-2000:]}
+
+
+def collect_evidence(container, ev):
+    """Copy out what the container would otherwise take with it: Claude Code's
+    own session transcript and config (showing which hooks and MCP servers each
+    arm had), and a consistent snapshot of every mcp-recall store."""
+    sh(["docker", "cp", f"{container}:/root/.claude", str(ev / "claude-home")])
+    sh(["docker", "cp", f"{container}:/root/.claude.json", str(ev / "claude.json")])
+    snap = sh(["docker", "exec", container, "python3", "-c",
+               "import sqlite3,glob,os\n"
+               "os.makedirs('/tmp/recall-snap',exist_ok=True)\n"
+               "for f in glob.glob('/root/.local/share/mcp-recall/*.db'):\n"
+               "    sqlite3.connect(f).backup(sqlite3.connect('/tmp/recall-snap/'+os.path.basename(f)))\n"])
+    if snap.returncode == 0:
+        sh(["docker", "cp", f"{container}:/tmp/recall-snap", str(ev / "recall-store")])
+
+
+def tool_versions():
+    claude_bin = os.path.realpath(shutil.which("claude") or "")
+    swebench = sh([sys.executable, "-c", "import swebench; print(swebench.__version__)"]).stdout.strip()
+    git = lambda *args: sh(["git", "-C", str(HERE), *args]).stdout.strip()
+    return {
+        "claude_version": sh(["claude", "--version"]).stdout.strip(),
+        "claude_sha256": sha256(claude_bin),
+        "mcp_recall_version": sh([str(RECALL_BIN), "--version"]).stdout.strip(),
+        "mcp_recall_sha256": sha256(RECALL_BIN),
+        "swebench_version": swebench,
+        "harness_commit": git("rev-parse", "HEAD"),
+        "harness_dirty": bool(git("status", "--porcelain", "--", ".")),
+        "bench_py_sha256": sha256(__file__),
+        "docker": sh(["docker", "version", "--format", "{{.Server.Version}}"]).stdout.strip(),
+        "host": " ".join(os.uname()),
+    }
+
+
+def append_manifest(out_dir, entry):
+    path = out_dir / "manifest.json"
+    stages = json.loads(path.read_text()) if path.exists() else []
+    stages.append(entry)
+    path.write_text(json.dumps(stages, indent=1))
+
+
 def run_one(task, model, arm, out_dir, a):
     iid = task["instance_id"]
     out = out_dir / model / arm
@@ -104,6 +175,7 @@ def run_one(task, model, arm, out_dir, a):
     if started.returncode:
         return f"FAIL start {iid}: {started.stderr.strip()[:200]}"
     try:
+        inst = None
         if arm == "recall":
             inst = sh(["docker", "exec", name, "mcp-recall", "install"])
             if inst.returncode:
@@ -111,20 +183,26 @@ def run_one(task, model, arm, out_dir, a):
         prompt = PROMPT.format(extra=PROMPT_EXTRA[a.prompt], problem=task["problem_statement"])
         (out / f"{iid}.prompt.txt").write_text(prompt)
         sh(["docker", "cp", str(out / f"{iid}.prompt.txt"), f"{name}:/tmp/prompt.txt"])
+        # stream-json records every event the agent saw, tool results included, so
+        # the recall arm's evidence shows the summaries Claude actually received.
         cmd = ("source /opt/miniconda3/bin/activate testbed && "
-               f"claude -p \"$(cat /tmp/prompt.txt)\" --model {model} --output-format json "
+               f"claude -p \"$(cat /tmp/prompt.txt)\" --model {model} --output-format stream-json --verbose "
                f"--dangerously-skip-permissions --max-budget-usd {RUN_BUDGET[model]}")
+        started_at = now_utc()
         t0 = time.time()
         try:
             res = sh(["docker", "exec", "-w", "/testbed", name, "bash", "-lc", cmd], timeout=a.timeout)
-            raw, rc = res.stdout, res.returncode
-        except subprocess.TimeoutExpired:
-            raw, rc = "", "timeout"
+            raw, rc, err = res.stdout, res.returncode, res.stderr
+        except subprocess.TimeoutExpired as e:
+            raw, rc, err = as_text(e.stdout), "timeout", as_text(e.stderr)
         wall = time.time() - t0
-        try:
-            result = json.loads(raw)
-        except json.JSONDecodeError:
-            result = {"is_error": True, "raw_tail": raw[-2000:]}
+        ev = out / f"{iid}.evidence"
+        ev.mkdir(exist_ok=True)
+        (ev / "stream.jsonl").write_text(raw)
+        (ev / "stderr.txt").write_text(err)
+        if inst is not None:
+            (ev / "install.log").write_text(inst.stdout + inst.stderr)
+        result = last_result_event(raw)
         # HEAD, not base_commit: each image adds its own "SWE-bench" commit on top
         # (sympy's flips every file to 755), and grading applies onto that image.
         diff = sh(["docker", "exec", "-w", "/testbed", name, "bash", "-lc",
@@ -137,7 +215,10 @@ def run_one(task, model, arm, out_dir, a):
                     "print(json.dumps([list(r) for f in fs for r in sqlite3.connect(f).execute("
                     "'select tool_name, original_size, summary_size, access_count from stored_outputs')]))"])
             stored = json.loads(q.stdout) if q.returncode == 0 else q.stderr[-300:]
-        record = {"instance_id": iid, "model": model, "arm": arm, "prompt": a.prompt, "rc": rc, "wall_s": round(wall, 1),
+        collect_evidence(name, ev)
+        record = {"instance_id": iid, "model": model, "arm": arm, "prompt": a.prompt, "rc": rc,
+                  "started_at": started_at, "ended_at": now_utc(), "wall_s": round(wall, 1),
+                  "image": task["image"], "image_id": image_id(task["image"]),
                   "patch_bytes": len(diff.stdout), "recall_stored": stored, "claude": result}
         (out / f"{iid}.json").write_text(json.dumps(record, indent=1))
         return (f"done {model} {arm} {iid}: ${result.get('total_cost_usd', 0):.3f} "
@@ -154,6 +235,14 @@ def cmd_run(a):
         if sh(["docker", "image", "inspect", task["image"]]).returncode:
             print("pull", task["image"], flush=True)
             subprocess.run(["docker", "pull", "-q", task["image"]], check=True)
+    from datasets import load_dataset
+    stage = {"started_at": now_utc(), "argv": sys.argv, "tasks_file": a.tasks,
+             "tasks_sha256": sha256(a.tasks), "models": a.models, "prompt": a.prompt,
+             "prompt_template": PROMPT, "prompt_extra": PROMPT_EXTRA[a.prompt],
+             "run_budget_usd": RUN_BUDGET, "cap_usd": a.cap, "jobs": a.jobs, "timeout_s": a.timeout,
+             "dataset": DATASET, "dataset_fingerprint": cast(Any, load_dataset(DATASET, split="test"))._fingerprint,
+             "images": {t["instance_id"]: image_id(t["image"]) for t in tasks},
+             "key_spend_before_usd": key_spend(), **tool_versions()}
     for model in a.models:
         spend = key_spend()
         if spend >= a.cap:
@@ -163,7 +252,24 @@ def cmd_run(a):
         with ThreadPoolExecutor(a.jobs) as pool:
             for line in pool.map(lambda j: run_one(j[0], j[1], j[2], out_dir, a), jobs):
                 print(line, flush=True)
-    print(f"key spend after run ${key_spend():.2f}")
+                with (out_dir / "run.log").open("a") as log:
+                    log.write(f"{now_utc()} {line}\n")
+    stage.update(ended_at=now_utc(), key_spend_after_usd=key_spend())
+    append_manifest(out_dir, stage)
+    print(f"key spend after run ${stage['key_spend_after_usd']:.2f}")
+
+
+def cmd_seal(a):
+    """Fail if the API token appears anywhere under the run, then write a
+    SHA256SUMS over every file so later tampering or loss is detectable."""
+    out_dir = RUNS / a.run_id
+    token = dict(l.split("=", 1) for l in ENV_FILE.read_text().split() if "=" in l)["ANTHROPIC_AUTH_TOKEN"]
+    files = sorted(p for p in out_dir.rglob("*") if p.is_file() and p.name != "SHA256SUMS")
+    leaked = [str(p.relative_to(out_dir)) for p in files if token.encode() in p.read_bytes()]
+    if leaked:
+        sys.exit(f"token found in {len(leaked)} files, not sealing: {leaked[:5]}")
+    (out_dir / "SHA256SUMS").write_text("".join(f"{sha256(p)}  {p.relative_to(out_dir)}\n" for p in files))
+    print(f"sealed {len(files)} files, no token found")
 
 
 def strip_mode_only(patch):
@@ -248,8 +354,9 @@ def main():
     g.add_argument("--jobs", type=int, default=4)
     rp = sub.add_parser("report")
     rp.add_argument("--run-id", required=True)
+    sub.add_parser("seal").add_argument("--run-id", required=True)
     a = p.parse_args()
-    {"run": cmd_run, "grade": cmd_grade, "report": cmd_report}[a.cmd](a)
+    {"run": cmd_run, "grade": cmd_grade, "report": cmd_report, "seal": cmd_seal}[a.cmd](a)
 
 
 if __name__ == "__main__":
