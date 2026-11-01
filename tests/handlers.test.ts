@@ -1295,7 +1295,7 @@ describe("getBashHandler", () => {
   });
 
   // #339: routing saw `ssh`/`pct exec`, not the command they run, so every remote
-  // command fell to the shell fallback (38% in the README's as-recorded table).
+  // command fell to the shell fallback (38% in the as-recorded table, docs/benchmarks.md).
   describe("unwraps commands run elsewhere (#339)", () => {
     const shapes: [string, string, Handler][] = [
       ["ssh h 'git status'", "git status", gitStatusHandler],

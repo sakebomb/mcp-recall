@@ -1,6 +1,6 @@
 # Benchmarks
 
-Every measured number for mcp-recall lives here:
+What mcp-recall delivers to Claude, measured:
 
 - [**Quality benchmark**](#quality-benchmark): whether what Claude receives still carries the facts in the output.
   Rerunnable by anyone on a checked-in corpus.

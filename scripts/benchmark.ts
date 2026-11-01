@@ -6,7 +6,7 @@
  *
  * These are PER-OUTPUT compression ratios on representative fixtures, not a
  * whole-session token figure (most outputs are smaller; the fallback already
- * caps). Use the numbers to refresh the README savings table; use
+ * caps). Use the numbers to refresh the per-command table in docs/benchmarks.md; use
  * `recall__stats` on a real session for actual session savings.
  */
 import { getBashHandler } from "../src/handlers/bash";

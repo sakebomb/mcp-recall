@@ -162,7 +162,7 @@ Each project gets its own SQLite database under `~/.local/share/mcp-recall/`. `m
 
 - **Credentials are never stored.** Password-manager MCPs (1Password, Bitwarden, Vault and others) are blocked by name, credential-like tool names (`*secret*`, `*token*`, `*api_key*`, …) by pattern, and every output is scanned for secrets (PEM headers, GitHub PATs, AWS keys) before any write. A tool blocked by mistake goes in `denylist.allowlist`. Full lists: [SECURITY.md](SECURITY.md).
 - **Everything stays on your machine**, in `~/.local/share/mcp-recall/`. Nothing is sent anywhere. The database holds full tool outputs, so treat it accordingly. `recall__forget(all: true, confirmed: true)` wipes the current project; deleting the directory wipes everything.
-- **Running alongside rtk** works; what changes is in the [install guide](docs/install.md#running-alongside-rtk).
+- **Running alongside rtk:** its command-rewriting hook was measured with mcp-recall, and the [install guide](docs/install.md#running-alongside-rtk) says what changes. Its PostToolUse pipeline is untested.
 
 ### Error contract
 
@@ -181,7 +181,7 @@ Context pressure builds at four distinct layers. Native Claude tooling covers th
 | **③ MCP tool outputs** | Up to 25k tokens or 50k characters, an MCP result enters the window whole. Above that, Claude Code saves it to a file and Claude must read the file in chunks. Neither is searchable later | **mcp-recall** |
 | **④ Cross-session memory** | Context vanishes when the session ends; the API memory tool is a model-managed summary, not a searchable verbatim archive | **mcp-recall** |
 
-For layer ③, [Claude Code](https://code.claude.com/docs/en/mcp) puts an MCP result under `MAX_MCP_OUTPUT_TOKENS` (25,000 by default) into the window whole, and saves a larger one under the session's `tool-results` directory with a notice to read it in chunks. mcp-recall summarizes before either happens and keeps the full output searchable; for a result Claude Code saved to a file, it stores the file's content rather than the notice.
+For layer ③, [Claude Code](https://code.claude.com/docs/en/mcp) puts an MCP result under `MAX_MCP_OUTPUT_TOKENS` (25,000 by default) into the window whole, and saves a larger one under the session's `tool-results` directory with a notice to read it in chunks. mcp-recall replaces a result with a summary before it reaches the window and keeps the full output searchable; for a result Claude Code already saved to a file, it stores and summarizes the file's content rather than the notice.
 
 API [context editing](https://platform.claude.com/docs/en/build-with-claude/context-editing), [compaction](https://platform.claude.com/docs/en/build-with-claude/compaction) and the [memory tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool) also reduce context, through eviction or model-written summaries, with no verbatim retrieval of the original output. They stack with mcp-recall, which sits ahead of them as the tool-output layer.
 
