@@ -102,3 +102,8 @@ model, with the event streams of the discordant tasks examined in the report.
   cited only as the costing round, never pooled with the pilot.
 - A first pilot attempt was stopped after 144 runs because it kept no transcripts
   (`runs/superseded/`). Its outcomes were never graded. The pilot was rerun in full.
+- The analysis code (`bench/agent/analyze.py`, `check_analyze.py`) was committed in
+  56c4a9f at 17:35:54 -05:00 on 2026-11-01, 47 seconds after the grader wrote its first
+  pilot report (17:35:07). Its commit message says "before grading", which is wrong by
+  those 47 seconds. Both files were last modified before grading began (17:23:26 and
+  17:32:20), and no pilot report was opened before the commit.
