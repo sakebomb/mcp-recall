@@ -52,11 +52,11 @@ The [architecture guide](docs/architecture.md#the-capture-pipeline) walks throug
 
 **Two hooks, one MCP server.**
 
-- `SessionStart` hook — records each active day, prunes expired items, and injects a compact context snapshot before the first message
-- `PostToolUse` hook — intercepts MCP tool outputs and native Bash commands; delivers a Bash read of file or diff content (`cat`, `git diff`, `| head -40`, `sed -n 900,1000p`) whole when it is 8 KB or less; deduplicates identical output from the same tool and command (by content hash); compresses, stores, and returns summary
-- `recall` MCP server — exposes eleven tools for retrieval, search, memory, and management
+- `SessionStart` hook: injects a short snapshot of pinned items, notes and recent activity before the first message, records the active day, and prunes expired items.
+- `PostToolUse` hook: replaces large MCP and Bash output with a summary and stores the full output. A Bash read of 8 KB or less (`cat`, `git diff`, `| head -40`, `sed -n 900,1000p`) is delivered whole, and identical output from the same tool and command returns a cached header.
+- `recall` MCP server: eleven `recall__*` tools Claude uses to search and retrieve what was stored.
 
-> **Scope**: Compression applies to MCP tools and the native `Bash` built-in. The remaining built-ins (Read, Grep, Glob) pass through unchanged. See [Scope](#scope) for details.
+**What it covers.** MCP tools (`mcp__*`, except mcp-recall's own) and the native Bash tool. Each output is routed to a handler built for its shape, so `git diff`, test runners, compilers and `grep` get summaries that put failures and errors first. The [handler reference](docs/handlers.md) lists every handler and what it keeps. The built-in Read, Grep and Glob pass through unchanged; if large file reads are your biggest cost, the [filesystem MCP server](https://github.com/modelcontextprotocol/servers) can be intercepted where Read can't.
 
 ---
 
@@ -74,7 +74,7 @@ Repeated identical tool calls return a cached header instead of re-compressing:
 [recall:recall_abc12345 · cached · 2026-03-01]
 ```
 
-Eleven `recall__*` tools are available to Claude in every session. The `recall__` prefix is the MCP naming convention — it namespaces the tools so Claude knows which plugin owns them. You don't call these yourself; Claude uses them automatically.
+Eleven `recall__*` tools are available to Claude in every session. You don't call them yourself; Claude uses them when it needs detail.
 
 | Tool | Use when |
 |---|---|
@@ -96,84 +96,23 @@ Eleven `recall__*` tools are available to Claude in every session. The `recall__
 
 ## Results
 
-> **Before 1.15.1, these savings did not reach Claude's context on current Claude Code.** The hook returned its summary in a field Claude Code no longer reads, so outputs were stored and searchable but Claude still received them in full ([#298](https://github.com/sakebomb/mcp-recall/issues/298)). 1.15.1 uses the documented field, which delivered MCP summaries. Bash summaries were still dropped: Claude Code checks a built-in tool's replacement against that tool's output shape, and a plain string never matched Bash's. From 1.15.2 the hook returns Bash's own shape, and Bash summaries were verified live on Claude Code 2.1.292 ([#304](https://github.com/sakebomb/mcp-recall/issues/304)). The figures below measure what the compression produces.
+- **How much smaller.** On one developer's real store (36,039 calls, July to October 2026), MCP output replayed through today's handlers came out 96.6% smaller, and all intercepted calls 57.9% smaller as recorded. One person's mix, dominated by Bash; yours will differ. Run `bun run measure` on your own store.
+- **What the summaries keep.** The [quality benchmark](docs/benchmarks.md#quality-benchmark) scores the facts each summary keeps against a same-size head cut, on a public corpus anyone can rerun with `bun run quality`. It names every family where mcp-recall does no better than the head cut.
+- **Whether the agent still solves the task.** A paired benchmark of the same agent with and without mcp-recall is in progress ([#414](https://github.com/sakebomb/mcp-recall/issues/414)).
 
-Measured on 2026-10-13 across one developer's real store: 121 project stores, 107 projects, 36,039 intercepted calls dated 2026-07-21 to 2026-10-13 (older calls had expired). Reproduce on your own store with `bun run measure`, which opens every store read-only and prints aggregates only.
-
-| Figure | Calls | Original | Delivered | Reduction |
-|---|---|---|---|---|
-| All intercepted calls, as recorded | 36,039 | 66.1 MB | 27.9 MB | **57.9%** |
-| Bash, as recorded | 35,857 | 61.0 MB | 24.9 MB | 59.2% |
-| MCP, replayed through current handlers | 182 | 5.1 MB | 0.2 MB | **96.6%** |
-
-"As recorded" is what the installed versions' compression produced, using the same accounting as `recall__stats` (notes excluded): 38.3 MB, about 10.0M tokens. Because of #298 that reduction was stored, not delivered to context. The MCP row re-compresses every stored MCP call with today's handlers, because most of those calls were stored by an older release that predated image-block stripping; as recorded they show 41.9%. The replay applies the hook's own rules: a summary that, with its header, saves less than 25% passes the output through, and an empty summary falls back to the generic handler. It uses the 1.15.1 profiles, so Context7 calls are no longer counted as empty summaries ([#299](https://github.com/sakebomb/mcp-recall/issues/299)). This is one person's workload, dominated by Bash, so your mix will differ.
-
-**The Bash rows overstate what 1.16.0 saves.** They were recorded by earlier releases. 1.16.0 delivers more Bash output whole: content reads (`cat`, `git diff`) and reads you bounded (`| head`, `sed -n`) of 8 KB or less, and any summary that would save under 25%. Most Bash bodies are not stored, so `measure` cannot replay them under the new rules. In a replay of recorded `gh` and `cd …` results, the 25% rule alone delivered 0.3–0.5% more of the input.
-
-### What the summaries keep
-
-Bytes saved don't show whether a summary kept what mattered. The [quality benchmark](docs/benchmarks.md) scores that on a public corpus anyone can rerun with `bun run quality`: the facts kept against a head cut of the same size, false claims, and how often one search recovers what a summary cut. It names every family where mcp-recall does no better than the head cut.
-
-### What compresses well, and what doesn't
-
-The reduction depends on the shape of the output, not on how large it is. Long, structured, repetitive output compresses well. Short or one-off output has little to remove.
-
-| | Examples (from the measurement above) | Why |
-|---|---|---|
-| **Excellent, 95–100%** | Tavily extract, Hugging Face, browser automation and screenshots (image blocks stripped) | A dedicated handler or profile keeps only the fields that matter; images carry no searchable text |
-| **Good, 73–92%** | Playwright snapshots (88%), Tavily search (84%), Gmail search (85%), `git diff` (92%), `git show` (80%), `cat` of large files (73%) | Structured enough for a handler to summarize; the full text stays retrievable |
-| **Moderate, 50–70%** | `sed`, `python3`, `gh`, shell loops, Mermaid rendering (60%) | Mixed output with no dedicated handler; the generic fallback trims the head and tail |
-| **Weak, 30–46%** | `grep` (37%), `ssh` (38%), `timeout` (32%), `cd …` chains (46%) | Usually short output, or a wrapper that hides the real command from command-aware routing |
-| **Fixed in 1.15.1** | Cloudflare docs search: 37% before, 89% with the new bundled profile | No handler matched it; a profile now extracts title, URL and an excerpt |
-
-Bash rows in this table are as recorded by earlier releases; see the note above on what 1.16.0 changes. Small tools with very few calls (for example, three Vikunja calls) are too little data to judge. If a tool you use lands in the weak rows, a [profile](docs/profiles-quickstart.md) is usually the fix.
-
-Individual MCP calls:
-
-| Tool | Original | Delivered | Reduction |
-|---|---|---|---|
-| `mcp__playwright__snapshot` | 56.2 KB | 299 B | 99.5% |
-| `mcp__github__list_issues` (20 items) | 59.1 KB | 1.1 KB | 98.1% |
-| `mcp__filesystem__read_file` (large file) | 85.0 KB | 2.2 KB | 97.4% |
-| Analytics CSV (500 rows) | 85.0 KB | 222 B | 99.7% |
-| Tavily web extracts (12 calls, one session) | 170.3 KB | 2.0 KB | 99% |
-
-Across a full session: 315 KB of tool output → 5.4 KB delivered to context.
-
-Command-aware Bash compression, per-output on representative fixtures (regenerate with `bun run bench`):
-
-| Command | Original | Delivered | Reduction | Facts kept |
-|---|---|---|---|---|
-| `journalctl -n 500` (retry loop, 3 messages) | 30.9 KB | 286 B | 99.1% | 1/1 |
-| `grep -n` piped to `head` (one 180 KB minified line) | 191.2 KB | 4.0 KB | 97.9% | — |
-| `find` (400 paths) | 19.0 KB | 1.2 KB | 93.7% | 1/2 |
-| `tsc --noEmit` (60 errors) | 28.5 KB | 2.2 KB | 92.4% | 1/2 |
-| `rg` (240 matches, 6 files) | 13.6 KB | 1.4 KB | 89.7% | 2/2 |
-| `ssh host rg` (240 matches, 6 files) | 13.6 KB | 1.4 KB | 89.7% | — |
-| `ls -R` (deep tree) | 1.5 KB | 207 B | 86.5% | — |
-| `cargo build` (typical failure) | 1.9 KB | 581 B | 69.8% | — |
-| `journalctl -b -1` (a unit fails, no line says "error") | 3.3 KB | 2.2 KB | 32.2% | 2/2 |
-| `git --no-pager diff` (18 files) | 4.1 KB | 3.2 KB | 22.3% | 2/2 |
-| `ssh host 'cd /srv && git diff'` (18 files) | 4.1 KB | 3.2 KB | 22.3% | — |
-
-These show what each handler produces on hand-written fixtures; the [quality benchmark](docs/benchmarks.md) is the measured fidelity score. *Facts kept* counts the facts a fixture lists in `scripts/benchmark.ts` that are still in the summary: the error count and the last error for `tsc`, the last file and an added line for `git diff`, the total and the last path for `find`. A miss is a fact Claude would have to retrieve. The `tsc` and `find` misses are deliberate ([#395](https://github.com/sakebomb/mcp-recall/issues/395)): neither summary keeps the last item past its cap, and in 312 recorded `tsc` and `find` calls Claude never used that item. The `tsc` cap of 20 errors was never reached, and the one `find` past its sample used paths from the middle of the cut, which a tail line would not have shown. From 1.16.0 the hook delivers a diff or file read of 8 KB or less whole, so the `git diff` fixture above would reach Claude unsummarised. The `ssh` rows reach the same handler as the local command since 1.17.0. The `git diff` rows keep the hunks themselves, with only the `index` and `---`/`+++` lines dropped: a larger diff delivers 4 KB of hunks shared across its files, plus a per-file list of what was cut. The `journalctl -b -1` row costs the most for what it keeps: the shell fallback keeps the first 25 lines, then the error/warn lines past them, which carry the failure ([#358](https://github.com/sakebomb/mcp-recall/issues/358)). These are per-output compression ratios, not a whole-session token figure — most outputs are smaller and the generic fallback already caps long output. That is why the measured Bash figure above (59.2%) is lower. For your own session savings, read `recall__stats` (which counts intercepted output only).
+Long, structured, repetitive output (Playwright snapshots, API JSON, large diffs, test logs) compresses well; short or one-off output has little to remove. Every figure, its method and its caveats: [Benchmarks](docs/benchmarks.md).
 
 ---
+
 ## Profiles
 
 Profiles teach mcp-recall how to compress output from specific MCPs, as declarative TOML with no TypeScript required. Five profiles ship built in (Jira, Gmail, Context7, Docker, Cloudflare docs), and **[26 community profiles](https://github.com/sakebomb/mcp-recall-profiles)** cover Stripe, Grafana, Shopify, Datadog, Notion, Teams, and more.
 
 ```bash
-mcp-recall profiles seed                 # install community profiles for your connected MCPs
-mcp-recall profiles seed --all           # or install the full community catalog
-mcp-recall profiles available            # browse the catalog (add --verbose for MCP URLs)
-mcp-recall profiles list                 # what's installed (short names work: "grafana")
-mcp-recall profiles info <name>          # full metadata (installed first, else catalog)
-mcp-recall profiles install <name>       # install one by short name
-mcp-recall profiles update               # keep installed profiles up to date
-mcp-recall learn                         # generate profiles from your installed MCPs
-mcp-recall profiles retrain              # suggest field additions using your stored data
-mcp-recall profiles test <tool>          # apply a profile and show the compression result
+mcp-recall profiles seed        # install community profiles for your connected MCPs
+mcp-recall profiles available   # browse the catalog
+mcp-recall profiles update      # keep installed profiles up to date
+mcp-recall learn                # generate profiles from your installed MCPs
 ```
 
 → [Profiles quickstart](docs/profiles-quickstart.md) · [Profile schema](docs/profile-schema.md) · [retrain guide](docs/retrain.md) · [AI profile guide](docs/ai-profile-guide.md) · [Contributing a profile](CONTRIBUTING.md#contributing-a-profile)
@@ -213,58 +152,17 @@ mcp-recall completions <shell>  # print a bash / zsh / fish completion script
 
 `mcp-recall --help` lists every subcommand. Update with `bun update -g mcp-recall && mcp-recall install`.
 
-**Reclaiming disk.** Each project gets its own SQLite database under `~/.local/share/mcp-recall/`. `mcp-recall gc` lists databases left behind by deleted projects or untouched for a long time, and `--force` deletes them. It is a dry run by default, never touches the active project, and never deletes a database whose project might still exist (for example, on an unmounted volume). Add `--vacuum` to compact the databases you keep. Session start reminds you once the store passes `store.gc_reminder_mb` (default 2 GB).
+Each project gets its own SQLite database under `~/.local/share/mcp-recall/`. `mcp-recall gc` is a dry run by default and never deletes a database whose project might still exist. Shell completions: `mcp-recall completions zsh > ~/.zfunc/_mcp-recall`.
 
-**Restoring an export.** `mcp-recall import dump.json` reads a `recall__export()` dump into the current project's store. Rows containing a credential are withheld, not imported.
-
-→ [Maintenance details](docs/maintenance.md): what `gc` deletes and why, and import options.
-
-**Shell completions.** Add to your shell profile once:
-
-```bash
-mcp-recall completions zsh > ~/.zfunc/_mcp-recall
-```
+→ [Maintenance details](docs/maintenance.md): what `gc` deletes and why, `--vacuum`, and import options.
 
 ---
 
-## What it touches
+## Safety and privacy
 
-### Scope
-
-**Compression applies to MCP tools and the native Bash built-in.** MCP tools (`mcp__*`, except mcp-recall's own) go through a dedicated handler, a profile, or a structure-aware fallback. Bash output is routed on the command: `git diff`, test runners, compilers and linters, `grep`, `ls` and more each get a summary built to put failures and errors first ([how well that holds](docs/benchmarks.md)). The [handler reference](docs/handlers.md) lists every handler and what it keeps.
-
-The remaining built-in tools — `Read`, `Grep`, `Glob` — pass through unchanged, and their full output enters context directly. If large file reads are your biggest context consumer, consider the [filesystem MCP server](https://github.com/modelcontextprotocol/servers) instead of the built-in Read tool.
-
-### Running alongside rtk
-
-[rtk](https://github.com/rtk-ai/rtk)'s hook rewrites a Bash command before it runs (`cat f` → `rtk read f`, `git diff` → `rtk git diff`), so mcp-recall sees rtk's output, not the command's. Measured with rtk 1.0.1:
-
-- **Reads stay reads.** `rtk read`, `rtk recall` and an rtk-run `git diff` are content reads: delivered whole up to 8 KB, body kept above it.
-- **rtk's output gets the shell fallback**, never a handler for the raw command. rtk reshapes output (its `grep` prints a sample under its true total), and a parser for the raw shape would report a wrong count. So an rtk-run command is summarized less finely than mcp-recall alone would: a large `rtk git diff` gets a 25-line head (body kept) rather than a per-file summary.
-- **rtk's recovery hints survive.** A summary that cuts a line holding `rtk recall <hash>` or `[full diff: rtk … --no-compact]` appends it.
-- **Analytics stay per command**: fingerprints read `rtk git diff`, `rtk read`, not `rtk`.
-
-rtk's optional PostToolUse pipeline (`rtk:posthook`) also rewrites tool output; running it alongside mcp-recall has not been tested.
-
-### Credentials
-
-Credential tools are never stored. Password managers are blocked by explicit name (`mcp__1password__*`, `mcp__bitwarden__*`, `mcp__lastpass__*`, `mcp__dashlane__*`, `mcp__keeper__*`, `mcp__hashicorp_vault__*`, `mcp__vault__*`, `mcp__doppler__*`, `mcp__infisical__*`) because their tool names — `get_item`, `list_logins`, `vault read` — don't contain obvious credential keywords. Keyword patterns catch remaining credential-adjacent names: `*secret*`, `*token*`, `*password*`, `*credential*`, `*api_key*`, `*access_key*`, `*private_key*`, `*signing_key*`, `*oauth*`, `*auth_token*`, `*authenticate*`, `*env_var*`, `*dotenv*`. Output is also scanned for secret patterns (PEM headers, GitHub PATs, AWS keys, etc.) before any write. If a legitimate tool is blocked by a keyword pattern, add it to `denylist.allowlist` in your config. See [SECURITY.md](SECURITY.md) for details.
-
-### Privacy
-
-All stored data lives locally on your machine at `~/.local/share/mcp-recall/`. Nothing is sent to any external service. The SQLite database contains full tool outputs — treat it accordingly.
-
-To wipe all stored data for the current project:
-
-```
-recall__forget(all: true, confirmed: true)
-```
-
-Or delete the directory directly:
-
-```bash
-rm -rf ~/.local/share/mcp-recall/
-```
+- **Credentials are never stored.** Password-manager MCPs (1Password, Bitwarden, Vault and others) are blocked by name, credential-like tool names (`*secret*`, `*token*`, `*api_key*`, …) by pattern, and every output is scanned for secrets (PEM headers, GitHub PATs, AWS keys) before any write. A tool blocked by mistake goes in `denylist.allowlist`. Full lists: [SECURITY.md](SECURITY.md).
+- **Everything stays on your machine**, in `~/.local/share/mcp-recall/`. Nothing is sent anywhere. The database holds full tool outputs, so treat it accordingly. `recall__forget(all: true, confirmed: true)` wipes the current project; deleting the directory wipes everything.
+- **Running alongside rtk** works; what changes is in the [install guide](docs/install.md#running-alongside-rtk).
 
 ### Error contract
 
@@ -283,47 +181,16 @@ Context pressure builds at four distinct layers. Native Claude tooling covers th
 | **③ MCP tool outputs** | Up to 25k tokens or 50k characters, an MCP result enters the window whole. Above that, Claude Code saves it to a file and Claude must read the file in chunks. Neither is searchable later | **mcp-recall** |
 | **④ Cross-session memory** | Context vanishes when the session ends; the API memory tool is a model-managed summary, not a searchable verbatim archive | **mcp-recall** |
 
-Layers ① and ② have solid first-party and community solutions. For layer ③, [Claude Code](https://code.claude.com/docs/en/mcp) delivers an MCP result below its limit (`MAX_MCP_OUTPUT_TOKENS`, 25,000 by default, or 50,000 characters) into the window whole. A larger one is saved under the session's `tool-results` directory, and Claude gets a notice telling it to read the file in chunks. mcp-recall intercepts MCP output *before* it reaches the window. It delivers a summary instead, stores the full payload locally, and keeps it searchable across sessions. For a result Claude Code saved to a file, mcp-recall stores and summarizes the file's content rather than the notice.
+For layer ③, [Claude Code](https://code.claude.com/docs/en/mcp) puts an MCP result under `MAX_MCP_OUTPUT_TOKENS` (25,000 by default) into the window whole, and saves a larger one under the session's `tool-results` directory with a notice to read it in chunks. mcp-recall summarizes before either happens and keeps the full output searchable; for a result Claude Code saved to a file, it stores the file's content rather than the notice.
 
-**How this compares to Claude's native context tools:** API-level [context editing](https://platform.claude.com/docs/en/build-with-claude/context-editing) (beta), [compaction](https://platform.claude.com/docs/en/build-with-claude/compaction) (beta), and the [memory tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool) all reduce context — but through lossy eviction or model-authored summaries, with no verbatim retrieval or full-text search of the original tool output. mcp-recall is complementary, not competing: it captures MCP output automatically (skipping denylisted tools and secrets), stores it verbatim with an FTS index, and sits *ahead of* native compaction in the pipeline as the MCP-output layer. All layers stack — run them together for maximum efficiency.
-
----
-
-## Troubleshooting
-
-→ [Troubleshooting guide](docs/troubleshooting.md)
+API [context editing](https://platform.claude.com/docs/en/build-with-claude/context-editing), [compaction](https://platform.claude.com/docs/en/build-with-claude/compaction) and the [memory tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool) also reduce context, through eviction or model-written summaries, with no verbatim retrieval of the original output. They stack with mcp-recall, which sits ahead of them as the tool-output layer.
 
 ---
 
-## Development
+## Learn more
 
-```bash
-git clone https://github.com/sakebomb/mcp-recall
-cd mcp-recall
-bun install
-bun test
-```
-
-See [docs/architecture.md](docs/architecture.md) for how the system fits together — the capture pipeline, module map, and the invariants a change must not break. See [CONTRIBUTING.md](CONTRIBUTING.md) for the step-by-step workflow and how to add a new compression handler.
-
----
-
-## What's next
-
-The easiest way to contribute is a TOML profile — no TypeScript, no clone of this repo needed. If you use an MCP that isn't covered, check the [community profiles repo](https://github.com/sakebomb/mcp-recall-profiles) or open a [profile request](https://github.com/sakebomb/mcp-recall/issues/new?template=profile-request.md).
-
-TypeScript handlers are welcome for tools with complex, non-JSON output (HTML, DOM trees, binary formats) — see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-For where the project is headed and, just as importantly, what it deliberately won't become, see [ROADMAP.md](ROADMAP.md).
-
----
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for the full release history.
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE)
+- **Something not working:** [Troubleshooting guide](docs/troubleshooting.md).
+- **Contributing:** the easiest contribution is a TOML profile, with no TypeScript and no clone of this repo. Check the [community profiles repo](https://github.com/sakebomb/mcp-recall-profiles) or open a [profile request](https://github.com/sakebomb/mcp-recall/issues/new?template=profile-request.md). TypeScript handlers are welcome for complex non-JSON output (HTML, DOM trees, binary formats): [CONTRIBUTING.md](CONTRIBUTING.md) has the workflow (`bun install && bun test`) and how to add one, and [docs/architecture.md](docs/architecture.md) the pipeline and the invariants a change must not break.
+- **Where it's headed**, and what it deliberately won't become: [ROADMAP.md](ROADMAP.md).
+- **Release history:** [CHANGELOG.md](CHANGELOG.md).
+- **License:** MIT, see [LICENSE](LICENSE).
