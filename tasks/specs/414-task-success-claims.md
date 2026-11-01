@@ -96,6 +96,46 @@ model, with the event streams of the discordant tasks examined in the report.
 | `README.md` | One or two sentences and a link |
 | HF dataset `sakebomb/mcp-recall-task-success` | The sealed evidence (`SHA256SUMS`), its layout, how to verify and rerun. Private until the report is approved |
 
+## Follow-up: what caused the Haiku result (added 2026-11-01, before it ran)
+
+The pilot is graded and its primary result stands as reported above; nothing in
+this section changes it. On the hard set, Haiku solved 25 tasks without
+mcp-recall and 21 with it (4 discordant pairs, all one way; bootstrap interval
+below 0, exact McNemar p = 0.125). In 3 of those 4 losses the recall arm stored
+no output, so compression did not change what the agent saw. The pilot cannot
+tell three explanations apart, and this follow-up is designed to.
+
+**Arms**, on the same 45 hard-set tasks, Haiku 5.5 only, same prompt, harness and
+limits as the pilot (`runs/followup-haiku`):
+
+- `plain2`: no plugin, a second time. Against the pilot's `plain` it measures
+  run-to-run noise (an A/A comparison).
+- `nohook`: `mcp-recall install`, then its `PostToolUse` hook removed from
+  `settings.json`. The MCP server, the `SessionStart` hook and the CLAUDE.md block
+  stay, so the agent sees everything installing adds except output replacement.
+
+**Comparisons**, each reported with the same statistics as the primary analysis
+(paired solve-rate difference, exact McNemar, bootstrap 95% interval):
+
+1. `plain2` vs `plain`: the noise floor.
+2. `nohook` vs `plain`: the effect of installing without compression.
+3. `recall` vs `nohook`: the effect of compression alone.
+
+**How the result will be read**, decided now:
+
+- If comparison 1 shows a net difference of 4 or more tasks in either direction,
+  the pilot's Haiku result is within run-to-run noise, and the report says so.
+- If comparison 2 shows a deficit like the pilot's (`nohook` below `plain`) and
+  comparison 3 does not, the cost is from installing (the instructions, the
+  session-start snapshot or the tool definitions), not from compression.
+- If comparison 3 shows the deficit and comparison 2 does not, the cost is from
+  compression.
+- Any other pattern is reported as it falls, without choosing an explanation.
+
+With one run per arm and 45 tasks, none of these comparisons has more power than
+the primary analysis; the follow-up can separate explanations only if the
+differences are as large as the pilot's. The report says so whatever it shows.
+
 ## Already disclosed
 
 - The smoke round (`runs/smoke1`, 4 medium tasks) predates full recording; it is
