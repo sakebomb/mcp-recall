@@ -13,8 +13,8 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   serialized that array to JSON, so the handler never saw a line of the page:
   every `browser_snapshot` came back as "no interactive elements or visible
   text extracted". Navigate, click and evaluate never reached the Playwright
-  handler, so the generic fallback kept their first 4 KB, mostly site
-  navigation, and an evaluate kept under 1 KB of the data it returned.
+  handler, so the generic fallback kept their first 4 KB: mostly site
+  navigation for a page, and a JSON-escaped head of an evaluate's result.
   Context7, Sentry and Claude in Chrome results arrive in the same shape and
   now reach their handlers as text too. Every Playwright page response now
   goes to the Playwright handler, which outlines the snapshot one line per
