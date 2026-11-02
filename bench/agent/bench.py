@@ -29,7 +29,13 @@ HERE = Path(__file__).resolve().parent
 RUNS = HERE / "runs"
 RECALL_BIN = HERE / "bin" / "mcp-recall-linux-x64"
 ENV_FILE = Path.home() / ".config" / "mcp-recall-bench" / "litellm.env"
-ARMS = ("plain", "recall")
+# plain2 repeats plain (an A/A noise check); nohook installs mcp-recall and then
+# removes its PostToolUse hook, isolating install side effects from compression.
+ARMS = ("plain", "recall", "plain2", "nohook")
+DEFAULT_ARMS = ("plain", "recall")
+INSTALLED = ("recall", "nohook")
+DROP_POST_TOOL_USE = ("import json; p='/root/.claude/settings.json'; s=json.load(open(p)); "
+                      "s['hooks'].pop('PostToolUse'); json.dump(s, open(p, 'w'), indent=2)")
 # The SWE-bench org copy carries the image, eval_script and log_parser fields
 # that swebench>=5 grades from; the older princeton-nlp copy lacks them.
 DATASET = "SWE-bench/SWE-bench_Verified"
@@ -176,10 +182,14 @@ def run_one(task, model, arm, out_dir, a):
         return f"FAIL start {iid}: {started.stderr.strip()[:200]}"
     try:
         inst = None
-        if arm == "recall":
+        if arm in INSTALLED:
             inst = sh(["docker", "exec", name, "mcp-recall", "install"])
             if inst.returncode:
                 return f"FAIL install {iid}: {inst.stderr.strip()[:200]}"
+        if arm == "nohook":
+            drop = sh(["docker", "exec", name, "python3", "-c", DROP_POST_TOOL_USE])
+            if drop.returncode:
+                return f"FAIL nohook {iid}: {drop.stderr.strip()[:200]}"
         prompt = PROMPT.format(extra=PROMPT_EXTRA[a.prompt], problem=task["problem_statement"])
         (out / f"{iid}.prompt.txt").write_text(prompt)
         sh(["docker", "cp", str(out / f"{iid}.prompt.txt"), f"{name}:/tmp/prompt.txt"])
@@ -209,7 +219,7 @@ def run_one(task, model, arm, out_dir, a):
                    "git add -A && git diff --cached HEAD -- . ':!.claude'"])
         (out / f"{iid}.patch").write_text(diff.stdout)
         stored = None
-        if arm == "recall":
+        if arm in INSTALLED:
             q = sh(["docker", "exec", name, "python3", "-c",
                     "import sqlite3,glob,json;fs=glob.glob('/root/.local/share/mcp-recall/*.db');"
                     "print(json.dumps([list(r) for f in fs for r in sqlite3.connect(f).execute("
@@ -237,7 +247,7 @@ def cmd_run(a):
             subprocess.run(["docker", "pull", "-q", task["image"]], check=True)
     from datasets import load_dataset
     stage = {"started_at": now_utc(), "argv": sys.argv, "tasks_file": a.tasks,
-             "tasks_sha256": sha256(a.tasks), "models": a.models, "prompt": a.prompt,
+             "tasks_sha256": sha256(a.tasks), "models": a.models, "arms": a.arms, "prompt": a.prompt,
              "prompt_template": PROMPT, "prompt_extra": PROMPT_EXTRA[a.prompt],
              "run_budget_usd": RUN_BUDGET, "cap_usd": a.cap, "jobs": a.jobs, "timeout_s": a.timeout,
              "dataset": DATASET, "dataset_fingerprint": cast(Any, load_dataset(DATASET, split="test"))._fingerprint,
@@ -248,7 +258,7 @@ def cmd_run(a):
         if spend >= a.cap:
             sys.exit(f"key spend ${spend:.2f} reached cap ${a.cap:.2f}; stopping before {model}")
         print(f"== {model} (key spend so far ${spend:.2f})", flush=True)
-        jobs = [(t, model, arm) for t in tasks for arm in ARMS]
+        jobs = [(t, model, arm) for t in tasks for arm in a.arms]
         with ThreadPoolExecutor(a.jobs) as pool:
             for line in pool.map(lambda j: run_one(j[0], j[1], j[2], out_dir, a), jobs):
                 print(line, flush=True)
@@ -347,6 +357,7 @@ def main():
     r.add_argument("--cap", type=float, default=40.0,
                    help="never start a run that could take key spend past this, counting in-flight runs")
     r.add_argument("--prompt", choices=sorted(PROMPT_EXTRA), default="default")
+    r.add_argument("--arms", nargs="+", choices=ARMS, default=list(DEFAULT_ARMS))
     r.add_argument("--jobs", type=int, default=4)
     r.add_argument("--timeout", type=int, default=3600, help="seconds per agent run")
     g = sub.add_parser("grade")
