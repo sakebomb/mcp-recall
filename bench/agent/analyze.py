@@ -209,13 +209,75 @@ def compare(base, treat, model):
     return {"base": base, "treat": treat, **res}
 
 
+def replicate_pairs(runs, base, treat):
+    """Per task, the (base, treat) run pairs, one per run id in which both arms ran
+    and were graded without an infrastructure failure."""
+    cells = {}
+    for r in runs:
+        cells.setdefault((r["task"], r["run_id"]), {})[r["arm"]] = r
+    per_task = {}
+    for (task, _), arms in sorted(cells.items()):
+        if base not in arms or treat not in arms:
+            continue
+        b, t = arms[base], arms[treat]
+        if b["infra_failure"] or t["infra_failure"] or b["resolved"] is None or t["resolved"] is None:
+            continue
+        per_task.setdefault(task, []).append((b, t))
+    return per_task
+
+
+def replicate_compare(run_ids, base, treat, model):
+    """The compression test (#414 follow-up 2): treat minus base solve rate with
+    several runs per task. The unit is the task: each task's mean difference over its
+    replicate pairs. Interval: percentile bootstrap over tasks. p: randomization test
+    that swaps the two arms' labels independently within each replicate pair."""
+    runs = [{**r, "run_id": rid} for rid in run_ids for r in load_runs(rid) if r["model"] == model]
+    return {"model": model, "run_ids": list(run_ids), **replicate_stats(runs, base, treat)}
+
+
+def replicate_stats(runs, base, treat):
+    pairs = replicate_pairs(runs, base, treat)
+    diffs = {task: [int(bool(t["resolved"])) - int(bool(b["resolved"])) for b, t in ps]
+             for task, ps in pairs.items()}
+    tasks = sorted(diffs)
+    n = len(tasks)
+    out = {"base": base, "treat": treat, "n_tasks": n, "n_pairs": sum(len(diffs[t]) for t in tasks)}
+    if not n:
+        return out
+    means = [statistics.mean(diffs[t]) for t in tasks]
+    obs = sum(means) / n
+    rng = random.Random(SEED)
+    out["diff"] = obs
+    out["diff_ci95"] = bootstrap_ci(n, lambda ix: sum(means[i] for i in ix) / n, rng)
+    hits = 0
+    for _ in range(RESAMPLES):
+        stat = sum(statistics.mean(d * rng.choice((-1, 1)) for d in diffs[t]) for t in tasks) / n
+        hits += abs(stat) >= abs(obs) - 1e-12
+    out["perm_p"] = (hits + 1) / (RESAMPLES + 1)
+    out["tasks_changed"] = sum(1 for t in tasks if any(diffs[t]))
+    paired = [pair for ps in pairs.values() for pair in ps]
+    for i, arm in enumerate((base, treat)):
+        out[f"{arm}_solve_rate"] = sum(bool(p[i]["resolved"]) for p in paired) / len(paired)
+    treated = [t for _, t in paired]
+    out["engagement"] = {k: None if any(r[k] is None for r in treated)
+                         else f"{sum(1 for r in treated if r[k] > 0)}/{len(treated)}"
+                         for k in ("summaries_delivered", "recall_calls")}
+    return out
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--run-id")
     p.add_argument("--compare", nargs=2, metavar=("BASE_RUN:ARM", "TREAT_RUN:ARM"),
                    help="follow-up comparison, reported as TREAT minus BASE")
     p.add_argument("--model", default="claude-haiku-5-5")
+    p.add_argument("--replicates", nargs="+", metavar="RUN_ID",
+                   help="replicate run ids for the compression test; use with --pair")
+    p.add_argument("--pair", nargs=2, metavar=("BASE_ARM", "TREAT_ARM"), default=("nohook", "recall"))
     a = p.parse_args()
+    if a.replicates:
+        print(json.dumps(replicate_compare(a.replicates, a.pair[0], a.pair[1], a.model), indent=1))
+        return
     if a.compare:
         res = compare(a.compare[0], a.compare[1], a.model)
         ci = res.get("diff_ci95")

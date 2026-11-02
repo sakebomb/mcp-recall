@@ -48,3 +48,35 @@ p.write_text("\n".join(json.dumps(e) for e in ev) + "\nnot json\n")
 assert A.stream_engagement(p) == (2, 1), A.stream_engagement(p)
 assert A.stream_engagement(p.parent / "missing.jsonl") == (None, None)
 print("stream checks pass")
+# Replicates (compression test): 4 tasks over run ids r1-r3, nohook vs recall.
+# A: 0->1 in all three (mean +1). B: 1->1 (0). C: (1,0,1)->(0,0,1), mean -1/3.
+# D: r1 0->1; r2 dropped for an infra failure; r3 has no recall run. Task-level diff
+# (1 + 0 - 1/3 + 1) / 4 = 5/12; pooling runs instead would give 0.8 - 0.5 = 0.3.
+def rep(t, rid, arm, ok, **kw):
+    return {**run(t, arm, ok, **kw), "run_id": rid}
+R = []
+for i, rid in enumerate(("r1", "r2", "r3")):
+    R += [rep("A", rid, "nohook", False), rep("A", rid, "recall", True, summaries_delivered=2 if i == 0 else 0)]
+    R += [rep("B", rid, "nohook", True), rep("B", rid, "recall", True)]
+    R += [rep("C", rid, "nohook", (True, False, True)[i]), rep("C", rid, "recall", i == 2)]
+R += [rep("D", "r1", "nohook", False), rep("D", "r1", "recall", True),
+      rep("D", "r2", "nohook", False), rep("D", "r2", "recall", True, infra_failure=True),
+      rep("D", "r3", "nohook", True)]
+s = A.replicate_stats(R, "nohook", "recall")
+assert (s["n_tasks"], s["n_pairs"], s["tasks_changed"]) == (4, 10, 3), s
+assert abs(s["diff"] - 5 / 12) < 1e-12, s["diff"]
+assert (s["nohook_solve_rate"], s["recall_solve_rate"]) == (0.5, 0.8), s
+assert s["engagement"] == {"summaries_delivered": "1/10", "recall_calls": "0/10"}, s["engagement"]
+# Randomization p: 6 tasks, 3 pairs each, all +1, so only 2 of 2^18 sign patterns are as extreme.
+S = [rep(t, rid, arm, arm == "recall") for t in range(6) for rid in ("r1", "r2", "r3") for arm in ("nohook", "recall")]
+strong = A.replicate_stats(S, "nohook", "recall")
+assert strong["diff"] == 1.0 and strong["perm_p"] < 0.001 and strong["diff_ci95"] == (1.0, 1.0), strong
+# Mixed signs within a task: 5 tasks of (+1, -1, +1) give diff 1/3, and the test is not extreme.
+M = [rep(t, rid, arm, (arm == "recall") == (rid != "r2")) for t in range(5) for rid in ("r1", "r2", "r3")
+     for arm in ("nohook", "recall")]
+mixed = A.replicate_stats(M, "nohook", "recall")
+assert abs(mixed["diff"] - 1 / 3) < 1e-12 and 0.05 < mixed["perm_p"] < 1.0, mixed
+# No differences at all -> p = 1.
+same = A.replicate_stats([r for r in R if r["task"] == "tB"], "nohook", "recall")
+assert same["diff"] == 0 and same["perm_p"] == 1.0, same
+print("replicate checks pass")
