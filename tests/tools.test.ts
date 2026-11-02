@@ -56,12 +56,27 @@ describe("MCP tool handlers", () => {
       expect(result).toContain("no item found");
     });
 
-    it("returns summary with header when no query given", () => {
+    // The summary is what the header already delivered; an id alone must show more.
+    it("returns the stored content, not the summary, when given only an id", () => {
       const stored = storeOutput(db, makeInput());
       const result = toolRetrieve(db, { id: stored.id });
       expect(result).toContain(stored.id);
       expect(result).toContain("mcp__github__list_issues");
-      expect(result).toContain("Fix bug");
+      expect(result).toContain('"number":1'); // raw JSON lives only in full_content
+    });
+
+    it("accepts recall_id for id, and an id copied with the header's recall: prefix", () => {
+      const stored = storeOutput(db, makeInput());
+      for (const args of [{ recall_id: stored.id }, { id: `recall:${stored.id}` }, { id: ` ${stored.id} ` }]) {
+        expect(toolRetrieve(db, args)).toContain('"number":1');
+      }
+    });
+
+    it("says where to find the id when none is given", () => {
+      const result = toolRetrieve(db, {});
+      expect(result).toContain('"id"');
+      expect(result).toContain("[recall:");
+      expect(result).toContain("recall__list_stored");
     });
 
     it("returns full_content when query is given", () => {

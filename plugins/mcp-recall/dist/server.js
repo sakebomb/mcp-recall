@@ -23549,16 +23549,23 @@ function reductionPct(original, summary) {
 function itemHeader(item) {
   return `[recall:${item.id} \xB7 ${item.tool_name} \xB7 ${formatDate(item.created_at)} \xB7 ${formatBytes(item.original_size)}\u2192${formatBytes(item.summary_size)}]`;
 }
+var MISSING_ID = '[recall: pass "id": the recall_\u2026 value from the [recall:recall_\u2026 \xB7 \u2026] line above a summary, ' + 'e.g. recall__retrieve({"id": "recall_1a2b3c4d"}). recall__list_stored lists stored ids.]';
+function retrieveId(args) {
+  return (args.id ?? args.recall_id ?? "").trim().replace(/^\[?recall:(?=recall_)/, "");
+}
 function toolRetrieve(db, args) {
   const config2 = loadConfig();
   const cap = args.max_bytes ?? config2.retrieve.default_max_bytes;
-  const item = retrieveOutput(db, args.id);
+  const id = retrieveId(args);
+  if (!id)
+    return MISSING_ID;
+  const item = retrieveOutput(db, id);
   if (!item) {
-    return `[recall: no item found with id "${args.id}"]`;
+    return `[recall: no item found with id "${id}"]`;
   }
-  recordAccess(db, args.id);
+  recordAccess(db, id);
   const header = itemHeader(item);
-  const mode = args.mode ?? (args.query ? "peek" : "summary");
+  const mode = args.mode ?? "peek";
   if (item.full_retained === 0 && mode !== "summary") {
     return `${header}
 ${item.summary}
@@ -23576,12 +23583,12 @@ ${content}${truncated}`;
 ${item.summary}`;
   if (mode === "full")
     return fullCapped();
-  const peek = retrievePeek(db, args.id, args.query);
+  const peek = retrievePeek(db, id, args.query);
   if (peek)
     return `${header}
 ${peek}`;
   if (args.query) {
-    const snippet = retrieveSnippet(db, args.id, args.query);
+    const snippet = retrieveSnippet(db, id, args.query);
     if (snippet)
       return `${header}
 ${snippet}`;
@@ -24007,10 +24014,11 @@ var server = new McpServer({
   name: "recall",
   version: version2
 });
-server.tool("recall__retrieve", "Fetch stored content from a previous tool call, in graduated tiers. mode='summary' (default without a query) returns the compressed summary; mode='peek' (default with a query) returns a bounded context window \u2014 top matching chunks for a query, or head chunks without \u2014 far cheaper than full; mode='full' returns the verbatim content (capped by max_bytes). Escalate summary \u2192 peek \u2192 full only as needed.", {
-  id: string2().describe("recall_* item ID"),
+server.tool("recall__retrieve", "Fetch stored content from a previous tool call by its id, the recall_\u2026 value in the [recall:recall_\u2026 \xB7 \u2026] line above a summary. mode='peek' (the default) returns a bounded context window \u2014 top matching chunks for a query, or the head of the content without one \u2014 far cheaper than full; mode='full' returns the verbatim content (capped by max_bytes); mode='summary' repeats the summary you already have. Escalate peek \u2192 full only as needed.", {
+  id: string2().optional().describe("Required: the recall_\u2026 item ID, e.g. recall_1a2b3c4d"),
+  recall_id: string2().optional().describe("Same as id"),
   query: string2().optional().describe("FTS query to focus a peek on matching chunks"),
-  mode: _enum(["summary", "peek", "full"]).optional().describe("Retrieval tier. Defaults to 'peek' when a query is given, else 'summary'."),
+  mode: _enum(["summary", "peek", "full"]).optional().describe("Retrieval tier. Defaults to 'peek'."),
   max_bytes: number2().optional().describe("Override default 8KB cap on returned bytes (applies to mode='full')")
 }, safeTool((args) => ({
   content: [{ type: "text", text: toolRetrieve(db, args) }]

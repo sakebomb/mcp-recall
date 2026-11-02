@@ -13757,7 +13757,7 @@ var BOLD = "\x1B[1m", GREEN = "\x1B[32m", YELLOW = "\x1B[33m", RED = "\x1B[31m",
 
 Session context from previous sessions is automatically injected at startup (pinned items, notes, recent activity). If it was truncated, call \`recall__context()\` for the full view.
 
-When a tool output was compressed by mcp-recall (you'll see a summary with a recall ID like \`recall_abc123\`), call \`recall__retrieve("recall_abc123")\` when you need the full content.
+When a tool output was compressed by mcp-recall (you'll see a \`[recall:recall_abc123 \xB7 \u2026]\` line above a summary), call \`recall__retrieve({"id": "recall_abc123"})\` for the content behind it, or add a \`query\` to see the parts that match.
 
 Proactively:
 - \`recall__note("\u2026")\` \u2014 save important decisions or context worth keeping across sessions
@@ -13961,6 +13961,7 @@ function reductionPct(original, summary) {
     return "0%";
   return `${((1 - summary / original) * 100).toFixed(0)}%`;
 }
+var MISSING_ID = '[recall: pass "id": the recall_\u2026 value from the [recall:recall_\u2026 \xB7 \u2026] line above a summary, ' + 'e.g. recall__retrieve({"id": "recall_1a2b3c4d"}). recall__list_stored lists stored ids.]';
 var OVERFLOW_SESSIONS = 3;
 function formatSampleCount(sample) {
   return sample.overflow.length > 0 ? `${sample.items.length} of ${sample.total.toLocaleString("en-US")}` : `${sample.items.length}`;
