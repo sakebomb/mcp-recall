@@ -14163,8 +14163,22 @@ var STOPWORDS = new Set([
   "false",
   "none",
   "nan",
-  "undefined"
+  "undefined",
+  "www",
+  "com",
+  "org",
+  "net"
 ]);
+var STRUCTURE_RES = [
+  /^([ \t]*-[ \t]+'?)(?:[a-z][\w-]{0,31}(?=[ \t]+["[])|text:|\/url:)/gm,
+  /\\?"[A-Za-z_]\w{0,63}\\?"[ \t]*:/g,
+  /\[[a-z][\w-]{0,31}(?:=[^\]\s]{0,200})?\]/g,
+  /\b[a-z]{1,10}:\/\/(?:www\.)?/g
+];
+var GENERATED_ID_RE = /^(?=.*\d)(?:[0-9a-f]{4,}|[A-Za-z0-9]{16,})$/i;
+function withoutStructure(content) {
+  return STRUCTURE_RES.reduce((text, re) => text.replace(re, (_m, lead) => typeof lead === "string" ? lead : " "), content);
+}
 function isIdentifier(token) {
   return token.includes("_") || CAMEL_RE.test(token);
 }
@@ -14172,9 +14186,11 @@ function extractHints(content, maxHints = DEFAULT_MAX_HINTS) {
   if (maxHints <= 0)
     return [];
   const acc = new Map;
-  for (const match of content.matchAll(TOKEN_RE)) {
+  for (const match of withoutStructure(content).matchAll(TOKEN_RE)) {
     const raw = match[0];
     if (raw.length < MIN_TOKEN_LEN || raw.length > MAX_TOKEN_LEN)
+      continue;
+    if (GENERATED_ID_RE.test(raw))
       continue;
     const key = raw.toLowerCase();
     if (STOPWORDS.has(key))

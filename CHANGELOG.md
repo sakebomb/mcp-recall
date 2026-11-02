@@ -8,6 +8,14 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ### Fixed
 
+- **Search hints name content, not structure** (#428). The `search:` hints
+  in the recall header ranked words by frequency, so structure repeated once
+  per record won: `ref`, `cursor` and `pointer` on a browser page, JSON keys
+  such as `timeZone` and `folderId`, `https` and `www`, and generated ids.
+  Keys, `[key=value]` attributes, page-snapshot roles and URL schemes no
+  longer count, and hex and long letter-and-digit ids are skipped. A word
+  that is a key in one place and a value in another still counts as a value.
+
 - **Playwright output keeps the page** (#424). Claude Code hands Playwright
   results to the hook as a top-level array of text blocks, and the hook
   serialized that array to JSON, so the handler never saw a line of the page:

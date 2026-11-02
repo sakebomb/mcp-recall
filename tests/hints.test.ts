@@ -87,6 +87,67 @@ describe("extractHints", () => {
 
 // ── FTS round-trip: every emitted hint must actually retrieve its item ────────
 
+// Structure repeats once per record, so it out-counts the words a reader would
+// search for: keys, attributes, roles, URL scaffolding and hex ids never hint.
+describe("extractHints — structure is not a hint", () => {
+  test("ignores page snapshot roles and attributes, keeping the page's words", () => {
+    const rows = ["Alamodome attendance record", "Spurs Alamodome return", "Wembanyama Alamodome debut"];
+    const snapshot = rows.flatMap((title, i) => [
+      `- generic [ref=e${i * 4}]:`,
+      `  - link "${title}" [ref=e${i * 4 + 1}] [cursor=pointer]:`,
+      `    - /url: /f/nba/${i}`,
+      `  - paragraph [ref=e${i * 4 + 2}]: Submitted by`,
+    ]).join("\n");
+    const hints = extractHints(snapshot);
+    expect(hints[0]).toBe("Alamodome");
+    for (const markup of ["generic", "ref", "cursor", "pointer", "link", "url", "paragraph"]) {
+      expect(hints).not.toContain(markup);
+    }
+  });
+
+  test("ignores JSON keys, keeping the values", () => {
+    const events = ["Quarterly planning", "Planning retro", "Budget planning"].map((summary) =>
+      JSON.stringify({ summary, timeZone: "America/New_York", startDateTime: "2026-11-02", htmlLink: "x" })
+    );
+    const hints = extractHints(`[${events.join(",\n")}]`);
+    expect(hints.map((h) => h.toLowerCase())).toContain("planning");
+    for (const key of ["timeZone", "startDateTime", "htmlLink", "summary"]) expect(hints).not.toContain(key);
+  });
+
+  test("ignores URL scaffolding, hex ids and opaque ids", () => {
+    const content = [
+      "https://www.example.com/thread/a197f309f6243d7 deploy rollback MdwqLOBsFOCRitL54HwXzSQY0vnj64cg",
+      "https://www.example.com/thread/fd7a0c deploy rollback MdwqLOBsFOCRitL54HwXzSQY0vnj64cg",
+      "http://www.example.com/thread/9e1b4c2 deploy MdwqLOBsFOCRitL54HwXzSQY0vnj64cg",
+    ].join("\n");
+    const hints = extractHints(content);
+    for (const noise of ["https", "http", "www", "com", "a197f309f6243d7", "fd7a0c", "MdwqLOBsFOCRitL54HwXzSQY0vnj64cg"]) {
+      expect(hints).not.toContain(noise);
+    }
+    expect(hints).toContain("deploy");
+    expect(hints).toContain("rollback");
+  });
+
+  test("keeps the words of a plain markdown list", () => {
+    expect(extractHints("- timeout\n- timeout\n- retry\n- fixed: the parser")).toEqual(
+      expect.arrayContaining(["timeout", "retry", "fixed", "parser"])
+    );
+  });
+
+  // Every stored output passes through here; an unclosed run must not go quadratic.
+  test("stays linear on unclosed attributes and long blank runs", () => {
+    for (const content of ["[a=".repeat(300_000), "[a=b".repeat(250_000), "\n".repeat(1_000_000) + "x", " \n".repeat(500_000)]) {
+      const start = performance.now();
+      extractHints(content);
+      expect(performance.now() - start).toBeLessThan(1000);
+    }
+  });
+
+  test("still hints a key-shaped word that appears as a value", () => {
+    expect(extractHints('{"name": "sessionToken", "note": "sessionToken rotated"}')[0]).toBe("sessionToken");
+  });
+});
+
 describe("extractHints — FTS round-trip", () => {
   const PROJECT_KEY = "hintsroundtrip01";
   let db: Database;

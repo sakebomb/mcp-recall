@@ -34,7 +34,35 @@ const STOPWORDS = new Set([
   "not", "but", "you", "your", "yours", "all", "any", "can", "use", "used",
   "using", "its", "out", "per", "via", "one", "two", "get", "set", "new",
   "null", "true", "false", "none", "nan", "undefined",
+  "www", "com", "org", "net",
 ]);
+
+/**
+ * Structure repeats once per record, so on frequency alone it beats the words a
+ * reader would search for (#424 surfaced "ref", "cursor", "pointer"). Each span
+ * is blanked before counting: a JSON key (escaped or not), a `[key=value]`
+ * attribute, a page-snapshot role (a `- ` line's first word when a name or an
+ * attribute follows, and the bare `text:` and `/url:` lines), and a URL scheme.
+ * Every quantifier is bounded or stays on one line: this runs on each stored
+ * output, and an unbounded scan from every `[` or blank line is quadratic.
+ * Roles go first: they are recognised by the attribute that follows them.
+ */
+const STRUCTURE_RES = [
+  /^([ \t]*-[ \t]+'?)(?:[a-z][\w-]{0,31}(?=[ \t]+["[])|text:|\/url:)/gm,
+  /\\?"[A-Za-z_]\w{0,63}\\?"[ \t]*:/g,
+  /\[[a-z][\w-]{0,31}(?:=[^\]\s]{0,200})?\]/g,
+  /\b[a-z]{1,10}:\/\/(?:www\.)?/g,
+];
+
+/**
+ * Generated ids, not search terms: hex (`a197f309f6243d7`, `fd7a0c`), or 16 or
+ * more letters and digits (Drive and Gmail ids). An identifier with `_` is kept.
+ */
+const GENERATED_ID_RE = /^(?=.*\d)(?:[0-9a-f]{4,}|[A-Za-z0-9]{16,})$/i;
+
+function withoutStructure(content: string): string {
+  return STRUCTURE_RES.reduce((text, re) => text.replace(re, (_m, lead) => (typeof lead === "string" ? lead : " ")), content);
+}
 
 interface TokenAcc {
   display: string;
@@ -59,9 +87,10 @@ export function extractHints(content: string, maxHints = DEFAULT_MAX_HINTS): str
   // matchAll iterates lazily — it never materializes a full token array and
   // does not mutate TOKEN_RE.lastIndex, so this is safe to call repeatedly on
   // large content without a peak-memory spike.
-  for (const match of content.matchAll(TOKEN_RE)) {
+  for (const match of withoutStructure(content).matchAll(TOKEN_RE)) {
     const raw = match[0];
     if (raw.length < MIN_TOKEN_LEN || raw.length > MAX_TOKEN_LEN) continue;
+    if (GENERATED_ID_RE.test(raw)) continue;
     const key = raw.toLowerCase();
     if (STOPWORDS.has(key)) continue;
 
