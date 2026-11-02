@@ -1,42 +1,125 @@
 /**
- * Playwright handler — compresses browser_snapshot accessibility trees into
- * interactive elements and visible text, discarding raw HTML structure.
+ * Playwright handler — turns a page snapshot into a flat outline the agent can
+ * still act on: every visible name and text, each element's ref, and each link's
+ * target, without the wrappers, nesting and cursor flags that make up most of it.
+ *
+ * Playwright MCP answers browser_snapshot, every action (navigate, click, …) and
+ * browser_evaluate in "### " sections: the result, the code it ran, the page URL
+ * and title, a "### Snapshot" ```yaml block and the console events. Only the
+ * snapshot and the events are cut; every other section is kept as it is (#424).
  */
 import type { CompressionResult, Handler } from "./types";
 import { extractText } from "./types";
 
-const INTERACTIVE_ROLES = new Set([
-  "button",
-  "link",
-  "textbox",
-  "input",
-  "checkbox",
-  "radio",
-  "select",
-  "combobox",
-  "menuitem",
-  "tab",
-  "searchbox",
-  "spinbutton",
-  "slider",
-  "switch",
+const SNAPSHOT_HEADING = "### Snapshot";
+const EVENTS_HEADING = "### Events";
+const EVENT_LINES = 5;
+const EMPTY = "[snapshot: no interactive elements or visible text extracted]";
+
+/** Sections that open a Playwright MCP page response: an action, an evaluate, or a snapshot. */
+const PAGE_SECTION = /^### (Snapshot|Result|Ran Playwright code)$/m;
+
+/** Roles kept with no name or text: the agent acts on them, or they group what follows. */
+const KEEP_BARE = new Set([
+  "article", "row", "dialog", "form", "table", "alert",
+  "button", "link", "textbox", "searchbox", "combobox", "checkbox", "radio",
+  "slider", "spinbutton", "switch", "tab", "menuitem", "option",
 ]);
 
-const TEXT_ROLES = new Set([
-  "heading",
-  "paragraph",
-  "statictext",
-  "text",
-  "label",
-  "status",
-  "alert",
-  "cell",
-  "columnheader",
-  "rowheader",
-]);
+/** Attributes kept as states. ref is kept on its own; cursor, active and level are dropped. */
+const STATES = new Set(["checked", "disabled", "expanded", "selected", "pressed", "required"]);
 
-const MAX_INTERACTIVE = 20;
-const MAX_TEXT_CHARS = 400;
+// role "name" [attr] [attr=v]: text
+const LINE = /^([a-z][\w-]*)(?:\s+"((?:[^"\\]|\\.)*)")?((?:\s+\[[^\]]*\])*)\s*(?::\s*(.*))?$/i;
+
+type Node = { role: string; name: string; ref: string; states: string[]; text: string };
+
+function isPlaywrightPage(text: string): boolean {
+  return PAGE_SECTION.test(text);
+}
+
+export function isPlaywrightResponse(output: unknown): boolean {
+  return isPlaywrightPage(extractText(output));
+}
+
+/** YAML single-quotes a line holding ": " or a quote: `'heading "''x'': y" [ref=e1]':`. */
+function unquoteYaml(s: string): string {
+  const m = s.match(/^'(.*)'(:?)$/);
+  return m ? m[1].replace(/''/g, "'") + m[2] : s;
+}
+
+function unquoteValue(v: string): string {
+  const t = v.trim();
+  return t.length >= 2 && t.startsWith('"') && t.endsWith('"') ? t.slice(1, -1) : t;
+}
+
+function parseLine(raw: string): Node | { url: string } | null {
+  const s = raw.trim();
+  if (!s.startsWith("- ")) return null;
+  const body = unquoteYaml(s.slice(2).trim());
+  if (body.startsWith("/url:")) return { url: unquoteValue(body.slice(5)) };
+  const m = body.match(LINE);
+  if (!m) return null;
+  const [, role, name = "", attrs = "", text = ""] = m;
+  let ref = "";
+  const states: string[] = [];
+  for (const [, attr] of attrs.matchAll(/\[([^\]]*)\]/g)) {
+    const [key, value] = attr.split("=");
+    if (key === "ref") ref = value ?? "";
+    else if (STATES.has(key)) states.push(attr);
+  }
+  return { role, name, ref, states, text: unquoteValue(text) };
+}
+
+function render(n: Node): string {
+  const head = [n.role, n.name && `"${n.name}"`, n.ref, ...n.states].filter(Boolean).join(" ");
+  return n.text ? `${head}: ${n.text}` : head;
+}
+
+/** One line per element worth reading or acting on, in page order, unindented. */
+function outline(tree: string): string[] {
+  const out: string[] = [];
+  let linkAt = -1;
+  let lastSaid = "";
+  for (const line of tree.split("\n")) {
+    const node = parseLine(line);
+    if (!node) continue;
+    if ("url" in node) {
+      if (linkAt >= 0 && linkAt === out.length - 1) out[linkAt] += ` → ${node.url}`;
+      continue;
+    }
+    // A bare wrapper, or a line that repeats the one above (a strong inside its link).
+    if (!node.name && !node.text && !KEEP_BARE.has(node.role)) continue;
+    if (!node.name && node.text && node.text === lastSaid) continue;
+    out.push(render(node));
+    lastSaid = node.name || node.text;
+    linkAt = node.role === "link" ? out.length - 1 : -1;
+  }
+  return out;
+}
+
+/** The YAML tree inside a snapshot section's ```yaml fence. */
+function snapshotTree(section: string): string {
+  const open = section.indexOf("```yaml");
+  const from = open >= 0 ? open + "```yaml".length : SNAPSHOT_HEADING.length;
+  const close = section.indexOf("\n```", from);
+  return section.slice(from, close >= 0 ? close : undefined);
+}
+
+function renderSnapshot(tree: string): string {
+  const lines = outline(tree);
+  return lines.length > 0
+    ? `${SNAPSHOT_HEADING} (outline: one line per element, refs as on the page)\n${lines.join("\n")}`
+    : "";
+}
+
+/** The first few events and every error; the rest is console noise (hundreds of warnings). */
+function trimEvents(section: string): string {
+  const [heading, ...lines] = section.split("\n").filter((l) => l.trim());
+  const kept = lines.filter((l, i) => i < EVENT_LINES || l.includes("[ERROR]"));
+  const more = lines.length - kept.length;
+  return [heading, ...kept, ...(more > 0 ? [`… (+${more} more event lines)`] : [])].join("\n");
+}
 
 export const playwrightHandler: Handler = (
   _toolName: string,
@@ -44,45 +127,18 @@ export const playwrightHandler: Handler = (
 ): CompressionResult => {
   const raw = extractText(output);
   const originalSize = Buffer.byteLength(raw, "utf8");
-
-  const interactive: string[] = [];
-  const textChunks: string[] = [];
-
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-
-    // Accessibility tree lines look like:  - role "label" [attr=val]
-    const match = trimmed.match(/^-\s+(\w+)\s+"([^"]*)"(.*)$/i);
-    if (!match) continue;
-
-    const [, role, label] = match;
-    const roleLower = role.toLowerCase();
-
-    if (INTERACTIVE_ROLES.has(roleLower) && interactive.length < MAX_INTERACTIVE) {
-      interactive.push(`[${roleLower} "${label}"]`);
-    } else if (TEXT_ROLES.has(roleLower) && label.trim().length > 0) {
-      textChunks.push(label.trim());
-    }
+  // A bare tree, with none of the sections a page response carries.
+  if (!isPlaywrightPage(raw)) {
+    return { summary: renderSnapshot(raw) || EMPTY, originalSize };
   }
-
-  const textContent = textChunks
-    .join(" ")
-    .slice(0, MAX_TEXT_CHARS)
-    .trimEnd();
-
-  const parts: string[] = [];
-  if (interactive.length > 0) {
-    parts.push(`Interactive: ${interactive.join(", ")}`);
-  }
-  if (textContent.length > 0) {
-    parts.push(`Visible text: ${textContent}`);
-  }
-
-  const summary =
-    parts.length > 0
-      ? parts.join("\n")
-      : "[snapshot: no interactive elements or visible text extracted]";
-
-  return { summary, originalSize };
+  const summary = raw
+    .split(/^(?=### )/m)
+    .map((section) => {
+      if (section.startsWith(SNAPSHOT_HEADING)) return renderSnapshot(snapshotTree(section));
+      if (section.startsWith(EVENTS_HEADING)) return trimEvents(section);
+      return section.trim();
+    })
+    .filter(Boolean)
+    .join("\n");
+  return { summary: summary || EMPTY, originalSize };
 };

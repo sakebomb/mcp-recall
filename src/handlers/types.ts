@@ -71,15 +71,6 @@ export function payloadByteLength(output: unknown): number {
   return Buffer.byteLength(JSON.stringify(output), "utf8");
 }
 
-function isTopLevelArrayPayload(output: unknown): boolean {
-  if (Array.isArray(output)) return true;
-  if (typeof output === "string") {
-    const trimmed = output.trimStart();
-    return trimmed.startsWith("[");
-  }
-  return false;
-}
-
 /**
  * Extracts plain text from an MCP tool result.
  * MCP results arrive as { content: [{ type: "text", text: "..." }, ...] }
@@ -87,8 +78,10 @@ function isTopLevelArrayPayload(output: unknown): boolean {
  * dropped so they are not stored or hashed. Falls back to JSON serialization
  * for unrecognized shapes.
  *
- * A text-only top-level array is left as JSON.stringify so jsonHandler
- * routing stays unchanged (scroll/click payloads in the same family).
+ * A top-level array counts too: Claude Code delivers Playwright, context7 and
+ * Sentry results that way, and stringifying it hid every line from the text
+ * handlers (#424). Routing then follows the text, so JSON text still reaches
+ * jsonHandler.
  */
 export function extractText(output: unknown): string {
   const blocks = asMcpContentBlocks(output);
@@ -97,7 +90,7 @@ export function extractText(output: unknown): string {
     const hasNonText = blocks.some((b) => b.type !== "text");
     // Non-text blocks: never JSON.stringify the image bytes into the store.
     if (hasNonText) return text;
-    if (text.length > 0 && !isTopLevelArrayPayload(output)) return text;
+    if (text.length > 0) return text;
   }
 
   if (typeof output === "string") return output;

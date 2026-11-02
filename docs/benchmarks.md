@@ -159,10 +159,12 @@ The reduction depends on the shape of the output, not on how large it is. Long, 
 | | Examples (from the measurement above) | Why |
 |---|---|---|
 | **Excellent, 95–100%** | Tavily extract, Hugging Face, browser automation and screenshots (image blocks stripped) | A dedicated handler or profile keeps only the fields that matter; images carry no searchable text |
-| **Good, 73–92%** | Playwright snapshots (88%), Tavily search (84%), Gmail search (85%), `git diff` (92%), `git show` (80%), `cat` of large files (73%) | Structured enough for a handler to summarize; the full text stays retrievable |
+| **Good, 73–92%** | Playwright snapshots (88%, before the #424 fix; see below), Tavily search (84%), Gmail search (85%), `git diff` (92%), `git show` (80%), `cat` of large files (73%) | Structured enough for a handler to summarize; the full text stays retrievable |
 | **Moderate, 50–70%** | `sed`, `python3`, `gh`, shell loops, Mermaid rendering (60%) | Mixed output with no dedicated handler; the generic fallback trims the head and tail |
 | **Weak, 30–46%** | `grep` (37%), `ssh` (38%), `timeout` (32%), `cd …` chains (46%) | Usually short output, or a wrapper that hides the real command from command-aware routing |
 | **Fixed in 1.15.1** | Cloudflare docs search: 37% before, 89% with the new bundled profile | No handler matched it; a profile now extracts title, URL and an excerpt |
+
+**The Playwright figures overstate what was useful.** Until [#424](https://github.com/sakebomb/mcp-recall/issues/424), a snapshot reduced to an empty-page notice and other Playwright actions to their first 4 KB, mostly navigation, so part of that reduction was the page itself. The fixed handler keeps every element's name, text, ref and link target, and saved 62% over 164 Playwright MCP 0.0.68 responses from a forum site.
 
 Bash rows in this table are as recorded by earlier releases; see the note above on what 1.16.0 changes. Small tools with very few calls (for example, three Vikunja calls) are too little data to judge. If a tool you use lands in the weak rows, a [profile](profiles-quickstart.md) is usually the fix.
 
@@ -172,7 +174,7 @@ Individual MCP calls:
 
 | Tool | Original | Delivered | Reduction |
 |---|---|---|---|
-| `mcp__playwright__snapshot` | 56.2 KB | 299 B | 99.5% |
+| `mcp__playwright__snapshot` (before #424; see above) | 56.2 KB | 299 B | 99.5% |
 | `mcp__github__list_issues` (20 items) | 59.1 KB | 1.1 KB | 98.1% |
 | `mcp__filesystem__read_file` (large file) | 85.0 KB | 2.2 KB | 97.4% |
 | Analytics CSV (500 rows) | 85.0 KB | 222 B | 99.7% |
