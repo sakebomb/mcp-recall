@@ -23551,7 +23551,8 @@ function itemHeader(item) {
 }
 var MISSING_ID = '[recall: pass "id": the recall_\u2026 value from the [recall:recall_\u2026 \xB7 \u2026] line above a summary, ' + 'e.g. recall__retrieve({"id": "recall_1a2b3c4d"}). recall__list_stored lists stored ids.]';
 function retrieveId(args) {
-  return (args.id ?? args.recall_id ?? "").trim().replace(/^\[?recall:(?=recall_)/, "");
+  const given = [args.id, args.recall_id].map((v) => v?.trim() ?? "").find(Boolean) ?? "";
+  return given.match(/recall_[0-9a-f]+/i)?.[0] ?? given;
 }
 function toolRetrieve(db, args) {
   const config2 = loadConfig();
@@ -24015,8 +24016,8 @@ var server = new McpServer({
   version: version2
 });
 server.tool("recall__retrieve", "Fetch stored content from a previous tool call by its id, the recall_\u2026 value in the [recall:recall_\u2026 \xB7 \u2026] line above a summary. mode='peek' (the default) returns a bounded context window \u2014 top matching chunks for a query, or the head of the content without one \u2014 far cheaper than full; mode='full' returns the verbatim content (capped by max_bytes); mode='summary' repeats the summary you already have. Escalate peek \u2192 full only as needed.", {
-  id: string2().optional().describe("Required: the recall_\u2026 item ID, e.g. recall_1a2b3c4d"),
-  recall_id: string2().optional().describe("Same as id"),
+  id: string2().optional().describe("The recall_\u2026 item ID, e.g. recall_1a2b3c4d. Send this one"),
+  recall_id: string2().optional().describe("Alias for id; id wins when both are given"),
   query: string2().optional().describe("FTS query to focus a peek on matching chunks"),
   mode: _enum(["summary", "peek", "full"]).optional().describe("Retrieval tier. Defaults to 'peek'."),
   max_bytes: number2().optional().describe("Override default 8KB cap on returned bytes (applies to mode='full')")

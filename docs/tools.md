@@ -64,7 +64,7 @@ Graduated retrieval across three tiers — escalate only as far as you need:
 | `full` | The verbatim content, capped at `max_bytes` (default 8 KB) | — |
 | `summary` | The compressed summary, which the header already delivered | — |
 
-- `id` is the `recall_…` value in the `[recall:recall_… · …]` line above a summary. `recall_id` is accepted for it, and so is an id copied with the `recall:` prefix. A call with no id returns a note saying where to find one.
+- `id` is the `recall_…` value in the `[recall:recall_… · …]` line above a summary. `recall_id` is accepted for it (`id` wins when both are given), and so is an id copied with the `recall:` prefix or inside a whole pasted header line. A call with no id returns a note saying where to find one.
 - With no `mode`, a call peeks. Earlier releases returned the summary for an id alone, which the agent already had.
 - `peek` with a `query` falls back to full content if the item has no matching chunks (e.g. rows stored before chunking).
 - `peek` is bounded independently of `max_bytes` (a few chunks); `max_bytes` caps only `mode: "full"`.

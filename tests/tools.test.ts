@@ -67,7 +67,13 @@ describe("MCP tool handlers", () => {
 
     it("accepts recall_id for id, and an id copied with the header's recall: prefix", () => {
       const stored = storeOutput(db, makeInput());
-      for (const args of [{ recall_id: stored.id }, { id: `recall:${stored.id}` }, { id: ` ${stored.id} ` }]) {
+      for (const args of [
+        { recall_id: stored.id },
+        { id: `recall:${stored.id}` },
+        { id: ` ${stored.id} ` },
+        { id: `[recall:${stored.id} · 3.1KB→1.2KB (61% reduction)]` },
+        { id: "", recall_id: stored.id },
+      ]) {
         expect(toolRetrieve(db, args)).toContain('"number":1');
       }
     });

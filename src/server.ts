@@ -60,8 +60,8 @@ server.tool(
   "recall__retrieve",
   "Fetch stored content from a previous tool call by its id, the recall_… value in the [recall:recall_… · …] line above a summary. mode='peek' (the default) returns a bounded context window — top matching chunks for a query, or the head of the content without one — far cheaper than full; mode='full' returns the verbatim content (capped by max_bytes); mode='summary' repeats the summary you already have. Escalate peek → full only as needed.",
   {
-    id: z.string().optional().describe("Required: the recall_… item ID, e.g. recall_1a2b3c4d"),
-    recall_id: z.string().optional().describe("Same as id"),
+    id: z.string().optional().describe("The recall_… item ID, e.g. recall_1a2b3c4d. Send this one"),
+    recall_id: z.string().optional().describe("Alias for id; id wins when both are given"),
     query: z.string().optional().describe("FTS query to focus a peek on matching chunks"),
     mode: z
       .enum(["summary", "peek", "full"])

@@ -121,9 +121,13 @@ const MISSING_ID =
   '[recall: pass "id": the recall_… value from the [recall:recall_… · …] line above a summary, ' +
   'e.g. recall__retrieve({"id": "recall_1a2b3c4d"}). recall__list_stored lists stored ids.]';
 
-/** The id as given, as `recall_id`, or copied with the header's `recall:` prefix. */
+/**
+ * The id as given or as `recall_id` (the first that is not blank), or the
+ * recall_… id inside a pasted header line such as `[recall:recall_1a2b · 3KB]`.
+ */
 function retrieveId(args: RetrieveArgs): string {
-  return (args.id ?? args.recall_id ?? "").trim().replace(/^\[?recall:(?=recall_)/, "");
+  const given = [args.id, args.recall_id].map((v) => v?.trim() ?? "").find(Boolean) ?? "";
+  return given.match(/recall_[0-9a-f]+/i)?.[0] ?? given;
 }
 
 /**
