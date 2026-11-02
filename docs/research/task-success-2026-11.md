@@ -3,25 +3,30 @@
 *A paired task-success pilot on SWE-bench Verified, November 2026. This is a dated record: later
 results go in a new report, not into this one. Tracks [#414](https://github.com/sakebomb/mcp-recall/issues/414).*
 
-**DRAFT for review.** Every number below comes from `bench/agent/analyze.py` output or a count over the
-sealed event streams. Nothing here is published until the maintainer approves it.
+**DRAFT for review.** Every registered number below comes from `bench/agent/analyze.py` output or a count
+over the sealed event streams. Numbers labelled post hoc (sensitivity intervals, multiplicity and
+simulation figures) come from an independent review run after grading. Nothing here is published until
+the maintainer approves it.
 
 ## Summary
 
-- **Sonnet 5.5 and Opus 5.5: no measurable effect.** On 45 hard SWE-bench Verified tasks, Sonnet solved
-  25 with mcp-recall and 25 without (difference 0.0 points, 95% interval −8.9 to +8.9). Opus solved 37
-  with and 35 without (+4.4, interval 0.0 to +11.1).
-- **Haiku 5.5: a measured harm by the rule fixed in advance.** It solved 21 with and 25 without
-  (−8.9 points, bootstrap interval −17.8 to −2.2, entirely below 0). The exact McNemar test on the same
-  pairs is not significant (p = 0.125), and the report gives both.
-- **The Haiku cost is not compression.** A pre-registered follow-up installed mcp-recall with its
-  output-replacing hook removed: Haiku again solved 21, against 25 in a second plain run. With compression
-  added back on top, it still solved 21. What costs Haiku is what installing adds to every session (the
-  CLAUDE.md instructions, the session-start snapshot and 11 tool definitions), though no single follow-up
-  comparison is significant.
+- **No model showed an effect we can tell apart from chance.** On 45 hard SWE-bench Verified tasks,
+  Sonnet 5.5 solved 25 with mcp-recall and 25 without (difference 0.0 points, 95% interval −8.9 to +8.9).
+  Opus 5.5 solved 37 with and 35 without (+4.4, interval 0.0 to +11.1). The largest harm each interval
+  still allows is 8.9 points for Sonnet and 0 for Opus.
+- **Haiku 5.5 lost four tasks and gained none, and the pre-registered harm rule fired.** It solved 21
+  with and 25 without (−8.9 points, bootstrap interval −17.8 to −2.2). We cannot tell this from noise at
+  this size. The exact McNemar test gives p = 0.125. With three models, the rule fires on at least one of
+  them about 6% of the time when there is no effect at all. And two identical Haiku runs without the
+  plugin disagreed on 8 of the 45 tasks.
+- **The follow-up did not identify a cause.** A second plain run solved 25 again, and installs with and
+  without the output-replacing hook both solved 21. That is weak evidence that installed Haiku runs solve
+  fewer tasks. It cannot separate the cost of installing from the cost of compression, or either from
+  chance.
 - **mcp-recall rarely engaged on these tasks, and the agent never retrieved.** Summaries replaced output
   in 3 to 8 of each model's 45 runs. Across all 165 recall-arm runs the agent called a `recall__*` tool
-  zero times; where output was cut, it re-ran a narrower command instead.
+  zero times. Where output was cut, it re-ran a narrower command instead. This pilot mostly measured
+  having mcp-recall installed, not what its compression does to the agent.
 
 All runs, their full event streams and the grading logs are in the evidence archive, checksummed.
 Total API spend for every round, including the smoke round and the superseded attempt: $36.88.
@@ -93,12 +98,31 @@ Hard set (primary), 45 paired tasks per model:
 
 Pooled across models (secondary): −1.5 points, interval −5.9 to +3.0, 135 pairs.
 
-Under the spec's loss rule, Haiku's interval lying entirely below 0 is a measured harm, and it is reported
-as Haiku's headline. The two pre-registered statistics disagree for Haiku: all 4 discordant pairs went
-the same way, which the bootstrap reads as a clear deficit, while the exact test, which uses only those 4
-pairs, cannot rule out chance (p = 0.125). A percentile bootstrap is known to understate the width of an
-interval when discordant pairs are this few, so the McNemar result is the more cautious reading. Neither
-statistic was chosen after the fact.
+The spec quotes each interval's lower bound as the largest harm the data still allows: 17.8 points for
+Haiku, 8.9 for Sonnet and 0 for Opus. Opus's interval touches 0 but does not exclude it, so it supports no
+claim of benefit. The spec did not say whether an interval that touches 0 counts as lying beside it. We
+read it strictly: touching does not count.
+
+**Haiku.** By the registered rule (a percentile bootstrap), Haiku's interval lies entirely below 0. The
+rule therefore fired, and this report gives Haiku's result first, as the spec requires. Three things limit
+what it shows:
+
+- **The two registered statistics disagree.** All 4 discordant pairs went the same way, and the bootstrap
+  reads that as a deficit. The exact McNemar test uses only those 4 pairs and cannot rule out chance
+  (p = 0.125).
+- **The bootstrap is a poor fit for 4 discordant pairs.** In a simulation with a true effect of −9 points,
+  its 95% interval covered the truth 90% of the time, and its near bound is optimistic. We added other
+  intervals after seeing the result, so they are a sensitivity check and not part of the registered rule.
+  They put the near bound at −0.3 to −0.9 points (Newcombe, Tango, and exact unconditional with p = 0.048
+  at 0). All of them agree on direction. They disagree on whether 0 is excluded.
+- **Haiku is the most extreme of several looks.** In simulation with no true effect, the rule fires on
+  about 2% of 45-task comparisons. Across the three models that makes at least one firing about 6% likely,
+  and about 10% counting the follow-up comparisons. The spec applied no multiplicity correction, so the
+  rule stands as fired. But being chosen as the extreme of three biases −8.9 away from zero, and a real
+  harm, if there is one, is likely smaller.
+
+These checks come from an independent statistical review run after grading. The spec fixed none of them
+in advance.
 
 Large-output set (secondary), 10 paired tasks per model, `verify-full` prompt:
 
@@ -108,7 +132,8 @@ Large-output set (secondary), 10 paired tasks per model, `verify-full` prompt:
 | Sonnet 5.5 | 7 | 5 | −20.0 | −50.0 to 0.0 | 0.500 |
 | Opus 5.5 | 9 | 9 | 0.0 | −30.0 to +30.0 | 1.000 |
 
-With 10 tasks the intervals span up to 80 points; this set supports no claim in either direction.
+With 10 tasks the intervals span up to 80 points; this set supports no claim in either direction. Under
+the strict reading above, the Sonnet interval (−50.0 to 0.0) touches 0 and does not fire the rule.
 
 ### How often mcp-recall engaged
 
@@ -158,44 +183,76 @@ same 45 hard-set tasks: `plain2` (no plugin, a second time) and `nohook` (mcp-re
 | 2. Installing: `nohook` vs `plain` | 25 → 21 | −8.9 pts | −20.0 to +2.2 | 0.289 | 6 · 2 |
 | 3. Compression: `recall` vs `nohook` | 21 → 21 | 0.0 | −11.1 to +11.1 | 1.000 | 3 · 3 |
 
-Read by the rules the spec fixed in advance:
+**Read mechanically, the spec's rules say "installing, not compression":** comparison 1's net difference
+(0) is below the noise threshold of 4, comparison 2 repeats the deficit, and comparison 3 shows none. We
+do not draw that conclusion, because the design cannot carry it:
 
-- Comparison 1 shows a net difference of 0, below the 4 the spec set as the noise threshold, so the
-  pilot's Haiku result is not attributed to run-to-run noise. Noise is still large: 8 of 45 tasks changed
-  outcome between two identical runs, 4 each way.
-- Comparison 2 shows the pilot's deficit again (25 to 21) with compression switched off, and
-  comparison 3 shows none (21 to 21). By the spec's rule, **the cost is from installing, not from
-  compression.**
-- None of the three comparisons is significant on its own. The finding rests on the same −4 appearing
-  twice, in two separate runs with the plugin installed, against 25 in both runs without it. That
-  pattern is an observation, not a pre-registered test.
+- **The noise rule can barely detect noise.** It reads the A/A comparison by its net difference. With
+  pure noise at the flip rate observed here, a net of 4 or more turns up only about one time in five. So
+  a net of 0 does not rule noise out. The size of the swing is the better noise measure: 8 of 45 tasks
+  changed outcome between two identical runs, 4 each way.
+- **Comparisons 2 and 3 reuse the pilot's runs.** Comparison 2 measures against the same plain run that
+  produced the pilot's loss. If that run was lucky, a second deficit against it is likely: under no true
+  effect, about 40% once the loss rule has fired, against about 10% for a fresh baseline. Against the
+  fresh baseline, `plain2`, neither installed arm differs significantly: `nohook` is 7 · 3 (p = 0.344) and
+  `recall` is 5 · 1 (p = 0.219). These two contrasts were not pre-registered.
+- **Comparison 3 does not exclude a compression effect.** Its interval, −11.1 to +11.1, contains the
+  whole pilot deficit.
+- **The follow-up is underpowered for its question.** If the true harm were −8.9 points, a single
+  comparison would show p < 0.05 only 18% of the time.
 
-The spec named three things installing adds: the 721-byte CLAUDE.md instruction block, the
-session-start snapshot, and 11 tool definitions. This follow-up does not separate them.
+Haiku's losses are also unstable tasks. Of the four tasks the pilot's plain run solved and its recall
+run did not, the second plain run failed three:
+
+| Task | `plain` | `plain2` | `nohook` | `recall` |
+|---|---|---|---|---|
+| `django__django-11885` | solved | failed | failed | failed |
+| `django__django-14011` | solved | solved | failed | failed |
+| `pydata__xarray-3993` | solved | failed | solved | failed |
+| `sympy__sympy-14248` | solved | failed | failed | failed |
+
+13 of the 45 tasks changed outcome somewhere across the four Haiku runs. The other 32 gave the same result
+in all four, so the comparisons turn on a small number of tasks.
+
+**What the four runs do support** is a post hoc observation, not a test: the two plain runs (25, 25)
+solved four more tasks than the two installed runs (21, 21). Pooled over tasks, plain beats installed by
+8.9 points (task-level bootstrap interval +1.1 to +16.7, permutation p = 0.06 two-sided). That number is
+not corrected for having picked Haiku after the pilot or for reusing the pilot's runs. It is weak evidence
+that installed Haiku runs solve fewer tasks. Whether the cost comes from installing or from compression,
+and whether it is chance, all stay open.
+
+If installing is the cause, the spec named three candidates: the 721-byte CLAUDE.md instruction block,
+the session-start snapshot, and 11 tool definitions. This follow-up does not separate them.
 
 ### Worked example
+
+This example shows what the agent does with a summary. It is not evidence that the summary caused a
+failure.
 
 `django__django-11885` is the one Haiku hard-set loss where a summary replaced output. The agent ran a
 compound read, `sed -n 120,330p` of `django/db/models/deletion.py` plus a `grep -A40` of a second file,
 11.5 KB of output. mcp-recall delivered a 1.8 KB summary under the header
 `[recall:recall_0a3f2345614cb9b9 · 11.5KB→1.8KB (85% reduction) · search: …]`. The agent did not call
-`recall__retrieve`. Its next command re-read narrower ranges of the same file with `sed`. It then made a
-change that grouped fast-delete querysets, and its own final message reports that two existing tests
-fail with it. The plain run of the same task solved it. One case does not show the summary caused the
-failure, but it shows the behavior the engagement table counts: cut output is re-read, not retrieved.
+`recall__retrieve`. Its next command re-read narrower ranges of the same file with `sed`, plus the first
+60 lines of the second file. It then made a change that grouped fast-delete querysets, and its own final
+message reports that two existing tests fail with it.
+
+Haiku solved this task in only one of its four runs. `plain2` and `nohook` failed it too, with no
+summary anywhere in those runs. The task is unstable for Haiku with or without compression. What the
+case does show is the behavior the engagement table counts: cut output is re-read, not retrieved.
 
 ## What this means for mcp-recall
 
 *(Interpretation, not a measured claim.)*
 
-- On coding tasks like these, the compression is close to free in solve rate: for Sonnet, Opus, and Haiku
-  with the install held fixed, adding it changed nothing measurable.
-- The fixed cost of being installed is the open question. It is the part of mcp-recall that every
-  session pays for, whether or not any output is ever summarized, and on the smallest model it lined up
-  with four lost tasks out of 45, twice. Which of the three parts matters, and whether it holds beyond
-  this one model and task set, needs its own test.
+- This pilot did not test compression much. Summaries fired in 16 of 135 hard-set recall-arm runs,
+  because agents piped test output through `tail`, `head` and `grep`. A null result here says the plugin
+  did no measurable harm on Sonnet and Opus. It does not say compression is free.
+- Haiku is the open question. Two installed runs both solved four fewer tasks than two plain runs. That
+  is weak evidence, and it cannot say whether the cause is installing, compression, or chance. Settling
+  it would take repeated runs per task, and a test that removes each install component in turn.
 - Agents did not use the retrieval tools at all in headless runs. The recovery path the design relies
-  on, retrieving a cut output, was never exercised.
+  on, retrieving a cut output, was never exercised. That is the clearest finding for the product.
 
 ## Limits
 
@@ -207,6 +264,19 @@ failure, but it shows the behavior the engagement table counts: cut output is re
   which is noise both arms share but which widens every interval.
 - **Engagement is observed, not assigned.** The engaged-subset numbers are exploratory: whether
   mcp-recall engages depends on what the agent did in that run.
+- **Headless, single-task sessions.** Every run used `claude -p` with permissions skipped, and the
+  mcp-recall store started empty. A long interactive session, where a store fills and an agent might
+  search it, was not tested. Nor was an agent that is asked or prompted to retrieve.
+- **The follow-up is Haiku only.** Nothing separates installing from compression for Sonnet or Opus.
+- **The never-retrieved finding rests on few chances.** Only 20 recall-arm runs (16 hard-set, 4
+  large-output) received a summary at all. Zero retrievals in those is clear, but it is 20 chances, not
+  165.
+- **Time.** The follow-up ran about 4.3 hours after the pilot on the same API endpoint. Within each
+  session the two arms ran side by side, but all three registered follow-up comparisons cross sessions.
+  A change in the service between sessions would move both follow-up arms together. One second plain
+  run matching the first (25 and 25) argues against a large shift but cannot rule one out.
+- **Empty patches count as unsolved.** Runs that produced no patch (2, 0, 2 and 1 across `plain`,
+  `recall`, `plain2` and `nohook`) are scored as failures, as the spec's exclusion rule implies.
 
 ## Deviations
 
@@ -222,3 +292,14 @@ failure, but it shows the behavior the engagement table counts: cut output is re
   Neither is counted.
 - The first launch of the follow-up failed on a log path before any run started; it was relaunched
   unchanged. No run was lost or repeated because of it.
+- **Engagement measure.** The spec defines engagement as runs that *stored* at least one output. This
+  report counts runs where a summary *reached the agent*, from the event stream. That is what changes what
+  the agent reads. The stored counts are in `analysis.json`.
+- **Pooled view.** The spec asked for a pooled view stratified by model and did not say how. `analyze.py`
+  resamples tasks within each model and divides by all 135 pairs.
+- **What was visible before grading.** As the spec says, progress lines (cost, turns, patch size) were
+  visible while the pilot ran. No solve outcome was.
+- **Readings added after the results.** The strict reading of an interval that touches 0, the
+  sensitivity intervals, the multiplicity figures, the reuse-of-baseline analysis and the pooled
+  plain-against-installed contrast were all added after grading. The spec's rules were applied as
+  written. Where we decline a conclusion those rules produce, the follow-up section says so and why.
