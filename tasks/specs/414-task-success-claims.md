@@ -360,6 +360,10 @@ or graded.
 
 ## Already disclosed
 
+- Study 5's section says the fix was checked on the Playwright responses "stored in Study 4's smoke
+  and main runs". They came from Study 4's `recall` chains only (`web-s01` to `web-s03`): 166 stored
+  items, 164 distinct. Corrected here after the run; the section above is left as registered.
+
 - The smoke round (`runs/smoke1`, 4 medium tasks) predates full recording; it is
   cited only as the costing round, never pooled with the pilot.
 - A first pilot attempt was stopped after 144 runs because it kept no transcripts
