@@ -318,6 +318,46 @@ Cost and context are reported whatever they show, and make no claim.
 **Known before this was written:** every earlier result, Study 3's included, and the smoke checks above.
 No outcome of this design has been run or graded.
 
+## Study 5: the MCP-heavy test, rerun on the fixed build (added 2026-11-02, before it ran)
+
+Study 4 ran and is sealed (`runs/web-s01` to `web-s03`). Its pre-registered reading is **shows a
+cost**: `recall` compacted less (1/1/1 against 4/2/2) but solved 23 of 36 against 27. Reading the
+stored summaries afterwards found why, and it is a defect in mcp-recall, not in the design: every
+Playwright response reached the agent without its page
+([#424](https://github.com/sakebomb/mcp-recall/issues/424)). `browser_snapshot` became an empty-page
+notice; navigate and click kept their first 4 KB, mostly site navigation; an evaluate kept under 1 KB
+of the data the agent had asked for. The agent could have re-read pages through `recall__retrieve`,
+and called it once in 36 runs. Study 4 therefore measured a broken handler. Its result stands as
+recorded and is reported, with this cause.
+
+This study runs the **identical design** on a build with #424 fixed, to measure the handler as
+intended. Only the mcp-recall binary changes.
+
+- **Build:** mcp-recall at commit `2f54ba5` (PR #426, branch `fix/playwright-snapshots`), standalone
+  binary built with Bun 1.3.14, sha256
+  `ed8d579778177ba187a71c8c072d4be7f1f7a95b03a041b2ecce3b3252ac4872`. It still reports version
+  1.19.0, so runs are told apart by this hash, which every run manifest records. The Study 4 binary
+  (`a9a50e9f…`) is kept in `bench/agent/bin/v1.19.0/`. Playwright pages now reach the agent as an
+  outline that keeps every element's name, text, link target and clickable ref; the result, the code
+  and the page URL are kept whole; console events are capped, keeping every error. Over the 164
+  Playwright responses stored in Study 4's smoke and main runs, it saves 62%.
+- **Everything else as Study 4:** the same 12 tasks, the same 3 sequences (seed 414), Haiku 5.5, both
+  arms installed, `CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000`, `--max-budget-usd` 2 and 1,800 s per task,
+  the same images by digest. `nohook` is rerun too, so both arms share the day and the API. Run ids
+  `web-fix-s01` to `web-fix-s03`.
+- **Measures and reading:** exactly Study 4's, applied to these three sequences alone. The rules for
+  benefit, nothing, cost and mixed are unchanged, and Study 4's runs are never pooled with these.
+- **Expected spend:** about $4; key spend so far $85.01 of the $100 cap.
+
+**What this rerun can and cannot show.** Fixing a bug found after seeing a result, then rerunning, is
+a second look at the same question. That is disclosed here and in the report: both studies are
+reported side by side, Study 4 first, and neither is dropped. A benefit here would be a claim about
+the fixed handler on this site and this model, nothing wider.
+
+**Known before this was written:** Study 4's results and cause (above), every earlier result, and the
+164 stored responses used to check the fix. No outcome of this design on the fixed build has been run
+or graded.
+
 ## Already disclosed
 
 - The smoke round (`runs/smoke1`, 4 medium tasks) predates full recording; it is
