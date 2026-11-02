@@ -14,13 +14,14 @@ pre-registered as claims. Nothing here is published until the maintainer approve
   mcp-recall installed either way, turning on the hook that replaces output with summaries moved Haiku
   from 51.1% to 53.3% (+2.2 points, 95% interval −2.2 to +6.7) and Sonnet from 58.5% to 55.6% (−3.0
   points, interval −9.6 to +3.7). Both intervals cross 0, so neither is a harm or a benefit under the
-  pre-registered rule. The largest harm the data still allow is 2.2 points for Haiku and 9.6 for Sonnet.
+  pre-registered rule. The largest harm the bootstrap interval still allows is 2.2 points for Haiku and
+  9.6 for Sonnet; other interval methods put it about half a point larger.
 - **This time compression actually ran.** Summaries reached the agent in 98 of 135 Haiku runs and 89 of
   135 Sonnet runs, against 20 of 165 in the pilot. The pilot mostly measured having mcp-recall
   installed; this test measures what its summaries do.
 - **Agents retrieved for the first time.** 11 Haiku and 24 Sonnet runs called a `recall__*` tool, 63
-  calls in all, against none in the pilot. In 13 of those 35 runs every call passed no arguments, which
-  returns the summary the agent already had, so the agent never saw more than the summary.
+  calls in all, against none in the pilot. In 13 of those 35 runs the agent's first call named the item
+  wrongly and failed, and its retry asked for the summary it already had, so it saw nothing new.
 - **The pilot's Haiku deficit did not come back.** Haiku without the plugin and Haiku installed with
   the hook off solved within 2.2 points of each other (interval −2.2 to +7.4).
 
@@ -96,9 +97,11 @@ Primary: compression, with mcp-recall installed in both arms.
 | Haiku 5.5 | 51.1% | 53.3% | +2.2 | −2.2 to +6.7 | 0.60 | 13 of 45 |
 | Sonnet 5.5 | 58.5% | 55.6% | −3.0 | −9.6 to +3.7 | 0.50 | 12 of 45 |
 
-Neither interval lies beside 0. Under the spec, the result for each model is "no measurable effect of
-compression". With two primary comparisons, at least one would show an effect by chance alone about 10%
-of the time; neither did.
+Both intervals include 0. Under the spec, the result for each model is "no measurable effect of
+compression". With two primary comparisons, at least one would show an effect by chance alone at most
+about 10% of the time; neither did. The bootstrap's near bound runs slightly optimistic here as in the
+pilot: other interval methods (post hoc) give lower bounds of about −2.5 to −2.7 for Haiku and −10.0 for
+Sonnet.
 
 Secondary, Haiku only:
 
@@ -122,8 +125,9 @@ Solved per replicate:
 | Sonnet 5.5 | `nohook` | 27 | 26 | 26 | 0 |
 | | `recall` | 25 | 25 | 25 | 0 |
 
-Haiku's `recall` arm ranged from 20 to 27 across replicates, so a single run per arm, as in the pilot,
-could have read either way.
+Haiku's `recall` arm ranged from 20 to 27 across replicates while `plain` and `nohook` stayed within 22
+to 24, so a single run per arm, as in the pilot, could have read either way. Haiku's `recall` arm also
+left more empty patches (7, against 3 for `nohook` and 5 for `plain`); they count as unsolved.
 
 ### How often compression engaged
 
@@ -139,12 +143,15 @@ Counted from each run's own event stream, as in the pilot. The calls were `recal
 |---|---|---|---|
 | `mode: "full"` | 13 | 15 | The stored output |
 | A query, or `mode: "peek"` | 0 | 4 | The best-matching part of it |
-| No arguments | 4 | 27 | The summary again |
+| `id` only | 2 | 16 | The summary again, the documented default |
+| No `id` (`recall_id` instead, or nothing) | 2 | 11 | A validation error |
 
-A `recall__retrieve` call with no mode and no query returns the summary (`src/tools.ts`), which the
-agent already had. In 13 of the 35 runs that retrieved (2 Haiku, 11 Sonnet), every call was of that
-kind, often two or three in a row, so the agent asked for detail and never got it. That is a product
-defect this test found, not a measured cost: nothing here ties it to a solve-rate change.
+In 13 of the 35 runs that retrieved (2 Haiku, 11 Sonnet), the first call failed validation: 6 passed
+the item as `recall_id`, the word the `[recall:recall_…]` header shows, and 7 passed nothing. Each retry
+passed only `id`, which returns the summary, and the agent stopped there. So in those runs it asked for
+detail and never got any. Returning the summary by default is deliberate and documented in the tool's
+description, so this is a usability finding, not a defect, and nothing here ties it to a solve-rate
+change.
 
 **Exploratory only** (engagement is not randomized): recall-arm runs with a summary solved 59 of 98
 (Haiku) and 58 of 89 (Sonnet); runs without one solved 13 of 37 and 17 of 46. Runs that reach the full
@@ -160,10 +167,12 @@ Descriptive only: the spec registered no claim on them, and no interval was comp
 | Haiku 5.5 | −$0.0005 | +15,200 | +2 | $1.84 → $1.76 |
 | Sonnet 5.5 | −$0.012 | −147 | 0 | $12.56 → $10.25 |
 
-Sonnet's lower total comes from writing less to the prompt cache: 1.63M cache-write tokens with
-summaries against 2.59M without, offset in part by more cache reads (22.7M against 20.5M). A summary is
-smaller new content to cache than the output it replaced. Haiku took a median of two more turns with
-summaries and read more input in total, so on these short tasks compression did not save it context.
+Totals, post hoc: with summaries, Sonnet wrote 1.63M tokens to the prompt cache against 2.59M without,
+and read 22.7M against 20.5M. Turns rose in both models' totals, by 13% for Haiku (1,833 to 2,074) and
+11% for Sonnet (1,023 to 1,132), although Sonnet's median paired difference is 0. Smaller cache writes
+fit Sonnet's lower cost, but nothing here tests that as the cause, and Haiku wrote less too while its
+cost barely moved. On these short tasks compression did not save Haiku context: it read more input.
+The run that stopped itself (below) recorded no cost, so its arm's total is slightly low.
 
 ### One run ended without a result
 
@@ -175,15 +184,16 @@ infrastructure failure needs no patch as well as no result, so the run counts as
 ## What this means for mcp-recall
 
 - **Summaries do not measurably cost solve rate on these tasks.** When compression replaced output in
-  about two thirds of Sonnet runs and three quarters of Haiku runs, Haiku and Sonnet solved about as often as with the hook off. Harm of more
-  than 2.2 points (Haiku) or 9.6 points (Sonnet) is unlikely in this setting. Smaller effects can exist.
+  66% of Sonnet runs and 73% of Haiku runs, both models solved about as often as with the hook off. The
+  intervals still allow a harm of a few points for Haiku and about 10 for Sonnet, and smaller effects
+  can go unseen.
 - **The pilot's Haiku result is not reproduced.** Here, installing cost Haiku nothing measurable and
-  compression cost it nothing measurable. Together with the pilot's follow-up, the most economical
-  reading of the pilot's −8.9 points is run-to-run noise, though this test used a different prompt and
-  cannot rule out that the pilot's effect was real under the default one.
-- **Retrieval is used once summaries are common, and its default is wrong.** A bare
-  `recall__retrieve` returns what the agent already has. Returning a bounded excerpt of the stored
-  output instead would give every retrieval something new.
+  compression cost it nothing measurable. This test used a different prompt, so it cannot say whether
+  the pilot's −8.9 points was noise or a real effect under the default prompt.
+- **Retrieval is used once summaries are common, and it is easy to get wrong.** Agents named the item
+  `recall_id`, the word the summary header shows, and an `id`-only call returns the summary they already
+  had. Accepting the header's wording, or making an `id`-only call return something new, are changes
+  worth considering; this test does not show either would change outcomes.
 - **This test cannot show a benefit.** Each session is one short task, so context never runs short.
   The benefit mcp-recall is built for, longer sessions before the context fills, needs a long-session
   benchmark.
@@ -196,6 +206,11 @@ infrastructure failure needs no patch as well as no result, so the run counts as
   sessions, compaction or context pressure.
 - **Bash output only.** No MCP server besides mcp-recall's own ran, so none of the MCP output mcp-recall
   is designed around (browser snapshots, API responses) appears here.
+- **`nohook` did not always see full output.** Claude Code itself saves a tool result over about 30 KB
+  to a file and shows the agent a short notice, in both arms. By a line-level count (post hoc,
+  approximate), that happened in 26 to 27 of each model's 135 `nohook` runs, and in the recall arm
+  some summaries reached the agent inside that notice. So the comparison is summaries against
+  Claude Code's own handling, not against full output every time.
 - **Two models.** Opus did not run. Results may not carry to other models, agents or task sets.
 - **Power.** Effects under about 15 points can go unseen; the Sonnet interval still allows a 9.6-point
   harm.
@@ -205,13 +220,15 @@ infrastructure failure needs no patch as well as no result, so the run counts as
 
 ## Deviations
 
-- **Opus did not run.** The spec allowed it only with budget left after Sonnet. At $65.14 spent, the
-  harness's worst-case reserve for six Opus jobs ($36) would have crossed the $100 cap, so it started
+- **Opus did not run.** The spec allowed it only with budget left after Sonnet. The cap counts the
+  key's total spend: $65.14 by then ($36.98 before this test, $28.16 in it), and adding the
+  harness's worst-case reserve for six Opus jobs ($36) would have crossed $100, so it started
   none. This follows the spec's budget rule; it is stated here because Opus was in the plan.
 - **comp-r1 was graded twice.** The capped Opus stage left an empty Opus directory in `comp-r1`, and the
   grader stopped on it before reaching Sonnet. The empty directory, which held no run, was moved out of
   the run tree and `comp-r1` was graded again. The grader skipped every Haiku instance it had already
-  graded, and the Haiku totals match the first pass (22, 22, 25). Sonnet's comp-r1 arms were graded only
+  graded, and the Haiku totals match the first pass's grading log (22, 22, 25). Sonnet's comp-r1 arms were graded only
   in the second pass.
-- **Post hoc, not registered:** the breakdown of retrieval calls by argument, the cache-token breakdown,
-  and the note on the run that stopped itself.
+- **Post hoc, not registered:** the breakdown of retrieval calls by argument, the cache-token and turn
+  totals, the alternative interval bounds, the count of Claude Code's own file spills, and the note on
+  the run that stopped itself.
