@@ -32,7 +32,7 @@ const STATES = new Set(["checked", "disabled", "expanded", "selected", "pressed"
 // role "name" [attr] [attr=v]: text
 const LINE = /^([a-z][\w-]*)(?:\s+"((?:[^"\\]|\\.)*)")?((?:\s+\[[^\]]*\])*)\s*(?::\s*(.*))?$/i;
 
-type Node = { role: string; name: string; ref: string; states: string[]; text: string };
+type Node = { role: string; name: string; ref: string; states: string[]; text: string; clickable: boolean };
 
 function isPlaywrightPage(text: string): boolean {
   return PAGE_SECTION.test(text);
@@ -62,13 +62,15 @@ function parseLine(raw: string): Node | { url: string } | null {
   if (!m) return null;
   const [, role, name = "", attrs = "", text = ""] = m;
   let ref = "";
+  let clickable = false;
   const states: string[] = [];
   for (const [, attr] of attrs.matchAll(/\[([^\]]*)\]/g)) {
     const [key, value] = attr.split("=");
     if (key === "ref") ref = value ?? "";
+    else if (key === "cursor") clickable = value === "pointer";
     else if (STATES.has(key)) states.push(attr);
   }
-  return { role, name, ref, states, text: unquoteValue(text) };
+  return { role, name, ref, states, text: unquoteValue(text), clickable };
 }
 
 function render(n: Node): string {
@@ -88,8 +90,8 @@ function outline(tree: string): string[] {
       if (linkAt >= 0 && linkAt === out.length - 1) out[linkAt] += ` → ${node.url}`;
       continue;
     }
-    // A bare wrapper, or a line that repeats the one above (a strong inside its link).
-    if (!node.name && !node.text && !KEEP_BARE.has(node.role)) continue;
+    // A bare wrapper nobody clicks, or a line that repeats the one above (a strong inside its link).
+    if (!node.name && !node.text && !node.clickable && !KEEP_BARE.has(node.role)) continue;
     if (!node.name && node.text && node.text === lastSaid) continue;
     out.push(render(node));
     lastSaid = node.name || node.text;

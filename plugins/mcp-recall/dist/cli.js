@@ -8036,15 +8036,18 @@ function parseLine(raw) {
     return null;
   const [, role, name = "", attrs = "", text = ""] = m;
   let ref = "";
+  let clickable = false;
   const states = [];
   for (const [, attr] of attrs.matchAll(/\[([^\]]*)\]/g)) {
     const [key, value] = attr.split("=");
     if (key === "ref")
       ref = value ?? "";
+    else if (key === "cursor")
+      clickable = value === "pointer";
     else if (STATES.has(key))
       states.push(attr);
   }
-  return { role, name, ref, states, text: unquoteValue(text) };
+  return { role, name, ref, states, text: unquoteValue(text), clickable };
 }
 function render(n) {
   const head = [n.role, n.name && `"${n.name}"`, n.ref, ...n.states].filter(Boolean).join(" ");
@@ -8064,7 +8067,7 @@ function outline(tree) {
         out[linkAt] += ` \u2192 ${node2.url}`;
       continue;
     }
-    if (!node2.name && !node2.text && !KEEP_BARE.has(node2.role))
+    if (!node2.name && !node2.text && !node2.clickable && !KEEP_BARE.has(node2.role))
       continue;
     if (!node2.name && node2.text && node2.text === lastSaid)
       continue;
@@ -11211,6 +11214,14 @@ var init_profiles = __esm(() => {
 });
 
 // src/handlers/index.ts
+function parsesAsJson(text) {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
 function getHandler(toolName, output, input) {
   if (toolName === "Bash") {
     return keepStderrError(getBashHandler(input), output);
@@ -11230,7 +11241,7 @@ function getHandler(toolName, output, input) {
   }
   const text = extractText(output);
   const trimmed = text.trimStart();
-  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+  if ((trimmed.startsWith("{") || trimmed.startsWith("[")) && parsesAsJson(trimmed)) {
     return jsonHandler;
   }
   if (looksLikeCsv(text)) {

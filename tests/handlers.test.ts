@@ -165,6 +165,22 @@ describe("playwrightHandler", () => {
     expect(summary).not.toContain("strong e67: 5221026");
   });
 
+  it("keeps a clickable wrapper's ref even when it has no name or text", () => {
+    const text = [
+      "### Snapshot",
+      "```yaml",
+      "- generic [ref=e12] [cursor=pointer]:",
+      "  - text: Buy now",
+      "- generic [ref=e13]:",
+      "  - text: Footer",
+      "```",
+    ].join("\n");
+    const { summary } = playwrightHandler("mcp__playwright__browser_snapshot", [{ type: "text", text }]);
+    expect(summary).toMatch(/^generic e12$/m);
+    expect(summary).toContain("text: Buy now");
+    expect(summary).not.toContain("e13");
+  });
+
   it("keeps an evaluate result whole and caps console events, keeping every error", () => {
     const rows = Array.from({ length: 40 }, (_, i) => `  {"title": "Post ${i}", "votes": ${i * 7}}`);
     const warnings = Array.from({ length: 200 }, (_, i) => `- [WARNING] preload ${i} @ http://forum/search:0`);
@@ -556,6 +572,13 @@ describe("getHandler", () => {
   it("routes JSON output to json handler when tool name is unrecognised", () => {
     const h = getHandler("mcp__unknown__tool", '{"key": "value"}');
     expect(h).toBe(jsonHandler);
+  });
+
+  it("routes text that only opens with a bracket to generic handler, in every shape", () => {
+    const log = Array.from({ length: 200 }, (_, i) => `[WARN] retry ${i} of the upload`).join("\n");
+    for (const output of [log, { content: [{ type: "text", text: log }] }, [{ type: "text", text: log }]]) {
+      expect(getHandler("mcp__unknown__tool", output)).toBe(genericHandler);
+    }
   });
 
   it("routes plain text to generic handler when tool name is unrecognised", () => {

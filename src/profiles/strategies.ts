@@ -8,10 +8,10 @@ import type { ProfileStrategy } from "./types";
 // ── shared helpers ────────────────────────────────────────────────────────────
 
 /**
- * The text a profile should work on. extractText keeps a text-only top-level
- * block array as JSON (for jsonHandler routing), so a profile would parse the
- * blocks themselves and find none of its fields. Context7 and Sentry send that
- * shape: unwrap it so a JSON body parses and markdown takes the fallback path.
+ * The text a profile should work on: the joined text blocks, so a profile never
+ * parses the blocks themselves and finds none of its fields. Context7 and Sentry
+ * send a top-level block array: a JSON body parses and markdown takes the
+ * fallback path.
  */
 function profileText(output: unknown): string {
   const blocks = asMcpContentBlocks(output);

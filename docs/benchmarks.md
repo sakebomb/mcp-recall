@@ -164,7 +164,7 @@ The reduction depends on the shape of the output, not on how large it is. Long, 
 | **Weak, 30–46%** | `grep` (37%), `ssh` (38%), `timeout` (32%), `cd …` chains (46%) | Usually short output, or a wrapper that hides the real command from command-aware routing |
 | **Fixed in 1.15.1** | Cloudflare docs search: 37% before, 89% with the new bundled profile | No handler matched it; a profile now extracts title, URL and an excerpt |
 
-**The Playwright figures overstate what was useful.** Until [#424](https://github.com/sakebomb/mcp-recall/issues/424), a snapshot reduced to an empty-page notice and other Playwright actions to their first 4 KB, mostly navigation, so part of that reduction was the page itself. The fixed handler keeps every element's name, text, ref and link target, and saved 62% over 164 Playwright MCP 0.0.68 responses from a forum site.
+**The Playwright figures overstate what was useful.** Until [#424](https://github.com/sakebomb/mcp-recall/issues/424), a snapshot reduced to an empty-page notice and other Playwright actions to their first 4 KB, mostly navigation, so part of that reduction was the page itself. The fixed handler keeps every element's name, text, link target and clickable ref, so it saves less; these figures are due a re-measure.
 
 Bash rows in this table are as recorded by earlier releases; see the note above on what 1.16.0 changes. Small tools with very few calls (for example, three Vikunja calls) are too little data to judge. If a tool you use lands in the weak rows, a [profile](profiles-quickstart.md) is usually the fix.
 

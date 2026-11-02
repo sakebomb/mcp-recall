@@ -110,6 +110,15 @@ const HANDLER_REGISTRY: HandlerMatcher[] = [
 // Dispatch
 // ---------------------------------------------------------------------------
 
+function parsesAsJson(text: string): boolean {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Returns the appropriate compression handler for a given MCP tool name.
  *
@@ -156,7 +165,8 @@ export function getHandler(toolName: string, output: unknown, input?: unknown): 
   const text = extractText(output);
   const trimmed = text.trimStart();
 
-  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+  // A log line such as "[WARN] …" opens with a bracket too; jsonHandler would cut it to 500 chars.
+  if ((trimmed.startsWith("{") || trimmed.startsWith("[")) && parsesAsJson(trimmed)) {
     return jsonHandler;
   }
 

@@ -19,10 +19,12 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   now reach their handlers as text too. Every Playwright page response now
   goes to the Playwright handler, which outlines the snapshot one line per
   element (role, name, ref, states, text and link target) and keeps the
-  result, the code that ran and the page URL whole. Over 164 Playwright MCP
-  0.0.68 responses from a forum site it saves 62%, with every name, text,
-  link target and actionable ref kept. The refs it drops belong to labels
-  that repeat the element above them.
+  result, the code that ran and the page URL whole. It keeps every name,
+  text, link target and clickable element's ref; the refs it drops belong to
+  wrappers and to labels that repeat the element above them. Separately,
+  text that only opens with `[` or `{`, such as a `[WARN]` log, now goes to
+  the generic handler instead of being cut to 500 characters by the JSON
+  handler.
 
 ## [1.19.0] — 2026-10-30
 
