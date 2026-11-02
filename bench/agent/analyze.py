@@ -81,7 +81,10 @@ def load_runs(run_id):
         c = rec["claude"]
         u = c.get("usage", {})
         has_result = c.get("type") == "result"
-        if report.exists():
+        web = "resolved" in rec  # web.py runs carry their verifier's verdict and no patch
+        if web:
+            resolved = rec["resolved"]
+        elif report.exists():
             resolved = json.loads(report.read_text())[iid]["resolved"]
         elif rec["patch_bytes"] == 0:
             resolved = False  # nothing to grade: an empty patch solves nothing
@@ -94,7 +97,8 @@ def load_runs(run_id):
         runs.append({
             "model": model, "arm": arm, "task": iid, "resolved": resolved,
             # Spec exclusion: infrastructure failure = no result event and no patch.
-            "infra_failure": not has_result and rec["patch_bytes"] == 0,
+            # A web run has no patch: there, no result event and a failed check.
+            "infra_failure": not has_result and (not resolved if web else rec["patch_bytes"] == 0),
             "subtype": c.get("subtype"), "cost": c.get("total_cost_usd", 0.0),
             "turns": c.get("num_turns") or 0, "wall_s": rec["wall_s"],
             "in_tok": u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0)
@@ -331,7 +335,8 @@ def chain_stats(runs, seqs, base, treat):
             "first_ctx_by_position": [statistics.median(r["first_ctx"] for r in p) if p and all(
                 r["first_ctx"] is not None for r in p) else None for p in by_pos],
             "solved_by_position": [f"{sum(bool(r['resolved']) for r in p)}/{len(p)}" for p in by_pos],
-            "cost": round(sum(r["cost"] for rows in done.values() for r in rows), 4),
+            # A resumed session reports its cost so far, so a chain's cost is its last run's.
+            "cost": round(sum(rows[-1]["cost"] for rows in done.values() if rows), 4),
         }
     b, t = out["arms"][base]["compactions"], out["arms"][treat]["compactions"]
     out["compaction_diff"] = {rid: t[rid] - b[rid] for rid in seqs}

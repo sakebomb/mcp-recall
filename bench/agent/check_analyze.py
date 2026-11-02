@@ -82,12 +82,13 @@ assert same["diff"] == 0 and same["perm_p"] == 1.0, same
 print("replicate checks pass")
 # Chains (long-session pilot): s1 runs A B C, s2 runs B C A. nohook s2 stops after C;
 # recall s2 has no C, so its A (5 compactions) is past the chain's end and must not count.
-def ch(rid, t, arm, ok, comp, ctx):
-    return {**run(t, arm, ok), "run_id": rid, "compactions": comp, "first_ctx": ctx}
-C2 = [ch("s1", "A", "nohook", True, 0, 10), ch("s1", "B", "nohook", False, 1, 50), ch("s1", "C", "nohook", True, 1, 30),
-      ch("s1", "A", "recall", True, 0, 10), ch("s1", "B", "recall", True, 0, 40), ch("s1", "C", "recall", False, 0, 60),
-      ch("s2", "B", "nohook", False, 0, 10), ch("s2", "C", "nohook", True, 2, 70),
-      ch("s2", "B", "recall", True, 0, 10), ch("s2", "A", "recall", True, 5, 90)]
+# Costs are cumulative, as a resumed session reports them: a chain costs its last run's.
+def ch(rid, t, arm, ok, comp, ctx, cost=1.0):
+    return {**run(t, arm, ok, cost=cost), "run_id": rid, "compactions": comp, "first_ctx": ctx}
+C2 = [ch("s1", "A", "nohook", True, 0, 10, 1), ch("s1", "B", "nohook", False, 1, 50, 2), ch("s1", "C", "nohook", True, 1, 30, 3),
+      ch("s1", "A", "recall", True, 0, 10, 1), ch("s1", "B", "recall", True, 0, 40, 2), ch("s1", "C", "recall", False, 0, 60, 3),
+      ch("s2", "B", "nohook", False, 0, 10, 1), ch("s2", "C", "nohook", True, 2, 70, 2),
+      ch("s2", "B", "recall", True, 0, 10, 1), ch("s2", "A", "recall", True, 5, 90, 5)]
 cs = A.chain_stats(C2, {"s1": ["tA", "tB", "tC"], "s2": ["tB", "tC", "tA"]}, "nohook", "recall")
 nh, rc = cs["arms"]["nohook"], cs["arms"]["recall"]
 assert nh["compactions"] == {"s1": 2, "s2": 2} and rc["compactions"] == {"s1": 0, "s2": 0}, cs
@@ -95,6 +96,7 @@ assert nh["positions_run"] == {"s1": 3, "s2": 2} and rc["positions_run"] == {"s1
 assert cs["compaction_diff"] == {"s1": -2, "s2": -2}, cs
 assert nh["first_ctx_by_position"] == [10, 60, 30] and rc["first_ctx_by_position"] == [10, 40, 60], cs
 assert nh["solved_by_position"] == ["1/2", "1/2", "1/1"] and rc["solved_by_position"] == ["2/2", "1/1", "0/1"], cs
+# Last run per chain: nohook 3 + 2, recall 3 + 1 (a sum would give 9 and 7, first runs 2 and 2).
 assert (nh["cost"], rc["cost"]) == (5.0, 4.0), cs
 # Solve pairs by (sequence, task): A (0), B (+1, +1), C (-1) -> task means 0, 1, -1, diff 0.
 assert (cs["solve"]["n_pairs"], cs["solve"]["diff"]) == (4, 0), cs["solve"]
