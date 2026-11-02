@@ -358,6 +358,50 @@ the fixed handler on this site and this model, nothing wider.
 164 stored responses used to check the fix. No outcome of this design on the fixed build has been run
 or graded.
 
+## Study 6: the MCP-heavy test on a self-hosted model (added 2026-11-02, before it ran)
+
+Studies 3 to 5 ran on Claude models with 200k-token or larger windows, where few tasks fill the
+context. This study asks the same question of a smaller, self-hosted model whose window a single
+forum task does fill, at no API cost.
+
+- **Model:** Qwen/Qwen3-Coder-Next-FP8 (about 80B mixture-of-experts, 3B active), served by vLLM
+  0.29.0 on blackwell (RTX PRO 6000, prefix caching on, fp8 KV cache), reached through LiteLLM as
+  `blackwell-coder-next`, priced at $0 there. Its context is 131,072 tokens and its output is capped
+  at 16,384, and `CLAUDE_CODE_AUTO_COMPACT_WINDOW=131072` tells Claude Code so. `--max-budget-usd` is
+  not passed: Claude Code would price the unknown model and could end runs early.
+- **Build:** mcp-recall at main `b1c72bd` (#424, #428, #430 and #425 fixed), standalone binary built
+  with Bun 1.3.14, sha256 `307d9793dd46e90dbbf00df98bf2d88f7662651d3c98e4fa354acaee9f8ef842`, recorded
+  in every manifest. Study 5's binary is kept in `bench/agent/bin/fix-424/`.
+- **Design:** single tasks, each in a fresh session against a fresh forum (`web.py single`): the same
+  12 tasks, both arms installed as before, 3 repeats, so 36 runs per arm. Within a repeat, each task's
+  two arms are queued together, and the order flips every repeat; two run at a time, so a task's two
+  arms usually run side by side. 3,600 s per task. Run ids `web-local-r01` to `web-local-r03`.
+- **Primary measure:** tasks solved out of 36 per arm, by each task's own `verify.py`.
+- **Reading, fixed now:** **shows a benefit** if `recall` solves at least 4 more than `nohook`;
+  **shows nothing** if the two are within 3; **shows a cost** if `recall` solves at least 4 fewer. A
+  paired exact test on the 36 task-repeat pairs is reported beside it, with no claim resting on it.
+- **Secondary, reported whatever the primary says:** compactions per run, wall time and turns per
+  run, Playwright bytes stored and returned, `recall__*` calls.
+- **Reruns:** a run that fails for infrastructure (setup failure, the gateway or vLLM returning an
+  error, the forum not starting) is rerun once and the failure disclosed. A run the agent finishes
+  is never rerun, whatever its result.
+
+**Smoke runs, disclosed and excluded from the analysis.** `smoke6`: qwen3-coder 30B on jupiter's
+Ollama, 64k window, solved 0 of 2 easy tasks (it never registered), so it failed the floor.
+`smoke6b`: qwen3.6 35B on jupiter, solved 1 of 2, but 6 to 22 minutes a task with a third of the
+model on the CPU. `smoke6c`: this model, `nohook`, solved `easy/movie_reviewer_analysis` in 72 s
+with no compaction and failed `easy/llm_research_summary` after 81 turns and 8 compactions, each at
+about 104k tokens. `smoke6d`: this model, `recall`, solved `easy/movie_reviewer_analysis` in 55 s,
+storing 11 Playwright responses at about 60% smaller. The smokes ran on Study 5's binary except
+`smoke6d`.
+
+**What this can and cannot show.** A result is about this model, this site and this harness. A
+benefit here would say mcp-recall helps a model whose window a task fills; it would not say the same
+of Claude, which Studies 3 to 5 measured directly.
+
+**Known before this was written:** every earlier result and the four smoke runs above. No run of
+this design has been graded.
+
 ## Already disclosed
 
 - Study 5's section says the fix was checked on the Playwright responses "stored in Study 4's smoke
