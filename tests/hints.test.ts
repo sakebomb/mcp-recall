@@ -128,6 +128,21 @@ describe("extractHints — structure is not a hint", () => {
     expect(hints).toContain("rollback");
   });
 
+  test("keeps the words of a plain markdown list", () => {
+    expect(extractHints("- timeout\n- timeout\n- retry\n- fixed: the parser")).toEqual(
+      expect.arrayContaining(["timeout", "retry", "fixed", "parser"])
+    );
+  });
+
+  // Every stored output passes through here; an unclosed run must not go quadratic.
+  test("stays linear on unclosed attributes and long blank runs", () => {
+    for (const content of ["[a=".repeat(300_000), "[a=b".repeat(250_000), "\n".repeat(1_000_000) + "x", " \n".repeat(500_000)]) {
+      const start = performance.now();
+      extractHints(content);
+      expect(performance.now() - start).toBeLessThan(1000);
+    }
+  });
+
   test("still hints a key-shaped word that appears as a value", () => {
     expect(extractHints('{"name": "sessionToken", "note": "sessionToken rotated"}')[0]).toBe("sessionToken");
   });

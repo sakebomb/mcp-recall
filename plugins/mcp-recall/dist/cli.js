@@ -14170,10 +14170,10 @@ var STOPWORDS = new Set([
   "net"
 ]);
 var STRUCTURE_RES = [
-  /\\?"[A-Za-z_]\w*\\?"\s*:/g,
-  /\[[a-z][\w-]*(?:=[^\]\s]*)?\]/g,
-  /^(\s*-\s+'?)\/?[a-z][\w-]*(?=\s*(?:"|\[|:|$))/gm,
-  /\b[a-z]+:\/\/(?:www\.)?/g
+  /^([ \t]*-[ \t]+'?)(?:[a-z][\w-]{0,31}(?=[ \t]+["[])|text:|\/url:)/gm,
+  /\\?"[A-Za-z_]\w{0,63}\\?"[ \t]*:/g,
+  /\[[a-z][\w-]{0,31}(?:=[^\]\s]{0,200})?\]/g,
+  /\b[a-z]{1,10}:\/\/(?:www\.)?/g
 ];
 var GENERATED_ID_RE = /^(?=.*\d)(?:[0-9a-f]{4,}|[A-Za-z0-9]{16,})$/i;
 function withoutStructure(content) {

@@ -41,13 +41,17 @@ const STOPWORDS = new Set([
  * Structure repeats once per record, so on frequency alone it beats the words a
  * reader would search for (#424 surfaced "ref", "cursor", "pointer"). Each span
  * is blanked before counting: a JSON key (escaped or not), a `[key=value]`
- * attribute, a page-snapshot role at the start of a `- ` line, and a URL scheme.
+ * attribute, a page-snapshot role (a `- ` line's first word when a name or an
+ * attribute follows, and the bare `text:` and `/url:` lines), and a URL scheme.
+ * Every quantifier is bounded or stays on one line: this runs on each stored
+ * output, and an unbounded scan from every `[` or blank line is quadratic.
+ * Roles go first: they are recognised by the attribute that follows them.
  */
 const STRUCTURE_RES = [
-  /\\?"[A-Za-z_]\w*\\?"\s*:/g,
-  /\[[a-z][\w-]*(?:=[^\]\s]*)?\]/g,
-  /^(\s*-\s+'?)\/?[a-z][\w-]*(?=\s*(?:"|\[|:|$))/gm,
-  /\b[a-z]+:\/\/(?:www\.)?/g,
+  /^([ \t]*-[ \t]+'?)(?:[a-z][\w-]{0,31}(?=[ \t]+["[])|text:|\/url:)/gm,
+  /\\?"[A-Za-z_]\w{0,63}\\?"[ \t]*:/g,
+  /\[[a-z][\w-]{0,31}(?:=[^\]\s]{0,200})?\]/g,
+  /\b[a-z]{1,10}:\/\/(?:www\.)?/g,
 ];
 
 /**
