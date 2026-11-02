@@ -147,7 +147,7 @@ function attribution(credits: string[]): string {
     "licence below. Ludwig, Ahmad, Majumdar and Ginsburg, *From SWE-ZERO to SWE-HERO*,",
     "[arXiv:2604.01496](https://arxiv.org/abs/2604.01496).",
     "",
-    "These files are not covered by this repository's MIT licence: they stay under CC BY 4.0 and the",
+    "These files are not covered by this repository's Apache-2.0 licence: they stay under CC BY 4.0 and the",
     "licences listed. They are test data for the benchmark and are not part of the published package.",
     "",
     "Regenerate with `bun run scripts/quality-public.ts`.",

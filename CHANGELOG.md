@@ -8,6 +8,12 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ### Changed
 
+- **Licensed under Apache-2.0.** Releases from this one on are
+  Apache-2.0, which adds a patent grant and a NOTICE file to MIT's terms.
+  Releases up to 1.19.0 were published under MIT and stay under it.
+  Contributions now need a `Signed-off-by` line (the Developer
+  Certificate of Origin), checked in CI; see CONTRIBUTING.md.
+
 - **`recall__retrieve` peeks by default** (#430). With no `mode`, an id
   alone returned the summary, which the `[recall:…]` header had already
   delivered, so the call showed the agent nothing new. It now returns the
