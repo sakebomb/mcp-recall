@@ -35,6 +35,12 @@ The pre-commit hook (`bun install` wires it automatically) detects staged `src/`
 | `test/` | Test-only change |
 | `chore/` | Tooling, docs, config |
 
+## Signing off commits (DCO)
+
+mcp-recall is licensed under Apache-2.0, and contributions are accepted under the same licence. Every commit in a PR needs a `Signed-off-by` line naming its author, which certifies the [Developer Certificate of Origin](https://developercertificate.org/): you wrote the change, or otherwise have the right to submit it under the project's licence.
+
+`git commit -s` adds the line. The `DCO` check fails a PR with a commit that lacks it, or whose sign-off names someone other than the commit's author. To fix the last commit, run `git commit --amend -s --no-edit`; to fix all of them, `git rebase --signoff main`. Then force-push. Commits by bot accounts, such as Dependabot, are exempt.
+
 ## Testing
 
 - New features require tests. Bug fixes require regression tests.
@@ -56,6 +62,7 @@ mcp-recall must never break a tool call under any failure condition. Every new c
 
 ## PR checklist
 
+- [ ] Every commit is signed off (`git commit -s`)
 - [ ] `bun test` passes
 - [ ] `bun run typecheck` passes
 - [ ] `bun run build` run if any `src/` files changed (pre-commit hook does this automatically)

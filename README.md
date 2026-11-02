@@ -3,7 +3,7 @@
 [![CI](https://github.com/sakebomb/mcp-recall/actions/workflows/ci.yml/badge.svg)](https://github.com/sakebomb/mcp-recall/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/mcp-recall.svg)](https://www.npmjs.com/package/mcp-recall)
 [![npm downloads](https://img.shields.io/npm/dw/mcp-recall.svg)](https://www.npmjs.com/package/mcp-recall)
-![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
+![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)
 ![Runtime: Bun](https://img.shields.io/badge/runtime-Bun-f472b6.svg)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6.svg)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)
@@ -193,4 +193,4 @@ API [context editing](https://platform.claude.com/docs/en/build-with-claude/cont
 - **Contributing:** the easiest contribution is a TOML profile, with no TypeScript and no clone of this repo. Check the [community profiles repo](https://github.com/sakebomb/mcp-recall-profiles) or open a [profile request](https://github.com/sakebomb/mcp-recall/issues/new?template=profile-request.md). TypeScript handlers are welcome for complex non-JSON output (HTML, DOM trees, binary formats): [CONTRIBUTING.md](CONTRIBUTING.md) has the workflow (`bun install && bun test`) and how to add one, and [docs/architecture.md](docs/architecture.md) the pipeline and the invariants a change must not break.
 - **Where it's headed**, and what it deliberately won't become: [ROADMAP.md](ROADMAP.md).
 - **Release history:** [CHANGELOG.md](CHANGELOG.md).
-- **License:** MIT, see [LICENSE](LICENSE).
+- **License:** Apache-2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE). Releases up to 1.19.0 were published under MIT and stay under it.

@@ -149,4 +149,15 @@ describe("packaged CLI entrypoint", () => {
     // Guard the helper itself against the reversed-prefix bug.
     expect(covered("b")).toBe(false);
   });
+
+  test("every manifest names the licence in LICENSE, and LICENSE and NOTICE ship", () => {
+    const manifests = ["package.json", ".claude-plugin/plugin.json", "plugins/mcp-recall/.claude-plugin/plugin.json"];
+    for (const m of manifests) {
+      expect(JSON.parse(readFileSync(join(REPO, m), "utf8")).license).toBe("Apache-2.0");
+    }
+    expect(readFileSync(join(REPO, "LICENSE"), "utf8")).toContain("Apache License\n                           Version 2.0, January 2004");
+    expect(PKG.files).toContain("LICENSE");
+    expect(PKG.files).toContain("NOTICE");
+    expect(existsSync(join(REPO, "NOTICE"))).toBe(true);
+  });
 });

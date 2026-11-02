@@ -8,7 +8,7 @@
   },
   "homepage": "https://github.com/sakebomb/mcp-recall",
   "repository": "https://github.com/sakebomb/mcp-recall",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "keywords": ["context", "compression", "memory", "mcp"],
   "hooks": "./hooks/hooks.json"
 }
