@@ -197,10 +197,35 @@ def to_markdown(res):
     return "\n".join(lines) + "\n"
 
 
+def compare(base, treat, model):
+    """The follow-up comparisons: pair two RUN:ARM sides by task with the same
+    statistics as the primary analysis. `base` takes the plain role and `treat`
+    the recall role, so B minus A is reported as recall minus plain."""
+    sides = []
+    for spec, role in ((base, "plain"), (treat, "recall")):
+        run_id, arm = spec.split(":")
+        sides += [{**r, "arm": role} for r in load_runs(run_id) if r["arm"] == arm and r["model"] == model]
+    res = analyze_model(sides, model, random.Random(SEED))
+    return {"base": base, "treat": treat, **res}
+
+
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--run-id", required=True)
+    p.add_argument("--run-id")
+    p.add_argument("--compare", nargs=2, metavar=("BASE_RUN:ARM", "TREAT_RUN:ARM"),
+                   help="follow-up comparison, reported as TREAT minus BASE")
+    p.add_argument("--model", default="claude-haiku-5-5")
     a = p.parse_args()
+    if a.compare:
+        res = compare(a.compare[0], a.compare[1], a.model)
+        ci = res.get("diff_ci95")
+        print(f"| {a.compare[1]} − {a.compare[0]} | {a.model} | {res['n_pairs']} pairs | "
+              f"{res['plain_solved']} → {res['recall_solved']} solved | {pct(res['diff'])} pts | "
+              f"95% CI {pct(ci[0]) if ci else 'n/a'} to {pct(ci[1]) if ci else 'n/a'} | "
+              f"McNemar p {res['mcnemar_p']:.3f} | discordant {res['plain_only']} · {res['recall_only']} |")
+        return
+    if not a.run_id:
+        p.error("--run-id or --compare is required")
     res = analyze(a.run_id)
     (RUNS / a.run_id / "analysis.json").write_text(json.dumps(res, indent=1))
     print(to_markdown(res), end="")
