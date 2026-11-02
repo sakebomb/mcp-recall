@@ -101,7 +101,7 @@ function hasLines(text: string, lines: number): boolean {
  * for reading it. Any other response is returned as it is.
  */
 function withSavedMcpResult(toolResponse: unknown): unknown | null {
-  // Not extractText: it keeps a text-only top-level array as JSON, which hides the notice.
+  // Only the text blocks: extractText falls back to JSON for a shape it does not know.
   const blocks = asMcpContentBlocks(toolResponse);
   const text = blocks ? joinTextBlocks(blocks) : typeof toolResponse === "string" ? toolResponse : "";
   const match = text.match(SAVED_RESULT_RE);
@@ -116,7 +116,7 @@ function withSavedMcpResult(toolResponse: unknown): unknown | null {
     const saved = readFileSync(path, "utf8");
     if (saved.length !== chars || (lines !== null && !hasLines(saved, lines))) return null;
     if (typeof toolResponse === "string") return saved;
-    // Never a bare array: extractText keeps a top-level array as JSON, not text.
+    // A bare array becomes the wrapped shape, which carries no fields to keep.
     const base = Array.isArray(toolResponse) ? {} : (toolResponse as Record<string, unknown>);
     return { ...base, content: [{ type: "text", text: saved }] };
   } catch (err) {

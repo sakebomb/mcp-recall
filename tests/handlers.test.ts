@@ -75,9 +75,12 @@ describe("extractText", () => {
     expect(text).not.toContain(imageData);
   });
 
-  it("JSON.stringifies a text-only top-level content-block array (unchanged routing)", () => {
+  // Claude Code hands some MCP servers' results to the hook in this shape (Playwright,
+  // context7, Sentry). Stringifying it hid every line from the text handlers (#424).
+  it("unwraps a text-only top-level content-block array to its text", () => {
     const payload = chromeTextOnlyPayload();
-    expect(extractText(payload)).toBe(JSON.stringify(payload));
+    expect(extractText(payload)).toBe("Scrolled down 400 pixels\n\n\nTab Context:\n- https://example.com/page\n- Title: Page");
+    expect(extractText(JSON.stringify(payload))).toBe(extractText(payload));
   });
 });
 
@@ -95,17 +98,11 @@ describe("playwrightHandler", () => {
     '  - statictext "Some visible text here"',
   ].join("\n");
 
-  it("extracts interactive elements", () => {
+  it("keeps interactive elements and visible text from a bare tree", () => {
     const { summary } = playwrightHandler("mcp__playwright__browser_snapshot", snapshot);
-    expect(summary).toContain('[button "Submit"]');
-    expect(summary).toContain('[textbox "Email"]');
-    expect(summary).toContain('[link "Home"]');
-  });
-
-  it("extracts visible text from headings and statictext", () => {
-    const { summary } = playwrightHandler("mcp__playwright__browser_snapshot", snapshot);
-    expect(summary).toContain("Welcome");
-    expect(summary).toContain("Some visible text here");
+    for (const line of ['button "Submit"', 'textbox "Email"', 'link "Home"', 'heading "Welcome"', "Some visible text here"]) {
+      expect(summary).toContain(line);
+    }
   });
 
   it("reports originalSize in bytes", () => {
@@ -115,8 +112,7 @@ describe("playwrightHandler", () => {
 
   it("handles MCP content wrapper", () => {
     const output = { content: [{ type: "text", text: snapshot }] };
-    const { summary } = playwrightHandler("mcp__playwright__browser_snapshot", output);
-    expect(summary).toContain('[button "Submit"]');
+    expect(playwrightHandler("mcp__playwright__browser_snapshot", output).summary).toContain('button "Submit"');
   });
 
   it("returns fallback message for empty snapshot", () => {
@@ -124,13 +120,161 @@ describe("playwrightHandler", () => {
     expect(summary).toContain("no interactive elements");
   });
 
-  it("caps interactive elements at 20", () => {
-    const lines = Array.from({ length: 25 }, (_, i) => `- button "Btn${i}"`).join("\n");
-    const { summary } = playwrightHandler("mcp__playwright__browser_snapshot", lines);
-    const matches = summary.match(/\[button/g) ?? [];
-    expect(matches.length).toBeLessThanOrEqual(20);
+  // The shape Playwright MCP 0.0.68 returns from navigate, click and snapshot, as
+  // Claude Code hands it to the hook: a top-level text block array (#424).
+  for (const [shape, payload] of [
+    ["array", playwrightPagePayload()],
+    ["JSON string", JSON.stringify(playwrightPagePayload())],
+  ] as const) {
+    it(`keeps every post's title, score, comment count and refs (${shape})`, () => {
+      const { summary } = playwrightHandler("mcp__playwright__browser_navigate", payload);
+      for (const kept of [
+        "Page URL: http://forum/f/sports",
+        "Page Title: sports",
+        "await page.goto('http://forum/f/sports');",
+        `heading "'Mission accomplished': Ukrainian peewee hockey team arrives" e61`,
+        'link "129 comments" e72 → /f/sports/113275/mission-accomplished',
+        "generic e81: 9569",
+        'button "Upvote" e76',
+        'heading "Iran football legend Daei will not attend World Cup" e92',
+        "generic e112: 1266",
+        "text: Submitted by",
+        "time e68: 4 years ago",
+        'searchbox "Search query" e20',
+        "article e56",
+      ]) {
+        expect(summary).toContain(kept);
+      }
+    });
+  }
+
+  it("drops wrappers, cursor flags and nesting, and halves the page at least", () => {
+    const payload = playwrightPagePayload();
+    const { summary, originalSize } = playwrightHandler("mcp__playwright__browser_navigate", payload);
+    expect(summary).not.toContain("[cursor=pointer]");
+    expect(summary).not.toContain("/url:");
+    expect(summary).not.toMatch(/^generic e\d+$/m);
+    expect(summary).not.toMatch(/^\s+\S/m);
+    expect(originalSize).toBe(Buffer.byteLength(extractText(payload), "utf8"));
+    expect(Buffer.byteLength(summary, "utf8")).toBeLessThan(originalSize / 2);
+  });
+
+  it("does not repeat text a parent line already carries", () => {
+    const { summary } = playwrightHandler("mcp__playwright__browser_navigate", playwrightPagePayload());
+    expect(summary).toContain('link "5221026" e66');
+    expect(summary).not.toContain("strong e67: 5221026");
+  });
+
+  it("keeps a clickable wrapper's ref even when it has no name or text", () => {
+    const text = [
+      "### Snapshot",
+      "```yaml",
+      "- generic [ref=e12] [cursor=pointer]:",
+      "  - text: Buy now",
+      "- generic [ref=e13]:",
+      "  - text: Footer",
+      "```",
+    ].join("\n");
+    const { summary } = playwrightHandler("mcp__playwright__browser_snapshot", [{ type: "text", text }]);
+    expect(summary).toMatch(/^generic e12$/m);
+    expect(summary).toContain("text: Buy now");
+    expect(summary).not.toContain("e13");
+  });
+
+  it("keeps an evaluate result whole and caps console events, keeping every error", () => {
+    const rows = Array.from({ length: 40 }, (_, i) => `  {"title": "Post ${i}", "votes": ${i * 7}}`);
+    const warnings = Array.from({ length: 200 }, (_, i) => `- [WARNING] preload ${i} @ http://forum/search:0`);
+    const text = [
+      "### Result",
+      "[", rows.join(",\n"), "]",
+      "### Ran Playwright code",
+      "```js",
+      "await page.evaluate('() => posts()');",
+      "```",
+      "### Page",
+      "- Page URL: http://forum/search?q=NBA",
+      "### Events",
+      "- New console entries: .playwright-mcp/console.log#L1-L201",
+      ...warnings.slice(0, 100),
+      "- [ERROR] Uncaught TypeError: x is undefined @ http://forum/app.js:12",
+      ...warnings.slice(100),
+    ].join("\n");
+    const { summary } = playwrightHandler("mcp__playwright__browser_evaluate", [{ type: "text", text }]);
+    for (const row of rows) expect(summary).toContain(row.trim());
+    expect(summary).toContain("await page.evaluate('() => posts()');");
+    expect(summary).toContain("- Page URL: http://forum/search?q=NBA");
+    expect(summary).toContain("- [ERROR] Uncaught TypeError: x is undefined");
+    expect(summary).toContain("- [WARNING] preload 0 @");
+    expect(summary).not.toContain("- [WARNING] preload 199 @");
+    expect(summary).toContain("(+196 more event lines)");
   });
 });
+
+function playwrightPagePayload(): Array<Record<string, unknown>> {
+  const nav = [
+    "- generic [active] [ref=e1]:",
+    "  - navigation:",
+    '    - link "Jump to main content" [ref=e2] [cursor=pointer]:',
+    '      - /url: "#main"',
+    "  - navigation [ref=e4]:",
+    "    - generic [ref=e5]:",
+    '      - link "Home" [ref=e7] [cursor=pointer]:',
+    "        - /url: /",
+    "        - text: Postmill",
+    "      - generic [ref=e15]:",
+    "        - img [ref=e18]",
+    '        - searchbox "Search query" [ref=e20]',
+  ];
+  // YAML single-quotes a line whose text holds ": " or a quote, doubling inner quotes.
+  const q = (line: string) => (/'|: /.test(line) ? `'${line.replace(/'/g, "''")}':` : `${line}:`);
+  const post = (r: number, title: string, slug: string, user: string, score: string, comments: number) => [
+    `      - article [ref=e${r}]:`,
+    `        - generic [ref=e${r + 1}]:`,
+    `          - generic [ref=e${r + 2}]:`,
+    `            - ${q(`heading "${title}" [level=1] [ref=e${r + 5}]`)}`,
+    `              - ${q(`link "${title}" [ref=e${r + 6}] [cursor=pointer]`)}`,
+    `                - /url: https://example.com/${slug}`,
+    `            - paragraph [ref=e${r + 8}]:`,
+    `              - generic [ref=e${r + 9}]:`,
+    "                - text: Submitted by",
+    `                - link "${user}" [ref=e${r + 10}] [cursor=pointer]:`,
+    `                  - /url: /user/${user}`,
+    `                  - strong [ref=e${r + 11}]: "${user}"`,
+    `                - time [ref=e${r + 12}]: 4 years ago`,
+    `          - navigation [ref=e${r + 13}]:`,
+    `            - list [ref=e${r + 14}]:`,
+    `              - listitem [ref=e${r + 15}]:`,
+    `                - link "${comments} comments" [ref=e${r + 16}] [cursor=pointer]:`,
+    `                  - /url: /f/sports/113275/${slug}`,
+    `                  - strong [ref=e${r + 17}]: ${comments} comments`,
+    `        - generic [ref=e${r + 19}]:`,
+    `          - button "Upvote" [ref=e${r + 20}] [cursor=pointer]:`,
+    `            - img [ref=e${r + 23}]`,
+    `          - generic [ref=e${r + 25}]: "${score}"`,
+    `          - button "Downvote" [ref=e${r + 26}] [cursor=pointer]:`,
+  ];
+  const yaml = [
+    ...nav,
+    "  - main [ref=e50]:",
+    ...post(56, "'Mission accomplished': Ukrainian peewee hockey team arrives", "mission-accomplished", "5221026", "9569", 129),
+    ...post(87, "Iran football legend Daei will not attend World Cup", "iran-football", "sirbarani", "1266", 40),
+  ].join("\n");
+  const text = [
+    "### Ran Playwright code",
+    "```js",
+    "await page.goto('http://forum/f/sports');",
+    "```",
+    "### Page",
+    "- Page URL: http://forum/f/sports",
+    "- Page Title: sports",
+    "- Console: 0 errors, 6 warnings",
+    "### Snapshot",
+    "```yaml",
+    yaml,
+    "```",
+  ].join("\n");
+  return [{ type: "text", text }];
+}
 
 // ---------------------------------------------------------------------------
 // githubHandler
@@ -400,6 +544,16 @@ describe("genericHandler", () => {
 // ---------------------------------------------------------------------------
 
 describe("getHandler", () => {
+  it("routes any playwright result in the page response shape to the playwright handler (#424)", () => {
+    for (const tool of ["mcp__playwright__browser_navigate", "mcp__plugin_playwright_playwright__browser_click"]) {
+      expect(getHandler(tool, playwrightPagePayload())).toBe(playwrightHandler);
+      expect(getHandler(tool, JSON.stringify(playwrightPagePayload()))).toBe(playwrightHandler);
+    }
+    const evaluated = [{ type: "text", text: '### Result\n{"posts": 25}\n### Ran Playwright code\n```js\nawait page.evaluate()\n```' }];
+    expect(getHandler("mcp__playwright__browser_evaluate", evaluated)).toBe(playwrightHandler);
+    expect(getHandler("mcp__playwright__browser_evaluate", '{"posts": 25}')).not.toBe(playwrightHandler);
+  });
+
   it("routes playwright snapshot to playwright handler", () => {
     const h = getHandler("mcp__plugin_playwright_playwright__browser_snapshot", "");
     expect(h).toBe(playwrightHandler);
@@ -418,6 +572,13 @@ describe("getHandler", () => {
   it("routes JSON output to json handler when tool name is unrecognised", () => {
     const h = getHandler("mcp__unknown__tool", '{"key": "value"}');
     expect(h).toBe(jsonHandler);
+  });
+
+  it("routes text that only opens with a bracket to generic handler, in every shape", () => {
+    const log = Array.from({ length: 200 }, (_, i) => `[WARN] retry ${i} of the upload`).join("\n");
+    for (const output of [log, { content: [{ type: "text", text: log }] }, [{ type: "text", text: log }]]) {
+      expect(getHandler("mcp__unknown__tool", output)).toBe(genericHandler);
+    }
   });
 
   it("routes plain text to generic handler when tool name is unrecognised", () => {
@@ -530,7 +691,8 @@ describe("content-block image stripping (#270)", () => {
   it("routes a screenshot payload to the content-block handler, not jsonHandler", () => {
     const payload = chromeScreenshotPayload();
     expect(getHandler("mcp__claude-in-chrome__computer", payload)).toBe(contentBlockHandler);
-    expect(getHandler("mcp__claude-in-chrome__computer", chromeTextOnlyPayload())).toBe(jsonHandler);
+    // Text-only blocks route by their text, which here is plain prose (#424).
+    expect(getHandler("mcp__claude-in-chrome__computer", chromeTextOnlyPayload())).toBe(genericHandler);
   });
 
   it("strips a wrapped {content:[image,text]} payload and counts pre-strip originalSize", () => {

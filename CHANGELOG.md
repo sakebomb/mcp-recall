@@ -6,6 +6,26 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Fixed
+
+- **Playwright output keeps the page** (#424). Claude Code hands Playwright
+  results to the hook as a top-level array of text blocks, and the hook
+  serialized that array to JSON, so the handler never saw a line of the page:
+  every `browser_snapshot` came back as "no interactive elements or visible
+  text extracted". Navigate, click and evaluate never reached the Playwright
+  handler, so the generic fallback kept their first 4 KB, mostly site
+  navigation, and an evaluate kept under 1 KB of the data it returned.
+  Context7, Sentry and Claude in Chrome results arrive in the same shape and
+  now reach their handlers as text too. Every Playwright page response now
+  goes to the Playwright handler, which outlines the snapshot one line per
+  element (role, name, ref, states, text and link target) and keeps the
+  result, the code that ran and the page URL whole. It keeps every name,
+  text, link target and clickable element's ref; the refs it drops belong to
+  wrappers and to labels that repeat the element above them. Separately,
+  text that only opens with `[` or `{`, such as a `[WARN]` log, now goes to
+  the generic handler instead of being cut to 500 characters by the JSON
+  handler.
+
 ## [1.19.0] — 2026-10-30
 
 ### Security

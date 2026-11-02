@@ -1,5 +1,5 @@
 import type { Handler } from "./types";
-import { playwrightHandler } from "./playwright";
+import { playwrightHandler, isPlaywrightResponse } from "./playwright";
 import { githubHandler } from "./github";
 import { gitlabHandler } from "./gitlab";
 import { filesystemHandler } from "./filesystem";
@@ -28,7 +28,7 @@ export { contentBlockHandler } from "./content-blocks";
 
 /** A single entry in the handler registry. First match wins. */
 type HandlerMatcher = {
-  match: (toolName: string) => boolean;
+  match: (toolName: string, output: unknown) => boolean;
   handler: Handler;
 };
 
@@ -41,7 +41,8 @@ type HandlerMatcher = {
  */
 const HANDLER_REGISTRY: HandlerMatcher[] = [
   {
-    match: (t) => t.includes("playwright") && t.includes("snapshot"),
+    // Every Playwright action and evaluate returns the page response, not only browser_snapshot (#424).
+    match: (t, output) => t.includes("playwright") && (t.includes("snapshot") || isPlaywrightResponse(output)),
     handler: playwrightHandler,
   },
   {
@@ -109,6 +110,15 @@ const HANDLER_REGISTRY: HandlerMatcher[] = [
 // Dispatch
 // ---------------------------------------------------------------------------
 
+function parsesAsJson(text: string): boolean {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Returns the appropriate compression handler for a given MCP tool name.
  *
@@ -137,7 +147,7 @@ export function getHandler(toolName: string, output: unknown, input?: unknown): 
 
   // Walk the typed-handler registry in priority order
   for (const { match, handler } of HANDLER_REGISTRY) {
-    if (match(toolName)) return handler;
+    if (match(toolName, output)) return handler;
   }
 
   // Bundled profiles — for tools without a TypeScript handler
@@ -155,7 +165,8 @@ export function getHandler(toolName: string, output: unknown, input?: unknown): 
   const text = extractText(output);
   const trimmed = text.trimStart();
 
-  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+  // A log line such as "[WARN] …" opens with a bracket too; jsonHandler would cut it to 500 chars.
+  if ((trimmed.startsWith("{") || trimmed.startsWith("[")) && parsesAsJson(trimmed)) {
     return jsonHandler;
   }
 

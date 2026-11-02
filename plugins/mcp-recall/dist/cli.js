@@ -7990,15 +7990,6 @@ function payloadByteLength(output) {
     return Buffer.byteLength(output, "utf8");
   return Buffer.byteLength(JSON.stringify(output), "utf8");
 }
-function isTopLevelArrayPayload(output) {
-  if (Array.isArray(output))
-    return true;
-  if (typeof output === "string") {
-    const trimmed = output.trimStart();
-    return trimmed.startsWith("[");
-  }
-  return false;
-}
 function extractText(output) {
   const blocks = asMcpContentBlocks(output);
   if (blocks) {
@@ -8006,7 +7997,7 @@ function extractText(output) {
     const hasNonText = blocks.some((b) => b.type !== "text");
     if (hasNonText)
       return text;
-    if (text.length > 0 && !isTopLevelArrayPayload(output))
+    if (text.length > 0)
       return text;
   }
   if (typeof output === "string")
@@ -8019,69 +8010,135 @@ var init_types = __esm(() => {
 });
 
 // src/handlers/playwright.ts
-var INTERACTIVE_ROLES, TEXT_ROLES, MAX_INTERACTIVE = 20, MAX_TEXT_CHARS = 400, playwrightHandler = (_toolName, output) => {
+function isPlaywrightPage(text) {
+  return PAGE_SECTION.test(text);
+}
+function isPlaywrightResponse(output) {
+  return isPlaywrightPage(extractText(output));
+}
+function unquoteYaml(s) {
+  const m = s.match(/^'(.*)'(:?)$/);
+  return m ? m[1].replace(/''/g, "'") + m[2] : s;
+}
+function unquoteValue(v) {
+  const t = v.trim();
+  return t.length >= 2 && t.startsWith('"') && t.endsWith('"') ? t.slice(1, -1) : t;
+}
+function parseLine(raw) {
+  const s = raw.trim();
+  if (!s.startsWith("- "))
+    return null;
+  const body = unquoteYaml(s.slice(2).trim());
+  if (body.startsWith("/url:"))
+    return { url: unquoteValue(body.slice(5)) };
+  const m = body.match(LINE);
+  if (!m)
+    return null;
+  const [, role, name = "", attrs = "", text = ""] = m;
+  let ref = "";
+  let clickable = false;
+  const states = [];
+  for (const [, attr] of attrs.matchAll(/\[([^\]]*)\]/g)) {
+    const [key, value] = attr.split("=");
+    if (key === "ref")
+      ref = value ?? "";
+    else if (key === "cursor")
+      clickable = value === "pointer";
+    else if (STATES.has(key))
+      states.push(attr);
+  }
+  return { role, name, ref, states, text: unquoteValue(text), clickable };
+}
+function render(n) {
+  const head = [n.role, n.name && `"${n.name}"`, n.ref, ...n.states].filter(Boolean).join(" ");
+  return n.text ? `${head}: ${n.text}` : head;
+}
+function outline(tree) {
+  const out = [];
+  let linkAt = -1;
+  let lastSaid = "";
+  for (const line of tree.split(`
+`)) {
+    const node2 = parseLine(line);
+    if (!node2)
+      continue;
+    if ("url" in node2) {
+      if (linkAt >= 0 && linkAt === out.length - 1)
+        out[linkAt] += ` \u2192 ${node2.url}`;
+      continue;
+    }
+    if (!node2.name && !node2.text && !node2.clickable && !KEEP_BARE.has(node2.role))
+      continue;
+    if (!node2.name && node2.text && node2.text === lastSaid)
+      continue;
+    out.push(render(node2));
+    lastSaid = node2.name || node2.text;
+    linkAt = node2.role === "link" ? out.length - 1 : -1;
+  }
+  return out;
+}
+function snapshotTree(section) {
+  const open2 = section.indexOf("```yaml");
+  const from = open2 >= 0 ? open2 + "```yaml".length : SNAPSHOT_HEADING.length;
+  const close = section.indexOf("\n```", from);
+  return section.slice(from, close >= 0 ? close : undefined);
+}
+function renderSnapshot(tree) {
+  const lines = outline(tree);
+  return lines.length > 0 ? `${SNAPSHOT_HEADING} (outline: one line per element, refs as on the page)
+${lines.join(`
+`)}` : "";
+}
+function trimEvents(section) {
+  const [heading, ...lines] = section.split(`
+`).filter((l) => l.trim());
+  const kept = lines.filter((l, i) => i < EVENT_LINES || l.includes("[ERROR]"));
+  const more = lines.length - kept.length;
+  return [heading, ...kept, ...more > 0 ? [`\u2026 (+${more} more event lines)`] : []].join(`
+`);
+}
+var SNAPSHOT_HEADING = "### Snapshot", EVENTS_HEADING = "### Events", EVENT_LINES = 5, EMPTY = "[snapshot: no interactive elements or visible text extracted]", PAGE_SECTION, KEEP_BARE, STATES, LINE, playwrightHandler = (_toolName, output) => {
   const raw = extractText(output);
   const originalSize = Buffer.byteLength(raw, "utf8");
-  const interactive = [];
-  const textChunks = [];
-  for (const line of raw.split(`
-`)) {
-    const trimmed = line.trim();
-    if (!trimmed)
-      continue;
-    const match = trimmed.match(/^-\s+(\w+)\s+"([^"]*)"(.*)$/i);
-    if (!match)
-      continue;
-    const [, role, label] = match;
-    const roleLower = role.toLowerCase();
-    if (INTERACTIVE_ROLES.has(roleLower) && interactive.length < MAX_INTERACTIVE) {
-      interactive.push(`[${roleLower} "${label}"]`);
-    } else if (TEXT_ROLES.has(roleLower) && label.trim().length > 0) {
-      textChunks.push(label.trim());
-    }
+  if (!isPlaywrightPage(raw)) {
+    return { summary: renderSnapshot(raw) || EMPTY, originalSize };
   }
-  const textContent = textChunks.join(" ").slice(0, MAX_TEXT_CHARS).trimEnd();
-  const parts = [];
-  if (interactive.length > 0) {
-    parts.push(`Interactive: ${interactive.join(", ")}`);
-  }
-  if (textContent.length > 0) {
-    parts.push(`Visible text: ${textContent}`);
-  }
-  const summary = parts.length > 0 ? parts.join(`
-`) : "[snapshot: no interactive elements or visible text extracted]";
-  return { summary, originalSize };
+  const summary = raw.split(/^(?=### )/m).map((section) => {
+    if (section.startsWith(SNAPSHOT_HEADING))
+      return renderSnapshot(snapshotTree(section));
+    if (section.startsWith(EVENTS_HEADING))
+      return trimEvents(section);
+    return section.trim();
+  }).filter(Boolean).join(`
+`);
+  return { summary: summary || EMPTY, originalSize };
 };
 var init_playwright = __esm(() => {
   init_types();
-  INTERACTIVE_ROLES = new Set([
+  PAGE_SECTION = /^### (Snapshot|Result|Ran Playwright code)$/m;
+  KEEP_BARE = new Set([
+    "article",
+    "row",
+    "dialog",
+    "form",
+    "table",
+    "alert",
     "button",
     "link",
     "textbox",
-    "input",
+    "searchbox",
+    "combobox",
     "checkbox",
     "radio",
-    "select",
-    "combobox",
-    "menuitem",
-    "tab",
-    "searchbox",
-    "spinbutton",
     "slider",
-    "switch"
+    "spinbutton",
+    "switch",
+    "tab",
+    "menuitem",
+    "option"
   ]);
-  TEXT_ROLES = new Set([
-    "heading",
-    "paragraph",
-    "statictext",
-    "text",
-    "label",
-    "status",
-    "alert",
-    "cell",
-    "columnheader",
-    "rowheader"
-  ]);
+  STATES = new Set(["checked", "disabled", "expanded", "selected", "pressed", "required"]);
+  LINE = /^([a-z][\w-]*)(?:\s+"((?:[^"\\]|\\.)*)")?((?:\s+\[[^\]]*\])*)\s*(?::\s*(.*))?$/i;
 });
 
 // src/handlers/github.ts
@@ -11157,6 +11214,14 @@ var init_profiles = __esm(() => {
 });
 
 // src/handlers/index.ts
+function parsesAsJson(text) {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
 function getHandler(toolName, output, input) {
   if (toolName === "Bash") {
     return keepStderrError(getBashHandler(input), output);
@@ -11165,7 +11230,7 @@ function getHandler(toolName, output, input) {
   if (highPriorityProfile)
     return highPriorityProfile;
   for (const { match, handler } of HANDLER_REGISTRY) {
-    if (match(toolName))
+    if (match(toolName, output))
       return handler;
   }
   const bundledProfile = getProfileHandler(toolName, ["bundled"]);
@@ -11176,7 +11241,7 @@ function getHandler(toolName, output, input) {
   }
   const text = extractText(output);
   const trimmed = text.trimStart();
-  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+  if ((trimmed.startsWith("{") || trimmed.startsWith("[")) && parsesAsJson(trimmed)) {
     return jsonHandler;
   }
   if (looksLikeCsv(text)) {
@@ -11208,7 +11273,7 @@ var init_handlers = __esm(() => {
   init_content_blocks();
   HANDLER_REGISTRY = [
     {
-      match: (t) => t.includes("playwright") && t.includes("snapshot"),
+      match: (t, output) => t.includes("playwright") && (t.includes("snapshot") || isPlaywrightResponse(output)),
       handler: playwrightHandler
     },
     {
@@ -13731,12 +13796,12 @@ function readStore(file, opts = {}) {
     db = new Database4(file, { readonly: true });
     const isRecallDb = db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='stored_outputs'`).get();
     if (!isRecallDb)
-      return EMPTY;
+      return EMPTY2;
     const keys = db.prepare(`SELECT DISTINCT project_key FROM stored_outputs`).all().map((r) => r.project_key);
     if (!hasHandlerColumn(db)) {
       const since = opts.since ?? 0;
       const { n } = db.prepare(`SELECT COUNT(*) AS n FROM stored_outputs WHERE tool_name != 'recall__note' AND created_at >= ?`).get(since);
-      return { ...EMPTY, unrecorded: n, stores: 1 };
+      return { ...EMPTY2, unrecorded: n, stores: 1 };
     }
     const reports = keys.map((key) => ({
       routes: getFallbackRoutes(db, key, opts),
@@ -13746,7 +13811,7 @@ function readStore(file, opts = {}) {
     }));
     return { ...mergeReports(reports), stores: 1 };
   } catch {
-    return EMPTY;
+    return EMPTY2;
   } finally {
     db?.close();
   }
@@ -13868,11 +13933,11 @@ function discoverCommand(opts = {}) {
 `);
   console.log(formatReport(report, opts.limit));
 }
-var DEFAULT_LIMIT = 10, EMPTY;
+var DEFAULT_LIMIT = 10, EMPTY2;
 var init_discover = __esm(() => {
   init_db();
   init_project_key();
-  EMPTY = { routes: [], handlers: [], unrecorded: 0, stores: 0 };
+  EMPTY2 = { routes: [], handlers: [], unrecorded: 0, stores: 0 };
 });
 
 // src/hooks/session-start.ts
