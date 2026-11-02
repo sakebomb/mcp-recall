@@ -258,6 +258,66 @@ fewer compactions with `recall`, more, or the same. It decides what runs next:
 **Known before this was written:** every result of the pilot and both follow-ups, and the smoke check's
 runner behaviour above. No outcome of this design has been run or graded.
 
+## Study 4: the MCP-heavy test (added 2026-11-02, before it ran)
+
+Study 3 ran and is sealed (`runs/long-s01` to `long-s06`). Neither arm compacted once: Haiku 5.5's
+context window is 1M tokens, and ten Django tasks reached a median of 330k without mcp-recall. Its
+reading rule therefore says the sessions were too short. Bash output is also the weak case, because
+agents trim it themselves. This study tests the strong case: browser page snapshots, which the agent
+cannot trim, in sessions long enough to compact. It is the decisive test agreed with the maintainer on
+2026-11-02: if it shows nothing, mcp-recall goes to maintenance.
+
+**Design.** `web.py chain`. Tasks are MCPMark's 12 WebArena Reddit tasks (`bench/agent/web/tasks`,
+copied unchanged from MCPMark commit cd45b7f, Apache 2.0), driven through Playwright MCP 0.0.68 with
+MCPMark's own flags and prompt wording. Each task gets a fresh forum container
+(`am1n3e/webarena-verified-reddit`, pinned by digest) on its own internal network, and the task's own
+`verify.py` grades the forum's final state. Tasks are chained in one resumed session as in Study 3.
+
+- **Arms:** `nohook` and `recall`, both installed. **Model:** Haiku 5.5.
+- **Window:** `CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000` in both arms, so Claude Code compacts as it
+  would for a 200k-window model. This is a simulation and the report says so; it was chosen with the
+  maintainer because a 1M window does not fill in 12 tasks.
+- **Sequences:** 3, each all 12 tasks, drawn by `bench.sequences` with seed 414:
+  1. standard/budget_europe_travel, standard/ai_data_analyst, standard/movie_reviewer_analysis,
+     easy/nba_statistics_analysis, easy/routine_tracker_forum, easy/movie_reviewer_analysis,
+     easy/ai_data_analyst, standard/routine_tracker_forum, easy/llm_research_summary,
+     standard/buyitforlife_research, standard/llm_research_summary, standard/nba_statistics_analysis
+  2. easy/movie_reviewer_analysis, easy/routine_tracker_forum, standard/buyitforlife_research,
+     standard/routine_tracker_forum, easy/ai_data_analyst, standard/nba_statistics_analysis,
+     standard/llm_research_summary, standard/movie_reviewer_analysis, standard/ai_data_analyst,
+     easy/llm_research_summary, standard/budget_europe_travel, easy/nba_statistics_analysis
+  3. standard/nba_statistics_analysis, standard/movie_reviewer_analysis, easy/routine_tracker_forum,
+     easy/movie_reviewer_analysis, standard/llm_research_summary, easy/nba_statistics_analysis,
+     standard/budget_europe_travel, standard/ai_data_analyst, standard/buyitforlife_research,
+     easy/ai_data_analyst, easy/llm_research_summary, standard/routine_tracker_forum
+- **Limits:** `--max-budget-usd` 2 per task, 1,800 s per task; total key spend under $100. Expected
+  about $6-10.
+
+**Smoke checks, already run and excluded** (`runs/web-smoke-s01`, `runs/web-smoke2-s01`): two easy tasks
+per arm. Both arms passed `easy/ai_data_analyst` and failed `easy/llm_research_summary` in both rounds.
+Snapshots of about 44 KB reached the `recall` agent as about 4 KB. With a 60k compaction window, `nohook`
+compacted once in its second task and `recall` did not.
+
+**Measures** (`analyze.py --chains web-s01 web-s02 web-s03`): compactions per chain and arm, context at
+the start of each position, solve rate by position and overall (pairs are the same task in the same
+sequence), each chain's cost (its last run's, since a resumed session reports its cost so far), and
+engagement.
+
+**How it will be read, decided now.** Three sequences make no statistical claim. The reading is a
+decision for the product, stated before the runs:
+
+- **Shows a benefit** if `recall` compacts fewer times than `nohook` in all 3 sequences, and its total
+  solved tasks are not lower than `nohook`'s by more than 3 of 36.
+- **Shows nothing** if `recall` compacts as often as `nohook`, or more, in 2 or more sequences.
+- **Shows a cost** if `recall` solves 4 or more fewer of the 36 tasks than `nohook`, whatever the
+  compactions.
+- Any other pattern is reported as mixed, without choosing a reading.
+
+Cost and context are reported whatever they show, and make no claim.
+
+**Known before this was written:** every earlier result, Study 3's included, and the smoke checks above.
+No outcome of this design has been run or graded.
+
 ## Already disclosed
 
 - The smoke round (`runs/smoke1`, 4 medium tasks) predates full recording; it is

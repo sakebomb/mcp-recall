@@ -40,6 +40,12 @@ def load_tasks():
             for d in sorted(WEB.glob("tasks/*/reddit/*")) if (d / "verify.py").exists()}
 
 
+def compact_window_env(a):
+    """Claude Code compacts against min(model window, CLAUDE_CODE_AUTO_COMPACT_WINDOW), so
+    setting it makes a 1M-window model compact as a smaller-window one would."""
+    return ["-e", f"CLAUDE_CODE_AUTO_COMPACT_WINDOW={a.compact_window}"] if a.compact_window else []
+
+
 def wait_for_forum(agent, timeout=300):
     """The forum container initializes its database on first start (2-3 minutes)."""
     deadline = time.time() + timeout
@@ -78,6 +84,7 @@ def run_one(key, task_dir, model, arm, out_dir, a, resume_from=None):
                  ["docker", "run", "-d", "--name", forum, "--network", net, "--network-alias", "forum", FORUM_IMAGE],
                  ["docker", "run", "-d", "--name", agent, "--env-file", str(B.ENV_FILE),
                   "-e", "IS_SANDBOX=1", "-e", "DISABLE_AUTOUPDATER=1", "-e", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
+                  *compact_window_env(a),
                   "-v", f"{claude_bin}:/usr/local/bin/claude:ro", "-v", f"{B.RECALL_BIN}:/usr/local/bin/mcp-recall:ro",
                   "-w", "/work", AGENT_IMAGE, "bash", "-c", "mkdir -p /work && sleep infinity"],
                  ["docker", "network", "connect", net, agent]]
@@ -137,7 +144,7 @@ def run_one(key, task_dir, model, arm, out_dir, a, resume_from=None):
                   "started_at": started_at, "ended_at": B.now_utc(), "wall_s": round(wall, 1),
                   "image": FORUM_IMAGE, "image_id": B.image_id(FORUM_IMAGE), "patch_bytes": None,
                   "resolved": resolved, "recall_stored": stored, "claude": result,
-                  "resumed": resume_from is not None}
+                  "resumed": resume_from is not None, "compact_window": a.compact_window}
         (out / f"{tid}.json").write_text(json.dumps(record, indent=1))
         return (f"done {model} {arm} {tid}: ${result.get('total_cost_usd', 0):.3f} "
                 f"{result.get('num_turns')} turns {wall:.0f}s resolved={resolved}")
@@ -168,7 +175,8 @@ def cmd_chain(a):
         out_dir.mkdir(parents=True, exist_ok=True)
         stages.append({"started_at": B.now_utc(), "argv": B.sys.argv, "model": a.model, "arms": a.arms,
                        "sequence": seq, "seed": a.seed, "prompt_template": PROMPT, "chain_prefix": CHAIN_PREFIX,
-                       "playwright_mcp": PLAYWRIGHT_MCP, "run_budget_usd": a.run_budget, "cap_usd": a.cap,
+                       "playwright_mcp": PLAYWRIGHT_MCP, "compact_window": a.compact_window,
+                       "run_budget_usd": a.run_budget, "cap_usd": a.cap,
                        "jobs": a.jobs, "timeout_s": a.timeout, "agent_image": B.image_id(AGENT_IMAGE),
                        "forum_image": FORUM_IMAGE, "verify_image": B.image_id(VERIFY_IMAGE),
                        "tasks_sha256": {k: B.sha256(tasks[k] / "verify.py") for k in seq},
@@ -194,6 +202,7 @@ def main():
     c.add_argument("--length", type=int, help="tasks per sequence (default: all)")
     c.add_argument("--seed", type=int, default=414)
     c.add_argument("--run-budget", type=float, default=2.0, help="claude --max-budget-usd per task")
+    c.add_argument("--compact-window", type=int, help="tokens; sets CLAUDE_CODE_AUTO_COMPACT_WINDOW")
     c.add_argument("--cap", type=float, default=100.0)
     c.add_argument("--arms", nargs="+", choices=B.INSTALLED, default=list(B.INSTALLED))
     c.add_argument("--jobs", type=int, default=2)
