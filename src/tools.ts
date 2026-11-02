@@ -109,35 +109,52 @@ function itemHeader(item: StoredOutput): string {
 export type RetrieveMode = "summary" | "peek" | "full";
 
 export interface RetrieveArgs {
-  id: string;
+  id?: string;
+  /** Agents read `[recall:recall_…]` and name the parameter after it. */
+  recall_id?: string;
   query?: string;
   max_bytes?: number;
   mode?: RetrieveMode;
 }
 
+const MISSING_ID =
+  '[recall: pass "id": the recall_… value from the [recall:recall_… · …] line above a summary, ' +
+  'e.g. recall__retrieve({"id": "recall_1a2b3c4d"}). recall__list_stored lists stored ids.]';
+
+/**
+ * The id as given or as `recall_id` (the first that is not blank), or the
+ * recall_… id inside a pasted header line such as `[recall:recall_1a2b · 3KB]`.
+ */
+function retrieveId(args: RetrieveArgs): string {
+  const given = [args.id, args.recall_id].map((v) => v?.trim() ?? "").find(Boolean) ?? "";
+  return given.match(/recall_[0-9a-f]+/i)?.[0] ?? given;
+}
+
 /**
  * Graduated retrieval across three tiers:
- * - `summary` — the compressed summary (cheapest; the default when no query).
+ * - `summary` — the compressed summary, which the header already delivered.
  * - `peek`    — a bounded context window (top matching chunks with a query,
- *               head chunks without) — the middle tier, far smaller than full.
+ *               head chunks without) — the default, far smaller than full.
  * - `full`    — the verbatim content, capped at `max_bytes`.
  *
- * Backward-compatible: with no explicit `mode`, a query defaults to `peek` and
- * its absence to `summary`, matching the prior focused-excerpt / summary split.
+ * With no `mode`, a call peeks: an id alone used to return the summary the agent
+ * already had, so a retry taught it nothing.
  */
 export function toolRetrieve(db: Database, args: RetrieveArgs): string {
   const config = loadConfig();
   const cap = args.max_bytes ?? config.retrieve.default_max_bytes;
 
-  const item = retrieveOutput(db, args.id);
+  const id = retrieveId(args);
+  if (!id) return MISSING_ID;
+  const item = retrieveOutput(db, id);
   if (!item) {
-    return `[recall: no item found with id "${args.id}"]`;
+    return `[recall: no item found with id "${id}"]`;
   }
 
-  recordAccess(db, args.id);
+  recordAccess(db, id);
   const header = itemHeader(item);
 
-  const mode: RetrieveMode = args.mode ?? (args.query ? "peek" : "summary");
+  const mode: RetrieveMode = args.mode ?? "peek";
 
   // Summary-only rows (store.retention) have no verbatim body or chunks. Return
   // the summary with an explicit note instead of an empty/misleading result, so
@@ -161,11 +178,11 @@ export function toolRetrieve(db: Database, args: RetrieveArgs): string {
   if (mode === "full") return fullCapped();
 
   // mode === "peek": bounded context window, with graceful fallbacks.
-  const peek = retrievePeek(db, args.id, args.query);
+  const peek = retrievePeek(db, id, args.query);
   if (peek) return `${header}\n${peek}`;
   // Pre-chunking items with a query: legacy single-snippet path.
   if (args.query) {
-    const snippet = retrieveSnippet(db, args.id, args.query);
+    const snippet = retrieveSnippet(db, id, args.query);
     if (snippet) return `${header}\n${snippet}`;
   }
   // Nothing to peek at (no chunks / no match): fall back to full content.
