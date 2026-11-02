@@ -108,6 +108,10 @@ exercise() { # <label> <command...>
   esac
   [ "$(db_scalar "$db" "SELECT COUNT(*) FROM stored_outputs WHERE full_content LIKE '%BENIGN-$label%'")" = "1" ] \
     || fail "$label: benign output is not in the database"
+  # A minified build renames functions, and the store records handler.name (#425).
+  local handler
+  handler="$(db_scalar "$db" "SELECT handler FROM stored_outputs WHERE full_content LIKE '%BENIGN-$label%'")"
+  [ "$handler" = "genericHandler" ] || fail "$label: stored handler name is '$handler', not genericHandler"
   echo "ok: benign output stored"
 
   # 2. The same shape of output carrying a credential is skipped.
