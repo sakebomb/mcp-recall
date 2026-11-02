@@ -136,6 +136,73 @@ With one run per arm and 45 tasks, none of these comparisons has more power than
 the primary analysis; the follow-up can separate explanations only if the
 differences are as large as the pilot's. The report says so whatever it shows.
 
+## Follow-up 2: the compression test (added 2026-11-02, before it ran)
+
+The pilot and the Haiku follow-up are graded and their results stand. They barely tested
+compression: summaries reached the agent in 20 of 165 recall-arm runs, because agents piped test output
+through `tail`, `head` and `grep`. This follow-up asks the question they could not answer: **with
+mcp-recall installed either way, does replacing output with summaries change whether the agent solves
+the task?**
+
+**Design.** The same 45 hard-set tasks and harness. The new `full-output` prompt asks for complete,
+verbose test runs and forbids truncating command output. Both arms get it.
+
+- `nohook` vs `recall` is the primary comparison. Both have mcp-recall installed, so the only difference
+  is whether its `PostToolUse` hook replaces output.
+- **Three replicates** (`runs/comp-r1`, `comp-r2`, `comp-r3`), so that each task is run three times per arm.
+- **Haiku 5.5**: arms `plain`, `nohook` and `recall` in every replicate. **Sonnet 5.5**: `nohook` and
+  `recall`. **Opus 5.5**: `nohook` and `recall`, only with what budget remains after Sonnet, and then
+  descriptive only.
+- **Order**: Haiku r1, r2, r3, then Sonnet r1, r2, r3, then Opus. **Budget**: the bench key's total
+  recorded spend stays under $100. The harness never starts a run that could cross it, so the last
+  replicate may stop partway through.
+
+**Calibration, already run and excluded.** Two 5-task Haiku recall-arm rounds tested the prompt
+(`runs/superseded/calib-full-output-v1`, `runs/calib-full-output`). Neither was graded; only
+engagement was read. The first version of the prompt had summaries in 2 of 5 runs. After adding
+"verbose output" it had summaries in 4 of 5. The gate was set at 3 of 5 before the first round.
+
+**Analysis, fixed now** (`analyze.py --replicates`, committed in 6704abb with mutation-tested checks):
+
+- **Unit:** a task. Its outcome is the mean, over the replicates where both arms ran, of
+  `recall` solved minus `nohook` solved. The model's result is the mean over tasks, in points.
+- **Interval:** percentile bootstrap over tasks, 10,000 resamples, seed 414.
+- **Test:** a randomization test that swaps the two arms' labels independently within each replicate
+  pair, 10,000 draws, two-sided.
+- **Exclusions** as in the pilot. A task with no complete pair is dropped. A task with fewer than three
+  pairs counts with the pairs it has.
+- **Grading and empty patches** as in the pilot: an empty patch is unsolved.
+
+**How the result will be read**, decided now:
+
+- Per model, an interval lying entirely below 0 is a measured harm from compression. One lying
+  entirely above 0 is a measured benefit. An interval that touches 0 does neither.
+- Otherwise the claim is "no measurable effect of compression", quoting the lower bound as the largest
+  harm the data still allow.
+- There are two primary comparisons, Haiku and Sonnet. The report states the chance of at least one
+  firing by chance alone. Opus, if run, and any partial replicate are reported but make no claim.
+- **Secondary, Haiku only:** `plain` vs `nohook` (the cost of installing) and `plain` vs `recall`, with
+  the same method. The cost of installing is a claim only if its interval lies entirely below 0.
+- **Engagement**, reported whatever it shows: the share of recall-arm runs that got at least one
+  summary, and that called a `recall__*` tool.
+- **Exploratory only:** solve rates on the tasks where summaries fired, because engagement is not
+  randomized.
+
+**Power** (simulated with the analysis's own test, Haiku-like tasks: 17 always solved, 15 never,
+13 mixed), probability of p < 0.05:
+
+| True difference | 2 replicates | 3 replicates |
+|---|---|---|
+| 5 points | 0.10 | 0.11 |
+| 10 points | 0.27 | 0.39 |
+| 15 points | 0.50 | 0.72 |
+| 20 points | 0.81 | 0.95 |
+
+A compression effect under about 15 points can exist and go unseen. The report says so whatever it shows.
+
+**Known before this was written:** the pilot's and the first follow-up's results, and the calibration
+engagement counts above. No outcome of this design has been run or graded.
+
 ## Already disclosed
 
 - The smoke round (`runs/smoke1`, 4 medium tasks) predates full recording; it is
