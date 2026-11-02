@@ -58,7 +58,10 @@ function hostTarget(): string {
 /** Compiles one target; returns its path and its `sha256sum` line. */
 function build(target: string, entry: string, outDir: string): { outfile: string; sum: string } {
   const outfile = join(outDir, `mcp-recall-${target.replace(/^bun-/, "")}${target.includes("windows") ? ".exe" : ""}`);
-  const p = Bun.spawnSync(["bun", "build", "--compile", "--minify", `--target=${target}`, entry, "--outfile", outfile], {
+  // No --minify-identifiers: the store records handler.name, which it renames
+  // (#425). Bun's --keep-names does not keep them (checked on 1.3.14 and 1.4.4).
+  const minify = ["--minify-syntax", "--minify-whitespace"];
+  const p = Bun.spawnSync(["bun", "build", "--compile", ...minify, `--target=${target}`, entry, "--outfile", outfile], {
     cwd: root, stdout: "inherit", stderr: "inherit",
   });
   if (p.exitCode !== 0) throw new Error(`bun build --compile failed for ${target}`);

@@ -33,6 +33,13 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   the call with its parameter name; an existing install keeps its old block
   until `mcp-recall install` runs again.
 
+- **Standalone binaries record real handler names** (#425). The binary was
+  built with identifier minification, and the store records each handler's
+  function name, so a binary install stored names such as `KQ` and `discover`
+  and per-handler stats could not tell handlers apart. The binary now keeps
+  identifiers (Bun's `--keep-names` did not keep them), at 0.2 MB more.
+  Rows stored by an earlier binary keep their old names.
+
 - **Playwright output keeps the page** (#424). Claude Code hands Playwright
   results to the hook as a top-level array of text blocks, and the hook
   serialized that array to JSON, so the handler never saw a line of the page:
