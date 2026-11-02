@@ -203,6 +203,61 @@ A compression effect under about 15 points can exist and go unseen. The report s
 **Known before this was written:** the pilot's and the first follow-up's results, and the calibration
 engagement counts above. No outcome of this design has been run or graded.
 
+## Study 3: the long-session pilot (added 2026-11-02, before it ran)
+
+The compression test is graded and its result stands: summaries did not measurably change solve rate.
+Each of its sessions was one short task, so context never ran short, and it could not show the benefit
+mcp-recall is built for. This pilot asks: **when tasks run back to back in one session, does compression
+change how soon and how often the context fills, and does solve rate hold up later in the session?**
+
+**Design.** `bench.py chain` (commit 1b9a241). A sequence of tasks runs in one Claude Code session: each
+task gets a fresh container from its own image, the previous task's Claude Code home, config and
+mcp-recall store are copied in, and the agent continues with `claude -p --resume`. Every task after the
+first opens with one sentence saying the checkout is new and earlier changes are gone. Each task is
+graded on its own image as before.
+
+- **Arms:** `nohook` and `recall`, both installed, as in the compression test. Prompt `full-output`.
+- **Model:** Haiku 5.5. **Tasks:** the 22 Django tasks of the hard set (`tasks-long.txt`).
+- **Sequences:** 6, of 10 tasks each, drawn without repeats by `bench.sequences` with seed 414. Both
+  arms run the same sequences, in this order (Django instance numbers):
+  1. 14631, 14007, 16263, 13212, 13344, 13449, 11400, 12325, 14011, 15629
+  2. 12325, 14007, 14011, 16631, 13344, 15268, 12708, 10554, 13449, 15957
+  3. 10554, 13449, 15128, 12325, 16631, 13344, 12708, 11400, 13128, 14631
+  4. 15128, 15957, 13449, 12708, 13344, 12325, 15268, 14007, 14011, 16631
+  5. 15503, 11885, 11400, 15128, 14631, 16263, 15268, 12708, 11138, 15629
+  6. 11885, 13128, 16631, 12708, 10554, 15957, 11138, 13344, 15128, 16263
+- **Budget:** the key's total recorded spend stays under $100, as before. Expected about $10-15.
+- **A chain ends** where a task does not finish its run (an infrastructure failure or the cap), because
+  the next task has nothing to resume. Positions it did not reach are reported as not run.
+
+**Smoke check, already run and excluded.** One sequence of 2 tasks per arm (`runs/long-smoke-s01`)
+tested the runner: the second task continued the first's session in both arms, started with about 39k
+tokens of context against 18k fresh, the store carried over, and `nohook` kept its hook removed. It was
+not graded. It showed a Haiku task adds about 20k tokens of context, so sequences are 10 tasks long, not
+the 6 first planned, to reach compaction.
+
+**Measures** (`analyze.py --chains long-s01 … long-s06`, with mutation-tested checks):
+
+- **Compactions** per chain and arm, counted from `compact_boundary` events in each task's stream, and
+  per sequence `recall` minus `nohook`.
+- **Context at the start of each position:** the median over chains of the first model call's input,
+  cache-read and cache-write tokens.
+- **Solve rate:** by position, and overall with the compression test's method (a sequence standing in for
+  a replicate; pairs are the same task in the same sequence).
+- **How far each chain got**, cost, and engagement as before.
+
+**How it will be read, decided now.** This is a pilot with 6 sequences, so it makes **no claim** of
+benefit or harm. It reports every measure above as it falls, and says how many of the 6 sequences had
+fewer compactions with `recall`, more, or the same. It decides what runs next:
+
+- If `nohook` compacts at least once in 3 or more of its 6 chains, the setting produces context
+  pressure, and the remaining budget goes to 2-3 Sonnet sequences with the same design.
+- Otherwise the sessions were too short to test the question, and the next step is longer sequences,
+  not another model.
+
+**Known before this was written:** every result of the pilot and both follow-ups, and the smoke check's
+runner behaviour above. No outcome of this design has been run or graded.
+
 ## Already disclosed
 
 - The smoke round (`runs/smoke1`, 4 medium tasks) predates full recording; it is
