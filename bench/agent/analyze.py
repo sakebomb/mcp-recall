@@ -47,6 +47,29 @@ def stream_engagement(stream_path):
     return summaries, calls
 
 
+def stream_context(stream_path):
+    """From a run's own events: how many times Claude Code compacted the
+    conversation, and the context of the run's first and largest model call
+    (input plus cache read and write tokens). Nones when there is no stream."""
+    if not stream_path.exists():
+        return None, None, None
+    compactions, sizes = 0, []
+    for line in stream_path.read_text().splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") == "system" and event.get("subtype") == "compact_boundary":
+            compactions += 1
+        usage = (event.get("message") or {}).get("usage") if event.get("type") == "assistant" else None
+        if isinstance(usage, dict):
+            sizes.append(sum(usage.get(k, 0) or 0 for k in
+                             ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")))
+    return compactions, (sizes[0] if sizes else None), (max(sizes) if sizes else None)
+
+
 def load_runs(run_id):
     out_dir = RUNS / run_id
     runs = []
@@ -65,7 +88,9 @@ def load_runs(run_id):
         else:
             resolved = None  # a patch the grader produced no report for
         stored = rec["recall_stored"] if isinstance(rec["recall_stored"], list) else []
-        summaries, calls = stream_engagement(rec_path.with_suffix(".evidence") / "stream.jsonl")
+        stream = rec_path.with_suffix(".evidence") / "stream.jsonl"
+        summaries, calls = stream_engagement(stream)
+        compactions, first_ctx, peak_ctx = stream_context(stream)
         runs.append({
             "model": model, "arm": arm, "task": iid, "resolved": resolved,
             # Spec exclusion: infrastructure failure = no result event and no patch.
@@ -75,6 +100,7 @@ def load_runs(run_id):
             "in_tok": u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0)
             + u.get("cache_creation_input_tokens", 0),
             "stored": len(stored), "summaries_delivered": summaries, "recall_calls": calls,
+            "compactions": compactions, "first_ctx": first_ctx, "peak_ctx": peak_ctx,
         })
     return runs
 
@@ -265,6 +291,54 @@ def replicate_stats(runs, base, treat):
     return out
 
 
+def chain_compare(run_ids, base, treat, model):
+    """The long-session pilot (#414 study 3): each run id is one task sequence run
+    as a chain in both arms. The order comes from the run's manifest."""
+    runs, seqs = [], {}
+    for rid in run_ids:
+        stages = json.loads((RUNS / rid / "manifest.json").read_text())
+        seqs[rid] = next(s["sequence"] for s in reversed(stages) if "sequence" in s)
+        runs += [{**r, "run_id": rid} for r in load_runs(rid) if r["model"] == model]
+    return {"model": model, "run_ids": list(run_ids), **chain_stats(runs, seqs, base, treat)}
+
+
+def chain_rows(cell, rid, arm, seq):
+    """A chain's runs in order, up to its first missing position: a chain ends
+    where a task did not run, since the next one had nothing to resume."""
+    rows = []
+    for task in seq:
+        r = cell.get((rid, arm, task))
+        if r is None:
+            break
+        rows.append(r)
+    return rows
+
+
+def chain_stats(runs, seqs, base, treat):
+    """Per arm, over chains: compactions, how far each chain got, context at the
+    start of each position, and solve rate by position. Per sequence, treat minus
+    base compactions. Solve rate is compared with replicate_stats, a sequence
+    standing in for a replicate."""
+    cell = {(r["run_id"], r["arm"], r["task"]): r for r in runs}
+    out = {"base": base, "treat": treat, "n_sequences": len(seqs), "arms": {}}
+    for arm in (base, treat):
+        done = {rid: chain_rows(cell, rid, arm, seq) for rid, seq in seqs.items()}
+        length = max(len(s) for s in seqs.values())
+        by_pos = [[rows[i] for rows in done.values() if i < len(rows)] for i in range(length)]
+        out["arms"][arm] = {
+            "compactions": {rid: sum(r["compactions"] or 0 for r in rows) for rid, rows in done.items()},
+            "positions_run": {rid: len(rows) for rid, rows in done.items()},
+            "first_ctx_by_position": [statistics.median(r["first_ctx"] for r in p) if p and all(
+                r["first_ctx"] is not None for r in p) else None for p in by_pos],
+            "solved_by_position": [f"{sum(bool(r['resolved']) for r in p)}/{len(p)}" for p in by_pos],
+            "cost": round(sum(r["cost"] for rows in done.values() for r in rows), 4),
+        }
+    b, t = out["arms"][base]["compactions"], out["arms"][treat]["compactions"]
+    out["compaction_diff"] = {rid: t[rid] - b[rid] for rid in seqs}
+    out["solve"] = replicate_stats(runs, base, treat)
+    return out
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--run-id")
@@ -274,7 +348,12 @@ def main():
     p.add_argument("--replicates", nargs="+", metavar="RUN_ID",
                    help="replicate run ids for the compression test; use with --pair")
     p.add_argument("--pair", nargs=2, metavar=("BASE_ARM", "TREAT_ARM"), default=("nohook", "recall"))
+    p.add_argument("--chains", nargs="+", metavar="RUN_ID",
+                   help="sequence run ids for the long-session pilot; use with --pair")
     a = p.parse_args()
+    if a.chains:
+        print(json.dumps(chain_compare(a.chains, a.pair[0], a.pair[1], a.model), indent=1))
+        return
     if a.replicates:
         print(json.dumps(replicate_compare(a.replicates, a.pair[0], a.pair[1], a.model), indent=1))
         return

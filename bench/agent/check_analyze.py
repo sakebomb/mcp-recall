@@ -80,3 +80,40 @@ assert abs(mixed["diff"] - 1 / 3) < 1e-12 and 0.05 < mixed["perm_p"] < 1.0, mixe
 same = A.replicate_stats([r for r in R if r["task"] == "tB"], "nohook", "recall")
 assert same["diff"] == 0 and same["perm_p"] == 1.0, same
 print("replicate checks pass")
+# Chains (long-session pilot): s1 runs A B C, s2 runs B C A. nohook s2 stops after C;
+# recall s2 has no C, so its A (5 compactions) is past the chain's end and must not count.
+def ch(rid, t, arm, ok, comp, ctx):
+    return {**run(t, arm, ok), "run_id": rid, "compactions": comp, "first_ctx": ctx}
+C2 = [ch("s1", "A", "nohook", True, 0, 10), ch("s1", "B", "nohook", False, 1, 50), ch("s1", "C", "nohook", True, 1, 30),
+      ch("s1", "A", "recall", True, 0, 10), ch("s1", "B", "recall", True, 0, 40), ch("s1", "C", "recall", False, 0, 60),
+      ch("s2", "B", "nohook", False, 0, 10), ch("s2", "C", "nohook", True, 2, 70),
+      ch("s2", "B", "recall", True, 0, 10), ch("s2", "A", "recall", True, 5, 90)]
+cs = A.chain_stats(C2, {"s1": ["tA", "tB", "tC"], "s2": ["tB", "tC", "tA"]}, "nohook", "recall")
+nh, rc = cs["arms"]["nohook"], cs["arms"]["recall"]
+assert nh["compactions"] == {"s1": 2, "s2": 2} and rc["compactions"] == {"s1": 0, "s2": 0}, cs
+assert nh["positions_run"] == {"s1": 3, "s2": 2} and rc["positions_run"] == {"s1": 3, "s2": 1}, cs
+assert cs["compaction_diff"] == {"s1": -2, "s2": -2}, cs
+assert nh["first_ctx_by_position"] == [10, 60, 30] and rc["first_ctx_by_position"] == [10, 40, 60], cs
+assert nh["solved_by_position"] == ["1/2", "1/2", "1/1"] and rc["solved_by_position"] == ["2/2", "1/1", "0/1"], cs
+assert (nh["cost"], rc["cost"]) == (5.0, 4.0), cs
+# Solve pairs by (sequence, task): A (0), B (+1, +1), C (-1) -> task means 0, 1, -1, diff 0.
+assert (cs["solve"]["n_pairs"], cs["solve"]["diff"]) == (4, 0), cs["solve"]
+# Context by position is a median: 10, 20, 90 give 20 (a mean would give 40).
+c3 = A.chain_stats([ch(s, "A", arm, True, 0, x) for s, x in (("s1", 10), ("s2", 20), ("s3", 90))
+                    for arm in ("nohook", "recall")], {"s1": ["tA"], "s2": ["tA"], "s3": ["tA"]}, "nohook", "recall")
+assert c3["arms"]["nohook"]["first_ctx_by_position"] == [20], c3
+# Stream context: two compactions, first call 100 tokens, largest 900; junk and non-dict lines skipped.
+ctx_ev = [
+    {"type": "system", "subtype": "init", "session_id": "x"},
+    {"type": "assistant", "message": {"usage": {"input_tokens": 10, "cache_read_input_tokens": 60, "cache_creation_input_tokens": 30}}},
+    {"type": "system", "subtype": "compact_boundary", "compact_metadata": {"trigger": "auto"}},
+    {"type": "assistant", "message": {"usage": {"input_tokens": 5, "cache_read_input_tokens": 800, "cache_creation_input_tokens": 95}}},
+    {"type": "user", "message": {"usage": {"input_tokens": 99999}}},
+    {"type": "system", "subtype": "compact_boundary"},
+    {"type": "assistant", "message": {"usage": {"input_tokens": 1, "cache_read_input_tokens": 200}}},
+]
+q = pathlib.Path(tempfile.mkdtemp()) / "stream.jsonl"
+q.write_text("\n".join(json.dumps(e) for e in ctx_ev) + "\n[1, 2]\nnot json\n")
+assert A.stream_context(q) == (2, 100, 900), A.stream_context(q)
+assert A.stream_context(q.parent / "missing.jsonl") == (None, None, None)
+print("chain checks pass")
