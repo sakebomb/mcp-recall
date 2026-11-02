@@ -301,7 +301,8 @@ def chain_compare(run_ids, base, treat, model):
     runs, seqs = [], {}
     for rid in run_ids:
         stages = json.loads((RUNS / rid / "manifest.json").read_text())
-        seqs[rid] = next(s["sequence"] for s in reversed(stages) if "sequence" in s)
+        # web.py names a task 'suite/name' in its manifest and 'suite__name' in its records.
+        seqs[rid] = [t.replace("/", "__") for t in next(s["sequence"] for s in reversed(stages) if "sequence" in s)]
         runs += [{**r, "run_id": rid} for r in load_runs(rid) if r["model"] == model]
     return {"model": model, "run_ids": list(run_ids), **chain_stats(runs, seqs, base, treat)}
 
