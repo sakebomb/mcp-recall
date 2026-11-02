@@ -9,12 +9,18 @@ both arms run identical versions.
     bench.py run    --tasks tasks-smoke.txt --models claude-haiku-5-5 --run-id smoke1
     bench.py grade  --run-id smoke1
     bench.py report --run-id smoke1
+
+`chain` runs tasks back to back in one resumed session, one container per task,
+to let context build up the way a long working session does:
+
+    bench.py chain  --tasks tasks-long.txt --model claude-haiku-5-5 --run-id long --prompt full-output
 """
 
 import argparse
 import hashlib
 import json
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -70,6 +76,10 @@ PROMPT_EXTRA = {
                     " in full: do not pipe or truncate it with head, tail, grep or similar"
                     " filters, and do not redirect it to a file to read part of it."),
 }
+
+# Opens every chained task after the first: the session carries on, the checkout does not.
+CHAIN_PREFIX = ("This is a new task. /testbed now holds a different checkout, and your changes"
+                " from earlier tasks are not in it.\n\n")
 
 
 def load_tasks(path):
@@ -141,6 +151,33 @@ def collect_evidence(container, ev):
         sh(["docker", "cp", f"{container}:/tmp/recall-snap", str(ev / "recall-store")])
 
 
+def session_id(stream):
+    """The session a stream-json run belongs to, from its first event that names one."""
+    for line in stream.splitlines():
+        try:
+            sid = json.loads(line).get("session_id")
+        except (json.JSONDecodeError, AttributeError):
+            continue
+        if sid:
+            return sid
+    return None
+
+
+def restore_state(container, ev):
+    """Put the previous task's session into a fresh container: Claude Code's home
+    and config, and the mcp-recall store, from that task's evidence."""
+    steps = [["docker", "cp", f"{ev / 'claude-home'}/.", f"{container}:/root/.claude"],
+             ["docker", "cp", str(ev / "claude.json"), f"{container}:/root/.claude.json"]]
+    if (ev / "recall-store").is_dir():
+        steps += [["docker", "exec", container, "mkdir", "-p", "/root/.local/share/mcp-recall"],
+                  ["docker", "cp", f"{ev / 'recall-store'}/.", f"{container}:/root/.local/share/mcp-recall"]]
+    for step in steps:
+        r = sh(step)
+        if r.returncode:
+            return r.stderr.strip()[:200]
+    return None
+
+
 def tool_versions():
     claude_bin = os.path.realpath(shutil.which("claude") or "")
     swebench = sh([sys.executable, "-c", "import swebench; print(swebench.__version__)"]).stdout.strip()
@@ -166,7 +203,10 @@ def append_manifest(out_dir, entry):
     path.write_text(json.dumps(stages, indent=1))
 
 
-def run_one(task, model, arm, out_dir, a):
+def run_one(task, model, arm, out_dir, a, resume_from=None):
+    """One agent run in a fresh container. With resume_from (the previous task's
+    evidence directory), the run continues that task's session instead of
+    starting one: its state is copied in, and install is not run again."""
     iid = task["instance_id"]
     out = out_dir / model / arm
     out.mkdir(parents=True, exist_ok=True)
@@ -190,21 +230,30 @@ def run_one(task, model, arm, out_dir, a):
         return f"FAIL start {iid}: {started.stderr.strip()[:200]}"
     try:
         inst = None
-        if arm in INSTALLED:
+        resume = ""
+        if resume_from is not None:
+            sid = session_id((resume_from / "stream.jsonl").read_text())
+            failed = "no session id in the previous stream" if sid is None else restore_state(name, resume_from)
+            if failed:
+                return f"FAIL resume {iid}: {failed}"
+            resume = f"--resume {sid} "
+        elif arm in INSTALLED:
             inst = sh(["docker", "exec", name, "mcp-recall", "install"])
             if inst.returncode:
                 return f"FAIL install {iid}: {inst.stderr.strip()[:200]}"
-        if arm == "nohook":
+        if arm == "nohook" and resume_from is None:
             drop = sh(["docker", "exec", name, "python3", "-c", DROP_POST_TOOL_USE])
             if drop.returncode:
                 return f"FAIL nohook {iid}: {drop.stderr.strip()[:200]}"
         prompt = PROMPT.format(extra=PROMPT_EXTRA[a.prompt], problem=task["problem_statement"])
+        if resume_from is not None:
+            prompt = CHAIN_PREFIX + prompt
         (out / f"{iid}.prompt.txt").write_text(prompt)
         sh(["docker", "cp", str(out / f"{iid}.prompt.txt"), f"{name}:/tmp/prompt.txt"])
         # stream-json records every event the agent saw, tool results included, so
         # the recall arm's evidence shows the summaries Claude actually received.
         cmd = ("source /opt/miniconda3/bin/activate testbed && "
-               f"claude -p \"$(cat /tmp/prompt.txt)\" --model {model} --output-format stream-json --verbose "
+               f"claude -p \"$(cat /tmp/prompt.txt)\" {resume}--model {model} --output-format stream-json --verbose "
                f"--dangerously-skip-permissions --max-budget-usd {RUN_BUDGET[model]}")
         started_at = now_utc()
         t0 = time.time()
@@ -237,7 +286,8 @@ def run_one(task, model, arm, out_dir, a):
         record = {"instance_id": iid, "model": model, "arm": arm, "prompt": a.prompt, "rc": rc,
                   "started_at": started_at, "ended_at": now_utc(), "wall_s": round(wall, 1),
                   "image": task["image"], "image_id": image_id(task["image"]),
-                  "patch_bytes": len(diff.stdout), "recall_stored": stored, "claude": result}
+                  "patch_bytes": len(diff.stdout), "recall_stored": stored, "claude": result,
+                  "resumed": resume_from is not None}
         (out / f"{iid}.json").write_text(json.dumps(record, indent=1))
         return (f"done {model} {arm} {iid}: ${result.get('total_cost_usd', 0):.3f} "
                 f"{result.get('num_turns')} turns {wall:.0f}s patch={len(diff.stdout)}B")
@@ -245,22 +295,31 @@ def run_one(task, model, arm, out_dir, a):
         sh(["docker", "rm", "-f", name])
 
 
-def cmd_run(a):
-    tasks = load_tasks(a.tasks)
-    out_dir = RUNS / a.run_id
-    out_dir.mkdir(parents=True, exist_ok=True)
+def pull_images(tasks):
     for task in tasks:
         if sh(["docker", "image", "inspect", task["image"]]).returncode:
             print("pull", task["image"], flush=True)
             subprocess.run(["docker", "pull", "-q", task["image"]], check=True)
+
+
+def new_stage(a, tasks, models):
+    """The manifest entry pinning what a run invocation used."""
     from datasets import load_dataset
-    stage = {"started_at": now_utc(), "argv": sys.argv, "tasks_file": a.tasks,
-             "tasks_sha256": sha256(a.tasks), "models": a.models, "arms": a.arms, "prompt": a.prompt,
-             "prompt_template": PROMPT, "prompt_extra": PROMPT_EXTRA[a.prompt],
-             "run_budget_usd": RUN_BUDGET, "cap_usd": a.cap, "jobs": a.jobs, "timeout_s": a.timeout,
-             "dataset": DATASET, "dataset_fingerprint": cast(Any, load_dataset(DATASET, split="test"))._fingerprint,
-             "images": {t["instance_id"]: image_id(t["image"]) for t in tasks},
-             "key_spend_before_usd": key_spend(), **tool_versions()}
+    return {"started_at": now_utc(), "argv": sys.argv, "tasks_file": a.tasks,
+            "tasks_sha256": sha256(a.tasks), "models": models, "arms": a.arms, "prompt": a.prompt,
+            "prompt_template": PROMPT, "prompt_extra": PROMPT_EXTRA[a.prompt],
+            "run_budget_usd": RUN_BUDGET, "cap_usd": a.cap, "jobs": a.jobs, "timeout_s": a.timeout,
+            "dataset": DATASET, "dataset_fingerprint": cast(Any, load_dataset(DATASET, split="test"))._fingerprint,
+            "images": {t["instance_id"]: image_id(t["image"]) for t in tasks},
+            "key_spend_before_usd": key_spend(), **tool_versions()}
+
+
+def cmd_run(a):
+    tasks = load_tasks(a.tasks)
+    out_dir = RUNS / a.run_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pull_images(tasks)
+    stage = new_stage(a, tasks, a.models)
     for model in a.models:
         spend = key_spend()
         if spend >= a.cap:
@@ -275,6 +334,48 @@ def cmd_run(a):
     stage.update(ended_at=now_utc(), key_spend_after_usd=key_spend())
     append_manifest(out_dir, stage)
     print(f"key spend after run ${stage['key_spend_after_usd']:.2f}")
+
+
+def sequences(task_ids, n, length, seed):
+    """n task orders of the given length, each drawn without repeats, fixed by the seed."""
+    rng = random.Random(seed)
+    pool = sorted(task_ids)
+    return [rng.sample(pool, length) for _ in range(n)]
+
+
+def run_chain(seq, tasks, arm, out_dir, a):
+    """One sequence in one arm: each task resumes the previous task's session. A
+    task that does not finish its run ends the chain, since the next has nothing
+    to resume."""
+    prev = None
+    for iid in seq:
+        line = run_one(tasks[iid], a.model, arm, out_dir, a, resume_from=prev)
+        print(line, flush=True)
+        with (out_dir / "run.log").open("a") as log:
+            log.write(f"{now_utc()} {line}\n")
+        if not line.startswith(("done", "skip")):
+            return
+        prev = out_dir / a.model / arm / f"{iid}.evidence"
+
+
+def cmd_chain(a):
+    by_id = {t["instance_id"]: t for t in load_tasks(a.tasks)}
+    seqs = sequences(by_id, a.sequences, a.length, a.seed)
+    pull_images(by_id.values())
+    dirs = [RUNS / f"{a.run_id}-s{k + 1:02d}" for k in range(len(seqs))]
+    stages = []
+    for out_dir, seq in zip(dirs, seqs):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        stages.append({**new_stage(a, [by_id[i] for i in seq], [a.model]),
+                       "sequence": seq, "seed": a.seed, "chain_prefix": CHAIN_PREFIX})
+    print(f"== {a.model} chains (key spend so far ${key_spend():.2f})", flush=True)
+    jobs = [(seq, arm, out_dir) for out_dir, seq in zip(dirs, seqs) for arm in a.arms]
+    with ThreadPoolExecutor(a.jobs) as pool:
+        list(pool.map(lambda j: run_chain(j[0], by_id, j[1], j[2], a), jobs))
+    after = key_spend()
+    for out_dir, stage in zip(dirs, stages):
+        append_manifest(out_dir, {**stage, "ended_at": now_utc(), "key_spend_after_usd": after})
+    print(f"key spend after run ${after:.2f}")
 
 
 def cmd_seal(a):
@@ -368,6 +469,18 @@ def main():
     r.add_argument("--arms", nargs="+", choices=ARMS, default=list(DEFAULT_ARMS))
     r.add_argument("--jobs", type=int, default=4)
     r.add_argument("--timeout", type=int, default=3600, help="seconds per agent run")
+    c = sub.add_parser("chain")
+    c.add_argument("--tasks", required=True)
+    c.add_argument("--model", required=True, choices=sorted(RUN_BUDGET))
+    c.add_argument("--run-id", required=True, help="prefix: sequence k goes to <run-id>-sNN")
+    c.add_argument("--sequences", type=int, default=6)
+    c.add_argument("--length", type=int, default=6)
+    c.add_argument("--seed", type=int, default=414)
+    c.add_argument("--cap", type=float, default=40.0)
+    c.add_argument("--prompt", choices=sorted(PROMPT_EXTRA), default="default")
+    c.add_argument("--arms", nargs="+", choices=INSTALLED, default=list(INSTALLED))
+    c.add_argument("--jobs", type=int, default=4)
+    c.add_argument("--timeout", type=int, default=3600, help="seconds per agent run")
     g = sub.add_parser("grade")
     g.add_argument("--run-id", required=True)
     g.add_argument("--jobs", type=int, default=4)
@@ -375,7 +488,7 @@ def main():
     rp.add_argument("--run-id", required=True)
     sub.add_parser("seal").add_argument("--run-id", required=True)
     a = p.parse_args()
-    {"run": cmd_run, "grade": cmd_grade, "report": cmd_report, "seal": cmd_seal}[a.cmd](a)
+    {"run": cmd_run, "chain": cmd_chain, "grade": cmd_grade, "report": cmd_report, "seal": cmd_seal}[a.cmd](a)
 
 
 if __name__ == "__main__":
