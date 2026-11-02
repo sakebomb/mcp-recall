@@ -62,9 +62,11 @@ PROMPT_EXTRA = {
     "verify-full": (" Before you finish, run the complete test file for every module you"
                     " changed, not only the tests nearest your change, and read the output."),
     # verify-full barely raised engagement (4 of 30 runs): agents still piped test
-    # runs through tail, head or grep. full-output asks for the output unfiltered.
+    # runs through tail, head or grep. full-output asks for the output unfiltered and
+    # verbose, since a passing run that prints only dots is too small to summarize.
     "full-output": (" Before you finish, run the complete test file for every module you"
-                    " changed, not only the tests nearest your change. Read command output"
+                    " changed, not only the tests nearest your change, with verbose output"
+                    " that lists each test (pytest -v, or runtests.py -v 2). Read command output"
                     " in full: do not pipe or truncate it with head, tail, grep or similar"
                     " filters, and do not redirect it to a file to read part of it."),
 }
