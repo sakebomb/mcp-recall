@@ -6,8 +6,9 @@
 # Every non-merge commit in base..head must carry a trailer line
 # `Signed-off-by: <author name> <<author email>>` naming its own author, so the
 # sign-off certifies the person who wrote the change, not whoever pushed it.
-# Bot accounts (Dependabot and the like, whose names end in "[bot]") are exempt:
-# they cannot certify anything. Exits 1 and names each unsigned commit.
+# GitHub App bot accounts (Dependabot and the like) are exempt: they cannot certify
+# anything. Both the name and the email must have the bot form, since a name alone
+# is free text any committer can set. Exits 1 and names each unsigned commit.
 set -euo pipefail
 
 if [ "$#" -ne 2 ]; then
@@ -17,7 +18,7 @@ fi
 
 fail=0
 while IFS=$'\t' read -r sha name email subject; do
-  case "$name" in *"[bot]") continue ;; esac
+  case "$name/$email" in *"[bot]/"*"[bot]@users.noreply.github.com") continue ;; esac
   if ! git show -s --format=%B "$sha" | grep -qxF "Signed-off-by: $name <$email>"; then
     echo "missing sign-off: ${sha:0:12} $subject (needs 'Signed-off-by: $name <$email>')" >&2
     fail=1

@@ -13200,7 +13200,7 @@ var require_package = __commonJS((exports, module) => {
       name: "sakebomb",
       url: "https://github.com/sakebomb"
     },
-    license: "MIT",
+    license: "Apache-2.0",
     homepage: "https://github.com/sakebomb/mcp-recall#readme",
     repository: {
       type: "git",
@@ -13235,6 +13235,7 @@ var require_package = __commonJS((exports, module) => {
       "hooks/",
       ".claude-plugin/",
       "LICENSE",
+      "NOTICE",
       "README.md",
       "CHANGELOG.md",
       "CONTRIBUTING.md",

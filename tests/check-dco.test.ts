@@ -84,6 +84,13 @@ describe("check-dco.sh", () => {
     expect(check(base).code).toBe(0);
   });
 
+  test("does not exempt a person who only names themselves a bot", () => {
+    commit("sneaky", { name: "alice[bot]", email: ALICE.email });
+    const r = check(base);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("sneaky");
+  });
+
   test("ignores merge commits but still checks the commits they bring in", () => {
     git(["checkout", "-q", "-b", "side"]);
     commit("side change, unsigned");
