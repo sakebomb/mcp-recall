@@ -34,7 +34,31 @@ const STOPWORDS = new Set([
   "not", "but", "you", "your", "yours", "all", "any", "can", "use", "used",
   "using", "its", "out", "per", "via", "one", "two", "get", "set", "new",
   "null", "true", "false", "none", "nan", "undefined",
+  "www", "com", "org", "net",
 ]);
+
+/**
+ * Structure repeats once per record, so on frequency alone it beats the words a
+ * reader would search for (#424 surfaced "ref", "cursor", "pointer"). Each span
+ * is blanked before counting: a JSON key (escaped or not), a `[key=value]`
+ * attribute, a page-snapshot role at the start of a `- ` line, and a URL scheme.
+ */
+const STRUCTURE_RES = [
+  /\\?"[A-Za-z_]\w*\\?"\s*:/g,
+  /\[[a-z][\w-]*(?:=[^\]\s]*)?\]/g,
+  /^(\s*-\s+'?)\/?[a-z][\w-]*(?=\s*(?:"|\[|:|$))/gm,
+  /\b[a-z]+:\/\/(?:www\.)?/g,
+];
+
+/**
+ * Generated ids, not search terms: hex (`a197f309f6243d7`, `fd7a0c`), or 16 or
+ * more letters and digits (Drive and Gmail ids). An identifier with `_` is kept.
+ */
+const GENERATED_ID_RE = /^(?=.*\d)(?:[0-9a-f]{4,}|[A-Za-z0-9]{16,})$/i;
+
+function withoutStructure(content: string): string {
+  return STRUCTURE_RES.reduce((text, re) => text.replace(re, (_m, lead) => (typeof lead === "string" ? lead : " ")), content);
+}
 
 interface TokenAcc {
   display: string;
@@ -59,9 +83,10 @@ export function extractHints(content: string, maxHints = DEFAULT_MAX_HINTS): str
   // matchAll iterates lazily — it never materializes a full token array and
   // does not mutate TOKEN_RE.lastIndex, so this is safe to call repeatedly on
   // large content without a peak-memory spike.
-  for (const match of content.matchAll(TOKEN_RE)) {
+  for (const match of withoutStructure(content).matchAll(TOKEN_RE)) {
     const raw = match[0];
     if (raw.length < MIN_TOKEN_LEN || raw.length > MAX_TOKEN_LEN) continue;
+    if (GENERATED_ID_RE.test(raw)) continue;
     const key = raw.toLowerCase();
     if (STOPWORDS.has(key)) continue;
 
