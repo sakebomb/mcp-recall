@@ -363,6 +363,9 @@ or graded.
 - Study 5's section says the fix was checked on the Playwright responses "stored in Study 4's smoke
   and main runs". They came from Study 4's `recall` chains only (`web-s01` to `web-s03`): 166 stored
   items, 164 distinct. Corrected here after the run; the section above is left as registered.
+- The same section says an evaluate "kept under 1 KB of the data the agent had asked for". In Study 4
+  each evaluate went to the generic fallback, which kept the first 4 KB of a JSON-escaped copy: the 22
+  results, 5.9 KB or more each, were all cut, but not to under 1 KB.
 
 - The smoke round (`runs/smoke1`, 4 medium tasks) predates full recording; it is
   cited only as the costing round, never pooled with the pilot.
