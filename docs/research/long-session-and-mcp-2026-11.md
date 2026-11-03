@@ -198,6 +198,9 @@ request for 32,000 output tokens overflowed the window at about 99k tokens of pr
 died instead of compacting, which is the behaviour this study measures. The amendment set the output
 cap and fixed infrastructure failures as any run whose final result records an API error status. It
 also recorded the one result seen by then: `recall` 6 of 12, `nohook` 4 of 12 in the first repeat.
+The amendment put the other four errors down to LiteLLM crashing and to a malformed request. A later
+check found that all four, like every gateway error in the study, came straight after a screenshot:
+two in each arm.
 
 | | nohook | recall |
 |---|---|---|
