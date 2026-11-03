@@ -411,7 +411,9 @@ model on the CPU. `smoke6c`: this model, `nohook`, solved `easy/movie_reviewer_a
 with no compaction and failed `easy/llm_research_summary` after 81 turns and 8 compactions, each at
 about 104k tokens. `smoke6d`: this model, `recall`, solved `easy/movie_reviewer_analysis` in 55 s,
 storing 11 Playwright responses at about 60% smaller. The smokes ran on Study 5's binary except
-`smoke6d`.
+`smoke6d`. `smoke6e`, after the amendment: this model, `nohook`, main's binary, `--max-output 16384`,
+`easy/llm_research_summary`. It compacted once at 106,947 tokens and finished in 39 turns with no
+API error, unsolved.
 
 **What this can and cannot show.** A result is about this model, this site and this harness. A
 benefit here would say mcp-recall helps a model whose window a task fills; it would not say the same
