@@ -386,6 +386,24 @@ forum task does fill, at no API cost.
   error, the forum not starting) is rerun once and the failure disclosed. A run the agent finishes
   is never rerun, whatever its result.
 
+**Amendment, 2026-11-02, before the restart: the first attempt is void.** The first attempt was
+stopped after 41 of 72 runs, and its runs are kept in `bench/agent/runs/void-study6-attempt1/`,
+excluded from the analysis. Seven of the 41 ended on an API error rather than on the agent's own
+work, four in `recall` and three in `nohook`. Two got a 502 while LiteLLM was crashing, and two
+were ended by a LiteLLM 400 ("Input should be a valid string", a request sent to vLLM in the wrong
+shape). The third error was ours: Claude Code asks for 32,000 output tokens, so a prompt of about 99k plus the
+request overflowed the 131k window. Three runs died with that 400 when they should have compacted.
+Rerunning once could not have fixed this, because it recurs on every long run, and compaction is
+what this study is about. The restart changes two things and nothing else:
+
+- `--max-output 16384` sets `CLAUDE_CODE_MAX_OUTPUT_TOKENS`, the served model's real output cap, and
+  is recorded in every run and manifest.
+- A run whose final result carries a non-null `api_error_status` is an infrastructure failure,
+  under the reruns rule above. That status is read from the record, not judged by eye.
+
+Known when this was written: in the void attempt's first repeat, `recall` solved 6 of 12 and
+`nohook` 4 of 12. The reading, measures and tasks above stand unchanged.
+
 **Smoke runs, disclosed and excluded from the analysis.** `smoke6`: qwen3-coder 30B on jupiter's
 Ollama, 64k window, solved 0 of 2 easy tasks (it never registered), so it failed the floor.
 `smoke6b`: qwen3.6 35B on jupiter, solved 1 of 2, but 6 to 22 minutes a task with a third of the

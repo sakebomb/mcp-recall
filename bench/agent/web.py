@@ -73,6 +73,13 @@ def compact_window_env(a):
     return ["-e", f"CLAUDE_CODE_AUTO_COMPACT_WINDOW={a.compact_window}"] if a.compact_window else []
 
 
+def max_output_env(a):
+    """Claude Code asks for 32k output tokens by default. On a 131k self-hosted window that
+    request overflows near the compaction point and the run dies with a 400 instead of
+    compacting, so cap it at what the served model can actually emit."""
+    return ["-e", f"CLAUDE_CODE_MAX_OUTPUT_TOKENS={a.max_output}"] if a.max_output else []
+
+
 def wait_for_forum(agent, timeout=300):
     """The forum container initializes its database on first start (2-3 minutes)."""
     deadline = time.time() + timeout
@@ -111,7 +118,7 @@ def run_one(key, task_dir, model, arm, out_dir, a, resume_from=None):
                  ["docker", "run", "-d", "--name", forum, "--network", net, "--network-alias", "forum", FORUM_IMAGE],
                  ["docker", "run", "-d", "--name", agent, *backend_args(a),
                   "-e", "IS_SANDBOX=1", "-e", "DISABLE_AUTOUPDATER=1", "-e", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
-                  *compact_window_env(a),
+                  *compact_window_env(a), *max_output_env(a),
                   "-v", f"{claude_bin}:/usr/local/bin/claude:ro", "-v", f"{B.RECALL_BIN}:/usr/local/bin/mcp-recall:ro",
                   "-w", "/work", AGENT_IMAGE, "bash", "-c", "mkdir -p /work && sleep infinity"],
                  ["docker", "network", "connect", net, agent]]
@@ -174,7 +181,7 @@ def run_one(key, task_dir, model, arm, out_dir, a, resume_from=None):
                   "image": FORUM_IMAGE, "image_id": B.image_id(FORUM_IMAGE), "patch_bytes": None,
                   "resolved": resolved, "recall_stored": stored, "claude": result,
                   "resumed": resume_from is not None, "compact_window": a.compact_window,
-                  "backend": getattr(a, "backend", "litellm")}
+                  "max_output": a.max_output, "backend": getattr(a, "backend", "litellm")}
         (out / f"{tid}.json").write_text(json.dumps(record, indent=1))
         return (f"done {model} {arm} {tid}: ${result.get('total_cost_usd', 0):.3f} "
                 f"{result.get('num_turns')} turns {wall:.0f}s resolved={resolved}")
@@ -207,7 +214,7 @@ def stage_meta(a, tasks, keys):
     """The provenance every manifest stage records, whichever subcommand ran."""
     meta = {"started_at": B.now_utc(), "argv": B.sys.argv, "model": a.model, "arms": a.arms,
             "backend": a.backend, "prompt_template": PROMPT, "playwright_mcp": PLAYWRIGHT_MCP,
-            "compact_window": a.compact_window, "run_budget_usd": a.run_budget, "cap_usd": a.cap,
+            "compact_window": a.compact_window, "max_output": a.max_output, "run_budget_usd": a.run_budget, "cap_usd": a.cap,
             "jobs": a.jobs, "timeout_s": a.timeout, "agent_image": B.image_id(AGENT_IMAGE),
             "forum_image": FORUM_IMAGE, "verify_image": B.image_id(VERIFY_IMAGE),
             "tasks_sha256": {k: B.sha256(tasks[k] / "verify.py") for k in keys},
@@ -286,6 +293,7 @@ def main():
         q.add_argument("--tasks", nargs="+", help="task keys to use (default: all 12)")
         q.add_argument("--run-budget", type=float, default=2.0, help="claude --max-budget-usd per task")
         q.add_argument("--compact-window", type=int, help="tokens; sets CLAUDE_CODE_AUTO_COMPACT_WINDOW")
+        q.add_argument("--max-output", type=int, help="tokens; sets CLAUDE_CODE_MAX_OUTPUT_TOKENS")
         q.add_argument("--cap", type=float, default=100.0)
         q.add_argument("--arms", nargs="+", choices=B.INSTALLED, default=list(B.INSTALLED))
         q.add_argument("--jobs", type=int, default=2)
