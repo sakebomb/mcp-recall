@@ -1,6 +1,6 @@
 # Does mcp-recall help in long sessions and with browser output?
 
-*Three pre-registered studies, November 2026. This is a dated record: later results go in a new report,
+*Four pre-registered studies, November 2026. This is a dated record: later results go in a new report,
 not into this one. It follows the [compression test](compression-test-2026-11.md) and tracks
 [#414](https://github.com/sakebomb/mcp-recall/issues/414).*
 
@@ -29,11 +29,18 @@ pre-registered as claims. Nothing here is published until the maintainer approve
   declined to repost another user's comment under a misleading title; without mcp-recall it did the
   task all 6 times, from an identical prompt. Three are `standard/nba_statistics_analysis`. This was
   not pre-registered and does not change either reading.
+- **On a model whose window a task fills, it shows nothing.** Study 6 ran the twelve browser tasks as
+  single sessions on a self-hosted Qwen3-Coder-Next with a 131k window. mcp-recall compacted less (29
+  times against 50) and solved 11 of 36 against 12. Without the full page, the agent scripted the page
+  four times as often, and six of its runs ended when a screenshot made the self-hosted stack return
+  errors.
 - **Agents still did not retrieve.** Across 72 runs with mcp-recall in Studies 4 and 5, the agent called
-  a `recall__*` tool once. Whatever mcp-recall does here, it does through the summary alone.
+  a `recall__*` tool once, and 6 times in Study 6's 36. Whatever mcp-recall does here, it does through
+  the summary alone.
 
-API spend for the three studies, from each manifest's key spend after minus before: $16.25 (registered
-estimate $10-15), $3.48 and $3.95. Every run was graded and none was excluded.
+API spend for Studies 3 to 5, from each manifest's key spend after minus before: $16.25 (registered
+estimate $10-15), $3.48 and $3.95. Study 6 ran on a self-hosted model and cost nothing. Every run was
+graded; Study 6's void first attempt and its infrastructure reruns are disclosed in its section.
 
 ## Why these studies
 
@@ -47,11 +54,11 @@ exit before running anything more:
 2. One MCP-heavy long-session test, the product's strongest case, which is decisive (Study 4).
 3. If both show nothing, mcp-recall goes to maintenance mode.
 
-Study 5 was added after Study 4, for the reason given in its section. Each study's design and reading
-rule was committed to [`tasks/specs/414-task-success-claims.md`](../../tasks/specs/414-task-success-claims.md)
-before its first run: Study 3 in 5eda2a4, Study 4 in 15c6276, Study 5 in 40f39f6.
+Studies 5 and 6 were added after Study 4, for the reasons given in their sections. Each study's design
+and reading rule was committed to [`tasks/specs/414-task-success-claims.md`](../../tasks/specs/414-task-success-claims.md)
+before its first run: Study 3 in 5eda2a4, Study 4 in 15c6276, Study 5 in 40f39f6, Study 6 in 84b152c.
 
-## Method common to all three
+## Method common to Studies 3 to 5
 
 A **chain** is one Claude Code session that works through a sequence of tasks, resuming the same
 session for each task in a fresh container. The agent keeps its conversation from task to task, so its
@@ -172,6 +179,56 @@ design; had it solved 27 again, `recall` would be 5 short and this study would r
 design moved `nohook` by 2 tasks and `recall` by 1 between the two studies, so a gap of 3 to 4 between
 the arms is of the size the agent varies by on its own.
 
+## Study 6: the browser test on a self-hosted model
+
+**Why.** Studies 3 to 5 ran on Haiku, whose real window no task fills. This study asks the question of
+a model whose window one forum task does fill: Qwen3-Coder-Next (FP8, about 80B mixture-of-experts,
+3B active), served by vLLM on a local GPU through LiteLLM, with a 131,072-token window, at no API
+cost. Registered in 84b152c; amended in 85e4130 before the restart described below.
+
+**Design.** Single tasks, not chains: each run is one task in a fresh session against a fresh forum.
+The same 12 tasks, both arms, 3 repeats, so 36 runs per arm. Within a repeat a task's two arms run
+side by side, and the order flips every repeat. Claude Code was told the window
+(`CLAUDE_CODE_AUTO_COMPACT_WINDOW=131072`) and, after the amendment, the model's output cap
+(`CLAUDE_CODE_MAX_OUTPUT_TOKENS=16384`).
+
+**The first attempt is void.** It was stopped after 41 of 72 runs, when 7 had ended on API errors
+rather than on the agent's work. Three of the seven were a harness defect: Claude Code's default
+request for 32,000 output tokens overflowed the window at about 99k tokens of prompt, so long runs
+died instead of compacting, which is the behaviour this study measures. The amendment set the output
+cap and fixed infrastructure failures as any run whose final result records an API error status. It
+also recorded the one result seen by then: `recall` 6 of 12, `nohook` 4 of 12 in the first repeat.
+
+| | nohook | recall |
+|---|---|---|
+| Solved | 12 of 36 | 11 of 36 (pairs differing: 2 for `recall`, 3 against; exact p = 1.0) |
+| Runs that compacted | 17 | 11 |
+| Compactions | 50 | 29 |
+| Median wall time, turns | 84 s, 28.5 | 98 s, 30.5 |
+
+**Reading, as registered: shows nothing.** The arms are within 3 tasks.
+
+**Six runs failed for infrastructure, all in `recall`.** Each ended on a run of 502s from the gateway,
+and each came straight after the agent called `browser_take_screenshot`: the next request carried an
+image, which this text-only model's stack rejected every time. They were rerun once, as registered.
+Two solved and one finished unsolved; three took a screenshot again and failed the same way, and count as failures.
+Counting all six first attempts as failures instead gives 9 of 36 against 12, still within 3, so the
+reading does not depend on the reruns.
+
+**Why only `recall` took screenshots** (descriptive, final runs):
+
+| Over 36 runs per arm | nohook | recall |
+|---|---|---|
+| Read the full snapshot from Claude Code's spill file | 136 | 22 |
+| Scripted the page instead (`browser_evaluate`, `browser_run_code`) | 69 | 277 |
+| Took a screenshot | 0 | 3 |
+| Called a `recall__*` tool | — | 6 |
+
+Without mcp-recall, a large snapshot is spilled to a file and the agent reads it. With mcp-recall, the
+agent gets the outline, rarely asks for the stored page, and writes page scripts instead. When the
+scripts fail, it reaches for a screenshot. The hook stored 773 Playwright outputs and passed 14.8 MB
+of 49.3 MB, 70% smaller (descriptive).
+
 ## Exploratory: the task the agent declined
 
 *Not pre-registered. It does not change either reading.*
@@ -206,8 +263,8 @@ outcomes is what pre-registration rules out.
   rules fixed in advance, not statistical claims.
 - **A simulated window.** Haiku 5.5 has a 1M window. Compaction at 200k is what a smaller-window model
   would see, run on a model that does not have one.
-- **One site, one model.** Twelve tasks on one forum. Other sites, other MCP servers and stronger models
-  were not tested.
+- **One site, two models.** Twelve tasks on one forum, with Haiku 5.5 and, in Study 6, one self-hosted
+  model. Other sites, other MCP servers and stronger models were not tested.
 - **Compactions are counts, not consequences.** These studies show mcp-recall compacts less. They do not
   show what the agent lost at each compaction, and the solve rate did not rise with fewer compactions.
 - **No retrieval.** The agent almost never fetched stored output. The benefit, where there is one, comes
@@ -219,7 +276,8 @@ Read against the plan agreed before Study 3: the Bash-heavy case showed nothing 
 because it never compacted. The test agreed as decisive, Study 4, read as a cost. The benefit comes only
 from Study 5, a rerun registered after the bug behind that cost was found. It met the registered bar by
 the smallest margin the rule allows, on a label that one task would flip, in a simulation, with fewer
-compactions and lower cost and no gain in solved tasks. Whether that is enough to keep building mcp-recall is the maintainer's
+compactions and lower cost and no gain in solved tasks. Study 6 then asked the question where the
+window really fills, and found the same shape: fewer compactions, no gain in solved tasks. Whether that is enough to keep building mcp-recall is the maintainer's
 decision; this report does not make it.
 
 ## Data and reproduction
@@ -232,4 +290,9 @@ decision; this report does not make it.
   Study 5's command:
   `web.py chain --model claude-haiku-5-5 --run-id web-fix --sequences 3 --seed 414 --compact-window 200000 --run-budget 2 --cap 100 --jobs 3`.
 - Analysis: `bench/agent/analyze.py --chains <run ids>`, checked by `bench/agent/check_analyze.py`.
-- Excluded smoke runs, disclosed in the spec: `long-smoke-s01`, `web-smoke-s01`, `web-smoke2-s01`.
+- Study 6: `web-local-r01`…`web-local-r03`, from
+  `web.py single --model blackwell-coder-next --run-id web-local --repeats 3 --jobs 2 --timeout 3600 --compact-window 131072 --max-output 16384`.
+  The six first attempts replaced by reruns are in `study6-infra-first-attempts`, the void attempt in
+  `void-study6-attempt1`. All are sealed and in the same private dataset.
+- Excluded smoke runs, disclosed in the spec: `long-smoke-s01`, `web-smoke-s01`, `web-smoke2-s01`, and
+  `smoke6-r01`, `smoke6b-r01` … `smoke6e-r01`.
