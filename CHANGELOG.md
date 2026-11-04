@@ -27,14 +27,17 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   in the recall header ranked words by frequency, so structure repeated once
   per record won: `ref`, `cursor` and `pointer` on a browser page, JSON keys
   such as `timeZone` and `folderId`, `https` and `www`, and generated ids.
-  Keys, `[key=value]` attributes, page-snapshot roles and URL schemes no
-  longer count, and hex and long letter-and-digit ids are skipped. A word
+  Keys, `[key=value]` attributes, page-snapshot roles, URL schemes and the
+  domain parts `www`, `com`, `org` and `net` no longer count, and hex and
+  long letter-and-digit ids are skipped. The filter runs on all output, not
+  only browser pages, so a lowercase `[word]` such as `[error]` no longer
+  counts either. A word
   that is a key in one place and a value in another still counts as a value.
 
 - **`recall__retrieve` takes the ids agents copy** (#430). `recall_id` is
   accepted for `id` (`id` wins when both are given), an id copied with the
-  header's `recall:` prefix or inside a whole pasted header line is found,
-  and a call with no id returns a note saying where the id is instead of a
+  header's `recall:` prefix, in uppercase, or inside a whole pasted header
+  line is found, and a call with no id returns a note saying where the id is instead of a
   schema validation error. The CLAUDE.md block written by `install` shows
   the call with its parameter name; an existing install keeps its old block
   until `mcp-recall install` runs again.
@@ -53,11 +56,16 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   text extracted". Navigate, click and evaluate never reached the Playwright
   handler, so the generic fallback kept their first 4 KB: mostly site
   navigation for a page, and a JSON-escaped head of an evaluate's result.
-  Context7, Sentry and Claude in Chrome results arrive in the same shape and
-  now reach their handlers as text too. Every Playwright page response now
-  goes to the Playwright handler, which outlines the snapshot one line per
+  Any tool whose result arrives in that shape, Context7, Sentry and Claude
+  in Chrome among them, is now stored and summarized as its text instead of
+  that JSON, so the first repeat of a call made before upgrading is stored
+  again rather than deduplicated. Every Playwright page response now goes
+  to the Playwright handler, which outlines the snapshot one line per
   element (role, name, ref, states, text and link target) and keeps the
-  result, the code that ran and the page URL whole. It keeps every name,
+  result, the code that ran and the page URL as they are up to 4 KB per
+  section; a larger section, such as a big evaluate or network result, is
+  cut to its head with a note of how much was cut, and the full output stays
+  stored for `recall__retrieve` (#434). It keeps every name,
   text, link target and clickable element's ref; the refs it drops belong to
   wrappers and to labels that repeat the element above them. Separately,
   text that only opens with `[` or `{`, such as a `[WARN]` log, now goes to

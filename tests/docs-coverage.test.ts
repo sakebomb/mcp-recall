@@ -4,6 +4,7 @@ import { join } from "path";
 import { Glob } from "bun";
 import { RecallConfigSchema } from "../src/config-schema";
 import { printHelp } from "../src/cli";
+import { CLAUDE_MD_BLOCK } from "../src/install";
 
 // Doc-coverage guard (#227). Derives four inventories from source of truth and
 // asserts each surface is named in its canonical doc location. This catches
@@ -145,5 +146,20 @@ describe("docs coverage: CLI commands", () => {
     const fence = firstFence(section(readme, "Maintenance and CLI"), "bash");
     const documented = [...new Set([...fence.matchAll(/^mcp-recall\s+([a-z]+)/gm)].map((m) => m[1]))];
     assertAllDocumented(commands, documented, "the README `## Maintenance and CLI` block");
+  });
+});
+
+// ── the CLAUDE.md block ─────────────────────────────────────────────────────
+
+describe("docs coverage: CLAUDE.md block", () => {
+  test("docs/quickstart.md shows the block install writes, verbatim", () => {
+    // The paste-it-yourself copy drifted once already: it kept the positional
+    // recall__retrieve("…") call after the installer moved to {"id": …} (#434).
+    // Not section(): the block's own "## mcp-recall" heading would end it early.
+    const quickstart = readFileSync("docs/quickstart.md", "utf8");
+    const from = quickstart.indexOf("\n## Claude instructions\n");
+    expect(from).toBeGreaterThan(-1);
+    const shown = firstFence(quickstart.slice(from), "markdown").trimEnd();
+    expect(shown).toBe(CLAUDE_MD_BLOCK);
   });
 });

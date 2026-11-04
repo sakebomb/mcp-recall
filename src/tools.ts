@@ -124,10 +124,11 @@ const MISSING_ID =
 /**
  * The id as given or as `recall_id` (the first that is not blank), or the
  * recall_… id inside a pasted header line such as `[recall:recall_1a2b · 3KB]`.
+ * Stored ids are lowercase, so a matched id is lowercased.
  */
 function retrieveId(args: RetrieveArgs): string {
   const given = [args.id, args.recall_id].map((v) => v?.trim() ?? "").find(Boolean) ?? "";
-  return given.match(/recall_[0-9a-f]+/i)?.[0] ?? given;
+  return given.match(/recall_[0-9a-f]+/i)?.[0].toLowerCase() ?? given;
 }
 
 /**
