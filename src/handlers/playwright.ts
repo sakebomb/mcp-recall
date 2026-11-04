@@ -5,15 +5,20 @@
  *
  * Playwright MCP answers browser_snapshot, every action (navigate, click, …) and
  * browser_evaluate in "### " sections: the result, the code it ran, the page URL
- * and title, a "### Snapshot" ```yaml block and the console events. Only the
- * snapshot and the events are cut; every other section is kept as it is (#424).
+ * and title, a "### Snapshot" ```yaml block and the console events. The
+ * snapshot becomes an outline and the events are trimmed; every other section
+ * is kept as it is (#424) up to SECTION_BYTES, then cut to its head (#434), so a
+ * large evaluate or network result does not pass through whole.
  */
+import { formatBytes } from "../format";
 import type { CompressionResult, Handler } from "./types";
 import { extractText } from "./types";
 
 const SNAPSHOT_HEADING = "### Snapshot";
 const EVENTS_HEADING = "### Events";
 const EVENT_LINES = 5;
+/** Kept of any other section; the full output stays stored for recall__retrieve. */
+const SECTION_BYTES = 4096;
 const EMPTY = "[snapshot: no interactive elements or visible text extracted]";
 
 /** Sections that open a Playwright MCP page response: an action, an evaluate, or a snapshot. */
@@ -123,6 +128,19 @@ function trimEvents(section: string): string {
   return [heading, ...kept, ...(more > 0 ? [`… (+${more} more event lines)`] : [])].join("\n");
 }
 
+/** A section up to SECTION_BYTES, else its head, ending on a line break where one is near. */
+function capSection(section: string): string {
+  const text = section.trim();
+  const buf = Buffer.from(text, "utf8");
+  if (buf.length <= SECTION_BYTES) return text;
+  // Decoding a byte slice can end in U+FFFD where it splits a character; drop it.
+  let head = buf.subarray(0, SECTION_BYTES).toString("utf8").replace(/�$/, "");
+  const lineEnd = head.lastIndexOf("\n");
+  if (lineEnd > SECTION_BYTES / 2) head = head.slice(0, lineEnd);
+  const cut = buf.length - Buffer.byteLength(head, "utf8");
+  return `${head}\n… (+${formatBytes(cut)} more in this section)`;
+}
+
 export const playwrightHandler: Handler = (
   _toolName: string,
   output: unknown
@@ -138,7 +156,7 @@ export const playwrightHandler: Handler = (
     .map((section) => {
       if (section.startsWith(SNAPSHOT_HEADING)) return renderSnapshot(snapshotTree(section));
       if (section.startsWith(EVENTS_HEADING)) return trimEvents(section);
-      return section.trim();
+      return capSection(section);
     })
     .filter(Boolean)
     .join("\n");

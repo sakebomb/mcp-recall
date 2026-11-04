@@ -8097,7 +8097,21 @@ function trimEvents(section) {
   return [heading, ...kept, ...more > 0 ? [`\u2026 (+${more} more event lines)`] : []].join(`
 `);
 }
-var SNAPSHOT_HEADING = "### Snapshot", EVENTS_HEADING = "### Events", EVENT_LINES = 5, EMPTY = "[snapshot: no interactive elements or visible text extracted]", PAGE_SECTION, KEEP_BARE, STATES, LINE, playwrightHandler = (_toolName, output) => {
+function capSection(section) {
+  const text = section.trim();
+  const buf = Buffer.from(text, "utf8");
+  if (buf.length <= SECTION_BYTES)
+    return text;
+  let head = buf.subarray(0, SECTION_BYTES).toString("utf8").replace(/\uFFFD$/, "");
+  const lineEnd = head.lastIndexOf(`
+`);
+  if (lineEnd > SECTION_BYTES / 2)
+    head = head.slice(0, lineEnd);
+  const cut = buf.length - Buffer.byteLength(head, "utf8");
+  return `${head}
+\u2026 (+${formatBytes(cut)} more in this section)`;
+}
+var SNAPSHOT_HEADING = "### Snapshot", EVENTS_HEADING = "### Events", EVENT_LINES = 5, SECTION_BYTES = 4096, EMPTY = "[snapshot: no interactive elements or visible text extracted]", PAGE_SECTION, KEEP_BARE, STATES, LINE, playwrightHandler = (_toolName, output) => {
   const raw = extractText(output);
   const originalSize = Buffer.byteLength(raw, "utf8");
   if (!isPlaywrightPage(raw)) {
@@ -8108,7 +8122,7 @@ var SNAPSHOT_HEADING = "### Snapshot", EVENTS_HEADING = "### Events", EVENT_LINE
       return renderSnapshot(snapshotTree(section));
     if (section.startsWith(EVENTS_HEADING))
       return trimEvents(section);
-    return section.trim();
+    return capSection(section);
   }).filter(Boolean).join(`
 `);
   return { summary: summary || EMPTY, originalSize };

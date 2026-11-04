@@ -69,7 +69,7 @@ You should see all green checkmarks. That's it — mcp-recall is active.
 
 Session context from previous sessions is automatically injected at startup (pinned items, notes, recent activity). If it was truncated, call `recall__context()` for the full view.
 
-When a tool output was compressed by mcp-recall (you'll see a summary with a recall ID like `recall_abc123`), call `recall__retrieve("recall_abc123")` when you need the full content.
+When a tool output was compressed by mcp-recall (you'll see a `[recall:recall_abc123 · …]` line above a summary), call `recall__retrieve({"id": "recall_abc123"})` for the content behind it, or add a `query` to see the parts that match.
 
 Proactively:
 - `recall__note("…")` — save important decisions or context worth keeping across sessions

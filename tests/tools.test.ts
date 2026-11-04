@@ -73,6 +73,8 @@ describe("MCP tool handlers", () => {
         { id: ` ${stored.id} ` },
         { id: `[recall:${stored.id} · 3.1KB→1.2KB (61% reduction)]` },
         { id: "", recall_id: stored.id },
+        { id: stored.id.toUpperCase() },
+        { id: `[recall:${stored.id.toUpperCase()} · 3.1KB]` },
       ]) {
         expect(toolRetrieve(db, args)).toContain('"number":1');
       }

@@ -208,6 +208,35 @@ describe("playwrightHandler", () => {
     expect(summary).not.toContain("- [WARNING] preload 199 @");
     expect(summary).toContain("(+196 more event lines)");
   });
+
+  it("cuts a large result to its head and keeps the sections after it (#434)", () => {
+    const rows = Array.from({ length: 2000 }, (_, i) => `  {"id": ${i}, "name": "item ${i}"}`);
+    const text = [
+      "### Result",
+      "[", rows.join(",\n"), "]",
+      "### Ran Playwright code",
+      "```js",
+      "await page.evaluate(() => window.items);",
+      "```",
+      "### Page",
+      "- Page URL: http://shop/items",
+    ].join("\n");
+    const { summary, originalSize } = playwrightHandler("mcp__playwright__browser_evaluate", [{ type: "text", text }]);
+    expect(summary).toContain(rows[0].trim());
+    expect(summary).not.toContain(rows[1999].trim());
+    expect(summary).toMatch(/… \(\+\d+(\.\d)?KB more in this section\)/);
+    expect(summary).toContain("await page.evaluate(() => window.items);");
+    expect(summary).toContain("- Page URL: http://shop/items");
+    expect(Buffer.byteLength(summary)).toBeLessThan(originalSize / 4);
+  });
+
+  it("cuts a result that is one long line (#434)", () => {
+    const text = `### Result\n${JSON.stringify(Array.from({ length: 5000 }, (_, i) => ({ id: i })))}`;
+    const { summary } = playwrightHandler("mcp__playwright__browser_evaluate", [{ type: "text", text }]);
+    expect(summary.startsWith('### Result\n[{"id":0}')).toBe(true);
+    expect(summary).toContain("more in this section)");
+    expect(Buffer.byteLength(summary)).toBeLessThan(5 * 1024);
+  });
 });
 
 function playwrightPagePayload(): Array<Record<string, unknown>> {

@@ -23553,7 +23553,7 @@ function itemHeader(item) {
 var MISSING_ID = '[recall: pass "id": the recall_\u2026 value from the [recall:recall_\u2026 \xB7 \u2026] line above a summary, ' + 'e.g. recall__retrieve({"id": "recall_1a2b3c4d"}). recall__list_stored lists stored ids.]';
 function retrieveId(args) {
   const given = [args.id, args.recall_id].map((v) => v?.trim() ?? "").find(Boolean) ?? "";
-  return given.match(/recall_[0-9a-f]+/i)?.[0] ?? given;
+  return given.match(/recall_[0-9a-f]+/i)?.[0].toLowerCase() ?? given;
 }
 function toolRetrieve(db, args) {
   const config2 = loadConfig();
