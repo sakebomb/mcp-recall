@@ -6,6 +6,8 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+## [1.20.0] — 2026-11-04
+
 ### Changed
 
 - **Licensed under Apache-2.0.** Releases from this one on are
@@ -1149,7 +1151,8 @@ Ten `recall__*` tools available in every Claude session:
 
 ---
 
-[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.19.0...HEAD
+[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.20.0...HEAD
+[1.20.0]: https://github.com/sakebomb/mcp-recall/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/sakebomb/mcp-recall/compare/v1.18.1...v1.19.0
 [1.18.1]: https://github.com/sakebomb/mcp-recall/compare/v1.18.0...v1.18.1
 [1.18.0]: https://github.com/sakebomb/mcp-recall/compare/v1.17.0...v1.18.0
