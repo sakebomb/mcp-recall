@@ -270,6 +270,11 @@ outcomes is what pre-registration rules out.
   model. Other sites, other MCP servers and stronger models were not tested.
 - **Compactions are counts, not consequences.** These studies show mcp-recall compacts less. They do not
   show what the agent lost at each compaction, and the solve rate did not rise with fewer compactions.
+- **Studies 5 and 6 predate a later fix.** Both ran builds from before
+  [#435](https://github.com/sakebomb/mcp-recall/pull/435) (released in v1.20.0). In those builds the
+  Playwright handler kept every section except the snapshot and console events whole, so a large
+  evaluate or network result reached the agent uncut. v1.20.0 caps each section at 4 KB. These studies
+  do not say which way that change moves the result.
 - **No retrieval.** The agent almost never fetched stored output. The benefit, where there is one, comes
   from smaller summaries alone, and anything the outline drops is lost to the agent in practice.
 
