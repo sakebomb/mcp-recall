@@ -5,7 +5,10 @@ results go in a new report, not into this one. Tracks [#414](https://github.com/
 
 Every registered number below comes from `bench/agent/analyze.py` output or a count
 over the sealed event streams. Numbers labelled post hoc (sensitivity intervals, multiplicity and
-simulation figures) come from an independent review run after grading.
+simulation figures) come from an independent review run after grading. Commit hashes cited for the
+harness and the pre-registration are in the tag
+[`research/414-original-history`](https://github.com/sakebomb/mcp-recall/tree/research/414-original-history),
+the branch as it was before it was rebased to merge.
 
 ## Summary
 

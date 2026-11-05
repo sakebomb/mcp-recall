@@ -5,6 +5,10 @@
 > but no patch had been graded and no solve outcome had been read. This file
 > fixes the claims, the analysis and the loss rule before those outcomes exist.
 > Changing any of it afterwards must be stated in the report as a deviation.
+>
+> Commit hashes below are from the branch's original history, kept as the tag
+> `research/414-original-history` after the branch was rebased to merge (#437).
+> `2f54ba5` is the head of PR #426, kept by GitHub as `refs/pull/426/head`.
 
 ## What
 

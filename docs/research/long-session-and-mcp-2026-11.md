@@ -6,7 +6,9 @@ not into this one. It follows the [compression test](compression-test-2026-11.md
 
 Every registered number below comes from `bench/agent/analyze.py --chains` output
 or a count over the sealed run directories. Numbers labelled descriptive or exploratory were not
-pre-registered as claims.
+pre-registered as claims. Commit hashes cited for the harness and the pre-registration are in the
+tag [`research/414-original-history`](https://github.com/sakebomb/mcp-recall/tree/research/414-original-history),
+the branch as it was before it was rebased to merge.
 
 ## Summary
 
