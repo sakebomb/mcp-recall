@@ -3,10 +3,9 @@
 *A paired task-success pilot on SWE-bench Verified, November 2026. This is a dated record: later
 results go in a new report, not into this one. Tracks [#414](https://github.com/sakebomb/mcp-recall/issues/414).*
 
-**DRAFT for review.** Every registered number below comes from `bench/agent/analyze.py` output or a count
+Every registered number below comes from `bench/agent/analyze.py` output or a count
 over the sealed event streams. Numbers labelled post hoc (sensitivity intervals, multiplicity and
-simulation figures) come from an independent review run after grading. Nothing here is published until
-the maintainer approves it.
+simulation figures) come from an independent review run after grading.
 
 ## Summary
 
@@ -67,7 +66,7 @@ graded patch, the exact prompt, and the SWE-bench grading log. Each `run` invoca
 entry pinning the harness commit, binary hashes, image digests and the dataset fingerprint. After
 grading, `bench.py seal` checks that the API key appears in no file and writes `SHA256SUMS`.
 
-The archive is the Hugging Face dataset `sakebomb/mcp-recall-task-success`. Layout and verification:
+The archive is the Hugging Face dataset `sakebomb/mcp-recall-task-success`, private for now. Layout and verification:
 [`bench/agent/README.md`](../../bench/agent/README.md).
 
 ## Analysis

@@ -4,9 +4,9 @@
 not into this one. It follows the [compression test](compression-test-2026-11.md) and tracks
 [#414](https://github.com/sakebomb/mcp-recall/issues/414).*
 
-**DRAFT for review.** Every registered number below comes from `bench/agent/analyze.py --chains` output
+Every registered number below comes from `bench/agent/analyze.py --chains` output
 or a count over the sealed run directories. Numbers labelled descriptive or exploratory were not
-pre-registered as claims. Nothing here is published until the maintainer approves it.
+pre-registered as claims.
 
 ## Summary
 
@@ -292,8 +292,8 @@ decision; this report does not make it.
 
 - Sealed run directories, each with a `SHA256SUMS` and a manifest recording the model, the Claude Code
   and mcp-recall binaries by sha256, the images by digest and the exact command:
-  `long-s01`…`long-s06`, `web-s01`…`web-s03`, `web-fix-s01`…`web-fix-s03`. They are held in a private
-  Hugging Face dataset until this report is approved.
+  `long-s01`…`long-s06`, `web-s01`…`web-s03`, `web-fix-s01`…`web-fix-s03`. They are in the
+  Hugging Face dataset `sakebomb/mcp-recall-task-success`, which is private for now.
 - Harness: `bench/agent/bench.py chain` (Study 3) and `bench/agent/web.py chain` (Studies 4 and 5).
   Study 5's command:
   `web.py chain --model claude-haiku-5-5 --run-id web-fix --sequences 3 --seed 414 --compact-window 200000 --run-budget 2 --cap 100 --jobs 3`.

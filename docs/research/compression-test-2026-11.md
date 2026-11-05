@@ -4,9 +4,9 @@
 results go in a new report, not into this one. It follows the
 [task-success pilot](task-success-2026-11.md) and tracks [#414](https://github.com/sakebomb/mcp-recall/issues/414).*
 
-**DRAFT for review.** Every registered number below comes from `bench/agent/analyze.py --replicates`
+Every registered number below comes from `bench/agent/analyze.py --replicates`
 output or a count over the sealed event streams. Numbers labelled descriptive or post hoc were not
-pre-registered as claims. Nothing here is published until the maintainer approves it.
+pre-registered as claims.
 
 ## Summary
 
@@ -64,7 +64,7 @@ graded, and both are excluded.
 The same as the pilot's: each run's full event stream, Claude Code's transcript and config, the
 mcp-recall store, the graded patch, the exact prompt and the grading log, checksummed by
 `bench.py seal`. The runs are in the Hugging Face dataset `sakebomb/mcp-recall-task-success` under
-`runs/comp-r1` to `runs/comp-r3`.
+`runs/comp-r1` to `runs/comp-r3`. The dataset is private for now.
 
 ## Analysis
 
