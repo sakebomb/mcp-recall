@@ -1,10 +1,26 @@
 # Roadmap
 
 What mcp-recall is aiming at, what it is deliberately *not* becoming, and where the
-two open long-horizon ideas sit. This is a statement of **direction**, not a
+two long-horizon ideas sit. This is a statement of **direction**, not a
 dated plan — a solo open-source project makes no delivery promises. For detailed
 per-phase status, see the phase table in [CLAUDE.md](CLAUDE.md); for the shape of
 the system, [docs/architecture.md](docs/architecture.md).
+
+## Status: maintenance mode (since 2026-11-04)
+
+mcp-recall is maintained, not extended. Releases keep shipping on the weekly
+train ([CONTRIBUTING.md](CONTRIBUTING.md#releases)) with bug, security,
+compatibility and install fixes, and with handler fixes where a summary drops
+what Claude needs. New features are not planned.
+
+The decision follows the paired task-success studies in
+[#414](https://github.com/sakebomb/mcp-recall/issues/414), with an exit rule
+agreed before they ran. Where sessions were long enough to compact, mcp-recall
+made them compact less often, and on Haiku it made them cheaper. No study found a
+change in solved tasks that could be told apart from chance, in either
+direction: the one harm signal, in the first pilot, did not recur. Agents almost never
+called a `recall__*` tool to fetch stored output. The summaries do the work; the
+retrieval side has not shown that it earns more investment.
 
 ## The bet
 
@@ -21,34 +37,28 @@ MCP-output-capture-and-retrieval story is in scope; a change that turns the
 project into a different kind of tool is not — however useful that other tool
 might be.
 
-## Directions (themes, not commitments)
+## What maintenance covers
 
-These are the areas active work tends to land in. No dates, no ordering promises —
-they describe *where* effort goes when it goes somewhere.
+Work still lands in these areas; anything outside them is a feature, and is not
+planned.
 
-- **Quality evidence** — a summary is judged on what Claude can still act on, not
-  on bytes saved. The bar is one that can fail: every compressed family keeps at
-  least as much of what Claude went on to use as a same-size cut of the raw
-  output (`bun run fidelity`, [#389](https://github.com/sakebomb/mcp-recall/issues/389)).
-  Public claims rest on a rerunnable benchmark against built-in baselines
-  ([#390](https://github.com/sakebomb/mcp-recall/issues/390), [docs/benchmarks.md](docs/benchmarks.md)), losses included.
-- **Retrieval quality** — making Claude's first recall land on the right content:
-  better summary hints, graduated/peek retrieval, structure-aware fallbacks. The
-  store is only as good as the odds a single query finds what's needed.
 - **Robustness & store lifecycle** — the store must be safe to leave running for
   months: correct eviction, disk reclamation (`gc`), dedup, and no silent
-  data-loss edges. Correctness of the delete path outranks any feature.
-- **Contributor experience & docs accuracy** — handlers and profiles should be
-  cheap to add and the docs should never overstate what the code does. Phase 13
-  exists entirely for this.
-- **Profile ecosystem** — the community-profile tier is how coverage scales
-  without a TypeScript change per MCP; lowering the cost of contributing and
-  trusting a profile stays a throughline.
+  data-loss edges. Correctness of the delete path outranks everything else.
+- **Summary quality** — a summary is judged on what Claude can still act on, not
+  on bytes saved. A handler that keeps less of what Claude went on to use than a
+  same-size cut of the raw output (`bun run fidelity`, `bun run quality`,
+  [docs/benchmarks.md](docs/benchmarks.md)) is a bug to fix, not a feature to add.
+- **Compatibility** — keeping up with Claude Code's hook and tool-output formats,
+  Bun, and the MCP servers whose output the handlers parse.
+- **Docs accuracy** — the docs should never overstate what the code does.
+- **Profiles** — community profiles are data in their own repository, so new and
+  corrected profiles stay welcome.
 
-## On the horizon (deferred, not committed)
+## On the horizon (not planned)
 
-Two filed ideas are genuine extensions of the bet but are not being built now.
-They are deferred, not rejected — if they ship, they ship as described here.
+Two filed ideas are genuine extensions of the bet. Neither is being built while
+the project is in maintenance mode; if one ever ships, it ships as described here.
 
 - **Anthropic memory-tool backend** ([#188](https://github.com/sakebomb/mcp-recall/issues/188))
   — expose mcp-recall's verbatim + FTS store as a backend behind the API memory
@@ -88,6 +98,6 @@ closed; reopening one is a direction change, not a feature request.
 
 A non-goal is not permanent, but changing one is a deliberate decision, not a
 drive-by PR. Open an issue that names the non-goal and argues why the bet has
-changed. Everything else — new handlers, profiles, retrieval and lifecycle
-improvements — is welcome without ceremony; see
-[CONTRIBUTING.md](CONTRIBUTING.md).
+changed. The same goes for leaving maintenance mode: bring evidence the studies
+in #414 did not have. Fixes inside what maintenance covers are welcome without
+ceremony; see [CONTRIBUTING.md](CONTRIBUTING.md).

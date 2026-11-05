@@ -191,6 +191,6 @@ API [context editing](https://platform.claude.com/docs/en/build-with-claude/cont
 
 - **Something not working:** [Troubleshooting guide](docs/troubleshooting.md).
 - **Contributing:** the easiest contribution is a TOML profile, with no TypeScript and no clone of this repo. Check the [community profiles repo](https://github.com/sakebomb/mcp-recall-profiles) or open a [profile request](https://github.com/sakebomb/mcp-recall/issues/new?template=profile-request.md). TypeScript handlers are welcome for complex non-JSON output (HTML, DOM trees, binary formats): [CONTRIBUTING.md](CONTRIBUTING.md) has the workflow (`bun install && bun test`) and how to add one, and [docs/architecture.md](docs/architecture.md) the pipeline and the invariants a change must not break.
-- **Where it's headed**, and what it deliberately won't become: [ROADMAP.md](ROADMAP.md).
+- **Where it's headed**: maintenance mode since 2026-11-04 (fixes, no new features). That, and what it deliberately won't become: [ROADMAP.md](ROADMAP.md).
 - **Release history:** [CHANGELOG.md](CHANGELOG.md).
 - **License:** Apache-2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE). Releases up to 1.19.0 were published under MIT and stay under it.
