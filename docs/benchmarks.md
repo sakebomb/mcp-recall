@@ -147,7 +147,7 @@ called a `recall__*` tool, so what effect there is comes from the summaries alon
 | Study | Tasks and models | Solved: without → with | Other effect | Report |
 |---|---|---|---|---|
 | Pilot | 45 hard SWE-bench Verified tasks; Haiku, Sonnet, Opus 5.5 | Haiku 25 → 21 (harm rule fired, exact p = 0.125); Sonnet 25 → 25; Opus 35 → 37 | Summaries reached the agent in 3 to 8 of 45 runs per model; 0 retrievals | [task-success](research/task-success-2026-11.md) |
-| Compression | Same 45 tasks, 3 runs per arm; Haiku, Sonnet 5.5; installed both ways, hook off vs on | Haiku +2.2 points (−2.2 to +6.7); Sonnet −3.0 (−9.6 to +3.7) | Summaries in 98 and 89 of 135 runs; the pilot's Haiku deficit did not recur | [compression test](research/compression-test-2026-11.md) |
+| Compression | Same 45 tasks, 3 runs per arm; Haiku, Sonnet 5.5; installed both ways, hook off vs on | Haiku 51.1% → 53.3% (+2.2 points, −2.2 to +6.7); Sonnet 58.5% → 55.6% (−3.0, −9.6 to +3.7) | Summaries in 98 and 89 of 135 runs; the pilot's Haiku deficit did not recur | [compression test](research/compression-test-2026-11.md) |
 | 3: long sessions | 6 chains of 10 Django tasks; Haiku | −2.3 points (−8.5 to +2.5) | No compactions in either arm (1M window); cost −23% | [long session and MCP](research/long-session-and-mcp-2026-11.md) |
 | 4: browser | 12 forum tasks via Playwright MCP, 3 sequences; Haiku, simulated 200k window | 27 → 23 of 36 (reads as a cost) | Measured bug [#424](https://github.com/sakebomb/mcp-recall/issues/424): pages reached the agent gutted | same |
 | 5: browser, fixed build | Study 4 rerun on the fixed build | 25 → 22 of 36 (reads as a benefit, at the rule's edge) | Compactions 10 → 6; cost −24% | same |
