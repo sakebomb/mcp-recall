@@ -52,3 +52,17 @@ Output lands in `runs/<run-id>/` (gitignored):
 | `<task>.evidence/recall-store/` | A consistent snapshot of every mcp-recall store, full stored content included |
 | `logs/run_evaluation/` | The SWE-bench harness's per-instance grading logs and `report.json` |
 | `SHA256SUMS` | Written by `bench.py seal`, which first refuses if the API token appears in any file |
+
+## Known limits
+
+The harness is kept as it ran for the #414 studies, so these are disclosed
+rather than fixed. Each one scores a broken run as unsolved instead of
+failing loudly, so it lowers both arms and can hide a harness fault:
+
+- A `docker exec` timeout stops the CLI, not the agent inside the container.
+- A failed `git diff` yields an empty patch, graded as unresolved.
+- In `web.py`, a verifier that crashes counts as a failed task. None of the
+  216 graded browser runs' `verify.log` files contains a traceback.
+- A run with no final `result` event records zero cost and zero turns.
+- `check_analyze.py` checks `analyze.py` against hand-computed answers, but
+  CI does not run it, or anything else under `bench/`.
