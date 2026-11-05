@@ -98,7 +98,7 @@ Eleven `recall__*` tools are available to Claude in every session. You don't cal
 
 - **How much smaller.** On one developer's real store (36,039 calls, July to October 2026), MCP output replayed through today's handlers came out 96.6% smaller, and all intercepted calls 57.9% smaller as recorded. One person's mix, dominated by Bash; yours will differ. Run `bun run measure` on your own store.
 - **What the summaries keep.** The [quality benchmark](docs/benchmarks.md#quality-benchmark) scores the facts each summary keeps against a same-size head cut, on a public corpus anyone can rerun with `bun run quality`. It names every family where mcp-recall does no better than the head cut.
-- **Whether the agent still solves the task.** A paired benchmark of the same agent with and without mcp-recall is in progress ([#414](https://github.com/sakebomb/mcp-recall/issues/414)).
+- **Whether the agent still solves the task.** In pre-registered paired runs of the same agent with and without mcp-recall, no study found a change in solved tasks that can be told apart from chance, in either direction. Long sessions compacted less where they compacted at all, and on Haiku they cost less. Results and limits: [task-success benchmark](docs/benchmarks.md#task-success-benchmark).
 
 Long, structured, repetitive output (Playwright snapshots, API JSON, large diffs, test logs) compresses well; short or one-off output has little to remove. Every figure, its method and its caveats: [Benchmarks](docs/benchmarks.md).
 
