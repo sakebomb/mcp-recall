@@ -1,0 +1,5 @@
+# Smoke round (#414): 4 medium tasks, one per repo, 1 FAIL_TO_PASS test each.
+django__django-11095
+sympy__sympy-12419
+pytest-dev__pytest-5631
+sphinx-doc__sphinx-10614
