@@ -13231,6 +13231,7 @@ __export(exports_install, {
   isOurSessionStartHook: () => isOurSessionStartHook,
   isOurPostToolUseHook: () => isOurPostToolUseHook,
   isClaudeMdInjected: () => isClaudeMdInjected,
+  isBunfsPath: () => isBunfsPath,
   installCommand: () => installCommand,
   injectClaudeMd: () => injectClaudeMd,
   detectLaunch: () => detectLaunch,
@@ -13261,11 +13262,14 @@ function defaultSettingsPath() {
 function defaultClaudeMdPath() {
   return path.join(os.homedir(), ".claude", "CLAUDE.md");
 }
+function isBunfsPath(modulePath) {
+  return /^(\/\$bunfs\/|[A-Za-z]:[\\/]~BUN[\\/])/.test(modulePath);
+}
 function isStandaloneBinary(modulePath = import.meta.path) {
   const flag = Bun.isStandaloneExecutable;
   if (typeof flag === "boolean")
     return flag;
-  return /^(\/\$bunfs\/|[A-Za-z]:[\\/]~BUN[\\/])/.test(modulePath);
+  return isBunfsPath(modulePath);
 }
 function shellWord(p) {
   return /[^\w@%+=:,./-]/.test(p) ? `'${p.replace(/'/g, `'\\''`)}'` : p;
