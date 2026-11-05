@@ -4,11 +4,10 @@ What mcp-recall delivers to Claude, measured:
 
 - [**Quality benchmark**](#quality-benchmark): whether what Claude receives still carries the facts in the output.
   Rerunnable by anyone on a checked-in corpus.
+- [**Task-success benchmark**](#task-success-benchmark): whether the same agent solves more or fewer tasks with
+  mcp-recall installed. Paired runs, pre-registered, November 2026.
 - [**Compression measurements**](#compression-measurements): how much smaller the output gets, on one developer's
   real store and on per-handler fixtures.
-
-Whether an agent still solves the task with mcp-recall installed is the paired task-success benchmark of
-[#414](https://github.com/sakebomb/mcp-recall/issues/414), in progress.
 
 ## Quality benchmark
 
@@ -27,7 +26,7 @@ The scoring runs over a checked-in corpus, so a clean checkout reproduces the ta
 
 This is command-level fidelity, not task success. It does not run an agent. Whether compression changes how often
 an agent solves a task needs a paired run of the same agent with and without mcp-recall, across models; that is
-[#414](https://github.com/sakebomb/mcp-recall/issues/414), in progress.
+the [task-success benchmark](#task-success-benchmark) below.
 
 ### What it measures
 
@@ -133,6 +132,38 @@ How to read it:
 - **Re-capturing moves the numbers.** Scoring the checked-in corpus is reproducible. Re-running the capture scripts
   is not entirely: Hugging Face search results cannot be pinned, and scripted cases depend on the installed tool
   versions recorded per case.
+
+## Task-success benchmark
+
+The same headless Claude Code agent ran the same tasks with and without mcp-recall, and each arm was graded by the
+task's own checker. Every study's design and reading rule was committed before it ran
+([#414](https://github.com/sakebomb/mcp-recall/issues/414)). The harness is
+[`bench/agent/`](../bench/agent/README.md); the full write-ups are in `docs/research/`.
+
+**Result: no study found a change in solved tasks that can be told apart from chance, in either direction.**
+Where sessions were long enough to compact, mcp-recall compacted less, and on Haiku it cost less. Agents almost never
+called a `recall__*` tool, so what effect there is comes from the summaries alone.
+
+| Study | Tasks and models | Solved: without → with | Other effect | Report |
+|---|---|---|---|---|
+| Pilot | 45 hard SWE-bench Verified tasks; Haiku, Sonnet, Opus 5.5 | Haiku 25 → 21 (harm rule fired, exact p = 0.125); Sonnet 25 → 25; Opus 35 → 37 | Summaries reached the agent in 3 to 8 of 45 runs per model; 0 retrievals | [task-success](research/task-success-2026-11.md) |
+| Compression | Same 45 tasks, 3 runs per arm; Haiku, Sonnet 5.5; installed both ways, hook off vs on | Haiku 51.1% → 53.3% (+2.2 points, −2.2 to +6.7); Sonnet 58.5% → 55.6% (−3.0, −9.6 to +3.7) | Summaries in 98 and 89 of 135 runs; the pilot's Haiku deficit did not recur | [compression test](research/compression-test-2026-11.md) |
+| 3: long sessions | 6 chains of 10 Django tasks; Haiku | −2.3 points (−8.5 to +2.5) | No compactions in either arm (1M window); cost −23% | [long session and MCP](research/long-session-and-mcp-2026-11.md) |
+| 4: browser | 12 forum tasks via Playwright MCP, 3 sequences; Haiku, simulated 200k window | 27 → 23 of 36 (reads as a cost) | Measured bug [#424](https://github.com/sakebomb/mcp-recall/issues/424): pages reached the agent gutted | same |
+| 5: browser, fixed build | Study 4 rerun on the fixed build | 25 → 22 of 36 (reads as a benefit, at the rule's edge) | Compactions 10 → 6; cost −24% | same |
+| 6: browser, small real window | 12 forum tasks × 3; self-hosted Qwen3-Coder-Next, 131k window | 12 → 11 of 36 | Compactions 50 → 29 | same |
+
+### Limits
+
+- **Small samples.** The intervals are wide; a difference of several tasks either way would not show. The readings
+  are decisions under rules fixed in advance, not statistical claims.
+- **Mostly one model.** Studies 3 to 5 ran on Haiku 5.5; only the pilot reached Opus.
+- **One site for browser tasks**, with a simulated window in Studies 4 and 5.
+- **Studies 5 and 6 predate v1.20.0**, which caps large Playwright sections
+  ([#435](https://github.com/sakebomb/mcp-recall/pull/435)).
+- **Fewer compactions are a count, not a consequence.** The solve rate did not rise with them.
+- **The run data is private for now.** The harness and analysis are in the repo; the sealed runs are in a private
+  Hugging Face dataset. The harness's own known limits are in its README.
 
 ## Compression measurements
 
