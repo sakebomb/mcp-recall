@@ -80,7 +80,10 @@ closed; reopening one is a direction change, not a feature request.
    verbatim — it does not distill a model of the conversation, build a knowledge
    graph, or summarize what happened. That is a different product (mem0, Letta,
    Zep, and similar occupy it). Keeping to raw-output capture is what makes
-   verbatim retrieval and secret-safe storage tractable.
+   verbatim retrieval and secret-safe storage tractable. `recall__note`,
+   `recall__pin` and `recall__context` stay as they are: small per-project
+   markers beside the stored output, not a memory layer. Long-term memory
+   belongs in a dedicated memory tool, and these will not grow toward one.
 2. **Won't intercept the built-in `Read` / `Grep` / `Glob` tools.** Claude Code's
    `PostToolUse` output-replacement only supports MCP tools and `Bash`; the other
    built-ins can't be intercepted, and Claude Code already manages their output
