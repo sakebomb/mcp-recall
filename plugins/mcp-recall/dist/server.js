@@ -13259,8 +13259,8 @@ var require_package = __commonJS((exports, module) => {
       prepare: "git config core.hooksPath .githooks"
     },
     dependencies: {
-      "@modelcontextprotocol/sdk": "^1.30.0",
-      "smol-toml": "^1.8.0",
+      "@modelcontextprotocol/sdk": "^1.32.2",
+      "smol-toml": "^1.9.1",
       zod: "^4.6.7"
     },
     devDependencies: {
@@ -19503,6 +19503,9 @@ class Protocol {
       this.setRequestHandler(GetTaskPayloadRequestSchema, async (request, extra) => {
         const handleTaskResult = async () => {
           const taskId = request.params.taskId;
+          if (!await this._taskStore.getTask(taskId, extra.sessionId)) {
+            throw new McpError(ErrorCode.InvalidParams, `Task not found: ${taskId}`);
+          }
           if (this._taskMessageQueue) {
             let queuedMessage;
             while (queuedMessage = await this._taskMessageQueue.dequeue(taskId, extra.sessionId)) {
@@ -19533,12 +19536,12 @@ class Protocol {
             throw new McpError(ErrorCode.InvalidParams, `Task not found: ${taskId}`);
           }
           if (!isTerminal(task.status)) {
-            await this._waitForTaskUpdate(taskId, extra.signal);
+            await this._waitForTaskUpdate(taskId, extra.signal, extra.sessionId);
             return await handleTaskResult();
           }
           if (isTerminal(task.status)) {
             const result = await this._taskStore.getTaskResult(taskId, extra.sessionId);
-            this._clearTaskQueue(taskId);
+            this._clearTaskQueue(taskId, extra.sessionId);
             return {
               ...result,
               _meta: {
@@ -19575,7 +19578,7 @@ class Protocol {
             throw new McpError(ErrorCode.InvalidParams, `Cannot cancel task in terminal status: ${task.status}`);
           }
           await this._taskStore.updateTaskStatus(request.params.taskId, "cancelled", "Client cancelled task execution.", extra.sessionId);
-          this._clearTaskQueue(request.params.taskId);
+          this._clearTaskQueue(request.params.taskId, extra.sessionId);
           const cancelledTask = await this._taskStore.getTask(request.params.taskId, extra.sessionId);
           if (!cancelledTask) {
             throw new McpError(ErrorCode.InvalidParams, `Task not found after cancellation: ${request.params.taskId}`);
@@ -19698,6 +19701,19 @@ class Protocol {
     const handler = this._requestHandlers.get(request.method) ?? this.fallbackRequestHandler;
     const capturedTransport = this._transport;
     const relatedTaskId = request.params?._meta?.[RELATED_TASK_META_KEY]?.taskId;
+    const sessionId = capturedTransport?.sessionId;
+    const store = this._taskStore;
+    let relatedTaskFound = true;
+    let relatedTaskLookup;
+    if (relatedTaskId && store && this._taskMessageQueue && sessionId !== undefined) {
+      relatedTaskFound = false;
+      relatedTaskLookup = (async () => {
+        if (!await store.getTask(relatedTaskId, sessionId)) {
+          throw new McpError(ErrorCode.InvalidParams, `Task not found: ${relatedTaskId}`);
+        }
+        relatedTaskFound = true;
+      })();
+    }
     if (handler === undefined) {
       const errorResponse = {
         jsonrpc: "2.0",
@@ -19707,7 +19723,10 @@ class Protocol {
           message: "Method not found"
         }
       };
-      if (relatedTaskId && this._taskMessageQueue) {
+      if (relatedTaskId && relatedTaskLookup) {
+        const queuedError = { type: "error", message: errorResponse, timestamp: Date.now() };
+        relatedTaskLookup.then(() => this._enqueueTaskMessage(relatedTaskId, queuedError, sessionId), () => capturedTransport?.send(errorResponse)).catch((error2) => this._onerror(new Error(`Failed to send an error response: ${error2}`)));
+      } else if (relatedTaskId && this._taskMessageQueue) {
         this._enqueueTaskMessage(relatedTaskId, {
           type: "error",
           message: errorResponse,
@@ -19758,7 +19777,10 @@ class Protocol {
       closeSSEStream: extra?.closeSSEStream,
       closeStandaloneSSEStream: extra?.closeStandaloneSSEStream
     };
-    Promise.resolve().then(() => {
+    (relatedTaskLookup ?? Promise.resolve()).then(() => {
+      if (relatedTaskLookup && abortController.signal.aborted) {
+        throw new McpError(ErrorCode.ConnectionClosed, "Request was cancelled");
+      }
       if (taskCreationParams) {
         this.assertTaskHandlerCapability(request.method);
       }
@@ -19793,7 +19815,7 @@ class Protocol {
           ...error2["data"] !== undefined && { data: error2["data"] }
         }
       };
-      if (relatedTaskId && this._taskMessageQueue) {
+      if (relatedTaskId && this._taskMessageQueue && relatedTaskFound) {
         await this._enqueueTaskMessage(relatedTaskId, {
           type: "error",
           message: errorResponse,
@@ -20181,7 +20203,7 @@ class Protocol {
       throw new Error("Cannot enqueue task message: taskStore and taskMessageQueue are not configured");
     }
     const maxQueueSize = this._options?.maxTaskQueueSize;
-    await this._taskMessageQueue.enqueue(taskId, message, sessionId, maxQueueSize);
+    await this._taskMessageQueue.enqueue(taskId, message, sessionId ?? this._transport?.sessionId, maxQueueSize);
   }
   async _clearTaskQueue(taskId, sessionId) {
     if (this._taskMessageQueue) {
@@ -20200,10 +20222,10 @@ class Protocol {
       }
     }
   }
-  async _waitForTaskUpdate(taskId, signal) {
+  async _waitForTaskUpdate(taskId, signal, sessionId) {
     let interval = this._options?.defaultTaskPollInterval ?? 1000;
     try {
-      const task = await this._taskStore?.getTask(taskId);
+      const task = await this._taskStore?.getTask(taskId, sessionId);
       if (task?.pollInterval) {
         interval = task.pollInterval;
       }
@@ -20872,6 +20894,42 @@ class ExperimentalMcpServerTasks {
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/mcp.js
 init_zod();
+function toolInputElementCount(value, max) {
+  let count = 0;
+  const stack = [value];
+  while (stack.length > 0) {
+    const node2 = stack.pop();
+    if (node2 === null || typeof node2 !== "object")
+      continue;
+    if (Array.isArray(node2)) {
+      for (const child of node2) {
+        if (++count > max)
+          return count;
+        if (child !== null && typeof child === "object")
+          stack.push(child);
+      }
+    } else {
+      for (const key in node2) {
+        if (!Object.prototype.hasOwnProperty.call(node2, key))
+          continue;
+        if (++count > max)
+          return count;
+        const child = node2[key];
+        if (child !== null && typeof child === "object")
+          stack.push(child);
+      }
+    }
+  }
+  return count;
+}
+function resolveMaxToolInputElements(value) {
+  if (value === undefined || value === Infinity)
+    return;
+  if (typeof value !== "number" || Number.isNaN(value) || value < 1) {
+    throw new RangeError(`maxToolInputElements must be a number of at least 1, or Infinity, got ${String(value)}`);
+  }
+  return value;
+}
 
 class McpServer {
   constructor(serverInfo, options) {
@@ -20884,6 +20942,16 @@ class McpServer {
     this._resourceHandlersInitialized = false;
     this._promptHandlersInitialized = false;
     this.server = new Server(serverInfo, options);
+    this._maxToolInputElements = resolveMaxToolInputElements(options?.maxToolInputElements);
+    if (options?.capabilities?.tools) {
+      this.setToolRequestHandlers();
+    }
+    if (options?.capabilities?.resources) {
+      this.setResourceRequestHandlers();
+    }
+    if (options?.capabilities?.prompts) {
+      this.setPromptRequestHandlers();
+    }
   }
   get experimental() {
     if (!this._experimental) {
@@ -20990,12 +21058,15 @@ class McpServer {
     };
   }
   async validateToolInput(tool, args, toolName) {
+    if (this._maxToolInputElements !== undefined && toolInputElementCount(args, this._maxToolInputElements) > this._maxToolInputElements) {
+      throw new McpError(ErrorCode.InvalidParams, `Invalid arguments for tool ${toolName}: arguments contain more than the maximum of ${this._maxToolInputElements} elements`);
+    }
     if (!tool.inputSchema) {
       return;
     }
     const inputObj = normalizeObjectSchema(tool.inputSchema);
     const schemaToParse = inputObj ?? tool.inputSchema;
-    const parseResult = await safeParseAsync3(schemaToParse, args);
+    const parseResult = await safeParseAsync3(schemaToParse, args ?? {});
     if (!parseResult.success) {
       const error2 = "error" in parseResult ? parseResult.error : "Unknown error";
       const errorMessage = getParseErrorMessage(error2);
@@ -21220,7 +21291,7 @@ class McpServer {
       }
       if (prompt.argsSchema) {
         const argsObj = normalizeObjectSchema(prompt.argsSchema);
-        const parseResult = await safeParseAsync3(argsObj, request.params.arguments);
+        const parseResult = await safeParseAsync3(argsObj, request.params.arguments ?? {});
         if (!parseResult.success) {
           const error2 = "error" in parseResult ? parseResult.error : "Unknown error";
           const errorMessage = getParseErrorMessage(error2);
@@ -22454,126 +22525,6 @@ function getContext(db, project_key, opts = {}) {
   }
   return { pinned, notes, recent, hot, last_session };
 }
-// node_modules/smol-toml/dist/date.js
-/*!
- * Copyright (c) Squirrel Chat et al., All rights reserved.
- * SPDX-License-Identifier: BSD-3-Clause
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice, this
- *    list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- *    this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the copyright holder nor the names of its contributors
- *    may be used to endorse or promote products derived from this software without
- *    specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
- * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-var DATE_TIME_RE = /^(\d{4}-\d{2}-\d{2})?[T ]?(?:(\d{2}):\d{2}(?::\d{2}(?:\.\d+)?)?)?(Z|[-+]\d{2}:\d{2})?$/i;
-
-class TomlDate extends Date {
-  #hasDate = false;
-  #hasTime = false;
-  #offset = null;
-  constructor(date4) {
-    let hasDate = true;
-    let hasTime = true;
-    let offset = "Z";
-    if (typeof date4 === "string") {
-      let match = date4.match(DATE_TIME_RE);
-      if (match) {
-        if (!match[1]) {
-          hasDate = false;
-          date4 = `0000-01-01T${date4}`;
-        }
-        hasTime = !!match[2];
-        hasTime && date4[10] === " " && (date4 = date4.replace(" ", "T"));
-        if (match[2] && +match[2] > 23) {
-          date4 = "";
-        } else {
-          offset = match[3] || null;
-          date4 = date4.toUpperCase();
-          if (!offset && hasTime)
-            date4 += "Z";
-        }
-      } else {
-        date4 = "";
-      }
-    }
-    super(date4);
-    if (!isNaN(this.getTime())) {
-      this.#hasDate = hasDate;
-      this.#hasTime = hasTime;
-      this.#offset = offset;
-    }
-  }
-  isDateTime() {
-    return this.#hasDate && this.#hasTime;
-  }
-  isLocal() {
-    return !this.#hasDate || !this.#hasTime || !this.#offset;
-  }
-  isDate() {
-    return this.#hasDate && !this.#hasTime;
-  }
-  isTime() {
-    return this.#hasTime && !this.#hasDate;
-  }
-  isValid() {
-    return this.#hasDate || this.#hasTime;
-  }
-  toISOString() {
-    let iso = super.toISOString();
-    if (this.isDate())
-      return iso.slice(0, 10);
-    if (this.isTime())
-      return iso.slice(11, 23);
-    if (this.#offset === null)
-      return iso.slice(0, -1);
-    if (this.#offset === "Z")
-      return iso;
-    let offset = +this.#offset.slice(1, 3) * 60 + +this.#offset.slice(4, 6);
-    offset = this.#offset[0] === "-" ? offset : -offset;
-    let offsetDate = new Date(this.getTime() - offset * 60000);
-    return offsetDate.toISOString().slice(0, -1) + this.#offset;
-  }
-  static wrapAsOffsetDateTime(jsDate, offset = "Z") {
-    let date4 = new TomlDate(jsDate);
-    date4.#offset = offset;
-    return date4;
-  }
-  static wrapAsLocalDateTime(jsDate) {
-    let date4 = new TomlDate(jsDate);
-    date4.#offset = null;
-    return date4;
-  }
-  static wrapAsLocalDate(jsDate) {
-    let date4 = new TomlDate(jsDate);
-    date4.#hasTime = false;
-    date4.#offset = null;
-    return date4;
-  }
-  static wrapAsLocalTime(jsDate) {
-    let date4 = new TomlDate(jsDate);
-    date4.#hasDate = false;
-    date4.#offset = null;
-    return date4;
-  }
-}
-
 // node_modules/smol-toml/dist/error.js
 /*!
  * Copyright (c) Squirrel Chat et al., All rights reserved.
@@ -22603,11 +22554,11 @@ class TomlDate extends Date {
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 function getLineColFromPtr(string4, ptr) {
-  let lines = string4.slice(0, ptr).split(/\r\n|\n|\r/g);
+  let lines = string4.slice(0, ptr).split(/\r?\n/);
   return [lines.length, lines.pop().length + 1];
 }
 function makeCodeBlock(string4, line, column) {
-  let lines = string4.split(/\r\n|\n|\r/g);
+  let lines = string4.split(/\r?\n/);
   let codeblock = "";
   let numberLen = (Math.log10(line + 1) | 0) + 1;
   for (let i = line - 1;i <= line + 1; i++) {
@@ -22642,89 +22593,9 @@ ${codeblock}`, options);
     this.column = column;
     this.codeblock = codeblock;
   }
-}
-
-// node_modules/smol-toml/dist/util.js
-/*!
- * Copyright (c) Squirrel Chat et al., All rights reserved.
- * SPDX-License-Identifier: BSD-3-Clause
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice, this
- *    list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- *    this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the copyright holder nor the names of its contributors
- *    may be used to endorse or promote products derived from this software without
- *    specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
- * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-function indexOfNewline(str, start = 0) {
-  let idx = str.indexOf(`
-`, start);
-  if (str.charCodeAt(idx - 1) === 13)
-    idx--;
-  return idx;
-}
-function skipComment(ctx) {
-  for (;ctx.p < ctx.s.length; ctx.p++) {
-    let c = ctx.s.charCodeAt(ctx.p);
-    if (c === 10)
-      break;
-    if (c === 13 && ctx.s.charCodeAt(ctx.p + 1) === 10) {
-      ctx.p++;
-      break;
-    }
-    if (c < 32 && c !== 9 || c === 127) {
-      throw new TomlError("control characters are not allowed in comments", {
-        toml: ctx.s,
-        ptr: ctx.p
-      });
-    }
+  static x(message, ctx, ptr) {
+    throw new TomlError(message, { toml: ctx.s, ptr: ptr ?? ctx.p });
   }
-}
-function skipVoid(ctx, banNewLines, banComments) {
-  let c;
-  while (true) {
-    while ((c = ctx.s.charCodeAt(ctx.p)) === 32 || c === 9 || !banNewLines && (c === 10 || c === 13 && ctx.s.charCodeAt(ctx.p + 1) === 10))
-      ctx.p++;
-    if (banComments || c !== 35)
-      break;
-    skipComment(ctx);
-  }
-}
-function skipUntil(ctx, sep, end) {
-  let ptr = ctx.p;
-  if (!end) {
-    ptr = indexOfNewline(ctx.s, ptr);
-    ctx.p = ptr < 0 ? ctx.s.length : ptr;
-    return;
-  }
-  for (;ctx.p < ctx.s.length; ctx.p++) {
-    let c = ctx.s.charCodeAt(ctx.p);
-    if (c === 35) {
-      skipComment(ctx);
-    } else if (c === end || c === sep) {
-      return;
-    }
-  }
-  throw new TomlError("cannot find end of structure", {
-    toml: ctx.s,
-    ptr
-  });
 }
 
 // node_modules/smol-toml/dist/primitive.js
@@ -22755,11 +22626,8 @@ function skipUntil(ctx, sep, end) {
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-var INT_REGEX = /^((0x[0-9a-fA-F](_?[0-9a-fA-F])*)|(([+-]|0[ob])?\d(_?\d)*))$/;
-var FLOAT_REGEX = /^[+-]?\d(_?\d)*(\.\d(_?\d)*)?([eE][+-]?\d(_?\d)*)?$/;
-var LEADING_ZERO = /^[+-]?0[0-9_]/;
 function parseString(ctx) {
-  let start = ctx.p;
+  let startPtr = ctx.p;
   let c = ctx.s.charCodeAt(ctx.p++);
   let first = c;
   let isLiteral = c === 39;
@@ -22778,10 +22646,7 @@ function parseString(ctx) {
     if (isMultiline && (c === 10 || c === 13 && ctx.s.charCodeAt(ctx.p + 1) === 10)) {
       state = state && 3;
     } else if (c < 32 && c !== 9 || c === 127) {
-      throw new TomlError("control characters are not allowed in strings", {
-        toml: ctx.s,
-        ptr: ctx.p
-      });
+      TomlError.x("control characters are not allowed in strings", ctx);
     } else if ((!state || state === 3) && c === first && (!isMultiline || ctx.s.charCodeAt(ctx.p + 1) === first && ctx.s.charCodeAt(ctx.p + 2) === first)) {
       if (isMultiline) {
         if (ctx.s.charCodeAt(ctx.p + 3) === first)
@@ -22789,8 +22654,10 @@ function parseString(ctx) {
         if (ctx.s.charCodeAt(ctx.p + 3) === first)
           ctx.p++;
       }
-      if (!state)
-        parsed += ctx.s.slice(sliceStart, ctx.p);
+      if (!state) {
+        let s = ctx.s.slice(sliceStart, ctx.p);
+        parsed = parsed ? parsed + s : s;
+      }
       ctx.p += isMultiline ? 3 : 1;
       return parsed;
     } else if (!state) {
@@ -22800,22 +22667,23 @@ function parseString(ctx) {
       }
     } else if (state === 1) {
       if (c === 120 || c === 117 || c === 85) {
+        let errPtr = ctx.p++ - 1;
         let value = 0;
         let len = c === 120 ? 2 : c === 117 ? 4 : 8;
         for (let j = 0;j < len; j++, ctx.p++) {
-          let hex = ctx.s.charCodeAt(ctx.p + 1);
+          let hex = ctx.s.charCodeAt(ctx.p);
           let digit = hex >= 48 && hex <= 57 ? hex - 48 : hex >= 65 && hex <= 70 ? hex - 65 + 10 : hex >= 97 && hex <= 102 ? hex - 97 + 10 : -1;
           if (digit < 0)
-            throw new TomlError("invalid non-hex character in unicode escape", { toml: ctx.s, ptr: ctx.p + 1 });
+            TomlError.x("invalid non-hex character in unicode escape", ctx);
           value = value << 4 | digit;
         }
         if (value < 0 || value > 1114111 || value >= 55296 && value <= 57343) {
-          throw new TomlError("invalid unicode escape", { toml: ctx.s, ptr: ctx.p });
+          TomlError.x("invalid unicode escape", ctx, errPtr);
         }
         parsed += String.fromCodePoint(value);
-        sliceStart = ctx.p + 1;
+        sliceStart = ctx.p--;
         state = 0;
-      } else if (c === 32 || c === 9) {
+      } else if (isMultiline && (c === 32 || c === 9)) {
         state = 2;
       } else {
         if (c === 98)
@@ -22836,70 +22704,161 @@ function parseString(ctx) {
         else if (c === 92)
           parsed += "\\";
         else
-          throw new TomlError("unrecognized escape sequence", { toml: ctx.s, ptr: ctx.p });
+          TomlError.x("unrecognised escape sequence", ctx);
         sliceStart = ctx.p + 1;
         state = 0;
       }
     } else if (c !== 32 && c !== 9) {
-      if (state === 2) {
-        throw new TomlError("invalid escape: only line-ending whitespace may be escaped", {
-          toml: ctx.s,
-          ptr: sliceStart
-        });
-      }
+      if (state === 2)
+        TomlError.x("invalid escape: only line-ending whitespace may be escaped", ctx, sliceStart);
       state = !isLiteral && c === 92 ? 1 : 0;
       sliceStart = ctx.p;
     }
   }
-  throw new TomlError("unfinished string", { toml: ctx.s, ptr: start });
+  TomlError.x("unfinished string", ctx, startPtr);
 }
-function sliceAndTrimEndOf(ctx, start, end) {
-  let value = ctx.s.slice(start, end);
-  let commentIdx = value.indexOf("#");
-  if (commentIdx > 0) {
-    skipComment({ s: value, p: commentIdx, d: 0 });
-    value = value.slice(0, commentIdx);
-  }
-  return value.trimEnd();
-}
-function parseValue(ctx, integersAsBigInt, end) {
-  let ptr = ctx.p;
-  let err = { toml: ctx.s, ptr };
-  skipUntil(ctx, 44, end);
-  let value = sliceAndTrimEndOf(ctx, ptr, ctx.p);
-  if (!value)
-    throw new TomlError("incomplete declaration: value expected", err);
-  if (value === "-inf")
-    return -Infinity;
-  if (value === "inf" || value === "+inf")
-    return Infinity;
-  if (value === "nan" || value === "+nan" || value === "-nan")
-    return NaN;
-  if (value === "-0")
-    return integersAsBigInt ? 0n : 0;
-  let isInt = INT_REGEX.test(value);
-  if (isInt || FLOAT_REGEX.test(value)) {
-    if (LEADING_ZERO.test(value)) {
-      throw new TomlError("leading zeroes are not allowed", err);
-    }
-    value = value.replace(/_/g, "");
-    let numeric = +value;
-    if (isNaN(numeric)) {
-      throw new TomlError("invalid number", err);
-    }
-    if (isInt) {
-      if ((isInt = !Number.isSafeInteger(numeric)) && !integersAsBigInt) {
-        throw new TomlError("integer value cannot be represented losslessly", err);
+
+// node_modules/smol-toml/dist/date.js
+/*!
+ * Copyright (c) Squirrel Chat et al., All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice, this
+ *    list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the copyright holder nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software without
+ *    specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+var DATE_TIME_RE = /^(\d{4}-\d{2}-\d{2})?[Tt ]?(?:(\d{2}):\d{2}(?::\d{2}(?:\.\d+)?)?)?(Z|z|[-+]\d{2}:\d{2})?$/i;
+
+class TomlDate extends Date {
+  #hasDate = false;
+  #hasTime = false;
+  #offset = null;
+  constructor(date4, fasttype, unsafeDelim) {
+    let hasDate = true;
+    let hasTime = true;
+    let offset = "Z";
+    let c;
+    if (typeof date4 === "string") {
+      if (fasttype)
+        prep: {
+          if (fasttype < 3) {
+            if (+date4.slice(11, 13) > 23) {
+              date4 = "";
+              break prep;
+            }
+            if (fasttype === 2) {
+              offset = null;
+              date4 += "Z";
+            } else if ((c = date4.charCodeAt(date4.length - 1)) !== 90 && c !== 122) {
+              offset = date4.slice(date4.length - 6);
+            }
+            if (unsafeDelim)
+              date4 = date4.slice(0, 10) + "T" + date4.slice(11);
+          } else if (fasttype === 4) {
+            date4 = +date4.slice(0, 2) > 23 ? "" : `0000-01-01T${date4}Z`;
+          }
+          hasDate = fasttype !== 4;
+          hasTime = fasttype !== 3;
+        }
+      else {
+        let match = date4.match(DATE_TIME_RE);
+        if (match) {
+          if (!match[1]) {
+            hasDate = false;
+            date4 = `0000-01-01T${date4}`;
+          }
+          hasTime = !!match[2];
+          hasTime && date4[10] === " " && (date4 = date4.replace(" ", "T"));
+          if (match[2] && +match[2] > 23) {
+            date4 = "";
+          } else {
+            offset = match[3] || null;
+            if (!offset && hasTime)
+              date4 += "Z";
+          }
+        } else {
+          date4 = "";
+        }
       }
-      if (isInt || integersAsBigInt === true)
-        numeric = BigInt(value);
     }
-    return numeric;
+    super(date4);
+    if (!isNaN(this.getTime())) {
+      this.#hasDate = hasDate;
+      this.#hasTime = hasTime;
+      this.#offset = offset;
+    }
   }
-  const date4 = new TomlDate(value);
-  if (!date4.isValid())
-    throw new TomlError("invalid value", err);
-  return date4;
+  isDateTime() {
+    return this.#hasDate && this.#hasTime;
+  }
+  isLocal() {
+    return !this.#hasDate || !this.#hasTime || !this.#offset;
+  }
+  isDate() {
+    return this.#hasDate && !this.#hasTime;
+  }
+  isTime() {
+    return this.#hasTime && !this.#hasDate;
+  }
+  isValid() {
+    return this.#hasDate || this.#hasTime;
+  }
+  toISOString() {
+    let iso = super.toISOString();
+    if (this.isDate())
+      return iso.slice(0, 10);
+    if (this.isTime())
+      return iso.slice(11, 23);
+    if (this.#offset === null)
+      return iso.slice(0, -1);
+    if (this.#offset === "Z" || this.#offset === "z")
+      return iso;
+    let offset = +this.#offset.slice(1, 3) * 60 + +this.#offset.slice(4, 6);
+    offset = this.#offset[0] === "-" ? offset : -offset;
+    let offsetDate = new Date(this.getTime() - offset * 60000);
+    return offsetDate.toISOString().slice(0, -1) + this.#offset;
+  }
+  static wrapAsOffsetDateTime(jsDate, offset = "Z") {
+    let date4 = new TomlDate(jsDate);
+    date4.#offset = offset;
+    return date4;
+  }
+  static wrapAsLocalDateTime(jsDate) {
+    let date4 = new TomlDate(jsDate);
+    date4.#offset = null;
+    return date4;
+  }
+  static wrapAsLocalDate(jsDate) {
+    let date4 = new TomlDate(jsDate);
+    date4.#hasTime = false;
+    date4.#offset = null;
+    return date4;
+  }
+  static wrapAsLocalTime(jsDate) {
+    let date4 = new TomlDate(jsDate);
+    date4.#hasDate = false;
+    date4.#offset = null;
+    return date4;
+  }
 }
 
 // node_modules/smol-toml/dist/extract.js
@@ -22930,17 +22889,18 @@ function parseValue(ctx, integersAsBigInt, end) {
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-function extractValue(ctx, end, integersAsBigInt) {
-  let ptr = ctx.p;
-  let c = ctx.s.charCodeAt(ptr);
+function isDigit(char, base = 10) {
+  return base === 16 ? char > 47 && char < 58 || char > 64 && char < 71 || char > 96 && char < 103 : char > 47 && char < 48 + base;
+}
+function isEndOfValue(char, delim) {
+  return char === 32 || char === 9 || char === 10 || char === 13 || delim && (char === delim || char === 44) || char === 35;
+}
+function extractValue(ctx, end) {
+  let errPtr = ctx.p;
+  let c = ctx.s.charCodeAt(ctx.p);
   if (c === 91 || c === 123) {
-    if (!ctx.d--) {
-      throw new TomlError("document contains excessively nested structures. aborting.", {
-        toml: ctx.s,
-        ptr
-      });
-    }
-    let value = c === 91 ? parseArray(ctx, integersAsBigInt) : parseInlineTable(ctx, integersAsBigInt);
+    ctx.d-- || TomlError.x("document contains excessively nested structures. aborting.", ctx);
+    let value = c === 91 ? parseArray(ctx) : parseInlineTable(ctx);
     ctx.d++;
     return value;
   }
@@ -22949,17 +22909,243 @@ function extractValue(ctx, end, integersAsBigInt) {
   }
   if (c === 116) {
     if (ctx.s.charCodeAt(++ctx.p) !== 114 || ctx.s.charCodeAt(++ctx.p) !== 117 || ctx.s.charCodeAt(++ctx.p) !== 101)
-      throw new TomlError("invalid value", { toml: ctx.s, ptr });
-    ctx.p++;
-    return true;
+      TomlError.x("invalid value", ctx, errPtr);
+    return ctx.p++, true;
   }
   if (c === 102) {
     if (ctx.s.charCodeAt(++ctx.p) !== 97 || ctx.s.charCodeAt(++ctx.p) !== 108 || ctx.s.charCodeAt(++ctx.p) !== 115 || ctx.s.charCodeAt(++ctx.p) !== 101)
-      throw new TomlError("invalid value", { toml: ctx.s, ptr });
-    ctx.p++;
-    return false;
+      TomlError.x("invalid value", ctx, errPtr);
+    return ctx.p++, false;
   }
-  return parseValue(ctx, integersAsBigInt, end);
+  if (c === 43 || c === 45) {
+    return parseNumber(ctx, ctx.p, ctx.s.charCodeAt(++ctx.p), 44 - c, end);
+  }
+  if (ctx.s.charCodeAt(ctx.p + 4) === 45 && ctx.s.charCodeAt(ctx.p + 7) === 45) {
+    return parseDate(ctx, c, end);
+  }
+  if (ctx.s.charCodeAt(ctx.p + 2) === 58) {
+    return parseTime(ctx, c, end);
+  }
+  return parseNumber(ctx, ctx.p, c, 0, end);
+}
+function parseNumber(ctx, startPtr, startChr, sign, endChr) {
+  let c = startChr;
+  let state = 0;
+  let hasUnderscores = false;
+  if (c === 105) {
+    if (ctx.s.charCodeAt(++ctx.p) !== 110 || ctx.s.charCodeAt(++ctx.p) !== 102)
+      TomlError.x("invalid value", ctx, startPtr);
+    return ctx.p++, (sign || 1) / 0;
+  }
+  if (c === 110) {
+    if (ctx.s.charCodeAt(++ctx.p) !== 97 || ctx.s.charCodeAt(++ctx.p) !== 110)
+      TomlError.x("invalid value", ctx, startPtr);
+    return ctx.p++, NaN;
+  }
+  if (c === 48) {
+    if (++ctx.p >= ctx.s.length || isEndOfValue(c = ctx.s.charCodeAt(ctx.p), endChr))
+      return ctx.bi === true ? 0n : 0;
+    if (!sign) {
+      if (c === 120)
+        return parseIntegerBaseN(ctx, startPtr, 16, endChr);
+      else if (c === 98)
+        return parseIntegerBaseN(ctx, startPtr, 2, endChr);
+      else if (c === 111)
+        return parseIntegerBaseN(ctx, startPtr, 8, endChr);
+    }
+    if (c === 46)
+      state = 2;
+    else if (c === 101 || c === 69)
+      state = 4;
+    else
+      TomlError.x("illegal leading zero", ctx, startPtr);
+  } else if (!isDigit(c))
+    TomlError.x("invalid value", ctx, startPtr);
+  while (++ctx.p < ctx.s.length && (c = ctx.s.charCodeAt(ctx.p), !isEndOfValue(c, endChr))) {
+    if (!state)
+      state = 1;
+    if (c === 95) {
+      if (!(state & 1))
+        TomlError.x("illegal underscore", ctx);
+      state += 11;
+      hasUnderscores = true;
+    } else if (state === 1 && c === 46)
+      state = 2;
+    else if ((state === 1 || state === 3) && (c === 101 || c === 69))
+      state = 4;
+    else if (state === 4 && (c === 43 || c === 45)) {
+      state = 6;
+    } else if (!isDigit(c))
+      TomlError.x(`illegal character in numeric literal`, ctx);
+    else if (state > 9)
+      state -= 11;
+    else if (!(state & 1))
+      state++;
+  }
+  if (!state) {
+    let val = (startChr - 48) * (sign || 1);
+    return ctx.bi === true ? BigInt(val) : val;
+  }
+  if (!(state & 1))
+    TomlError.x("unfinished numeric value", ctx, startPtr);
+  let str = ctx.s.slice(startPtr, ctx.p);
+  if (hasUnderscores)
+    str = str.replaceAll("_", "");
+  return state > 1 ? parseFloat(str) : parseInteger(ctx, str, 10, startPtr);
+}
+function parseIntegerBaseN(ctx, startPtr, base, endChr) {
+  let c, underscore = 1;
+  while (++ctx.p < ctx.s.length && (c = ctx.s.charCodeAt(ctx.p), !isEndOfValue(c, endChr))) {
+    if (c === 95) {
+      if (underscore & 1)
+        TomlError.x("illegal underscore", ctx);
+      underscore = 3;
+    } else if (!isDigit(c, base))
+      TomlError.x(`illegal character in numeric literal`, ctx);
+    else if (underscore & 1)
+      underscore--;
+  }
+  if (underscore & 1)
+    TomlError.x("unfinished numeric value", ctx);
+  let str = ctx.s.slice(startPtr + 2, ctx.p);
+  if (underscore)
+    str = str.replaceAll("_", "");
+  return parseInteger(ctx, str, base, startPtr);
+}
+function parseInteger(ctx, str, base, startPtr) {
+  if (ctx.bi !== true)
+    int: {
+      let val = parseInt(str, base);
+      if (!Number.isSafeInteger(val)) {
+        if (ctx.bi)
+          break int;
+        TomlError.x("integer value cannot be represented losslessly", ctx, startPtr);
+      }
+      return val;
+    }
+  return base === 10 ? BigInt(str) : BigInt((base === 2 ? "0b" : base === 8 ? "0o" : "0x") + str);
+}
+function parseDate(ctx, c, endChr) {
+  let startPtr = ctx.p++, unsafeSeparator;
+  if (!isDigit(c) || !isDigit(ctx.s.charCodeAt(ctx.p++)) || !isDigit(ctx.s.charCodeAt(ctx.p++)) || !isDigit(ctx.s.charCodeAt(ctx.p++))) {
+    return parseNumber(ctx, ctx.p = startPtr, c, 0, endChr);
+  }
+  ctx.p += 5;
+  if (!isDigit(ctx.s.charCodeAt(ctx.p++)))
+    TomlError.x("invalid date-time: date part is malformed", ctx, startPtr);
+  if (ctx.p >= ctx.s.length || ((c = ctx.s.charCodeAt(ctx.p)) !== 32 || (unsafeSeparator = true, !isDigit(ctx.s.charCodeAt(ctx.p + 1)))) && c !== 84 && c !== 116) {
+    let t2 = ctx.s.slice(startPtr, ctx.p);
+    return readDate(ctx, t2, 3, false, startPtr);
+  }
+  if (ctx.s.charCodeAt(ctx.p += 3) !== 58)
+    TomlError.x("invalid date-time: time part is malformed", ctx, startPtr);
+  if (ctx.s.charCodeAt(ctx.p += 3) === 58)
+    ctx.p += 3;
+  if (ctx.s.charCodeAt(ctx.p) === 46)
+    while (isDigit(ctx.s.charCodeAt(++ctx.p)))
+      ;
+  if (c = ctx.s.charCodeAt(ctx.p)) {
+    if (c === 90 || c === 122) {
+      let t2 = ctx.s.slice(startPtr, ++ctx.p);
+      return readDate(ctx, t2, 1, unsafeSeparator, startPtr, "[+00:00]");
+    }
+    if (c === 43 || c === 45) {
+      let t2 = ctx.s.slice(startPtr, ctx.p += 6);
+      return readDate(ctx, t2, 1, unsafeSeparator, startPtr, !ctx.ld && "[" + ctx.s.slice(ctx.p - 6, ctx.p) + "]");
+    }
+  }
+  let t = ctx.s.slice(startPtr, ctx.p);
+  return readDate(ctx, t, 2, unsafeSeparator, startPtr);
+}
+function parseTime(ctx, c, endChr) {
+  let start = ctx.p;
+  if (!isDigit(c) || !isDigit(ctx.s.charCodeAt(++ctx.p))) {
+    return parseNumber(ctx, --ctx.p, c, 0, endChr);
+  }
+  if (ctx.s.charCodeAt(ctx.p += 4) === 58)
+    ctx.p += 3;
+  if (ctx.s.charCodeAt(ctx.p) === 46)
+    while (isDigit(ctx.s.charCodeAt(++ctx.p)))
+      ;
+  let t = ctx.s.slice(start, ctx.p);
+  return readDate(ctx, t, 4, false, start);
+}
+function readDate(ctx, str, type, unsafeDelim, errPtr, temporalSuffix) {
+  if (ctx.ld) {
+    let date4 = new TomlDate(str, type, unsafeDelim);
+    if (!date4.isValid())
+      TomlError.x("invalid date", ctx, errPtr);
+    return date4;
+  }
+  try {
+    if (temporalSuffix)
+      str += temporalSuffix;
+    switch (type) {
+      case 1:
+        return Temporal.ZonedDateTime.from(str);
+      case 2:
+        return Temporal.PlainDateTime.from(str);
+      case 3:
+        return Temporal.PlainDate.from(str);
+      case 4:
+        return Temporal.PlainTime.from(str);
+    }
+  } catch (e) {
+    TomlError.x(e instanceof Error ? e.message : "" + e, ctx, errPtr);
+  }
+}
+
+// node_modules/smol-toml/dist/util.js
+/*!
+ * Copyright (c) Squirrel Chat et al., All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice, this
+ *    list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the copyright holder nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software without
+ *    specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+function skipComment(ctx) {
+  for (;ctx.p < ctx.s.length; ctx.p++) {
+    let c = ctx.s.charCodeAt(ctx.p);
+    if (c === 10)
+      break;
+    if (c === 13 && ctx.s.charCodeAt(ctx.p + 1) === 10) {
+      ctx.p++;
+      break;
+    }
+    if (c < 32 && c !== 9 || c === 127) {
+      TomlError.x("control characters are not allowed in comments", ctx);
+    }
+  }
+}
+function skipVoid(ctx, banNewLines, banComments) {
+  let c;
+  while (ctx.p < ctx.s.length) {
+    while (ctx.p < ctx.s.length && ((c = ctx.s.charCodeAt(ctx.p)) === 32 || c === 9 || !banNewLines && (c === 10 || c === 13 && ctx.s.charCodeAt(ctx.p + 1) === 10)))
+      ctx.p++;
+    if (banComments || c !== 35)
+      break;
+    skipComment(ctx);
+  }
 }
 
 // node_modules/smol-toml/dist/struct.js
@@ -22990,76 +23176,50 @@ function extractValue(ctx, end, integersAsBigInt) {
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-var KEY_PART_RE = /^[a-zA-Z0-9-_]+[ \t]*$/;
-function parseKey(ctx, end = "=") {
-  let start = ctx.p;
-  let dot = start - 1;
+function parseKey(ctx, end = 61) {
+  let startPtr;
+  let state = 0;
   let parsed = [];
-  let endPtr = ctx.s.indexOf(end, start);
-  if (endPtr < 0) {
-    throw new TomlError("incomplete key-value: cannot find end of key", {
-      toml: ctx.s,
-      ptr: start
-    });
-  }
+  let sliceStart;
+  let c = ctx.s.charCodeAt(startPtr = ctx.p);
   do {
-    let c = ctx.s.charCodeAt(ctx.p = ++dot);
-    if (c !== 32 && c !== 9) {
-      if (c === 34 || c === 39) {
-        if (c === ctx.s.charCodeAt(ctx.p + 1) && c === ctx.s.charCodeAt(ctx.p + 2)) {
-          throw new TomlError("multiline strings are not allowed in keys", {
-            toml: ctx.s,
-            ptr: ctx.p
-          });
-        }
-        let part = parseString(ctx);
-        dot = ctx.s.indexOf(".", ctx.p);
-        let strEnd = ctx.s.slice(ctx.p, dot < 0 || dot > endPtr ? endPtr : dot);
-        let newLine = indexOfNewline(strEnd);
-        if (newLine > -1) {
-          throw new TomlError("newlines are not allowed in keys", {
-            toml: ctx.s,
-            ptr: newLine
-          });
-        }
-        if (strEnd.trimStart()) {
-          throw new TomlError("found extra tokens after the string part", {
-            toml: ctx.s,
-            ptr: ctx.p
-          });
-        }
-        if (endPtr < ctx.p) {
-          endPtr = ctx.s.indexOf(end, ctx.p);
-          if (endPtr < 0) {
-            throw new TomlError("incomplete key-value: cannot find end of key", {
-              toml: ctx.s,
-              ptr: start
-            });
-          }
-        }
-        parsed.push(part);
-      } else {
-        dot = ctx.s.indexOf(".", ctx.p);
-        let part = ctx.s.slice(ctx.p, dot < 0 || dot > endPtr ? endPtr : dot);
-        if (!KEY_PART_RE.test(part)) {
-          throw new TomlError("only letter, numbers, dashes and underscores are allowed in keys", {
-            toml: ctx.s,
-            ptr: ctx.p
-          });
-        }
-        parsed.push(part.trimEnd());
+    if (c === end) {
+      if (!state)
+        TomlError.x("unexpected end of key", ctx);
+      if (state === 1)
+        parsed.push(ctx.s.slice(sliceStart, ctx.p));
+      return ctx.p++, parsed;
+    } else if (c === 46) {
+      if (!state)
+        TomlError.x("illegal empty bare key", ctx);
+      if (state === 1)
+        parsed.push(ctx.s.slice(sliceStart, ctx.p));
+      state = 0;
+    } else if (!state && (c === 34 || c === 39)) {
+      if (c === ctx.s.charCodeAt(ctx.p + 1) && c === ctx.s.charCodeAt(ctx.p + 2))
+        TomlError.x("illegal quoted key: multiline strings are not allowed", ctx);
+      parsed.push(parseString(ctx));
+      state = 2;
+      ctx.p--;
+    } else if (c === 32 || c === 9) {
+      if (state === 1) {
+        parsed.push(ctx.s.slice(sliceStart, ctx.p));
+        state = 2;
       }
+    } else if (state === 2 || c < 48 && c !== 45 || c > 57 && c < 65 || c > 90 && c < 97 && c !== 95 || c > 122) {
+      TomlError.x("illegal character in key", ctx);
+    } else if (!state) {
+      state = 1;
+      sliceStart = ctx.p;
     }
-  } while (dot + 1 && dot < endPtr);
-  ctx.p = endPtr + 1;
-  skipVoid(ctx, true, true);
-  return parsed;
+  } while (c = ctx.s.charCodeAt(++ctx.p));
+  TomlError.x("incomplete key-value: cannot find end of key", ctx, startPtr);
 }
-function parseInlineTable(ctx, integersAsBigInt) {
-  let res = {};
+function parseInlineTable(ctx) {
+  let startPtr = ctx.p++;
+  let res = Object.create(null);
   let seen = new Set;
   let c;
-  ctx.p++;
   while (ctx.p < ctx.s.length) {
     skipVoid(ctx);
     if ((c = ctx.s.charCodeAt(ctx.p)) === 125) {
@@ -23069,66 +23229,59 @@ function parseInlineTable(ctx, integersAsBigInt) {
     let k;
     let t = res;
     let hasOwn = false;
-    let p = ctx.p;
+    let errPtr = ctx.p;
     let key = parseKey(ctx);
     for (let i = 0;i < key.length; i++) {
       if (i)
-        t = hasOwn ? t[k] : t[k] = {};
+        t = hasOwn ? t[k] : t[k] = Object.create(null);
       k = key[i];
       if ((hasOwn = Object.hasOwn(t, k)) && (typeof t[k] !== "object" || seen.has(t[k]))) {
-        throw new TomlError("trying to redefine an already defined value", {
-          toml: ctx.s,
-          ptr: p
-        });
+        TomlError.x("trying to redefine an already defined value", ctx, errPtr);
       }
-      if (!hasOwn && k === "__proto__") {
+      let unsafe = k === "__proto__";
+      if (ctx.uk && (unsafe || k === "constructor")) {
+        t = ctx.uk !== 1 && TomlError.x("document contains an unsafe property", ctx, errPtr);
+        break;
+      }
+      if (!hasOwn && unsafe) {
         Object.defineProperty(t, k, { enumerable: true, configurable: true, writable: true });
       }
     }
     if (hasOwn) {
-      throw new TomlError("trying to redefine an already defined value", {
-        toml: ctx.s,
-        ptr: ctx.p
-      });
+      TomlError.x("trying to redefine an already defined value", ctx, errPtr);
     }
-    let value = extractValue(ctx, 125, integersAsBigInt);
-    seen.add(t[k] = value);
+    skipVoid(ctx, true, true);
+    let value = extractValue(ctx, 125);
+    if (t && typeof (t[k] = value) === "object")
+      seen.add(value);
     skipVoid(ctx);
     if ((c = ctx.s.charCodeAt(ctx.p++)) === 125) {
       return res;
     }
-    if (c !== 44) {
-      throw new TomlError("expected comma or end of structure", { toml: ctx.s, ptr: ctx.p - 1 });
-    }
+    if (c !== 44)
+      TomlError.x("expected comma or end of structure", ctx, ctx.p - 1);
   }
-  throw new TomlError("unfinished table encountered", {
-    toml: ctx.s,
-    ptr: ctx.p
-  });
+  TomlError.x("unfinished table", ctx, startPtr);
 }
-function parseArray(ctx, integersAsBigInt) {
+function parseArray(ctx) {
+  let startPtr = ctx.p++;
   let res = [];
   let c;
-  ctx.p++;
   while (ctx.p < ctx.s.length) {
     skipVoid(ctx);
     if ((c = ctx.s.charCodeAt(ctx.p)) === 93) {
       ctx.p++;
       return res;
     }
-    res.push(extractValue(ctx, 93, integersAsBigInt));
+    res.push(extractValue(ctx, 93));
     skipVoid(ctx);
     if ((c = ctx.s.charCodeAt(ctx.p++)) === 93) {
       return res;
     }
-    if (c !== 44) {
-      throw new TomlError("expected comma or end of structure", { toml: ctx.s, ptr: ctx.p - 1 });
-    }
+    if (c !== 44)
+      TomlError.x("expected comma or end of structure", ctx, ctx.p - 1);
   }
-  throw new TomlError("unfinished array encountered", {
-    toml: ctx.s,
-    ptr: ctx.p
-  });
+  TomlError.x("unfinished array", ctx, startPtr);
 }
 
 // node_modules/smol-toml/dist/parse.js
@@ -23159,7 +23312,7 @@ function parseArray(ctx, integersAsBigInt) {
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-function peekTable(key, table, meta2, type) {
+function peekTable(ctx, key, table, meta2, type) {
   let t = table;
   let m = meta2;
   let k;
@@ -23167,7 +23320,7 @@ function peekTable(key, table, meta2, type) {
   let state;
   for (let i = 0;i < key.length; i++) {
     if (i) {
-      t = hasOwn ? t[k] : t[k] = {};
+      t = hasOwn ? t[k] : t[k] = Object.create(null);
       m = (state = m[k]).c;
       if (type === 0 && (state.t === 1 || state.t === 2)) {
         return null;
@@ -23183,7 +23336,10 @@ function peekTable(key, table, meta2, type) {
       return null;
     }
     if (!hasOwn) {
-      if (k === "__proto__") {
+      let unsafe = k === "__proto__";
+      if (ctx.uk && (unsafe || k === "constructor"))
+        return false;
+      if (unsafe) {
         Object.defineProperty(t, k, { enumerable: true, configurable: true, writable: true });
         Object.defineProperty(m, k, { enumerable: true, configurable: true, writable: true });
       }
@@ -23191,7 +23347,7 @@ function peekTable(key, table, meta2, type) {
         t: i < key.length - 1 && type === 2 ? 3 : type,
         d: false,
         i: 0,
-        c: {}
+        c: Object.create(null)
       };
     }
   }
@@ -23204,69 +23360,76 @@ function peekTable(key, table, meta2, type) {
       state.d = true;
       t[k] = [];
     }
-    t[k].push(t = {});
-    state.c[state.i++] = state = { t: 1, d: false, i: 0, c: {} };
+    t[k].push(t = Object.create(null));
+    state.c[state.i++] = state = { t: 1, d: false, i: 0, c: Object.create(null) };
   }
   if (state.d) {
     return null;
   }
   state.d = true;
   if (type === 1) {
-    t = hasOwn ? t[k] : t[k] = {};
+    t = hasOwn ? t[k] : t[k] = Object.create(null);
   } else if (type === 0 && hasOwn) {
     return null;
   }
   return [k, t, state.c];
 }
-function parse6(toml, { maxDepth = 1000, integersAsBigInt } = {}) {
-  let ctx = { s: toml, p: 0, d: maxDepth };
-  let res = {};
-  let meta2 = {};
+function validateTablePeek(ctx, peek, ptr) {
+  if (peek === null || ctx.uk === 2)
+    TomlError.x(peek === null ? "trying to redefine an already defined table or value" : "document contains an unsafe property", ctx, ptr);
+}
+function parse6(toml, options = {}) {
+  let ctx = {
+    s: toml,
+    p: 0,
+    d: options.maxDepth ?? 1000,
+    bi: options.integersAsBigInt ?? false,
+    ld: options.useLegacyDate ?? true,
+    uk: options.unsafeKeyBehaviour === "throw" ? 2 : options.unsafeKeyBehaviour === "drop" ? 1 : 0
+  };
+  let res = Object.create(null);
+  let meta2 = Object.create(null);
   let tmp;
+  let skipping = false;
   let tbl = res;
   let m = meta2;
+  if (toml.charCodeAt(0) === 65279)
+    ctx.p++;
   skipVoid(ctx);
   while (ctx.p < toml.length) {
     if (toml.charCodeAt(ctx.p) === 91) {
       let isTableArray = toml.charCodeAt(++ctx.p) === 91;
       tmp = ctx.p += +isTableArray;
-      let k = parseKey(ctx, "]");
+      skipping = false;
+      let k = parseKey(ctx, 93);
       if (isTableArray) {
-        if (toml.charCodeAt(ctx.p - 1) !== 93) {
-          throw new TomlError("expected end of table declaration", {
-            toml,
-            ptr: ctx.p - 1
-          });
+        if (toml.charCodeAt(ctx.p) !== 93) {
+          TomlError.x("expected end of table array declaration", ctx);
         }
         ctx.p++;
       }
-      let p = peekTable(k, res, meta2, isTableArray ? 2 : 1);
+      let p = peekTable(ctx, k, res, meta2, isTableArray ? 2 : 1);
       if (!p) {
-        throw new TomlError("trying to redefine an already defined table or value", {
-          toml,
-          ptr: tmp
-        });
+        validateTablePeek(ctx, p, tmp);
+        skipping = true;
+      } else {
+        m = p[2];
+        tbl = p[1];
       }
-      m = p[2];
-      tbl = p[1];
     } else {
       tmp = ctx.p;
       let k = parseKey(ctx);
-      let p = peekTable(k, tbl, m, 0);
-      if (!p) {
-        throw new TomlError("trying to redefine an already defined table or value", {
-          toml,
-          ptr: tmp
-        });
-      }
-      p[1][p[0]] = extractValue(ctx, undefined, integersAsBigInt);
+      let p = peekTable(ctx, k, tbl, m, 0);
+      if (!p && !skipping)
+        validateTablePeek(ctx, p, tmp);
+      skipVoid(ctx, true, true);
+      let v = extractValue(ctx, undefined);
+      if (p && !skipping)
+        p[1][p[0]] = v;
     }
     skipVoid(ctx, true);
-    if (ctx.p < toml.length && (tmp = toml.charCodeAt(ctx.p)) !== 10 && tmp !== 13) {
-      throw new TomlError("each key-value declaration must be followed by an end-of-line", {
-        toml,
-        ptr: ctx.p
-      });
+    if (ctx.p < toml.length && (tmp = toml.charCodeAt(ctx.p)) !== 10 && (tmp !== 13 || toml.charCodeAt(ctx.p + 1) !== 10)) {
+      TomlError.x("each key-value declaration must be followed by an end-of-line", ctx);
     }
     skipVoid(ctx);
   }
@@ -23301,6 +23464,7 @@ function parse6(toml, { maxDepth = 1000, integersAsBigInt } = {}) {
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+var HAS_WELLFORMED = !!"".isWellFormed;
 
 // node_modules/smol-toml/dist/index.js
 /*!

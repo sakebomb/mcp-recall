@@ -6,6 +6,12 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Security
+
+- **smol-toml 1.9.1** fixes a TOML parser denial-of-service advisory
+  (GHSA-r4xh-jqrq-34v2). mcp-recall parses community profiles fetched from
+  the network with it. The MCP SDK moves to 1.32.2 as well.
+
 ### Changed
 
 - **`recall__note` no longer calls itself project memory.** Its description
