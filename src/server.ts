@@ -14,6 +14,12 @@
  *   recall__context          — session orientation: pinned, notes, recent, last session
  *   recall__suggest          — surface pin candidates and stale items
  */
+// Must stay the first import. config.ts require()s the schema so a hook without a
+// config file never loads zod (#416), and the bundler then wraps zod in a lazy
+// initialiser. The SDK below calls zod at load time, so in dist/server.js it ran
+// before that initialiser and crashed (#445). Importing the schema statically here
+// initialises zod first; tests/packaging.test.ts starts the bundle to guard it.
+import "./config-schema";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod";

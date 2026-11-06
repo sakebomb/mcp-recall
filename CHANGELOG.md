@@ -15,6 +15,11 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ### Fixed
 
+- **The plugin's MCP server starts again** (#445). Since 1.19.0 the bundled
+  `dist/server.js`, which a plugin-marketplace install runs, crashed on load
+  (`undefined is not a constructor`), so those installs had no `recall__*`
+  tools; the hooks still ran. The npm install and the standalone binary were
+  not affected. A test now starts the bundled server and lists its tools.
 - **Claude sees its screenshots again** (#441). A result carrying an image,
   such as a Claude in Chrome screenshot, was replaced with its text: the
   capture ID and dimensions reached Claude, the picture did not. Such a
