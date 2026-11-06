@@ -6,6 +6,13 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Changed
+
+- **`recall__note` no longer calls itself project memory.** Its description
+  now says a note is a short per-project marker that `recall__context` shows
+  at the start of a session, matching the README and ROADMAP: mcp-recall is
+  not a memory layer.
+
 ### Fixed
 
 - **Claude sees its screenshots again** (#441). A result carrying an image,

@@ -104,7 +104,7 @@ server.tool(
 
 server.tool(
   "recall__note",
-  "Store arbitrary text as a recall note — conclusions, findings, context that should survive context resets. Use for project memory.",
+  "Store a short project note — a conclusion, finding, or context worth carrying past a context reset. recall__context shows notes at the start of a session.",
   {
     text: z.string().describe("Note content to store"),
     title: z.string().optional().describe("Short title for the note (shown in list/search)"),

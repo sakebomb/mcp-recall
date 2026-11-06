@@ -24038,7 +24038,7 @@ server.tool("recall__pin", "Pin an item to protect it from expiry and eviction. 
 }, safeTool((args) => ({
   content: [{ type: "text", text: toolPin(db, projectKey, args) }]
 })));
-server.tool("recall__note", "Store arbitrary text as a recall note \u2014 conclusions, findings, context that should survive context resets. Use for project memory.", {
+server.tool("recall__note", "Store a short project note \u2014 a conclusion, finding, or context worth carrying past a context reset. recall__context shows notes at the start of a session.", {
   text: string2().describe("Note content to store"),
   title: string2().optional().describe("Short title for the note (shown in list/search)")
 }, safeTool((args) => ({
