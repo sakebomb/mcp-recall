@@ -6,6 +6,14 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Fixed
+
+- **Claude sees its screenshots again** (#441). A result carrying an image,
+  such as a Claude in Chrome screenshot, was replaced with its text: the
+  capture ID and dimensions reached Claude, the picture did not. Such a
+  result now passes through unchanged and is not stored. The content-block
+  handler that stripped images (#270) is gone.
+
 ## [1.20.0] — 2026-11-04
 
 ### Changed

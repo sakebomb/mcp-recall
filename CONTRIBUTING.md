@@ -140,7 +140,7 @@ export type Handler = (toolName: string, output: unknown) => CompressionResult;
 A handler receives the raw MCP `output` (which may be a `{ content: [{ type: "text", text: "..." }] }` wrapper or a plain string) and returns a compressed `summary` plus the `originalSize`.
 
 **Rules:**
-- Always call `extractText(output)` first and use its result for `originalSize`. Never measure the raw `output` object. Exception: when the handler's job is to drop incompressible non-text content blocks (images), `originalSize` must be the *pre-strip* payload (`payloadByteLength`). Measuring `extractText` after the drop makes `summarySize >= originalSize`, the PostToolUse skip-guard returns `{}`, and the screenshot still reaches the model.
+- Always call `extractText(output)` first and use its result for `originalSize`. Never measure the raw `output` object. A result with image or other non-text blocks never reaches a handler: the hook delivers it unchanged, because a text summary cannot carry the image (#441).
 - **Never throw.** If `JSON.parse()` fails, a field is missing, or the shape is unexpected — return a graceful fallback (e.g. `{ summary: raw.slice(0, 500), originalSize }`). The handler is called inside a live hook; an unhandled exception breaks the tool call for the user.
 - Return a result for every code path — no `undefined`, no `null`.
 - Keep `summary` under ~1 KB for typical inputs. The goal is to give Claude enough to reason with, not a full reproduction.
@@ -287,7 +287,7 @@ Add a row to the handler table in [`docs/handlers.md`](docs/handlers.md) — a m
 - [ ] `bun test` passes
 - [ ] `bun run typecheck` passes
 - [ ] Handler is a named `const` export
-- [ ] `extractText` used for `originalSize` (or `payloadByteLength` when dropping incompressible non-text blocks — see Rules)
+- [ ] `extractText` used for `originalSize`
 - [ ] No throws — every code path returns a `CompressionResult`
 - [ ] ≥ 5 tests including: basic extraction, MCP wrapper, `originalSize`, fallback, dispatcher routing
 - [ ] Row added to the handler table in `docs/handlers.md`

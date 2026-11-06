@@ -25,6 +25,7 @@ import { dataDir } from "../src/db/schema";
 import { getStats } from "../src/db/analytics";
 import { getHandler } from "../src/handlers/index";
 import { genericHandler } from "../src/handlers/generic";
+import { hasNonTextContentBlocks } from "../src/handlers/types";
 import { extractHints } from "../src/hints";
 import { deliveredBytes, savesEnough } from "../src/hooks/post-tool-use";
 
@@ -88,6 +89,12 @@ function replayMcp(db: Database, replay: Totals, byTool: Map<string, Totals>): v
       output = JSON.parse(row.full_content);
     } catch {
       // stored as plain text
+    }
+    // The hook delivers a payload with image or other non-text blocks whole (#441).
+    if (hasNonTextContentBlocks(output)) {
+      add(replay, row.original_size, row.original_size, 1);
+      tally(byTool, row.tool_name, row.original_size, row.original_size, 1);
+      continue;
     }
     let { summary } = getHandler(row.tool_name, output)(row.tool_name, output);
     // An empty summary is a handler failure. The hook falls back to the generic

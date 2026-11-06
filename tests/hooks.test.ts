@@ -911,7 +911,17 @@ function chromeTextOnlyPayload(): Array<Record<string, unknown>> {
   ];
 }
 
-describe("handlePostToolUse — image content blocks (#270)", () => {
+/** A browser_batch result: a long run of text steps, then one screenshot. */
+function chromeBatchPayload(): Array<Record<string, unknown>> {
+  const steps = Array.from({ length: 400 }, (_, i) =>
+    ({ type: "text", text: `[computer:left_click] Clicked on element ref_${i} at (${i}, ${i * 2})` })
+  );
+  return [...steps, { type: "image", mimeType: "image/jpeg", data: jpegShapedBase64(32 * 1024) }];
+}
+
+// A screenshot is the result Claude asked for: replacing it with text left Claude
+// unable to see the page (#441). Such a payload passes through, and is not stored.
+describe("handlePostToolUse — image content blocks pass through (#441)", () => {
   beforeEach(() => {
     process.env.RECALL_DB_PATH = ":memory:";
   });
@@ -922,36 +932,31 @@ describe("handlePostToolUse — image content blocks (#270)", () => {
     delete process.env.RECALL_DB_PATH;
   });
 
-  it("replaces a screenshot payload with a >90% smaller summary containing capture metadata", () => {
-    const payload = chromeScreenshotPayload();
-    const imageData = (payload.find((b) => b["type"] === "image") as { data: string }).data;
+  const storedRows = () =>
+    (getDb(":memory:").prepare("SELECT COUNT(*) AS n FROM stored_outputs").get() as { n: number }).n;
+
+  it("delivers a screenshot payload unchanged and stores nothing", () => {
     const result = handlePostToolUse(
-      makePostToolUseInput("mcp__claude-in-chrome__computer", payload)
+      makePostToolUseInput("mcp__claude-in-chrome__computer", chromeScreenshotPayload())
     );
-    expect(result.updatedMCPToolOutput).toBeDefined();
-    expect(result.suppressOutput).toBe(true);
-    const body = result.updatedMCPToolOutput!;
-    expect(body).toContain("ss_135241jnk");
-    expect(body).toContain("1419x840");
-    expect(body).toContain("jpeg");
-    expect(body).toContain("Tab Context");
-    expect(body).not.toContain(imageData);
-    const pctMatch = body.match(/\((\d+)% reduction\)/);
-    expect(pctMatch).not.toBeNull();
-    expect(Number(pctMatch![1])).toBeGreaterThan(90);
+    expect(result).toEqual({});
+    expect(storedRows()).toBe(0);
   });
 
-  it("stores stripped text in full_content, not the image payload", () => {
-    const payload = chromeScreenshotPayload();
-    const imageData = (payload.find((b) => b["type"] === "image") as { data: string }).data;
-    handlePostToolUse(makePostToolUseInput("mcp__claude-in-chrome__computer", payload));
-    const db = getDb(":memory:");
-    const row = db.prepare("SELECT full_content FROM stored_outputs").get() as
-      | { full_content: string }
-      | undefined;
-    expect(row).toBeDefined();
-    expect(row!.full_content).toContain("ss_135241jnk");
-    expect(row!.full_content).not.toContain(imageData);
+  it("delivers a wrapped {content:[text,image]} payload unchanged", () => {
+    const result = handlePostToolUse(
+      makePostToolUseInput("mcp__unknown__tool", { content: chromeScreenshotPayload() })
+    );
+    expect(result).toEqual({});
+    expect(storedRows()).toBe(0);
+  });
+
+  it("delivers a text-heavy batch that ends in a screenshot unchanged", () => {
+    const result = handlePostToolUse(
+      makePostToolUseInput("mcp__claude-in-chrome__browser_batch", chromeBatchPayload())
+    );
+    expect(result).toEqual({});
+    expect(storedRows()).toBe(0);
   });
 
   it("does not refuse a text-only scroll/click payload and keeps its texts", () => {

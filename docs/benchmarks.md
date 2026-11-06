@@ -189,7 +189,7 @@ The reduction depends on the shape of the output, not on how large it is. Long, 
 
 | | Examples (from the measurement above) | Why |
 |---|---|---|
-| **Excellent, 95–100%** | Tavily extract, Hugging Face, browser automation and screenshots (image blocks stripped) | A dedicated handler or profile keeps only the fields that matter; images carry no searchable text |
+| **Excellent, 95–100%** | Tavily extract, Hugging Face, text-only browser automation | A dedicated handler or profile keeps only the fields that matter |
 | **Good, 73–92%** | Playwright snapshots (88%, before the #424 fix; see below), Tavily search (84%), Gmail search (85%), `git diff` (92%), `git show` (80%), `cat` of large files (73%) | Structured enough for a handler to summarize; the full text stays retrievable |
 | **Moderate, 50–70%** | `sed`, `python3`, `gh`, shell loops, Mermaid rendering (60%) | Mixed output with no dedicated handler; the generic fallback trims the head and tail |
 | **Weak, 30–46%** | `grep` (37%), `ssh` (38%), `timeout` (32%), `cd …` chains (46%) | Usually short output, or a wrapper that hides the real command from command-aware routing |
