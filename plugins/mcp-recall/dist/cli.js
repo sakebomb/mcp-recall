@@ -7985,11 +7985,6 @@ function joinTextBlocks(blocks) {
   return blocks.filter((b) => b.type === "text" && typeof b.text === "string").map((b) => b.text).join(`
 `);
 }
-function payloadByteLength(output) {
-  if (typeof output === "string")
-    return Buffer.byteLength(output, "utf8");
-  return Buffer.byteLength(JSON.stringify(output), "utf8");
-}
 function extractText(output) {
   const blocks = asMcpContentBlocks(output);
   if (blocks) {
@@ -10874,26 +10869,6 @@ var init_csv = __esm(() => {
   init_types();
 });
 
-// src/handlers/content-blocks.ts
-var contentBlockHandler = (_toolName, output) => {
-  const originalSize = payloadByteLength(output);
-  const blocks = asMcpContentBlocks(output);
-  const text = blocks ? joinTextBlocks(blocks) : extractText(output);
-  const stripped = blocks?.filter((b) => b.type !== "text") ?? [];
-  if (stripped.length === 0) {
-    return { summary: text, originalSize };
-  }
-  const types2 = [...new Set(stripped.map((b) => b.type))];
-  const label = types2.length === 1 ? types2[0] : "non-text";
-  const note = `[stripped ${stripped.length} ${label} content block${stripped.length === 1 ? "" : "s"}]`;
-  const summary = text.length > 0 ? `${text}
-${note}` : note;
-  return { summary, originalSize };
-};
-var init_content_blocks = __esm(() => {
-  init_types();
-});
-
 // src/profiles/loader.ts
 import { readdirSync as readdirSync2, readFileSync as readFileSync2, statSync as statSync3 } from "fs";
 import { join as join4 } from "path";
@@ -11250,9 +11225,6 @@ function getHandler(toolName, output, input) {
   const bundledProfile = getProfileHandler(toolName, ["bundled"]);
   if (bundledProfile)
     return bundledProfile;
-  if (hasNonTextContentBlocks(output)) {
-    return contentBlockHandler;
-  }
   const text = extractText(output);
   const trimmed = text.trimStart();
   if ((trimmed.startsWith("{") || trimmed.startsWith("[")) && parsesAsJson(trimmed)) {
@@ -11280,11 +11252,9 @@ var init_handlers = __esm(() => {
   init_csv();
   init_json();
   init_generic();
-  init_content_blocks();
   init_types();
   init_profiles();
   init_types();
-  init_content_blocks();
   HANDLER_REGISTRY = [
     {
       match: (t, output) => t.includes("playwright") && (t.includes("snapshot") || isPlaywrightResponse(output)),
@@ -14365,6 +14335,10 @@ function handlePostToolUse(raw) {
       return {};
     }
     response = saved;
+  }
+  if (hasNonTextContentBlocks(response)) {
+    log.debug(`SKIP non-text-content \xB7 ${tool_name}`);
+    return {};
   }
   const fullContent = tool_name === "Bash" ? bashOutputText(response) : extractText(response);
   log.debug(`intercepted ${tool_name} \xB7 ${formatBytes(Buffer.byteLength(fullContent, "utf8"))}`);

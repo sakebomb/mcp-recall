@@ -10,7 +10,6 @@ import { linearHandler } from "../src/handlers/linear";
 import { slackHandler } from "../src/handlers/slack";
 import { JSON_BUDGET, jsonHandler } from "../src/handlers/json";
 import { genericHandler } from "../src/handlers/generic";
-import { contentBlockHandler } from "../src/handlers/content-blocks";
 import { getHandler, extractText } from "../src/handlers/index";
 import { getBashHandler, normalizeCommand, commandFingerprint, bashFingerprint, isBoundedRead, isContentRead, isFileRead, compoundHandler, gitDiffHandler, gitLogHandler, terraformPlanHandler, gitStatusHandler, gitRefsHandler, packageInstallHandler, testRunnerHandler, dockerPsHandler, buildToolHandler, ghHandler, compilerDiagnosticsHandler, grepHandler, lsHandler, findHandler } from "../src/handlers/bash";
 import { DIFF_BODY_BYTES } from "../src/handlers/bash-git";
@@ -686,29 +685,8 @@ function chromeImageData(payload: Array<Record<string, unknown>>): string {
   return image["data"];
 }
 
-describe("content-block image stripping (#270)", () => {
-  it("compresses a screenshot payload at >90% and keeps capture metadata", () => {
-    const payload = chromeScreenshotPayload();
-    const imageData = chromeImageData(payload);
-    const handler = getHandler("mcp__claude-in-chrome__computer", payload);
-    const { summary, originalSize } = handler("mcp__claude-in-chrome__computer", payload);
-    const summarySize = Buffer.byteLength(summary, "utf8");
-    expect(originalSize).toBeGreaterThan(30_000);
-    expect(1 - summarySize / originalSize).toBeGreaterThan(0.9);
-    expect(summary).toContain("ss_135241jnk");
-    expect(summary).toContain("1419x840");
-    expect(summary).toContain("jpeg");
-    expect(summary).toContain("Tab Context");
-    expect(summary).not.toContain(imageData);
-  });
-
-  it("counts originalSize from the pre-strip payload including image bytes", () => {
-    const payload = chromeScreenshotPayload();
-    const handler = getHandler("mcp__claude-in-chrome__computer", payload);
-    const { originalSize } = handler("mcp__claude-in-chrome__computer", payload);
-    expect(originalSize).toBe(Buffer.byteLength(JSON.stringify(payload), "utf8"));
-  });
-
+// A payload with image blocks never reaches a handler: the hook delivers it whole (#441).
+describe("text-only browser payloads", () => {
   it("leaves a text-only scroll/click payload's text intact", () => {
     const payload = chromeTextOnlyPayload();
     const handler = getHandler("mcp__claude-in-chrome__computer", payload);
@@ -717,22 +695,8 @@ describe("content-block image stripping (#270)", () => {
     expect(summary).toContain("Tab Context");
   });
 
-  it("routes a screenshot payload to the content-block handler, not jsonHandler", () => {
-    const payload = chromeScreenshotPayload();
-    expect(getHandler("mcp__claude-in-chrome__computer", payload)).toBe(contentBlockHandler);
-    // Text-only blocks route by their text, which here is plain prose (#424).
+  it("routes a text-only payload by its text, which here is plain prose (#424)", () => {
     expect(getHandler("mcp__claude-in-chrome__computer", chromeTextOnlyPayload())).toBe(genericHandler);
-  });
-
-  it("strips a wrapped {content:[image,text]} payload and counts pre-strip originalSize", () => {
-    const inner = chromeScreenshotPayload();
-    const payload = { content: inner };
-    const handler = getHandler("mcp__unknown__tool", payload);
-    const { summary, originalSize } = handler("mcp__unknown__tool", payload);
-    expect(originalSize).toBe(Buffer.byteLength(JSON.stringify(payload), "utf8"));
-    expect(1 - Buffer.byteLength(summary, "utf8") / originalSize).toBeGreaterThan(0.9);
-    expect(summary).toContain("ss_135241jnk");
-    expect(summary).not.toContain(chromeImageData(inner));
   });
 });
 

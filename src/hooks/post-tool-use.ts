@@ -6,7 +6,7 @@ import { getProjectKey } from "../project-key";
 import { isDenied } from "../denylist";
 import { findSecrets } from "../secrets";
 import { getHandler, extractText } from "../handlers/index";
-import { asMcpContentBlocks, joinTextBlocks } from "../handlers/types";
+import { asMcpContentBlocks, hasNonTextContentBlocks, joinTextBlocks } from "../handlers/types";
 import { genericHandler } from "../handlers/generic";
 import { extractHints } from "../hints";
 import { getDb, defaultDbPath, storeOutput, checkOutputDedup, hashContent, evictIfNeeded } from "../db/index";
@@ -178,6 +178,14 @@ export function handlePostToolUse(raw: string): HookOutput {
       return {};
     }
     response = saved;
+  }
+
+  // An image (or audio, or embedded resource) is part of what Claude asked for: a
+  // text replacement cannot carry it, so deliver the result unchanged. Stripping
+  // it left Claude blind to every screenshot (#441).
+  if (hasNonTextContentBlocks(response)) {
+    log.debug(`SKIP non-text-content · ${tool_name}`);
+    return {};
   }
 
   // 2. Extract text and check for secrets. For Bash that is stdout + stderr:

@@ -65,12 +65,6 @@ export function joinTextBlocks(blocks: McpContentBlock[]): string {
     .join("\n");
 }
 
-/** Byte size of the raw payload, including incompressible image bytes. */
-export function payloadByteLength(output: unknown): number {
-  if (typeof output === "string") return Buffer.byteLength(output, "utf8");
-  return Buffer.byteLength(JSON.stringify(output), "utf8");
-}
-
 /**
  * Extracts plain text from an MCP tool result.
  * MCP results arrive as { content: [{ type: "text", text: "..." }, ...] }
