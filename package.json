@@ -65,8 +65,8 @@
     "prepare": "git config core.hooksPath .githooks"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
-    "smol-toml": "^1.8.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "smol-toml": "^1.9.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
