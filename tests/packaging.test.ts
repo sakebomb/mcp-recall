@@ -161,3 +161,69 @@ describe("packaged CLI entrypoint", () => {
     expect(existsSync(join(REPO, "NOTICE"))).toBe(true);
   });
 });
+
+/**
+ * #445: the marketplace plugin runs `bun dist/server.js` (plugins/mcp-recall/.mcp.json).
+ * That bundle crashed on load in 1.19.0 and 1.20.0 while src/ started fine, and no
+ * test started it. Start the checked-in bundle as the plugin does and talk MCP to it.
+ */
+describe("the plugin's bundled MCP server (#445)", () => {
+  const SERVER_JS = join(REPO, "plugins", "mcp-recall", "dist", "server.js");
+
+  async function exchange(lines: object[], expectIds: number[]): Promise<Map<number, Record<string, unknown>>> {
+    const dir = mkdtempSync(join(tmpdir(), "recall-server-"));
+    const proc = Bun.spawn([process.execPath, SERVER_JS], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, RECALL_DB_PATH: join(dir, "store.db"), RECALL_CONFIG_PATH: join(dir, "none.toml") },
+    });
+    for (const l of lines) proc.stdin.write(JSON.stringify(l) + "\n");
+    proc.stdin.flush();
+    const replies = new Map<number, Record<string, unknown>>();
+    const decoder = new TextDecoder();
+    let buffered = "";
+    const reader = proc.stdout.getReader();
+    const deadline = Date.now() + 10_000;
+    try {
+      while (expectIds.some((id) => !replies.has(id)) && Date.now() < deadline) {
+        const chunk = await Promise.race([
+          reader.read(),
+          Bun.sleep(deadline - Date.now()).then(() => ({ done: true, value: undefined })),
+        ]);
+        if (chunk.done || !chunk.value) break;
+        buffered += decoder.decode(chunk.value);
+        let nl: number;
+        while ((nl = buffered.indexOf("\n")) >= 0) {
+          const msg = JSON.parse(buffered.slice(0, nl)) as Record<string, unknown>;
+          buffered = buffered.slice(nl + 1);
+          if (typeof msg["id"] === "number") replies.set(msg["id"], msg);
+        }
+      }
+    } finally {
+      proc.kill();
+      rmSync(dir, { recursive: true, force: true });
+    }
+    if (expectIds.some((id) => !replies.has(id))) {
+      const stderr = await new Response(proc.stderr).text();
+      throw new Error(`server answered ${[...replies.keys()].join(",") || "nothing"}; stderr: ${stderr.slice(0, 400)}`);
+    }
+    return replies;
+  }
+
+  test("starts, initializes, and lists all eleven recall tools", async () => {
+    const replies = await exchange(
+      [
+        { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } } },
+        { jsonrpc: "2.0", method: "notifications/initialized" },
+        { jsonrpc: "2.0", id: 2, method: "tools/list" },
+      ],
+      [1, 2]
+    );
+    const init = replies.get(1)!["result"] as { serverInfo: { name: string } };
+    expect(init.serverInfo.name).toBe("recall");
+    const tools = (replies.get(2)!["result"] as { tools: { name: string }[] }).tools.map((t) => t.name);
+    expect(tools).toHaveLength(11);
+    expect(tools).toContain("recall__retrieve");
+  }, 15_000);
+});
