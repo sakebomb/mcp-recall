@@ -919,6 +919,14 @@ function chromeBatchPayload(): Array<Record<string, unknown>> {
   return [...steps, { type: "image", mimeType: "image/jpeg", data: jpegShapedBase64(32 * 1024) }];
 }
 
+/** A screenshot whose tab context lists many tabs: enough text that, without the
+ *  pass-through, the hook would compress and replace it. A short one is passed
+ *  through by the saving guard alone, so would not test the fix. */
+function chromeScreenshotWithTabsPayload(): Array<Record<string, unknown>> {
+  const tabs = Array.from({ length: 300 }, (_, i) => `- tabId ${1000 + i}: "Dashboard ${i}" (https://example.com/d/${i})`);
+  return [...chromeScreenshotPayload(), { type: "text", text: `\n\nAvailable tabs:\n${tabs.join("\n")}` }];
+}
+
 // A screenshot is the result Claude asked for: replacing it with text left Claude
 // unable to see the page (#441). Such a payload passes through, and is not stored.
 describe("handlePostToolUse — image content blocks pass through (#441)", () => {
@@ -937,7 +945,7 @@ describe("handlePostToolUse — image content blocks pass through (#441)", () =>
 
   it("delivers a screenshot payload unchanged and stores nothing", () => {
     const result = handlePostToolUse(
-      makePostToolUseInput("mcp__claude-in-chrome__computer", chromeScreenshotPayload())
+      makePostToolUseInput("mcp__claude-in-chrome__computer", chromeScreenshotWithTabsPayload())
     );
     expect(result).toEqual({});
     expect(storedRows()).toBe(0);
@@ -945,7 +953,7 @@ describe("handlePostToolUse — image content blocks pass through (#441)", () =>
 
   it("delivers a wrapped {content:[text,image]} payload unchanged", () => {
     const result = handlePostToolUse(
-      makePostToolUseInput("mcp__unknown__tool", { content: chromeScreenshotPayload() })
+      makePostToolUseInput("mcp__unknown__tool", { content: chromeScreenshotWithTabsPayload() })
     );
     expect(result).toEqual({});
     expect(storedRows()).toBe(0);
