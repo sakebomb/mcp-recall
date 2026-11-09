@@ -135,7 +135,7 @@ Eleven `recall__*` tools are available to Claude in every session. You don't cal
 
 - **How much smaller.** On one developer's real store of about 36,000 tool calls, MCP output came out 96.6% smaller. Across everything intercepted, mostly Bash, earlier releases saved 57.9%; current ones pass more small reads through whole, so today's figure is lower. Your mix will differ: `bun run measure` reports it for your own store.
 - **What the summaries keep.** A smaller summary only helps if it keeps what Claude needs. The [quality benchmark](docs/benchmarks.md#quality-benchmark) checks each summary for the facts in the original, against simply cutting the output to the same size. It runs on a public corpus anyone can rerun with `bun run quality`, and lists every kind of output where mcp-recall does no better than the plain cut.
-- **Whether Claude still solves the task.** No measured change either way; [Is it for you?](#is-it-for-you) has the short version, and the [task-success benchmark](docs/benchmarks.md#task-success-benchmark) every study and its limits.
+- **Whether Claude still solves the task.** No measured change either way. [Is it for you?](#is-it-for-you) has the short version, and the [task-success benchmark](docs/benchmarks.md#task-success-benchmark) has every study and its limits.
 
 Long, structured, repetitive output (browser snapshots, API JSON, large diffs, test logs) compresses well; short or one-off output has little to remove. Every figure, how it was measured, and its caveats: [Benchmarks](docs/benchmarks.md).
 
@@ -211,7 +211,7 @@ mcp-recall never breaks a tool call. Every failure mode — hook crash, SQLite e
 
 Other tools already shrink what tool *definitions* and multi-step workflows put in the context window. None of them stops a large MCP result from filling the window while keeping the full output searchable later. That is the gap mcp-recall fills.
 
-Without it, [Claude Code](https://code.claude.com/docs/en/mcp) puts an MCP result into the window whole when it is under 25,000 tokens (`MAX_MCP_OUTPUT_TOKENS`) and 50,000 characters. A larger result is saved to a file that Claude reads in chunks. Neither can be searched in a later session. mcp-recall swaps the result for a summary before it reaches the window and keeps the full output searchable. If Claude Code has already saved the result to a file, mcp-recall summarizes the file's content instead of the notice.
+Without it, [Claude Code](https://code.claude.com/docs/en/mcp) puts an MCP result into the window whole when it is under 25,000 tokens (`MAX_MCP_OUTPUT_TOKENS`) and 50,000 characters. A larger result is saved to a file that Claude reads in chunks. Neither can be searched in a later session. mcp-recall swaps the result for a summary before it reaches the window and keeps the full output searchable. If Claude Code has already saved the result to a file, mcp-recall stores and summarizes the file's content instead of the notice.
 
 | Where context goes | What helps |
 |---|---|
