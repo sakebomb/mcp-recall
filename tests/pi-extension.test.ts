@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { mkdtemp, rm, writeFile } from "fs/promises";
+import { mkdtemp, rm, symlink, writeFile } from "fs/promises";
 import os from "os";
 import path from "path";
 import mcpRecall, {
@@ -64,6 +64,15 @@ describe("pi extension: reading back the full output", () => {
       await rm(elsewhere, { recursive: true, force: true });
     }
   });
+
+  it("does not follow a link planted under pi's name", async () => {
+    const target = await piFile(`not-pi-target-${process.pid}.txt`, "SHOULD NOT BE READ");
+    const link = path.join(os.tmpdir(), `pi-mcp-${"9a".repeat(8)}.txt`);
+    await rm(link, { force: true });
+    await symlink(target, link);
+    tmpFiles.push(link);
+    expect(fullOutputText(mcpEvent("cut", link))).toBe("cut");
+  });
 });
 
 describe("pi extension: translating to and from the hook", () => {
@@ -102,6 +111,20 @@ describe("pi extension: translating to and from the hook", () => {
   it("runHook resolves empty, not throwing, when mcp-recall can't be run", async () => {
     expect(await runHook(["/nonexistent/mcp-recall"], "post-tool-use", {})).toBe("");
     expect(await runHook([], "post-tool-use", {})).toBe("");
+  });
+
+  it("runHook gives up at the timeout on a hook that ignores SIGTERM", async () => {
+    const stubborn = `process.on("SIGTERM", () => {}); setInterval(() => {}, 1000);`;
+    const started = Date.now();
+    expect(await runHook(["bun", "-e", stubborn], "post-tool-use", {}, undefined, 300)).toBe("");
+    expect(Date.now() - started).toBeLessThan(3000);
+  });
+
+  it("runHook keeps multibyte characters whole across pipe chunks", async () => {
+    // One ASCII byte, then two-byte characters: every even-sized pipe chunk boundary splits one.
+    const out = await runHook(["bun", "-e", `process.stdout.write("a" + "é".repeat(150000))`], "post-tool-use", {});
+    expect(out.length).toBe(150001);
+    expect(out).not.toContain("�");
   });
 
   it("readLaunch rejects a missing or malformed launch.json", async () => {
@@ -184,5 +207,16 @@ describe("pi extension: end to end through the real hook", () => {
     const ctx = { cwd: dir, sessionManager: { getSessionId: () => "pi-session-1" } };
     expect(await pi.handlers["tool_result"]!(mcpEvent("short"), ctx)).toBeUndefined();
     expect(await pi.handlers["tool_result"]!({ ...mcpEvent("x"), toolName: "read" }, ctx)).toBeUndefined();
+  });
+
+  it("never throws into pi, whatever the event or context looks like", async () => {
+    const pi = fakePi();
+    mcpRecall(pi.api as never, { cli: ["bun", path.resolve("src/cli.ts")], server: { command: "bun", args: [] } });
+    const ctx = { cwd: dir, sessionManager: { getSessionId: () => "pi-session-1" } };
+    const broken = { toolName: "mcp__x__y", content: [null] } as unknown as PiToolResult;
+    expect(await pi.handlers["tool_result"]!(broken, ctx)).toBeUndefined();
+    const badCtx = { cwd: dir, sessionManager: { getSessionId: () => { throw new Error("no session"); } } };
+    expect(await pi.handlers["tool_result"]!(mcpEvent("x"), badCtx)).toBeUndefined();
+    expect(await pi.handlers["session_start"]!({}, badCtx)).toBeUndefined();
   });
 });

@@ -617,7 +617,9 @@ export async function uninstallCommand(opts: UninstallOptions = {}): Promise<voi
   } = opts;
 
   if (agents.includes("claude")) await uninstallClaude(claudeJsonPath, settingsPath, claudeMdPath, launch);
-  if (agents.includes("pi")) {
+  // pi is mentioned only to someone who has it, or who asked for it by name.
+  const piNamed = opts.agents?.includes("pi") ?? false;
+  if (agents.includes("pi") && (piNamed || piDetected(piDir))) {
     if (agents.includes("claude")) console.log("");
     if (await uninstallPi(piDir)) {
       console.log(`${GREEN}✓${RESET} Removed pi extension        ${DIM}(${piExtensionDir(piDir)})${RESET}`);

@@ -143,6 +143,11 @@ describe("uninstall from pi", () => {
     await uninstallCommand({ ...claude, piDir, launch, agents: ["pi"] });
     expect(out()).toContain("pi extension not present");
   });
+
+  it("says nothing about pi to someone without pi", async () => {
+    await uninstallCommand({ ...claude, piDir, launch });
+    expect(out()).not.toContain("pi extension");
+  });
 });
 
 describe("status for pi", () => {

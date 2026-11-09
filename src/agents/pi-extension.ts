@@ -13,9 +13,10 @@
  * writes both files, and re-running it after an update refreshes them.
  */
 import { spawn } from "node:child_process";
-import { readFileSync, statSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export interface Launch {
   /** argv that runs the mcp-recall CLI, e.g. ["bun", "/…/dist/cli.js"] or ["/…/mcp-recall"]. */
@@ -52,15 +53,17 @@ export function isHandled(toolName: string): boolean {
  * it (MCP to ~20 KB, bash to its last 2,000 lines) and saves the whole output
  * to a file named in `details.fullOutputPath`. Read it back only when it is
  * plainly pi's file: absolute, directly in the OS temp dir, named as pi names
- * them, and not huge. Anything else keeps the text pi delivered.
+ * them, a regular file rather than a link (the temp dir may be shared), and
+ * not huge. Anything else keeps the text pi delivered.
  */
 export function fullOutputText(event: PiToolResult, tmp = tmpdir()): string {
-  const delivered = (event.content ?? []).map((c) => c.text ?? "").join("\n");
+  const delivered = (event.content ?? []).map((c) => c?.text ?? "").join("\n");
   const p = event.details?.fullOutputPath;
   if (typeof p !== "string" || !isAbsolute(p)) return delivered;
   if (resolve(dirname(p)) !== resolve(tmp) || !PI_FULL_OUTPUT.test(basename(p))) return delivered;
   try {
-    if (statSync(p).size > MAX_FULL_OUTPUT_BYTES) return delivered;
+    const st = lstatSync(p);
+    if (!st.isFile() || st.size > MAX_FULL_OUTPUT_BYTES) return delivered;
     return readFileSync(p, "utf8");
   } catch {
     return delivered;
@@ -75,7 +78,7 @@ export function fullOutputText(event: PiToolResult, tmp = tmpdir()): string {
  */
 export function toHookInput(event: PiToolResult, sessionId: string, cwd: string): Record<string, unknown> | null {
   if (!isHandled(event.toolName) || event.isError) return null;
-  if ((event.content ?? []).some((c) => c.type !== "text")) return null;
+  if ((event.content ?? []).some((c) => c?.type !== "text")) return null;
   const text = fullOutputText(event);
   const bash = event.toolName === "bash";
   return {
@@ -104,17 +107,31 @@ export function fromHookOutput(stdout: string): TextBlock[] | null {
   return null;
 }
 
-/** Runs one mcp-recall hook with `input` on stdin; resolves to its stdout, "" on any failure. */
-export function runHook(cli: string[], hook: string, input: unknown, signal?: AbortSignal): Promise<string> {
+/**
+ * Runs one mcp-recall hook with `input` on stdin; resolves to its stdout, ""
+ * on any failure. Never rejects, and never waits past `timeoutMs`: a hook
+ * that hangs is killed and pi keeps its own result.
+ */
+export function runHook(
+  cli: string[], hook: string, input: unknown, signal?: AbortSignal, timeoutMs = HOOK_TIMEOUT_MS,
+): Promise<string> {
   return new Promise((done) => {
     const [program, ...args] = cli;
     if (!program) return done("");
+    let settled = false;
+    const finish = (out: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      done(out);
+    };
     let stdout = "";
     const child = spawn(program, [...args, hook], { stdio: ["pipe", "pipe", "ignore"], signal });
-    const timer = setTimeout(() => child.kill(), HOOK_TIMEOUT_MS);
-    child.stdout.on("data", (d) => { stdout += d; });
-    child.on("error", () => { clearTimeout(timer); done(""); });
-    child.on("close", () => { clearTimeout(timer); done(stdout); });
+    const timer = setTimeout(() => { child.kill("SIGKILL"); finish(""); }, timeoutMs);
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (d: string) => { stdout += d; });
+    child.on("error", () => finish(""));
+    child.on("close", () => finish(stdout));
     child.stdin.on("error", () => {});
     child.stdin.end(JSON.stringify(input));
   });
@@ -142,22 +159,29 @@ interface PiApi {
   registerMcpServer(name: string, config: Record<string, unknown>): void;
 }
 
-export default function mcpRecall(pi: PiApi, launch = readLaunch(import.meta.dirname ?? dirname(new URL(import.meta.url).pathname))): void {
+export default function mcpRecall(pi: PiApi, launch = readLaunch(dirname(fileURLToPath(import.meta.url)))): void {
   if (!launch) return; // no launch.json: re-run `mcp-recall install`
   pi.registerMcpServer("recall", { ...launch.server, exposure: "direct" });
 
+  // Neither handler may throw into pi: whatever goes wrong, pi keeps its own result.
   pi.on("session_start", async (_event, ctx) => {
-    await runHook(launch.cli, "session-start", {
-      session_id: ctx.sessionManager.getSessionId(),
-      cwd: ctx.cwd,
-      hook_event_name: "SessionStart",
-    });
+    try {
+      await runHook(launch.cli, "session-start", {
+        session_id: ctx.sessionManager.getSessionId(),
+        cwd: ctx.cwd,
+        hook_event_name: "SessionStart",
+      });
+    } catch { /* recording the session day is best-effort */ }
   });
 
   pi.on("tool_result", async (event, ctx) => {
-    const input = toHookInput(event, ctx.sessionManager.getSessionId(), ctx.cwd);
-    if (!input) return undefined;
-    const content = fromHookOutput(await runHook(launch.cli, "post-tool-use", input, ctx.signal));
-    return content ? { content } : undefined;
+    try {
+      const input = toHookInput(event, ctx.sessionManager.getSessionId(), ctx.cwd);
+      if (!input) return undefined;
+      const content = fromHookOutput(await runHook(launch.cli, "post-tool-use", input, ctx.signal));
+      return content ? { content } : undefined;
+    } catch {
+      return undefined;
+    }
   });
 }
