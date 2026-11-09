@@ -6,8 +6,7 @@ Start with the [README](../README.md): what mcp-recall does, whether it suits yo
 
 | Page | Read it when |
 |---|---|
-| [Quickstart](quickstart.md) | You want it running in two minutes |
-| [Install and update](install.md) | You need another install method (plugin marketplace, from source, standalone binary), or want to update or uninstall |
+| [Install and update](install.md) | You want an install method beyond the README's Quick start (plugin marketplace, from source, standalone binary), or want to update or uninstall |
 | [Tool reference](tools.md) | You want to know what each `recall__*` tool does and takes |
 | [Configuration](configuration.md) | You want to change store size, expiry, retention or the denylist, or look up an environment variable |
 | [Handlers](handlers.md) | You want to know how each kind of output is summarized and what is kept |

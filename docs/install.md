@@ -1,6 +1,6 @@
 # Install and update
 
-The [quickstart](quickstart.md) is the two-minute path. This page covers every install method, updating, and uninstalling.
+The README's [Quick start](../README.md#quick-start) is the short path. This page covers every install method, what to do after installing, updating, and uninstalling.
 
 ## Prerequisites
 
@@ -9,25 +9,14 @@ The [quickstart](quickstart.md) is the two-minute path. This page covers every i
 
 ## Option A — npm (recommended)
 
-No global install required — run directly with npx or bunx:
-
-```bash
-npx mcp-recall install   # or: bunx mcp-recall install
-```
-
-Or install globally for faster subsequent runs:
-
 ```bash
 bun add -g mcp-recall    # or: npm i -g mcp-recall
 mcp-recall install       # register hooks + MCP server in Claude Code
-mcp-recall status        # verify
 ```
 
-`mcp-recall install` writes the MCP server entry and hooks to `~/.claude.json` and `~/.claude/settings.json`, and adds a short instruction block to `~/.claude/CLAUDE.md` so Claude knows how to use the recall tools. It's idempotent — safe to re-run after updates.
+Install globally rather than through `npx` or `bunx`. `mcp-recall install` registers the path of the copy it runs from, and an `npx`/`bunx` copy lives in a cache that can be cleared, which would leave Claude Code pointing at files that are gone ([#455](https://github.com/sakebomb/mcp-recall/issues/455)).
 
-Update: `bun update -g mcp-recall && mcp-recall install`
-
-Uninstall: `mcp-recall uninstall && bun remove -g mcp-recall`
+`mcp-recall install` writes the MCP server entry and hooks to `~/.claude.json` and `~/.claude/settings.json`, and adds a short [instruction block](#claude-instructions) to `~/.claude/CLAUDE.md` so Claude knows how to use the recall tools. It's idempotent — safe to re-run after updates.
 
 ## Option B — Claude Code plugin marketplace
 
@@ -36,7 +25,10 @@ claude plugin marketplace add mcp-recall https://github.com/sakebomb/mcp-recall
 claude plugin install mcp-recall@mcp-recall
 ```
 
-Both hooks and the MCP server register automatically. Verify with `claude --debug`.
+Both hooks and the MCP server register automatically. Two things differ from Option A:
+
+- The plugin does not write the [Claude instructions](#claude-instructions) block. Paste it into `~/.claude/CLAUDE.md` yourself.
+- The plugin puts no `mcp-recall` command on your `PATH`, so the CLI steps in [After installing](#after-installing) (`profiles seed`, `status`) are not available. Don't add Option A on top: that registers the hooks twice. If you want the CLI, use Option A instead. Verify a plugin install with `claude --debug` ([#456](https://github.com/sakebomb/mcp-recall/issues/456)).
 
 ## Option C — from source
 
@@ -88,6 +80,41 @@ To build one from source instead: `bun run build:binary` (this platform) or `bun
 
 A binary is 60–95 MB, since it carries the Bun runtime. Its bundled profiles are inside it, and are copied out once per version to `~/.local/share/mcp-recall/bundled-profiles/`. The hooks name the binary's path, so run `mcp-recall install` again if you move it. CI runs every binary on its own OS. The macOS binaries are not notarized: `curl` leaves them runnable, but Gatekeeper blocks one downloaded through a browser until you clear the quarantine flag with `xattr -d com.apple.quarantine ~/.local/bin/mcp-recall`.
 
+## After installing
+
+1. **Restart Claude Code.** The MCP server and hooks register at startup.
+2. **Check the install:** `mcp-recall status` should show every check green.
+3. **Optional: install compression profiles** for the MCP servers you use. Profiles teach mcp-recall how to summarize a specific server's output.
+
+   ```bash
+   mcp-recall profiles seed        # profiles for the MCPs detected in ~/.claude.json
+   mcp-recall profiles seed --all  # or the full community catalog
+   mcp-recall learn                # generate profiles for MCPs the catalog doesn't cover
+   ```
+
+   See the [profiles quickstart](profiles-quickstart.md) for more.
+
+## Claude instructions
+
+`mcp-recall install` writes the following block to `~/.claude/CLAUDE.md`. If you installed via the plugin marketplace, or want it in a project-level `CLAUDE.md`, paste it yourself:
+
+```markdown
+<!-- BEGIN mcp-recall -->
+## mcp-recall
+
+Session context from previous sessions is automatically injected at startup (pinned items, notes, recent activity). If it was truncated, call `recall__context()` for the full view.
+
+When a tool output was compressed by mcp-recall (you'll see a `[recall:recall_abc123 · …]` line above a summary), call `recall__retrieve({"id": "recall_abc123"})` for the content behind it, or add a `query` to see the parts that match.
+
+Proactively:
+- `recall__note("…")` — save important decisions or context worth keeping across sessions
+- `recall__pin("recall_abc123")` — protect frequently-needed items from expiry and eviction
+- `recall__search("query")` — find stored outputs by content when you don't have an ID
+<!-- END mcp-recall -->
+```
+
+The `<!-- BEGIN mcp-recall -->` / `<!-- END mcp-recall -->` markers let `mcp-recall install` and `mcp-recall uninstall` manage the block. If you customize the content, keep the markers: updates replace only what is between them.
+
 ## Updating
 
 ### Option A — npm / bun global install
@@ -125,6 +152,17 @@ Run `mcp-recall status` to confirm the new version is active and hooks are regis
 mcp-recall profiles update
 ```
 
+## Uninstalling
+
+| Installed with | Uninstall |
+|---|---|
+| Option A — npm / bun | `mcp-recall uninstall && bun remove -g mcp-recall` (or `npm rm -g mcp-recall`) |
+| Option B — plugin marketplace | `claude plugin uninstall mcp-recall@mcp-recall`, then delete the [Claude instructions](#claude-instructions) block if you pasted it |
+| Option C — from source | `./bin/recall uninstall` from the clone, then delete the clone and any alias or symlink you added |
+| Option D — standalone binary | `mcp-recall uninstall`, then delete the binary |
+
+`mcp-recall uninstall` removes the MCP server entry, both hooks and the `CLAUDE.md` block. It leaves your stored output (`~/.local/share/mcp-recall/`) and your config (`~/.config/mcp-recall/`) on disk; delete those folders too to remove everything.
+
 ## Running alongside rtk
 
 [rtk](https://github.com/rtk-ai/rtk)'s hook rewrites a Bash command before it runs (`cat f` → `rtk read f`, `git diff` → `rtk git diff`), so mcp-recall sees rtk's output, not the command's. Measured with rtk 1.0.1:
@@ -138,4 +176,4 @@ rtk's optional PostToolUse pipeline (`rtk:posthook`) also rewrites tool output; 
 
 ---
 
-→ [Quickstart](quickstart.md) · [Configuration](configuration.md) · [Troubleshooting](troubleshooting.md)
+→ [Configuration](configuration.md) · [Tools](tools.md) · [Troubleshooting](troubleshooting.md)

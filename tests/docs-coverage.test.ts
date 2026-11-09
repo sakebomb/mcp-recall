@@ -152,14 +152,14 @@ describe("docs coverage: CLI commands", () => {
 // ── the CLAUDE.md block ─────────────────────────────────────────────────────
 
 describe("docs coverage: CLAUDE.md block", () => {
-  test("docs/quickstart.md shows the block install writes, verbatim", () => {
+  test("docs/install.md shows the block install writes, verbatim", () => {
     // The paste-it-yourself copy drifted once already: it kept the positional
     // recall__retrieve("…") call after the installer moved to {"id": …} (#434).
     // Not section(): the block's own "## mcp-recall" heading would end it early.
-    const quickstart = readFileSync("docs/quickstart.md", "utf8");
-    const from = quickstart.indexOf("\n## Claude instructions\n");
+    const install = readFileSync("docs/install.md", "utf8");
+    const from = install.indexOf("\n## Claude instructions\n");
     expect(from).toBeGreaterThan(-1);
-    const shown = firstFence(quickstart.slice(from), "markdown").trimEnd();
+    const shown = firstFence(install.slice(from), "markdown").trimEnd();
     expect(shown).toBe(CLAUDE_MD_BLOCK);
   });
 });

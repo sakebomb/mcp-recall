@@ -747,7 +747,7 @@ export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
       console.log(`  Run ${BOLD}mcp-recall install${RESET}`);
     }
     if (!claudeMdOk) {
-      console.log(`  Or add instructions manually: see ${BOLD}docs/quickstart.md${RESET}`);
+      console.log(`  Or add instructions manually: see ${BOLD}https://github.com/sakebomb/mcp-recall/blob/main/docs/install.md#claude-instructions${RESET}`);
     }
   }
 

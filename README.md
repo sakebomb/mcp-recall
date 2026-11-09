@@ -55,7 +55,7 @@ Restart Claude Code, then run `mcp-recall status`: every check should be green. 
 
 `mcp-recall install` writes the MCP server entry and hooks to `~/.claude.json` and `~/.claude/settings.json`, and adds a short instruction block to `~/.claude/CLAUDE.md`. It is idempotent, so re-run it after every update.
 
-→ [Quickstart](docs/quickstart.md) · [All install options, updating and uninstalling](docs/install.md) (plugin marketplace, from source, standalone binary)
+→ [All install options, updating and uninstalling](docs/install.md) (plugin marketplace, from source, standalone binary)
 
 ---
 
