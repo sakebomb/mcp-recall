@@ -47,6 +47,15 @@ Learnings captured after corrections. Updated after any mistake or course correc
 
 ---
 
+## A piped test run does not gate a commit
+
+**Pattern**: Running `bun test` and `git commit` in one Bash command
+**Mistake**: `bun test | grep … ; git add … && git commit …` committed while the suite reported a failure: the pipe hands back `grep`'s exit status, and `;` runs the commit regardless. The failures were timeouts under load from another session, but the commit should not have waited on luck
+**Rule**: Run the suite unpiped and chain with `&&` (`bun test && git commit …`), or set `-o pipefail` first. Read the summary in its own step. When a run fails only on timeouts while another session loads the machine, rerun the failing files alone before calling it a regression
+**Date**: 2026-11-09
+
+---
+
 ## Git
 
 **Pattern**: Pushing commits to GitHub repos with email privacy enabled
