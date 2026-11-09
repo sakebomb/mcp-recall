@@ -14685,9 +14685,9 @@ init_log();
 
 // src/hooks/grok.ts
 init_log();
-import { lstatSync, readFileSync as readFileSync3 } from "fs";
+import { lstatSync, readFileSync as readFileSync3, realpathSync } from "fs";
 import { homedir as homedir4 } from "os";
-import { basename as basename2, dirname as dirname3, isAbsolute as isAbsolute2, join as join5, normalize, sep } from "path";
+import { basename as basename2, dirname as dirname3, isAbsolute as isAbsolute2, join as join5, normalize, relative, sep } from "path";
 var MAX_SAVED_BYTES = 20 * 1024 * 1024;
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -14704,15 +14704,25 @@ function isGrokShell(value) {
 function grokHome() {
   return process.env["GROK_HOME"] || join5(homedir4(), ".grok");
 }
-function readSaved(path, kind, ext) {
+function callOf(input) {
+  const sessionId = input["session_id"] ?? input["sessionId"];
+  const toolUseId = input["tool_use_id"] ?? input["toolUseId"];
+  const safe = (v) => typeof v === "string" && /^[\w-]+$/.test(v);
+  return safe(sessionId) && safe(toolUseId) ? { sessionId, toolUseId } : null;
+}
+function readSaved(path, call, kind, ext) {
   if (!isAbsolute2(path) || normalize(path) !== path)
     return null;
   const sessions = join5(grokHome(), "sessions") + sep;
-  if (!path.startsWith(sessions) || basename2(dirname3(path)) !== kind)
+  if (!path.startsWith(sessions) || basename2(path) !== `${call.toolUseId}.${ext}`)
     return null;
-  if (!new RegExp(`^call-[0-9a-f-]+-\\d+\\.${ext}$`).test(basename2(path)))
+  const folder = dirname3(path);
+  if (basename2(folder) !== kind || basename2(dirname3(folder)) !== call.sessionId)
     return null;
   try {
+    const root = realpathSync(sessions);
+    if (realpathSync(folder) !== join5(root, relative(sessions, folder)))
+      return null;
     const stat = lstatSync(path);
     if (!stat.isFile() || stat.size > MAX_SAVED_BYTES)
       return null;
@@ -14723,11 +14733,13 @@ function readSaved(path, kind, ext) {
   }
 }
 var MCP_CUT_RE = /\n*\[MCP output truncated: [^\]\n]*?Full output written to: (\/[^\n]+?\.json)\.[^\n]*\]\s*$/;
-function mcpText(text) {
+function mcpText(text, call) {
   const match = text.match(MCP_CUT_RE);
   if (!match)
     return text;
-  const saved = readSaved(match[1], "mcp", "json");
+  if (!call)
+    return null;
+  const saved = readSaved(match[1], call, "mcp", "json");
   if (!saved)
     return null;
   const kept = Buffer.from(text.slice(0, match.index), "utf8");
@@ -14742,13 +14754,13 @@ function shellBytes(output) {
   }
   return null;
 }
-function shellText(result) {
+function shellText(result, call) {
   if (result.truncated !== true)
     return shellBytes(result.output)?.toString("utf8") ?? null;
   const { output_file: path, total_bytes: total } = result;
-  if (typeof path !== "string" || typeof total !== "number")
+  if (typeof path !== "string" || typeof total !== "number" || !call)
     return null;
-  const saved = readSaved(path, "terminal", "log");
+  const saved = readSaved(path, call, "terminal", "log");
   return saved && saved.length === total ? saved.toString("utf8") : null;
 }
 function fromGrok(input) {
@@ -14758,7 +14770,7 @@ function fromGrok(input) {
     const ok = response.output["OkayOutput"];
     if (typeof ok !== "string")
       return null;
-    const text = mcpText(ok);
+    const text = mcpText(ok, callOf(input));
     if (text === null) {
       log.debug(`SKIP grok-cut-unverified \xB7 ${name}`);
       return null;
@@ -14766,7 +14778,7 @@ function fromGrok(input) {
     return { ...input, tool_name: name, tool_response: [{ type: "text", text }] };
   }
   if (isGrokShell(response)) {
-    const stdout = shellText(response);
+    const stdout = shellText(response, callOf(input));
     if (stdout === null) {
       log.debug("SKIP grok-cut-unverified \xB7 Bash");
       return null;

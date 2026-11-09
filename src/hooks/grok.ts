@@ -1,6 +1,6 @@
-import { lstatSync, readFileSync } from "fs";
+import { lstatSync, readFileSync, realpathSync } from "fs";
 import { homedir } from "os";
-import { basename, dirname, isAbsolute, join, normalize, sep } from "path";
+import { basename, dirname, isAbsolute, join, normalize, relative, sep } from "path";
 import { log } from "../log";
 
 /**
@@ -59,17 +59,37 @@ export function grokHome(): string {
   return process.env["GROK_HOME"] || join(homedir(), ".grok");
 }
 
+/** The call a result belongs to: grok names its saved file and folder after them. */
+interface GrokCall {
+  sessionId: string;
+  toolUseId: string;
+}
+
+function callOf(input: Record<string, unknown>): GrokCall | null {
+  const sessionId = input["session_id"] ?? input["sessionId"];
+  const toolUseId = input["tool_use_id"] ?? input["toolUseId"];
+  const safe = (v: unknown): v is string => typeof v === "string" && /^[\w-]+$/.test(v);
+  return safe(sessionId) && safe(toolUseId) ? { sessionId, toolUseId } : null;
+}
+
 /**
- * Reads a file grok saved, when it is plainly one: absolute, under grok's
- * sessions directory in a `<kind>` folder, named `call-<id>-<n>.<ext>`, a
- * regular file (not a symlink) and at most {@link MAX_SAVED_BYTES}. Null otherwise.
+ * Reads the file grok saved for this call, when it is plainly that file:
+ * `<sessions>/<cwd>/<session id>/<kind>/<tool use id>.<ext>` under grok's
+ * data directory, reached without a symlink, a regular file, and at most
+ * {@link MAX_SAVED_BYTES}. Null otherwise. Requiring this call's ids means a
+ * tool cannot name another call's file in its own output: an MCP server never
+ * learns grok's tool use id.
  */
-function readSaved(path: string, kind: "mcp" | "terminal", ext: "json" | "log"): Buffer | null {
+function readSaved(path: string, call: GrokCall, kind: "mcp" | "terminal", ext: "json" | "log"): Buffer | null {
   if (!isAbsolute(path) || normalize(path) !== path) return null;
   const sessions = join(grokHome(), "sessions") + sep;
-  if (!path.startsWith(sessions) || basename(dirname(path)) !== kind) return null;
-  if (!new RegExp(`^call-[0-9a-f-]+-\\d+\\.${ext}$`).test(basename(path))) return null;
+  if (!path.startsWith(sessions) || basename(path) !== `${call.toolUseId}.${ext}`) return null;
+  const folder = dirname(path);
+  if (basename(folder) !== kind || basename(dirname(folder)) !== call.sessionId) return null;
   try {
+    // No symlink below the sessions root; the root itself may sit behind one.
+    const root = realpathSync(sessions);
+    if (realpathSync(folder) !== join(root, relative(sessions, folder))) return null;
     const stat = lstatSync(path);
     if (!stat.isFile() || stat.size > MAX_SAVED_BYTES) return null;
     return readFileSync(path);
@@ -86,10 +106,11 @@ const MCP_CUT_RE = /\n*\[MCP output truncated: [^\]\n]*?Full output written to: 
  * The whole text of an MCP result. A cut one is read back from the file its
  * marker names, which must begin with the text grok kept. Null when it cannot be.
  */
-function mcpText(text: string): string | null {
+function mcpText(text: string, call: GrokCall | null): string | null {
   const match = text.match(MCP_CUT_RE);
   if (!match) return text;
-  const saved = readSaved(match[1]!, "mcp", "json");
+  if (!call) return null;
+  const saved = readSaved(match[1]!, call, "mcp", "json");
   if (!saved) return null;
   const kept = Buffer.from(text.slice(0, match.index), "utf8");
   // grok cuts at a byte count, so the last kept character may be a split one.
@@ -110,11 +131,11 @@ function shellBytes(output: unknown): Buffer | null {
  * The whole output of a shell call. A cut one is read back from output_file,
  * which must be exactly total_bytes long. Null when it cannot be.
  */
-function shellText(result: GrokShellResult): string | null {
+function shellText(result: GrokShellResult, call: GrokCall | null): string | null {
   if (result.truncated !== true) return shellBytes(result.output)?.toString("utf8") ?? null;
   const { output_file: path, total_bytes: total } = result;
-  if (typeof path !== "string" || typeof total !== "number") return null;
-  const saved = readSaved(path, "terminal", "log");
+  if (typeof path !== "string" || typeof total !== "number" || !call) return null;
+  const saved = readSaved(path, call, "terminal", "log");
   return saved && saved.length === total ? saved.toString("utf8") : null;
 }
 
@@ -126,7 +147,7 @@ export function fromGrok(input: Record<string, unknown>): Record<string, unknown
     const ok = response.output["OkayOutput"];
     // An error result, or a shape this version does not know, is delivered as it is.
     if (typeof ok !== "string") return null;
-    const text = mcpText(ok);
+    const text = mcpText(ok, callOf(input));
     if (text === null) {
       log.debug(`SKIP grok-cut-unverified · ${name}`);
       return null;
@@ -134,7 +155,7 @@ export function fromGrok(input: Record<string, unknown>): Record<string, unknown
     return { ...input, tool_name: name, tool_response: [{ type: "text", text }] };
   }
   if (isGrokShell(response)) {
-    const stdout = shellText(response);
+    const stdout = shellText(response, callOf(input));
     if (stdout === null) {
       log.debug("SKIP grok-cut-unverified · Bash");
       return null;
