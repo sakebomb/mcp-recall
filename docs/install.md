@@ -25,10 +25,12 @@ claude plugin marketplace add mcp-recall https://github.com/sakebomb/mcp-recall
 claude plugin install mcp-recall@mcp-recall
 ```
 
-Both hooks and the MCP server register automatically. Two things differ from Option A:
+Both hooks and the MCP server register automatically; restart Claude Code once to load them. Two things differ from Option A:
 
 - The plugin does not write the [Claude instructions](#claude-instructions) block. Paste it into `~/.claude/CLAUDE.md` yourself.
-- The plugin puts no `mcp-recall` command on your `PATH`, so the CLI steps in [After installing](#after-installing) (`profiles seed`, `status`) are not available. Don't add Option A on top: that registers the hooks twice. If you want the CLI, use Option A instead. Verify a plugin install with `claude --debug` ([#456](https://github.com/sakebomb/mcp-recall/issues/456)).
+- The plugin puts no `mcp-recall` command on your `PATH`, so the CLI steps in [After installing](#after-installing) (`profiles seed`, `status`) are not available. Don't add Option A on top: it writes its own server entry and hooks beside the plugin's, so mcp-recall would be registered twice. If you want the CLI, use Option A instead ([#456](https://github.com/sakebomb/mcp-recall/issues/456)).
+
+To check a plugin install, run `/mcp` in Claude Code: the mcp-recall plugin's `recall` server should show as connected.
 
 ## Option C — from source
 
@@ -161,7 +163,7 @@ mcp-recall profiles update
 | Option C — from source | `./bin/recall uninstall` from the clone, then delete the clone and any alias or symlink you added |
 | Option D — standalone binary | `mcp-recall uninstall`, then delete the binary |
 
-`mcp-recall uninstall` removes the MCP server entry, both hooks and the `CLAUDE.md` block. It leaves your stored output (`~/.local/share/mcp-recall/`) and your config (`~/.config/mcp-recall/`) on disk; delete those folders too to remove everything.
+`mcp-recall uninstall` removes the MCP server entry, both hooks and the `CLAUDE.md` block. Neither it nor `claude plugin uninstall` touches your stored output (`~/.local/share/mcp-recall/`) or your config (`~/.config/mcp-recall/`); delete those folders too to remove everything.
 
 ## Running alongside rtk
 
