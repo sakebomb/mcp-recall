@@ -27,7 +27,7 @@ The goal is sessions that run for hours instead of hitting the context limit in 
 **It is likely to help if:**
 
 - Your sessions run long and lean on MCP tools that return large, structured output, such as browser automation, GitHub, or search and API results. In the browser studies, sessions compacted less often with mcp-recall: 10 compactions fell to 6, and 50 to 29.
-- You pay per token on a smaller model. In the long-session study and the browser study rerun after the #424 fix, Haiku runs cost about a quarter less.
+- You pay per token on a smaller model. In two Haiku studies, one of long sessions and one of browser tasks, runs cost about a quarter less.
 - You want tool output from an earlier session to stay searchable instead of gone.
 
 **It will do little if:**
@@ -37,7 +37,7 @@ The goal is sessions that run for hours instead of hitting the context limit in 
 
 **What it has not shown:** that Claude solves more tasks. In paired runs with and without it, no study found a difference in solved tasks larger than chance. Claude also almost never fetched the stored output, so the summaries carry the effect. See the [task-success benchmark](docs/benchmarks.md#task-success-benchmark) for every study and its limits.
 
-**What it costs you:** an install that edits your Claude Code config, and a size-capped SQLite store on your own disk. Nothing leaves your machine, and credentials are never stored: see [Safety and privacy](#safety-and-privacy).
+**What it costs you:** an install that edits your Claude Code config, and a local SQLite store on your own disk. Nothing leaves your machine, and credentials are never stored: see [Safety and privacy](#safety-and-privacy).
 
 ---
 
@@ -83,7 +83,7 @@ The [architecture guide](docs/architecture.md#the-capture-pipeline) walks throug
 
 ## Using it
 
-Here is one real call, from the public [benchmark corpus](benchmark/corpus/mcp-github-list-issues.json): the GitHub MCP server's `list_issues`, returning five issues from this repository. Without mcp-recall, all 31.2 KB of the GitHub API's JSON lands in Claude's context: every URL, user record and timestamp. With it, Claude receives this instead (shortened here; `…` marks the cuts):
+Here is one real call, from the public [benchmark corpus](benchmark/corpus/mcp-github-list-issues.json): the GitHub MCP server's `list_issues`, returning five issues and pull requests from this repository. Without mcp-recall, all 31.2 KB of the GitHub API's JSON lands in Claude's context: every URL, user record and timestamp. With it, Claude receives this instead (shortened here; `…` marks the cuts):
 
 ```
 [recall:recall_6abcf99290d6b4e7 · 31.2KB→1.6KB (95% reduction) · search: "sakebomb", "github", "api", "users", "mcp"]
@@ -94,7 +94,7 @@ Final polish before v1.0.0 release — README, benchmarks, plugin manifest verif
 #8 … #10 follow in the same shape
 ```
 
-The header line names the stored item, its sizes, and a few `search:` hints, which are salient terms from the full content so Claude's first `recall__search` lands without guessing keywords. Each issue keeps its number, title, state, link, labels and the start of its body. Everything else is stored, not lost. Issue #8's body is cut at "Exempt item from LFU expir…", and if Claude needs the rest it asks for it:
+The header line names the stored item, its sizes, and a few `search:` hints, which are salient terms from the full content so Claude's first `recall__search` lands without guessing keywords. Each issue keeps its number, title, state, link, labels and the start of its body. Everything else is stored, not lost. Issue #8's body is cut at "Exempt item from LFU expir…", and if Claude needs the rest it asks for it (the reply is shortened the same way):
 
 ```
 recall__retrieve(id: "recall_6abcf99290d6b4e7", query: "LFU expiry")
@@ -103,7 +103,7 @@ recall__retrieve(id: "recall_6abcf99290d6b4e7", query: "LFU expiry")
 … ### `recall__pin(id)`\n- Exempt item from LFU expiry — survives indefinitely until manually forgotten\n- `pinned = 1` column already in v1 schema …
 ```
 
-The excerpt is the matching part of the original output, verbatim, escapes and all. In practice Claude rarely needs this step: in the [task-success studies](docs/benchmarks.md#task-success-benchmark) agents almost never called a `recall__*` tool, because the summary already held what they needed.
+The excerpt is the matching part of the original output, verbatim, escapes and all. In practice Claude rarely needs this step: in the [task-success studies](docs/benchmarks.md#task-success-benchmark) agents almost never called a `recall__*` tool, so the summaries alone carried the effect.
 
 Repeated identical tool calls return a cached header instead of re-compressing:
 
