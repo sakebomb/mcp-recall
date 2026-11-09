@@ -90,6 +90,14 @@ For pi, install writes one folder, `~/.pi/agent/extensions/mcp-recall/`: an exte
 
 Restart pi, or run `/reload`, after installing. `mcp-recall status` lists pi below Claude Code. pi has no `CLAUDE.md`, so the [Claude instructions](#claude-instructions) block does not apply; pi's model finds the `recall__*` tools from the `[recall:…]` header and the tools' own descriptions.
 
+## grok
+
+xAI's `grok` CLI reads Claude Code's config: the hooks in `~/.claude/settings.json` and the MCP servers in `~/.claude.json`. Option A, C or D therefore covers grok with no step of its own. `grok inspect` lists the PostToolUse hook, and lists it under "Hook Load Errors" if something is wrong.
+
+grok's tool names and result shapes differ from Claude Code's. The hook translates them before anything else runs, so the denylist and the summaries treat a grok call the same as a Claude Code call. grok cuts a large result to about 20 KB and saves the whole output under `~/.grok/sessions/` (or `$GROK_HOME/sessions/`). mcp-recall stores that whole output, and passes a cut through unchanged if it cannot check the file against it.
+
+Earlier installs registered a hook matcher that grok's regex engine rejects, so grok ran without the PostToolUse hook. Run `mcp-recall install` again to replace it. A marketplace plugin picks up the new matcher when it updates.
+
 ## After installing
 
 1. **Restart Claude Code.** The MCP server and hooks register at startup.

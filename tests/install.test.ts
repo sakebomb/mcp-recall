@@ -13,6 +13,7 @@ import {
   makeSessionStartEntry,
   makePostToolUseEntry,
   POST_TOOL_USE_MATCHER,
+  LEGACY_POST_TOOL_USE_MATCHER,
   isClaudeMdInjected,
   injectClaudeMd,
   removeClaudeMd,
@@ -692,6 +693,55 @@ describe("install keeps the user's edits to recall's entries (#365)", () => {
     await installCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch: npm });
     expect(log.mock.calls.flat().join("\n")).toContain("PostToolUse hook already registered");
     expect(await Bun.file(settingsPath).text()).toBe(before);
+  });
+
+  /** An install from before #459: recall's entry still has the look-around matcher. */
+  async function legacyInstall() {
+    await editedInstall(npm);
+    const settings = await readJsonFile(settingsPath) as any;
+    settings.hooks.PostToolUse[0].matcher = LEGACY_POST_TOOL_USE_MATCHER;
+    await writeJsonFile(settingsPath, settings);
+  }
+
+  it("install rewrites the pre-#459 matcher in place, keeping the entry's hooks", async () => {
+    await legacyInstall();
+    const log = quiet();
+    await installCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch: npm });
+    expect(log.mock.calls.flat().join("\n")).toContain("PostToolUse hook updated");
+    const hooks = (await readJsonFile(settingsPath) as any).hooks;
+    expect(hooks.PostToolUse).toHaveLength(1);
+    expect(hooks.PostToolUse[0].matcher).toBe(POST_TOOL_USE_MATCHER);
+    expect(hooks.PostToolUse[0].hooks).toEqual([
+      { type: "command", command: "audit-log" },
+      { type: "command", command: `${npm.cli} post-tool-use`, timeout: 30 },
+    ]);
+  });
+
+  it("uninstall removes recall's hook from an entry with the pre-#459 matcher", async () => {
+    await legacyInstall();
+    quiet();
+    await uninstallCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch: npm });
+    const hooks = (await readJsonFile(settingsPath) as any).hooks;
+    expect(hooks.PostToolUse).toEqual([{ matcher: LEGACY_POST_TOOL_USE_MATCHER, hooks: [{ type: "command", command: "audit-log" }] }]);
+  });
+});
+
+describe("the PostToolUse matcher works in every agent's regex engine (#459)", () => {
+  it("has no look-around, which grok's engine rejects", () => {
+    expect(POST_TOOL_USE_MATCHER).not.toMatch(/\(\?[=!<]/);
+  });
+
+  it("matches MCP tools and Bash, and not other built-in tools", () => {
+    const re = new RegExp(`^(?:${POST_TOOL_USE_MATCHER})$`);
+    for (const name of ["mcp__github__list_issues", "mcp__recall__recall__search", "Bash"]) expect(re.test(name)).toBe(true);
+    for (const name of ["Read", "Edit", "WebFetch"]) expect(re.test(name)).toBe(false);
+  });
+
+  it("is the matcher both shipped hooks.json files register", async () => {
+    for (const file of ["hooks/hooks.json", "plugins/mcp-recall/hooks/hooks.json"]) {
+      const json = JSON.parse(await readFile(path.join(import.meta.dir, "..", file), "utf8"));
+      expect(json.hooks.PostToolUse[0].matcher).toBe(POST_TOOL_USE_MATCHER);
+    }
   });
 });
 

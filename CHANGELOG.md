@@ -16,6 +16,12 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   see it, so the extension stores the full output pi saved to disk. `--agent
   claude` or `--agent pi` limits install and uninstall to one agent;
   `mcp-recall status` reports pi when it is installed.
+- **grok support** ([#459](https://github.com/sakebomb/mcp-recall/issues/459)).
+  xAI's `grok` CLI runs Claude Code's hooks. The PostToolUse hook now
+  translates grok's tool names (`run_terminal_command`, `<server>__<tool>`)
+  and result shapes, so the denylist and handlers see what they would under
+  Claude Code. grok cuts a large result to about 20 KB before the hook runs;
+  the hook stores the full output grok saved under its sessions directory.
 
 ### Security
 
@@ -32,6 +38,11 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ### Fixed
 
+- **The PostToolUse hook loads in grok.** Its matcher used a look-ahead to
+  skip recall's own tools, and grok's regex engine rejects look-around, so
+  grok ran without the hook. The matcher is now `mcp__.*|Bash`; the hook
+  already skips `mcp__recall__*` through the denylist. `mcp-recall install`
+  rewrites the old matcher in place (#459).
 - **The plugin's MCP server starts again** (#445). Since 1.19.0 the bundled
   `dist/server.js`, which a plugin-marketplace install runs, crashed on load
   (`undefined is not a constructor`), so those installs had no `recall__*`

@@ -11479,7 +11479,7 @@ var require_package = __commonJS((exports, module) => {
 });
 
 // src/learn/retrain.ts
-import { readFileSync as readFileSync4, writeFileSync } from "fs";
+import { readFileSync as readFileSync5, writeFileSync } from "fs";
 function detectItemsPath(parsed) {
   if (Array.isArray(parsed))
     return { path: "", items: parsed };
@@ -11667,7 +11667,7 @@ function applyResult(result, date2) {
     return;
   let toml;
   try {
-    toml = readFileSync4(result.profileFilePath, "utf8");
+    toml = readFileSync5(result.profileFilePath, "utf8");
   } catch (e) {
     console.log(`  \u2717 Could not read ${result.profileFilePath}: ${e instanceof Error ? e.message : String(e)}`);
     return;
@@ -11753,9 +11753,9 @@ var init_retrain = __esm(() => {
 });
 
 // src/profiles/shared.ts
-import { readFileSync as readFileSync5, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync3, unlinkSync } from "fs";
-import { join as join5 } from "path";
-import { homedir as homedir4, tmpdir } from "os";
+import { readFileSync as readFileSync6, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync3, unlinkSync } from "fs";
+import { join as join6 } from "path";
+import { homedir as homedir5, tmpdir } from "os";
 import { createHash as createHash4 } from "crypto";
 function assertSafeId(id) {
   if (!SAFE_ID_RE.test(id)) {
@@ -11771,10 +11771,10 @@ function sanitize(value) {
   return value.replace(/[\x00-\x1F\x7F]|\x9B|\x1B\[[0-9;]*[a-zA-Z]/g, "");
 }
 function communityDir() {
-  return process.env.RECALL_COMMUNITY_PROFILES_PATH ?? join5(homedir4(), ".local", "share", "mcp-recall", "profiles", "community");
+  return process.env.RECALL_COMMUNITY_PROFILES_PATH ?? join6(homedir5(), ".local", "share", "mcp-recall", "profiles", "community");
 }
 function userDir() {
-  return process.env.RECALL_USER_PROFILES_PATH ?? join5(homedir4(), ".config", "mcp-recall", "profiles");
+  return process.env.RECALL_USER_PROFILES_PATH ?? join6(homedir5(), ".config", "mcp-recall", "profiles");
 }
 function manifestShortName(e) {
   return e.short_name ?? e.id.replace(/^mcp__/, "");
@@ -11843,7 +11843,7 @@ async function fetchManifest(skipVerify = false) {
     throw new Error(`manifest fetch failed: ${res.status} ${res.statusText}`);
   const text = await res.text();
   if (!skipVerify) {
-    const tmpPath = join5(tmpdir(), `mcp-recall-manifest-${process.pid}.json`);
+    const tmpPath = join6(tmpdir(), `mcp-recall-manifest-${process.pid}.json`);
     try {
       writeFileSync2(tmpPath, text, "utf8");
       const config2 = loadConfig();
@@ -11858,9 +11858,9 @@ async function fetchManifest(skipVerify = false) {
   return data.profiles;
 }
 function saveToCommunityDir(profileId, content) {
-  const dir = join5(communityDir(), profileId);
+  const dir = join6(communityDir(), profileId);
   mkdirSync2(dir, { recursive: true });
-  const filePath = join5(dir, "default.toml");
+  const filePath = join6(dir, "default.toml");
   writeFileSync2(filePath, content);
   return filePath;
 }
@@ -11873,9 +11873,9 @@ function installedCommunityMap() {
     return map;
   }
   for (const entry of entries) {
-    const toml = join5(communityDir(), entry, "default.toml");
+    const toml = join6(communityDir(), entry, "default.toml");
     try {
-      const p = parse(readFileSync5(toml, "utf8"));
+      const p = parse(readFileSync6(toml, "utf8"));
       const version2 = p["profile"]["version"];
       map.set(entry, version2 ?? "0.0.0");
     } catch {}
@@ -11942,8 +11942,8 @@ var init_shared = __esm(() => {
 });
 
 // src/profiles/cmd-local.ts
-import { readFileSync as readFileSync6, readdirSync as readdirSync4, rmSync as rmSync2 } from "fs";
-import { join as join6 } from "path";
+import { readFileSync as readFileSync7, readdirSync as readdirSync4, rmSync as rmSync2 } from "fs";
+import { join as join7 } from "path";
 function patternsOverlap(a, b) {
   const aExact = !a.endsWith("*");
   const bExact = !b.endsWith("*");
@@ -12011,7 +12011,7 @@ function cmdRemove(args) {
   }
   const id = target.spec.profile.id;
   assertSafeId(id);
-  rmSync2(join6(communityDir(), id), { recursive: true });
+  rmSync2(join7(communityDir(), id), { recursive: true });
   clearProfileCache();
   console.log(`\u2713 Removed ${id}`);
 }
@@ -12023,7 +12023,7 @@ function cmdFeed(args) {
     try {
       for (const entry of readdirSync4(dir)) {
         if (entry.endsWith(".toml"))
-          files.push(join6(dir, entry));
+          files.push(join7(dir, entry));
       }
     } catch {}
     console.log("Usage: mcp-recall profiles feed <path-to-profile.toml>");
@@ -12037,7 +12037,7 @@ Your local profiles:`);
   }
   let content;
   try {
-    content = readFileSync6(profilePath, "utf8");
+    content = readFileSync7(profilePath, "utf8");
   } catch {
     console.error(`Cannot read: ${profilePath}`);
     process.exit(1);
@@ -12130,9 +12130,9 @@ var init_cmd_local = __esm(() => {
 });
 
 // src/profiles/cmd-catalog.ts
-import { readFileSync as readFileSync7 } from "fs";
-import { join as join7 } from "path";
-import { homedir as homedir5 } from "os";
+import { readFileSync as readFileSync8 } from "fs";
+import { join as join8 } from "path";
+import { homedir as homedir6 } from "os";
 async function cmdInstall(args) {
   const skipVerify = args.includes("--skip-verify");
   const nameOrId = args.find((a) => !a.startsWith("-"));
@@ -12220,7 +12220,7 @@ ${installCount} profile(s) installed (${alreadyCount} already installed, ${entri
   }
   let serverKeys = [];
   try {
-    const raw = JSON.parse(readFileSync7(join7(homedir5(), ".claude.json"), "utf8"));
+    const raw = JSON.parse(readFileSync8(join8(homedir6(), ".claude.json"), "utf8"));
     const mcpServers = raw["mcpServers"];
     serverKeys = Object.keys(mcpServers ?? {}).filter((k) => k !== "recall");
   } catch {
@@ -12341,7 +12341,7 @@ var init_cmd_catalog = __esm(() => {
 });
 
 // src/profiles/cmd-test.ts
-import { readFileSync as readFileSync8 } from "fs";
+import { readFileSync as readFileSync9 } from "fs";
 function testProfile(toolName, content) {
   const profiles = loadProfiles();
   const matchedProfile = resolveProfile(toolName, profiles);
@@ -12392,7 +12392,7 @@ Examples:`);
     contentSource = `stored:${storedId}`;
   } else {
     try {
-      content = readFileSync8(inputFile, "utf8");
+      content = readFileSync9(inputFile, "utf8");
     } catch {
       console.error(`Cannot read: ${inputFile}`);
       process.exit(1);
@@ -12952,15 +12952,15 @@ var exports_learn = {};
 __export(exports_learn, {
   handleLearnCommand: () => handleLearnCommand
 });
-import { readFileSync as readFileSync9, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3 } from "fs";
-import { join as join8 } from "path";
-import { homedir as homedir6 } from "os";
+import { readFileSync as readFileSync10, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3 } from "fs";
+import { join as join9 } from "path";
+import { homedir as homedir7 } from "os";
 function userProfilesDir() {
-  return process.env.RECALL_USER_PROFILES_PATH ?? join8(homedir6(), ".config", "mcp-recall", "profiles");
+  return process.env.RECALL_USER_PROFILES_PATH ?? join9(homedir7(), ".config", "mcp-recall", "profiles");
 }
 function readClaudeJson() {
-  const path = join8(homedir6(), ".claude.json");
-  const raw = JSON.parse(readFileSync9(path, "utf8"));
+  const path = join9(homedir7(), ".claude.json");
+  const raw = JSON.parse(readFileSync10(path, "utf8"));
   return raw["mcpServers"] ?? {};
 }
 async function handleLearnCommand(args) {
@@ -13022,9 +13022,9 @@ Learning from ${candidates.length} MCP server(s)\u2026
       console.log(toml);
       continue;
     }
-    const profileDir = join8(outputDir, `mcp__${key.replace(/-/g, "_")}`);
+    const profileDir = join9(outputDir, `mcp__${key.replace(/-/g, "_")}`);
     mkdirSync3(profileDir, { recursive: true });
-    const filePath = join8(profileDir, "default.toml");
+    const filePath = join9(profileDir, "default.toml");
     writeFileSync3(filePath, toml);
     console.log(`     \u2192 ${filePath}`);
     written++;
@@ -13056,7 +13056,7 @@ __export(exports_import, {
   handleImportCommand: () => handleImportCommand,
   MAX_REPORTED_ISSUES: () => MAX_REPORTED_ISSUES
 });
-import { readFileSync as readFileSync10, statSync as statSync5, existsSync as existsSync2 } from "fs";
+import { readFileSync as readFileSync11, statSync as statSync5, existsSync as existsSync2 } from "fs";
 import { resolve as resolve3 } from "path";
 import { Database as Database3 } from "bun:sqlite";
 function validateExport(parsed) {
@@ -13179,14 +13179,14 @@ async function handleImportCommand(args) {
       if (size2 > LARGE_FILE_BYTES) {
         console.error(`Warning: file is ${Math.round(size2 / 1024 / 1024)} MB \u2014 this may take a while.`);
       }
-      raw = readFileSync10(filePath, "utf8");
+      raw = readFileSync11(filePath, "utf8");
     } catch {
       console.error(`Cannot read file: ${filePath}`);
       process.exit(1);
     }
   } else {
     try {
-      raw = readFileSync10("/dev/stdin", "utf8");
+      raw = readFileSync11("/dev/stdin", "utf8");
     } catch {
       console.error("No file specified and stdin is not readable.");
       console.error("Usage: mcp-recall import <file.json> [--overwrite] [--dry-run]");
@@ -13559,6 +13559,7 @@ __export(exports_install, {
   SESSION_START_MARKER: () => SESSION_START_MARKER,
   POST_TOOL_USE_MATCHER: () => POST_TOOL_USE_MATCHER,
   POST_TOOL_USE_MARKER: () => POST_TOOL_USE_MARKER,
+  LEGACY_POST_TOOL_USE_MATCHER: () => LEGACY_POST_TOOL_USE_MATCHER,
   CLAUDE_MD_SNIPPET: () => CLAUDE_MD_SNIPPET,
   CLAUDE_MD_MARKER_START: () => CLAUDE_MD_MARKER_START,
   CLAUDE_MD_MARKER_END: () => CLAUDE_MD_MARKER_END,
@@ -13749,7 +13750,7 @@ function makePostToolUseEntry(cli) {
   };
 }
 function recallHooks(clis = []) {
-  const recogniser = (marker, matcher) => {
+  const recogniser = (marker, matchers) => {
     const hook = (h) => {
       const cmd = h?.["command"];
       if (typeof cmd !== "string")
@@ -13760,13 +13761,14 @@ function recallHooks(clis = []) {
       if (!e || typeof e !== "object")
         return false;
       const { matcher: m, hooks } = e;
-      return (matcher === undefined || m === matcher) && Array.isArray(hooks) && hooks.some(hook);
+      const matches = matchers === undefined || typeof m === "string" && matchers.includes(m);
+      return matches && Array.isArray(hooks) && hooks.some(hook);
     };
     return { entry, hook };
   };
   return {
     SessionStart: recogniser(SESSION_START_MARKER),
-    PostToolUse: recogniser(POST_TOOL_USE_MARKER, POST_TOOL_USE_MATCHER)
+    PostToolUse: recogniser(POST_TOOL_USE_MARKER, [POST_TOOL_USE_MATCHER, LEGACY_POST_TOOL_USE_MATCHER])
   };
 }
 function knownClis(launch, server) {
@@ -13804,10 +13806,12 @@ function upsertHook(entries, ours, fresh) {
       return [{ ...h, command }];
     return ours.hook(h) ? [] : [h];
   });
-  const changed = dupes.removed > 0 || hooks.length !== entry.hooks.length || entry.hooks[first].command !== command;
+  const matcher = fresh.matcher ?? entry.matcher;
+  const changed = dupes.removed > 0 || hooks.length !== entry.hooks.length || entry.hooks[first].command !== command || entry.matcher !== matcher;
   if (!changed)
     return { entries, result: "present" };
-  return { entries: [...entries.slice(0, idx), { ...entry, hooks }, ...dupes.entries], result: "updated" };
+  const updated = matcher === undefined ? { ...entry, hooks } : { ...entry, matcher, hooks };
+  return { entries: [...entries.slice(0, idx), updated, ...dupes.entries], result: "updated" };
 }
 function detectAgents(piDir) {
   return piDetected(piDir) ? ["claude", "pi"] : ["claude"];
@@ -14196,7 +14200,7 @@ When a tool output was compressed by mcp-recall (you'll see a \`[recall:recall_a
 Proactively:
 - \`recall__note("\u2026")\` \u2014 save important decisions or context worth keeping across sessions
 - \`recall__pin("recall_abc123")\` \u2014 protect frequently-needed items from expiry and eviction
-- \`recall__search("query")\` \u2014 find stored outputs by content when you don't have an ID`, CLAUDE_MD_BLOCK, SESSION_START_MARKER = "session-start", POST_TOOL_USE_MARKER = "post-tool-use", POST_TOOL_USE_MATCHER = "(mcp__(?!recall__).*|Bash)", AGENTS;
+- \`recall__search("query")\` \u2014 find stored outputs by content when you don't have an ID`, CLAUDE_MD_BLOCK, SESSION_START_MARKER = "session-start", POST_TOOL_USE_MARKER = "post-tool-use", POST_TOOL_USE_MATCHER = "mcp__.*|Bash", LEGACY_POST_TOOL_USE_MATCHER = "(mcp__(?!recall__).*|Bash)", AGENTS;
 var init_install = __esm(() => {
   init_pi();
   init_loader();
@@ -14221,7 +14225,7 @@ __export(exports_discover, {
 });
 import { Database as Database4 } from "bun:sqlite";
 import { existsSync as existsSync5, readdirSync as readdirSync5 } from "fs";
-import { join as join9 } from "path";
+import { join as join10 } from "path";
 function hasHandlerColumn(db) {
   const cols = db.prepare(`PRAGMA table_info(stored_outputs)`).all();
   return cols.some((c) => c.name === "handler");
@@ -14286,7 +14290,7 @@ function storeFiles(all, cwd = process.cwd()) {
   const dir = dataDir();
   if (!existsSync5(dir))
     return [];
-  return readdirSync5(dir).filter((n) => n.endsWith(".db")).map((n) => join9(dir, n));
+  return readdirSync5(dir).filter((n) => n.endsWith(".db")).map((n) => join10(dir, n));
 }
 function pct(part, whole) {
   return whole > 0 ? `${(part / whole * 100).toFixed(0)}%` : "\u2014";
@@ -14544,8 +14548,8 @@ init_handlers();
 init_types();
 init_generic();
 import { createHash as createHash3 } from "crypto";
-import { readFileSync as readFileSync3, statSync as statSync4 } from "fs";
-import { basename as basename2, dirname as dirname3, isAbsolute as isAbsolute2 } from "path";
+import { readFileSync as readFileSync4, statSync as statSync4 } from "fs";
+import { basename as basename3, dirname as dirname4, isAbsolute as isAbsolute3 } from "path";
 
 // src/hints.ts
 var DEFAULT_MAX_HINTS = 5;
@@ -14678,6 +14682,106 @@ function shouldRetainFullBody(level, toolName, command, summary = "") {
 init_bash();
 init_bash_shared();
 init_log();
+
+// src/hooks/grok.ts
+init_log();
+import { lstatSync, readFileSync as readFileSync3 } from "fs";
+import { homedir as homedir4 } from "os";
+import { basename as basename2, dirname as dirname3, isAbsolute as isAbsolute2, join as join5, normalize, sep } from "path";
+var MAX_SAVED_BYTES = 20 * 1024 * 1024;
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function isGrokMcp(value) {
+  if (!isRecord(value) || value["type"] !== "MCP")
+    return false;
+  const output = value["output"];
+  return typeof value["server_name"] === "string" && typeof value["tool_name"] === "string" && isRecord(output);
+}
+function isGrokShell(value) {
+  return isRecord(value) && value["type"] === "Bash" && "output" in value && "output_for_prompt" in value;
+}
+function grokHome() {
+  return process.env["GROK_HOME"] || join5(homedir4(), ".grok");
+}
+function readSaved(path, kind, ext) {
+  if (!isAbsolute2(path) || normalize(path) !== path)
+    return null;
+  const sessions = join5(grokHome(), "sessions") + sep;
+  if (!path.startsWith(sessions) || basename2(dirname3(path)) !== kind)
+    return null;
+  if (!new RegExp(`^call-[0-9a-f-]+-\\d+\\.${ext}$`).test(basename2(path)))
+    return null;
+  try {
+    const stat = lstatSync(path);
+    if (!stat.isFile() || stat.size > MAX_SAVED_BYTES)
+      return null;
+    return readFileSync3(path);
+  } catch (err) {
+    log.debug(`grok saved output unreadable \xB7 ${path} \xB7 ${String(err)}`);
+    return null;
+  }
+}
+var MCP_CUT_RE = /\n*\[MCP output truncated: [^\]\n]*?Full output written to: (\/[^\n]+?\.json)\.[^\n]*\]\s*$/;
+function mcpText(text) {
+  const match = text.match(MCP_CUT_RE);
+  if (!match)
+    return text;
+  const saved = readSaved(match[1], "mcp", "json");
+  if (!saved)
+    return null;
+  const kept = Buffer.from(text.slice(0, match.index), "utf8");
+  const head = kept.subarray(0, Math.max(0, kept.length - 3));
+  return saved.subarray(0, head.length).equals(head) ? saved.toString("utf8") : null;
+}
+function shellBytes(output) {
+  if (typeof output === "string")
+    return Buffer.from(output, "utf8");
+  if (Array.isArray(output) && output.every((b) => Number.isInteger(b) && b >= 0 && b <= 255)) {
+    return Buffer.from(output);
+  }
+  return null;
+}
+function shellText(result) {
+  if (result.truncated !== true)
+    return shellBytes(result.output)?.toString("utf8") ?? null;
+  const { output_file: path, total_bytes: total } = result;
+  if (typeof path !== "string" || typeof total !== "number")
+    return null;
+  const saved = readSaved(path, "terminal", "log");
+  return saved && saved.length === total ? saved.toString("utf8") : null;
+}
+function fromGrok(input) {
+  const response = input["tool_response"];
+  if (isGrokMcp(response)) {
+    const name = `mcp__${response.server_name}__${response.tool_name}`;
+    const ok = response.output["OkayOutput"];
+    if (typeof ok !== "string")
+      return null;
+    const text = mcpText(ok);
+    if (text === null) {
+      log.debug(`SKIP grok-cut-unverified \xB7 ${name}`);
+      return null;
+    }
+    return { ...input, tool_name: name, tool_response: [{ type: "text", text }] };
+  }
+  if (isGrokShell(response)) {
+    const stdout = shellText(response);
+    if (stdout === null) {
+      log.debug("SKIP grok-cut-unverified \xB7 Bash");
+      return null;
+    }
+    const exit = typeof response.exit_code === "number" ? response.exit_code : null;
+    return {
+      ...input,
+      tool_name: "Bash",
+      tool_response: { stdout, stderr: "", interrupted: false, ...exit === null ? {} : { exit_code: exit } }
+    };
+  }
+  return;
+}
+
+// src/hooks/post-tool-use.ts
 function asBashResponse(toolResponse) {
   let value = toolResponse;
   if (typeof value === "string") {
@@ -14698,13 +14802,13 @@ function withPersistedOutput(toolResponse) {
   const size2 = bash?.persistedOutputSize;
   if (!bash || typeof path !== "string" || typeof size2 !== "number")
     return toolResponse;
-  if (!isAbsolute2(path) || basename2(dirname3(path)) !== "tool-results" || size2 > MAX_PERSISTED_BYTES) {
+  if (!isAbsolute3(path) || basename3(dirname4(path)) !== "tool-results" || size2 > MAX_PERSISTED_BYTES) {
     return toolResponse;
   }
   try {
     if (statSync4(path).size !== size2)
       return toolResponse;
-    return { ...bash, stdout: readFileSync3(path, "utf8"), stderr: "" };
+    return { ...bash, stdout: readFileSync4(path, "utf8"), stderr: "" };
   } catch (err) {
     log.debug(`persisted output unreadable \xB7 ${path} \xB7 ${String(err)}`);
     return toolResponse;
@@ -14727,12 +14831,12 @@ function withSavedMcpResult(toolResponse) {
   const chars = count(match[1]);
   const lines = match[2] === undefined ? null : count(match[2]);
   const path = match[3];
-  if (!isAbsolute2(path) || basename2(dirname3(path)) !== "tool-results")
+  if (!isAbsolute3(path) || basename3(dirname4(path)) !== "tool-results")
     return null;
   try {
     if (statSync4(path).size > MAX_PERSISTED_BYTES)
       return null;
-    const saved = readFileSync3(path, "utf8");
+    const saved = readFileSync4(path, "utf8");
     if (saved.length !== chars || lines !== null && !hasLines(saved, lines))
       return null;
     if (typeof toolResponse === "string")
@@ -14767,8 +14871,12 @@ function handlePostToolUse(raw) {
     log.error("post-tool-use received unexpected input shape \u2014 skipping");
     return {};
   }
-  const input = parsed;
+  const grok = fromGrok(parsed);
+  if (grok === null)
+    return {};
+  const input = grok ?? parsed;
   const { tool_name, tool_input, tool_response, cwd, session_id } = input;
+  const replyShape = grok ? undefined : tool_response;
   const config2 = loadConfig();
   let response = tool_name === "Bash" ? withPersistedOutput(tool_response) : tool_response;
   if (isDenied(tool_name, config2)) {
@@ -14813,7 +14921,7 @@ ${cached4.summary}`;
       return {};
     }
     log.debug(`CACHE HIT \xB7 ${tool_name} \xB7 id=${cached4.id} \xB7 cached ${cachedDate}`);
-    return replaceOutput(text, tool_response);
+    return replaceOutput(text, replyShape);
   };
   const cached3 = checkOutputDedup(db, projectKey, output_hash, tool_name, command_fp);
   if (cached3)
@@ -14854,7 +14962,7 @@ ${cached4.summary}`;
   evictIfNeeded(db, projectKey, config2.store.max_size_mb, config2.store.eviction_half_life_days);
   log.debug(`STORED \xB7 ${tool_name} \xB7 id=${stored.id} \xB7 ${formatBytes(originalSize)}\u2192${formatBytes(summarySize)} (${reductionPercent(summarySize, originalSize)}% reduction)`);
   return replaceOutput(`${recallHeader(stored.id, originalSize, summarySize, hints)}
-${summary}`, tool_response);
+${summary}`, replyShape);
 }
 function reductionPercent(summarySize, originalSize) {
   return ((1 - summarySize / originalSize) * 100).toFixed(0);
@@ -14875,7 +14983,7 @@ function deliveredBytes(summary, originalSize, hints) {
 
 // src/cli.ts
 init_log();
-import { join as join10 } from "path";
+import { join as join11 } from "path";
 async function getVersion() {
   const pkg = await Promise.resolve().then(() => __toESM(require_package(), 1));
   return pkg.version;
@@ -15213,7 +15321,7 @@ async function main() {
     process.exit(0);
   }
   if (subcommand === "serve") {
-    await import(join10(import.meta.dir, import.meta.path.endsWith(".js") ? "server.js" : "server.ts"));
+    await import(join11(import.meta.dir, import.meta.path.endsWith(".js") ? "server.js" : "server.ts"));
     return;
   }
   if (subcommand === "gc") {

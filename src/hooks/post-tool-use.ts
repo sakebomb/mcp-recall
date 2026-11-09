@@ -15,6 +15,7 @@ import { bashFingerprint, isContentRead, READ_PASSTHROUGH_MAX_BYTES } from "../h
 import { bashOutputText } from "../handlers/bash-shared";
 import { formatBytes } from "../format";
 import { log } from "../log";
+import { fromGrok } from "./grok";
 
 interface PostToolUseInput {
   session_id: string;
@@ -157,8 +158,13 @@ export function handlePostToolUse(raw: string): HookOutput {
     log.error("post-tool-use received unexpected input shape — skipping");
     return {};
   }
-  const input = parsed as PostToolUseInput;
+  // grok's names and result shape, converted before the denylist sees the name (#459).
+  const grok = fromGrok(parsed as Record<string, unknown>);
+  if (grok === null) return {};
+  const input = (grok ?? parsed) as PostToolUseInput;
   const { tool_name, tool_input, tool_response, cwd, session_id } = input;
+  // The shape the replacement must take: grok takes a plain string for every tool.
+  const replyShape = grok ? undefined : tool_response;
   const config = loadConfig();
   // The whole output, not the cut Claude Code hands over above ~50 KB (#316).
   let response = tool_name === "Bash" ? withPersistedOutput(tool_response) : tool_response;
@@ -245,7 +251,7 @@ export function handlePostToolUse(raw: string): HookOutput {
       return {};
     }
     log.debug(`CACHE HIT · ${tool_name} · id=${cached.id} · cached ${cachedDate}`);
-    return replaceOutput(text, tool_response);
+    return replaceOutput(text, replyShape);
   };
 
   const cached = checkOutputDedup(db, projectKey, output_hash, tool_name, command_fp);
@@ -305,7 +311,7 @@ export function handlePostToolUse(raw: string): HookOutput {
 
   // 10. Return compressed output to Claude
   log.debug(`STORED · ${tool_name} · id=${stored.id} · ${formatBytes(originalSize)}→${formatBytes(summarySize)} (${reductionPercent(summarySize, originalSize)}% reduction)`);
-  return replaceOutput(`${recallHeader(stored.id, originalSize, summarySize, hints)}\n${summary}`, tool_response);
+  return replaceOutput(`${recallHeader(stored.id, originalSize, summarySize, hints)}\n${summary}`, replyShape);
 }
 
 function reductionPercent(summarySize: number, originalSize: number): string {

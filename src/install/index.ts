@@ -284,7 +284,14 @@ export async function removeClaudeMd(filePath: string): Promise<boolean> {
 
 export const SESSION_START_MARKER = "session-start";
 export const POST_TOOL_USE_MARKER = "post-tool-use";
-export const POST_TOOL_USE_MATCHER = "(mcp__(?!recall__).*|Bash)";
+/**
+ * No look-around: grok compiles matchers with Rust's regex crate, which rejects
+ * it, so the old matcher left grok without this hook (#459). The hook itself
+ * skips recall's own tools (the denylist holds mcp__recall__*).
+ */
+export const POST_TOOL_USE_MATCHER = "mcp__.*|Bash";
+/** The matcher before #459; install rewrites an entry that still has it. */
+export const LEGACY_POST_TOOL_USE_MATCHER = "(mcp__(?!recall__).*|Bash)";
 
 /** Shape of a single hook entry in Claude Code's settings.json hooks array. */
 interface HookEntry {
@@ -321,7 +328,7 @@ export interface OurHooks {
  * which covers a binary whose path has no "recall" in it (#366).
  */
 export function recallHooks(clis: readonly string[] = []): { SessionStart: OurHooks; PostToolUse: OurHooks } {
-  const recogniser = (marker: string, matcher?: string): OurHooks => {
+  const recogniser = (marker: string, matchers?: readonly string[]): OurHooks => {
     const hook = (h: unknown) => {
       const cmd = (h as Record<string, unknown> | null)?.["command"];
       if (typeof cmd !== "string") return false;
@@ -330,13 +337,14 @@ export function recallHooks(clis: readonly string[] = []): { SessionStart: OurHo
     const entry = (e: unknown) => {
       if (!e || typeof e !== "object") return false;
       const { matcher: m, hooks } = e as Record<string, unknown>;
-      return (matcher === undefined || m === matcher) && Array.isArray(hooks) && hooks.some(hook);
+      const matches = matchers === undefined || (typeof m === "string" && matchers.includes(m));
+      return matches && Array.isArray(hooks) && hooks.some(hook);
     };
     return { entry, hook };
   };
   return {
     SessionStart: recogniser(SESSION_START_MARKER),
-    PostToolUse: recogniser(POST_TOOL_USE_MARKER, POST_TOOL_USE_MATCHER),
+    PostToolUse: recogniser(POST_TOOL_USE_MARKER, [POST_TOOL_USE_MATCHER, LEGACY_POST_TOOL_USE_MATCHER]),
   };
 }
 
@@ -379,7 +387,8 @@ export function removeOurHooks(entries: unknown[], ours: OurHooks): { entries: u
  * Adds `fresh` to `entries`, or points recall's existing hook at fresh's command.
  * An update changes that hook's `command` and nothing else: a timeout the user
  * raised, and other hooks they grouped into the same entry, stay (#365).
- * Duplicates of recall's hook after the first are removed (#366).
+ * Duplicates of recall's hook after the first are removed (#366). An entry
+ * with an older matcher of recall's gets fresh's (#459).
  */
 export function upsertHook(
   entries: unknown[],
@@ -396,9 +405,12 @@ export function upsertHook(
     if (i === first) return [{ ...h, command }];
     return ours.hook(h) ? [] : [h]; // a second copy inside the same entry
   });
-  const changed = dupes.removed > 0 || hooks.length !== entry.hooks.length || entry.hooks[first]!.command !== command;
+  const matcher = fresh.matcher ?? entry.matcher;
+  const changed = dupes.removed > 0 || hooks.length !== entry.hooks.length ||
+    entry.hooks[first]!.command !== command || entry.matcher !== matcher;
   if (!changed) return { entries, result: "present" };
-  return { entries: [...entries.slice(0, idx), { ...entry, hooks }, ...dupes.entries], result: "updated" };
+  const updated = matcher === undefined ? { ...entry, hooks } : { ...entry, matcher, hooks };
+  return { entries: [...entries.slice(0, idx), updated, ...dupes.entries], result: "updated" };
 }
 
 // ── install ───────────────────────────────────────────────────────────────────
