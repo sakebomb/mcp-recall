@@ -13272,6 +13272,237 @@ var init_import = __esm(() => {
   });
 });
 
+// src/agents/pi-extension.ts
+var pi_extension_default = `/**
+ * mcp-recall for pi (https://pi.dev) \u2014 installed by \`mcp-recall install\` (#458).
+ *
+ * pi loads this file from ~/.pi/agent/extensions/mcp-recall/index.ts. It is the
+ * pi side of what Claude Code's hooks do: each MCP or bash result goes through
+ * mcp-recall's own \`post-tool-use\` hook, unchanged, and the summary it returns
+ * replaces the result before the model sees it. The extension adds no logic of
+ * its own; it translates pi's event into the hook's input and back.
+ *
+ * Self-contained by design: it imports only node builtins, because it runs
+ * inside pi, and mcp-recall may be a standalone binary with no JS to import.
+ * \`launch.json\` beside it says how to run mcp-recall; \`mcp-recall install\`
+ * writes both files, and re-running it after an update refreshes them.
+ */
+import { spawn } from "node:child_process";
+import { readFileSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+
+export interface Launch {
+  /** argv that runs the mcp-recall CLI, e.g. ["bun", "/\u2026/dist/cli.js"] or ["/\u2026/mcp-recall"]. */
+  cli: string[];
+  /** The MCP server, in pi's mcp.json shape. */
+  server: { command: string; args: string[] };
+}
+
+interface TextBlock { type: "text"; text: string }
+
+/** The fields of pi's \`tool_result\` event this extension reads. */
+export interface PiToolResult {
+  toolName: string;
+  input?: unknown;
+  content?: Array<{ type: string; text?: string }>;
+  details?: { fullOutputPath?: unknown } | null;
+  isError?: boolean;
+}
+
+/** Claude Code's hook timeout for mcp-recall's own hooks, in ms. */
+const HOOK_TIMEOUT_MS = 10_000;
+/** The hook reads back at most this much of a saved full output, as it does for Claude Code. */
+const MAX_FULL_OUTPUT_BYTES = 20 * 1024 * 1024;
+/** pi's own names for the files it saves a cut result to. */
+const PI_FULL_OUTPUT = /^pi-(mcp|bash)-[0-9a-f]+\\.(txt|log)$/;
+
+/** Results mcp-recall handles: MCP tools other than its own, and bash. */
+export function isHandled(toolName: string): boolean {
+  return toolName === "bash" || (toolName.startsWith("mcp__") && !toolName.startsWith("mcp__recall__"));
+}
+
+/**
+ * The whole output of a result. pi cuts a large result before extensions see
+ * it (MCP to ~20 KB, bash to its last 2,000 lines) and saves the whole output
+ * to a file named in \`details.fullOutputPath\`. Read it back only when it is
+ * plainly pi's file: absolute, directly in the OS temp dir, named as pi names
+ * them, and not huge. Anything else keeps the text pi delivered.
+ */
+export function fullOutputText(event: PiToolResult, tmp = tmpdir()): string {
+  const delivered = (event.content ?? []).map((c) => c.text ?? "").join("\\n");
+  const p = event.details?.fullOutputPath;
+  if (typeof p !== "string" || !isAbsolute(p)) return delivered;
+  if (resolve(dirname(p)) !== resolve(tmp) || !PI_FULL_OUTPUT.test(basename(p))) return delivered;
+  try {
+    if (statSync(p).size > MAX_FULL_OUTPUT_BYTES) return delivered;
+    return readFileSync(p, "utf8");
+  } catch {
+    return delivered;
+  }
+}
+
+/**
+ * The PostToolUse input Claude Code would send for this result, or null when
+ * mcp-recall should leave it alone: another tool, an error (Claude Code runs
+ * PostToolUse only on success), or a result carrying an image or other
+ * non-text block (the hook passes those through anyway).
+ */
+export function toHookInput(event: PiToolResult, sessionId: string, cwd: string): Record<string, unknown> | null {
+  if (!isHandled(event.toolName) || event.isError) return null;
+  if ((event.content ?? []).some((c) => c.type !== "text")) return null;
+  const text = fullOutputText(event);
+  const bash = event.toolName === "bash";
+  return {
+    session_id: sessionId,
+    cwd,
+    hook_event_name: "PostToolUse",
+    tool_name: bash ? "Bash" : event.toolName,
+    tool_input: event.input ?? {},
+    tool_response: bash ? { stdout: text, stderr: "", interrupted: false } : [{ type: "text", text }],
+  };
+}
+
+/** The content to deliver from the hook's stdout, or null to keep pi's result. */
+export function fromHookOutput(stdout: string): TextBlock[] | null {
+  let out: unknown;
+  try {
+    out = JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+  const updated = (out as { hookSpecificOutput?: { updatedToolOutput?: unknown } } | null)
+    ?.hookSpecificOutput?.updatedToolOutput;
+  if (typeof updated === "string") return [{ type: "text", text: updated }];
+  const stdoutField = (updated as { stdout?: unknown } | null | undefined)?.stdout;
+  if (typeof stdoutField === "string") return [{ type: "text", text: stdoutField }];
+  return null;
+}
+
+/** Runs one mcp-recall hook with \`input\` on stdin; resolves to its stdout, "" on any failure. */
+export function runHook(cli: string[], hook: string, input: unknown, signal?: AbortSignal): Promise<string> {
+  return new Promise((done) => {
+    const [program, ...args] = cli;
+    if (!program) return done("");
+    let stdout = "";
+    const child = spawn(program, [...args, hook], { stdio: ["pipe", "pipe", "ignore"], signal });
+    const timer = setTimeout(() => child.kill(), HOOK_TIMEOUT_MS);
+    child.stdout.on("data", (d) => { stdout += d; });
+    child.on("error", () => { clearTimeout(timer); done(""); });
+    child.on("close", () => { clearTimeout(timer); done(stdout); });
+    child.stdin.on("error", () => {});
+    child.stdin.end(JSON.stringify(input));
+  });
+}
+
+/** launch.json from the directory this file was installed to. */
+export function readLaunch(dir: string): Launch | null {
+  try {
+    const launch = JSON.parse(readFileSync(join(dir, "launch.json"), "utf8")) as Launch;
+    return Array.isArray(launch.cli) && typeof launch.server?.command === "string" ? launch : null;
+  } catch {
+    return null;
+  }
+}
+
+interface PiContext {
+  cwd: string;
+  signal?: AbortSignal;
+  sessionManager: { getSessionId(): string };
+}
+
+interface PiApi {
+  on(event: "session_start", handler: (event: unknown, ctx: PiContext) => unknown): void;
+  on(event: "tool_result", handler: (event: PiToolResult, ctx: PiContext) => unknown): void;
+  registerMcpServer(name: string, config: Record<string, unknown>): void;
+}
+
+export default function mcpRecall(pi: PiApi, launch = readLaunch(import.meta.dirname ?? dirname(new URL(import.meta.url).pathname))): void {
+  if (!launch) return; // no launch.json: re-run \`mcp-recall install\`
+  pi.registerMcpServer("recall", { ...launch.server, exposure: "direct" });
+
+  pi.on("session_start", async (_event, ctx) => {
+    await runHook(launch.cli, "session-start", {
+      session_id: ctx.sessionManager.getSessionId(),
+      cwd: ctx.cwd,
+      hook_event_name: "SessionStart",
+    });
+  });
+
+  pi.on("tool_result", async (event, ctx) => {
+    const input = toHookInput(event, ctx.sessionManager.getSessionId(), ctx.cwd);
+    if (!input) return undefined;
+    const content = fromHookOutput(await runHook(launch.cli, "post-tool-use", input, ctx.signal));
+    return content ? { content } : undefined;
+  });
+}
+`;
+var init_pi_extension = () => {};
+
+// src/agents/pi.ts
+import { existsSync as existsSync3 } from "fs";
+import { mkdir, readFile, rm, writeFile } from "fs/promises";
+import os from "os";
+import path from "path";
+function defaultPiDir() {
+  return process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
+}
+function piDetected(piDir) {
+  return existsSync3(piDir);
+}
+function piExtensionDir(piDir) {
+  return path.join(piDir, "extensions", "mcp-recall");
+}
+function piLaunch(cliWords, server) {
+  return { cli: cliWords, server: { command: server.command, args: server.args } };
+}
+async function readText(p) {
+  try {
+    return await readFile(p, "utf8");
+  } catch {
+    return null;
+  }
+}
+async function installPi(piDir, launch, dryRun = false) {
+  const dir = piExtensionDir(piDir);
+  const indexPath = path.join(dir, "index.ts");
+  const launchPath = path.join(dir, "launch.json");
+  const launchJson = JSON.stringify(launch, null, 2) + `
+`;
+  const [oldIndex, oldLaunch] = await Promise.all([readText(indexPath), readText(launchPath)]);
+  if (oldIndex === PI_EXTENSION_SOURCE && oldLaunch === launchJson)
+    return "present";
+  if (!dryRun) {
+    await mkdir(dir, { recursive: true });
+    await writeFile(indexPath, PI_EXTENSION_SOURCE);
+    await writeFile(launchPath, launchJson);
+  }
+  return oldIndex === null && oldLaunch === null ? "added" : "updated";
+}
+async function uninstallPi(piDir) {
+  const dir = piExtensionDir(piDir);
+  if (!existsSync3(dir))
+    return false;
+  await rm(dir, { recursive: true, force: true });
+  return true;
+}
+async function piStatus(piDir) {
+  const dir = piExtensionDir(piDir);
+  const index = await readText(path.join(dir, "index.ts"));
+  let launch = null;
+  try {
+    const parsed = JSON.parse(await readText(path.join(dir, "launch.json")) ?? "");
+    if (Array.isArray(parsed.cli) && typeof parsed.server?.command === "string")
+      launch = parsed;
+  } catch {}
+  return { extension: index !== null, launch, stale: index !== null && index !== PI_EXTENSION_SOURCE };
+}
+var PI_EXTENSION_SOURCE;
+var init_pi = __esm(() => {
+  init_pi_extension();
+  PI_EXTENSION_SOURCE = pi_extension_default;
+});
+
 // src/install/index.ts
 var exports_install = {};
 __export(exports_install, {
@@ -13286,6 +13517,7 @@ __export(exports_install, {
   registeredFiles: () => registeredFiles,
   recallHooks: () => recallHooks,
   readJsonFile: () => readJsonFile,
+  parseAgents: () => parseAgents,
   makeSessionStartEntry: () => makeSessionStartEntry,
   makePostToolUseEntry: () => makePostToolUseEntry,
   isStandaloneBinary: () => isStandaloneBinary,
@@ -13296,6 +13528,7 @@ __export(exports_install, {
   installCommand: () => installCommand,
   injectClaudeMd: () => injectClaudeMd,
   detectLaunch: () => detectLaunch,
+  detectAgents: () => detectAgents,
   defaultSettingsPath: () => defaultSettingsPath,
   defaultClaudeMdPath: () => defaultClaudeMdPath,
   defaultClaudeJsonPath: () => defaultClaudeJsonPath,
@@ -13305,23 +13538,24 @@ __export(exports_install, {
   CLAUDE_MD_SNIPPET: () => CLAUDE_MD_SNIPPET,
   CLAUDE_MD_MARKER_START: () => CLAUDE_MD_MARKER_START,
   CLAUDE_MD_MARKER_END: () => CLAUDE_MD_MARKER_END,
-  CLAUDE_MD_BLOCK: () => CLAUDE_MD_BLOCK
+  CLAUDE_MD_BLOCK: () => CLAUDE_MD_BLOCK,
+  AGENTS: () => AGENTS
 });
-import { existsSync as existsSync3 } from "fs";
-import { mkdir, rename, readFile, realpath, readlink, stat, chmod, rm, writeFile } from "fs/promises";
-import path from "path";
-import os from "os";
+import { existsSync as existsSync4 } from "fs";
+import { mkdir as mkdir2, rename, readFile as readFile2, realpath, readlink, stat, chmod, rm as rm2, writeFile as writeFile2 } from "fs/promises";
+import path2 from "path";
+import os2 from "os";
 function isEnoent(e) {
   return typeof e === "object" && e !== null && e.code === "ENOENT";
 }
 function defaultClaudeJsonPath() {
-  return path.join(os.homedir(), ".claude.json");
+  return path2.join(os2.homedir(), ".claude.json");
 }
 function defaultSettingsPath() {
-  return path.join(os.homedir(), ".claude", "settings.json");
+  return path2.join(os2.homedir(), ".claude", "settings.json");
 }
 function defaultClaudeMdPath() {
-  return path.join(os.homedir(), ".claude", "CLAUDE.md");
+  return path2.join(os2.homedir(), ".claude", "CLAUDE.md");
 }
 function isBunfsPath(modulePath) {
   return /^(\/\$bunfs\/|[A-Za-z]:[\\/]~BUN[\\/])/.test(modulePath);
@@ -13372,9 +13606,9 @@ function detectLaunch(standalone = isStandaloneBinary()) {
     };
   }
   const isBuilt = import.meta.path.endsWith(".js");
-  const distDir = isBuilt ? import.meta.dir : path.resolve(import.meta.dir, "../../plugins/mcp-recall/dist");
-  const serverJs = path.join(distDir, "server.js");
-  const cliJs = path.join(distDir, "cli.js");
+  const distDir = isBuilt ? import.meta.dir : path2.resolve(import.meta.dir, "../../plugins/mcp-recall/dist");
+  const serverJs = path2.join(distDir, "server.js");
+  const cliJs = path2.join(distDir, "cli.js");
   return {
     cli: `bun ${shellWord(cliJs)}`,
     server: { type: "stdio", command: "bun", args: [serverJs] },
@@ -13383,7 +13617,7 @@ function detectLaunch(standalone = isStandaloneBinary()) {
 }
 async function readJsonFile(filePath) {
   try {
-    const content = await readFile(filePath, "utf8");
+    const content = await readFile2(filePath, "utf8");
     return JSON.parse(content);
   } catch (e) {
     if (e instanceof Error && e.code === "ENOENT")
@@ -13405,7 +13639,7 @@ async function writeTarget(filePath) {
   let target = filePath;
   for (let hop = 0;hop < MAX_LINK_HOPS; hop++) {
     try {
-      target = path.resolve(path.dirname(target), await readlink(target));
+      target = path2.resolve(path2.dirname(target), await readlink(target));
     } catch {
       return target;
     }
@@ -13414,13 +13648,13 @@ async function writeTarget(filePath) {
 }
 async function writeTextFile(filePath, content) {
   const target = await writeTarget(filePath);
-  await mkdir(path.dirname(target), { recursive: true });
+  await mkdir2(path2.dirname(target), { recursive: true });
   const mode = await stat(target).then((s) => s.mode & 4095, () => {
     return;
   });
   const tmp = target + ".tmp";
-  await rm(tmp, { force: true });
-  await writeFile(tmp, content, mode === undefined ? undefined : { mode });
+  await rm2(tmp, { force: true });
+  await writeFile2(tmp, content, mode === undefined ? undefined : { mode });
   if (mode !== undefined)
     await chmod(tmp, mode);
   await rename(tmp, target);
@@ -13431,7 +13665,7 @@ function isClaudeMdInjected(content) {
 async function injectClaudeMd(filePath, dryRun = false) {
   let existing = "";
   try {
-    existing = await readFile(filePath, "utf8");
+    existing = await readFile2(filePath, "utf8");
   } catch (e) {
     if (!isEnoent(e))
       throw e;
@@ -13461,7 +13695,7 @@ async function injectClaudeMd(filePath, dryRun = false) {
 async function removeClaudeMd(filePath) {
   let existing = "";
   try {
-    existing = await readFile(filePath, "utf8");
+    existing = await readFile2(filePath, "utf8");
   } catch (e) {
     if (isEnoent(e))
       return false;
@@ -13551,15 +13785,38 @@ function upsertHook(entries, ours, fresh) {
     return { entries, result: "present" };
   return { entries: [...entries.slice(0, idx), { ...entry, hooks }, ...dupes.entries], result: "updated" };
 }
+function detectAgents(piDir) {
+  return piDetected(piDir) ? ["claude", "pi"] : ["claude"];
+}
+function parseAgents(argv) {
+  const names = [];
+  argv.forEach((arg, i) => {
+    if (arg === "--agent")
+      names.push(...(argv[i + 1] ?? "").split(","));
+    else if (arg.startsWith("--agent="))
+      names.push(...arg.slice("--agent=".length).split(","));
+  });
+  if (names.length === 0)
+    return;
+  const wanted = names.map((n) => n.trim()).filter(Boolean);
+  if (wanted.length === 0 || wanted.some((n) => !AGENTS.includes(n)))
+    return null;
+  return [...new Set(wanted)];
+}
+function piLaunchOf(launch) {
+  return piLaunch(shellWords(launch.cli), launch.server);
+}
 async function installCommand(opts = {}) {
   const {
     dryRun = false,
     claudeJsonPath = defaultClaudeJsonPath(),
     settingsPath = defaultSettingsPath(),
     claudeMdPath = defaultClaudeMdPath(),
-    launch = detectLaunch()
+    launch = detectLaunch(),
+    piDir = defaultPiDir()
   } = opts;
-  const missing = launch.artifacts.find((a) => !existsSync3(a.path));
+  const agents = opts.agents ?? detectAgents(piDir);
+  const missing = launch.artifacts.find((a) => !existsSync4(a.path));
   if (missing) {
     console.error(`${RED}\u2717 Build artifacts not found.${RESET}`);
     console.error(`  Expected: ${DIM}${missing.path}${RESET}`);
@@ -13570,6 +13827,42 @@ async function installCommand(opts = {}) {
     console.log(`${DIM}dry run \u2014 no files will be modified${RESET}
 `);
   }
+  let anyChange = false;
+  if (agents.includes("claude")) {
+    anyChange = await installClaude(claudeJsonPath, settingsPath, claudeMdPath, launch, dryRun) || anyChange;
+  }
+  if (agents.includes("pi")) {
+    if (agents.includes("claude"))
+      console.log("");
+    const dir = piExtensionDir(piDir);
+    const result = await installPi(piDir, piLaunchOf(launch), dryRun);
+    if (result === "added") {
+      console.log(`${GREEN}\u2713${RESET} pi extension added        ${DIM}(${dir})${RESET}`);
+    } else if (result === "updated") {
+      console.log(`${YELLOW}\u21BA${RESET} pi extension updated      ${DIM}(${dir})${RESET}`);
+    } else {
+      console.log(`${DIM}\u2139 pi extension already installed${RESET}`);
+    }
+    if (result !== "present") {
+      anyChange = true;
+      if (!dryRun)
+        console.log(`
+Restart pi (or run /reload) to activate mcp-recall.`);
+    }
+  }
+  if (anyChange && !dryRun) {
+    console.log(`
+Next steps:`);
+    console.log(`  Install compression profiles for your MCPs:`);
+    console.log(`    ${BOLD}mcp-recall profiles seed${RESET}`);
+    console.log(`
+  Optional \u2014 enable shell completions:`);
+    console.log(`    ${BOLD}mcp-recall completions zsh > ~/.zfunc/_mcp-recall${RESET}   ${DIM}# zsh${RESET}`);
+    console.log(`    ${BOLD}mcp-recall completions bash >> ~/.bash_completion${RESET}    ${DIM}# bash${RESET}`);
+    console.log(`    ${BOLD}mcp-recall completions fish > ~/.config/fish/completions/mcp-recall.fish${RESET}  ${DIM}# fish${RESET}`);
+  }
+}
+async function installClaude(claudeJsonPath, settingsPath, claudeMdPath, launch, dryRun) {
   let anyChange = false;
   const claudeJson = await readJsonFile(claudeJsonPath);
   const mcpServers = claudeJson["mcpServers"] ?? {};
@@ -13636,24 +13929,33 @@ async function installCommand(opts = {}) {
   if (anyChange && !dryRun) {
     console.log(`
 Restart Claude Code to activate mcp-recall.`);
-    console.log(`
-Next steps:`);
-    console.log(`  Install compression profiles for your MCPs:`);
-    console.log(`    ${BOLD}mcp-recall profiles seed${RESET}`);
-    console.log(`
-  Optional \u2014 enable shell completions:`);
-    console.log(`    ${BOLD}mcp-recall completions zsh > ~/.zfunc/_mcp-recall${RESET}   ${DIM}# zsh${RESET}`);
-    console.log(`    ${BOLD}mcp-recall completions bash >> ~/.bash_completion${RESET}    ${DIM}# bash${RESET}`);
-    console.log(`    ${BOLD}mcp-recall completions fish > ~/.config/fish/completions/mcp-recall.fish${RESET}  ${DIM}# fish${RESET}`);
   }
+  return anyChange;
 }
 async function uninstallCommand(opts = {}) {
   const {
     claudeJsonPath = defaultClaudeJsonPath(),
     settingsPath = defaultSettingsPath(),
     claudeMdPath = defaultClaudeMdPath(),
-    launch = detectLaunch()
+    launch = detectLaunch(),
+    piDir = defaultPiDir(),
+    agents = [...AGENTS]
   } = opts;
+  if (agents.includes("claude"))
+    await uninstallClaude(claudeJsonPath, settingsPath, claudeMdPath, launch);
+  if (agents.includes("pi")) {
+    if (agents.includes("claude"))
+      console.log("");
+    if (await uninstallPi(piDir)) {
+      console.log(`${GREEN}\u2713${RESET} Removed pi extension        ${DIM}(${piExtensionDir(piDir)})${RESET}`);
+      console.log(`
+Restart pi (or run /reload) to deactivate mcp-recall.`);
+    } else {
+      console.log(`${DIM}\u2139 pi extension not present${RESET}`);
+    }
+  }
+}
+async function uninstallClaude(claudeJsonPath, settingsPath, claudeMdPath, launch) {
   let anyChange = false;
   const claudeJson = await readJsonFile(claudeJsonPath);
   const mcpServers = claudeJson["mcpServers"];
@@ -13714,8 +14016,8 @@ function describeLaunch(command) {
   return typeof command === "string" && !isBunProgram(command) ? `the binary at ${command}` : "the npm install";
 }
 function locate(program) {
-  if (path.isAbsolute(program) || path.win32.isAbsolute(program)) {
-    return { path: program, exists: existsSync3(program) };
+  if (path2.isAbsolute(program) || path2.win32.isAbsolute(program)) {
+    return { path: program, exists: existsSync4(program) };
   }
   const found = Bun.which(program);
   return { path: found ?? program, exists: found !== null };
@@ -13732,12 +14034,37 @@ function registeredFiles(launches) {
     if (isBunProgram(program)) {
       add("bun", program);
       if (script)
-        add(path.basename(script), script);
+        add(path2.basename(script), script);
     } else {
       add("binary", program);
     }
   }
   return [...files.values()];
+}
+async function printPiStatus(piDir, launch) {
+  const st = await piStatus(piDir);
+  if (!piDetected(piDir) && !st.extension)
+    return;
+  const tick = (ok2) => ok2 ? `${GREEN}\u2713${RESET}` : `${RED}\u2717${RESET}`;
+  const files = st.launch ? registeredFiles([st.launch.cli, [st.launch.server.command, ...st.launch.server.args]]) : [];
+  const ok = st.extension && st.launch !== null && !st.stale && files.every((f) => f.exists);
+  const label = ok ? `${GREEN}installed${RESET}` : st.extension ? `${YELLOW}partial / stale${RESET}` : `${RED}not installed${RESET}`;
+  const shown = piExtensionDir(piDir).replace(os2.homedir(), "~");
+  console.log(`
+pi: ${BOLD}${label}${RESET}
+`);
+  console.log(`  ${shown}`);
+  console.log(`    ${tick(st.extension && !st.stale)} extension${st.stale ? " (from another version)" : ""}`);
+  console.log(`    ${tick(st.launch !== null)} launch.json`);
+  for (const f of files)
+    console.log(`    ${tick(f.exists)} ${f.label} ${DIM}${f.path}${RESET}`);
+  if (st.launch && JSON.stringify(st.launch) !== JSON.stringify(piLaunchOf(launch))) {
+    console.log(`
+  The extension runs another install of mcp-recall than this one.`);
+  }
+  if (!ok)
+    console.log(`
+  Run ${BOLD}mcp-recall install${RESET}`);
 }
 function ourHookCommands(entries, ours) {
   return (entries ?? []).filter(ours.entry).flatMap((e) => e.hooks.filter(ours.hook).map((h) => h.command));
@@ -13747,7 +14074,8 @@ async function statusCommand(opts = {}) {
     claudeJsonPath = defaultClaudeJsonPath(),
     settingsPath = defaultSettingsPath(),
     claudeMdPath = defaultClaudeMdPath(),
-    launch = detectLaunch()
+    launch = detectLaunch(),
+    piDir = defaultPiDir()
   } = opts;
   function tick(ok) {
     return ok ? `${GREEN}\u2713${RESET}` : `${RED}\u2717${RESET}`;
@@ -13766,7 +14094,7 @@ async function statusCommand(opts = {}) {
   const ptuRegistered = (hooks["PostToolUse"] ?? []).some(ours.PostToolUse.entry);
   let claudeMdContent = "";
   try {
-    claudeMdContent = await readFile(claudeMdPath, "utf8");
+    claudeMdContent = await readFile2(claudeMdPath, "utf8");
   } catch {}
   const claudeMdOk = isClaudeMdInjected(claudeMdContent);
   const serverWords = typeof server?.["command"] === "string" ? [[server["command"], ...Array.isArray(server["args"]) ? server["args"].map(String) : []]] : [];
@@ -13809,6 +14137,7 @@ Installation: ${BOLD}${label}${RESET}
       console.log(`  Or add instructions manually: see ${BOLD}https://github.com/sakebomb/mcp-recall/blob/main/docs/install.md#claude-instructions${RESET}`);
     }
   }
+  await printPiStatus(piDir, launch);
   console.log("");
   const profiles = loadProfiles();
   if (profiles.length === 0) {
@@ -13842,14 +14171,16 @@ When a tool output was compressed by mcp-recall (you'll see a \`[recall:recall_a
 Proactively:
 - \`recall__note("\u2026")\` \u2014 save important decisions or context worth keeping across sessions
 - \`recall__pin("recall_abc123")\` \u2014 protect frequently-needed items from expiry and eviction
-- \`recall__search("query")\` \u2014 find stored outputs by content when you don't have an ID`, CLAUDE_MD_BLOCK, SESSION_START_MARKER = "session-start", POST_TOOL_USE_MARKER = "post-tool-use", POST_TOOL_USE_MATCHER = "(mcp__(?!recall__).*|Bash)";
+- \`recall__search("query")\` \u2014 find stored outputs by content when you don't have an ID`, CLAUDE_MD_BLOCK, SESSION_START_MARKER = "session-start", POST_TOOL_USE_MARKER = "post-tool-use", POST_TOOL_USE_MATCHER = "(mcp__(?!recall__).*|Bash)", AGENTS;
 var init_install = __esm(() => {
+  init_pi();
   init_loader();
   init_gc();
   init_config();
   CLAUDE_MD_BLOCK = `${CLAUDE_MD_MARKER_START}
 ${CLAUDE_MD_SNIPPET}
 ${CLAUDE_MD_MARKER_END}`;
+  AGENTS = ["claude", "pi"];
 });
 
 // src/discover/index.ts
@@ -13864,7 +14195,7 @@ __export(exports_discover, {
   DEFAULT_LIMIT: () => DEFAULT_LIMIT
 });
 import { Database as Database4 } from "bun:sqlite";
-import { existsSync as existsSync4, readdirSync as readdirSync5 } from "fs";
+import { existsSync as existsSync5, readdirSync as readdirSync5 } from "fs";
 import { join as join9 } from "path";
 function hasHandlerColumn(db) {
   const cols = db.prepare(`PRAGMA table_info(stored_outputs)`).all();
@@ -13925,10 +14256,10 @@ function mergeReports(reports) {
 function storeFiles(all, cwd = process.cwd()) {
   if (!all) {
     const file = defaultDbPath(getProjectKey(cwd));
-    return existsSync4(file) ? [file] : [];
+    return existsSync5(file) ? [file] : [];
   }
   const dir = dataDir();
-  if (!existsSync4(dir))
+  if (!existsSync5(dir))
     return [];
   return readdirSync5(dir).filter((n) => n.endsWith(".db")).map((n) => join9(dir, n));
 }
@@ -14526,13 +14857,14 @@ async function getVersion() {
 }
 function printHelp() {
   console.log(`
-mcp-recall \u2014 context compression for Claude Code
+mcp-recall \u2014 context compression for Claude Code and pi
 
 Usage: mcp-recall <command> [options]
 
 Commands:
-  install              Register hooks + MCP server in Claude Code
-  uninstall            Remove hooks + MCP server
+  install              Register hooks + MCP server in Claude Code, and in pi if installed
+    --agent NAME       Only these agents: claude, pi (comma-separated)
+  uninstall            Remove hooks + MCP server (--agent NAME to limit)
   status               Show current configuration and health
   serve                Run the MCP server on stdio (Claude Code starts this)
   gc [--force]         Reclaim disk: list/delete orphaned project DBs
@@ -14815,15 +15147,18 @@ async function main() {
     await handleImportCommand2(process.argv.slice(3));
     process.exit(0);
   }
-  if (subcommand === "install") {
-    const { installCommand: installCommand2 } = await Promise.resolve().then(() => (init_install(), exports_install));
-    const dryRun = process.argv.includes("--dry-run");
-    await installCommand2({ dryRun });
-    process.exit(0);
-  }
-  if (subcommand === "uninstall") {
-    const { uninstallCommand: uninstallCommand2 } = await Promise.resolve().then(() => (init_install(), exports_install));
-    await uninstallCommand2();
+  if (subcommand === "install" || subcommand === "uninstall") {
+    const { installCommand: installCommand2, uninstallCommand: uninstallCommand2, parseAgents: parseAgents2, AGENTS: AGENTS2 } = await Promise.resolve().then(() => (init_install(), exports_install));
+    const agents = parseAgents2(process.argv.slice(3));
+    if (agents === null) {
+      console.error(`--agent takes ${AGENTS2.join(", ")} (comma-separated for more than one)`);
+      process.exit(1);
+    }
+    if (subcommand === "install") {
+      await installCommand2({ dryRun: process.argv.includes("--dry-run"), agents });
+    } else {
+      await uninstallCommand2({ agents });
+    }
     process.exit(0);
   }
   if (subcommand === "status") {

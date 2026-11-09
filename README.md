@@ -14,6 +14,8 @@
 
 MCP tool outputs (Playwright snapshots, GitHub API responses, Linear queries) and long Bash output can consume tens of kilobytes of context per call, and a busy session fills even a large context window long before the work is done. mcp-recall intercepts those outputs, stores them in full locally, and delivers compressed summaries to Claude instead. When Claude needs more detail, it can search the stored output and retrieve it, without re-running the tool.
 
+It works in [Claude Code](https://claude.ai/claude-code) and in [pi](https://pi.dev): `mcp-recall install` sets up each one it finds.
+
 The goal is sessions that run for hours instead of hitting the context limit in minutes. [Results](#results) shows what is measured today, and the [quality benchmark](docs/benchmarks.md) what the summaries keep.
 
 **Status: maintenance mode since 2026-11-04.** Fixes keep shipping on a weekly release; new features are not planned. Why, and what it deliberately won't become: [ROADMAP.md](ROADMAP.md).

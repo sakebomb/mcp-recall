@@ -82,6 +82,14 @@ To build one from source instead: `bun run build:binary` (this platform) or `bun
 
 A binary is 60–95 MB, since it carries the Bun runtime. Its bundled profiles are inside it, and are copied out once per version to `~/.local/share/mcp-recall/bundled-profiles/`. The hooks name the binary's path, so run `mcp-recall install` again if you move it. CI runs every binary on its own OS. The macOS binaries are not notarized: `curl` leaves them runnable, but Gatekeeper blocks one downloaded through a browser until you clear the quarantine flag with `xattr -d com.apple.quarantine ~/.local/bin/mcp-recall`.
 
+## pi
+
+mcp-recall also runs under [pi](https://pi.dev). Install it with Option A, C or D, and `mcp-recall install` sets up pi as well as Claude Code whenever pi's config dir (`~/.pi/agent`, or `$PI_CODING_AGENT_DIR`) exists. `--agent pi` sets up pi alone; `--agent claude` skips it.
+
+For pi, install writes one folder, `~/.pi/agent/extensions/mcp-recall/`: an extension and a `launch.json` naming this install of mcp-recall. The extension runs each MCP and bash result through the same hook Claude Code uses and registers the `recall` MCP server, so pi's `mcp.json` is not edited. pi cuts a large result to about 20 KB before extensions see it and saves the whole output to a temp file; mcp-recall stores that whole output, not the cut.
+
+Restart pi, or run `/reload`, after installing. `mcp-recall status` lists pi below Claude Code. pi has no `CLAUDE.md`, so the [Claude instructions](#claude-instructions) block does not apply; pi's model finds the `recall__*` tools from the `[recall:…]` header and the tools' own descriptions.
+
 ## After installing
 
 1. **Restart Claude Code.** The MCP server and hooks register at startup.
@@ -163,7 +171,7 @@ mcp-recall profiles update
 | Option C — from source | `./bin/recall uninstall` from the clone, then delete the clone and any alias or symlink you added |
 | Option D — standalone binary | `mcp-recall uninstall`, then delete the binary |
 
-`mcp-recall uninstall` removes the MCP server entry, both hooks and the `CLAUDE.md` block. Neither it nor `claude plugin uninstall` touches your stored output (`~/.local/share/mcp-recall/`) or your config (`~/.config/mcp-recall/`); delete those folders too to remove everything.
+`mcp-recall uninstall` removes the MCP server entry, both hooks and the `CLAUDE.md` block, and pi's extension folder when there is one (`--agent` limits it to one agent). Neither it nor `claude plugin uninstall` touches your stored output (`~/.local/share/mcp-recall/`) or your config (`~/.config/mcp-recall/`); delete those folders too to remove everything.
 
 ## Running alongside rtk
 
