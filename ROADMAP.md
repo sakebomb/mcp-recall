@@ -16,7 +16,7 @@ what Claude needs. New features are not planned.
 One exception, opened deliberately in
 [#458](https://github.com/sakebomb/mcp-recall/issues/458): running under coding
 agents other than Claude Code. The same hook pipeline serves each agent through
-a thin adapter that translates shapes and adds no logic; pi is the first. An
+a thin adapter that translates shapes and adds no logic: pi and grok so far. An
 agent qualifies only if it can rewrite a tool's output before the model sees it.
 
 The decision follows the paired task-success studies in
