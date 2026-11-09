@@ -65,6 +65,8 @@ async function retrieve(query: string): Promise<void> {
   const c = load(CASE);
   await withStore(async (hook, scratch) => {
     const id = hook.deliverMcp(c.tool!, c.input, c.stdout).delivered.match(/^\[recall:(recall_[0-9a-f]+)/)?.[1];
+    // A case that no longer compresses passes through unstored, leaving nothing to retrieve.
+    if (!id) throw new Error(`${CASE} was delivered whole, not stored; pick a case that compresses`);
     const { toolRetrieve } = await import(join(ROOT, "src/tools"));
     const { getDb } = await import(join(ROOT, "src/db/index"));
     const [header, ...body] = toolRetrieve(getDb(join(scratch, "store.db")), { id, query }).split("\n");
