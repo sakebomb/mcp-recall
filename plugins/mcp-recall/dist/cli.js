@@ -14763,10 +14763,12 @@ function shellText(result, call) {
   const saved = readSaved(path, call, "terminal", "log");
   return saved && saved.length === total ? saved.toString("utf8") : null;
 }
-function fromGrok(input) {
+function fromGrok(input, denied) {
   const response = input["tool_response"];
   if (isGrokMcp(response)) {
     const name = `mcp__${response.server_name}__${response.tool_name}`;
+    if (denied(name))
+      return null;
     const ok = response.output["OkayOutput"];
     if (typeof ok !== "string")
       return null;
@@ -14778,6 +14780,8 @@ function fromGrok(input) {
     return { ...input, tool_name: name, tool_response: [{ type: "text", text }] };
   }
   if (isGrokShell(response)) {
+    if (denied("Bash"))
+      return null;
     const stdout = shellText(response, callOf(input));
     if (stdout === null) {
       log.debug("SKIP grok-cut-unverified \xB7 Bash");
@@ -14883,13 +14887,13 @@ function handlePostToolUse(raw) {
     log.error("post-tool-use received unexpected input shape \u2014 skipping");
     return {};
   }
-  const grok = fromGrok(parsed);
+  const config2 = loadConfig();
+  const grok = fromGrok(parsed, (name) => isDenied(name, config2));
   if (grok === null)
     return {};
   const input = grok ?? parsed;
   const { tool_name, tool_input, tool_response, cwd, session_id } = input;
   const replyShape = grok ? undefined : tool_response;
-  const config2 = loadConfig();
   let response = tool_name === "Bash" ? withPersistedOutput(tool_response) : tool_response;
   if (isDenied(tool_name, config2)) {
     log.debug(`SKIP denylist \xB7 ${tool_name}`);

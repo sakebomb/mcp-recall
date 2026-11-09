@@ -158,14 +158,15 @@ export function handlePostToolUse(raw: string): HookOutput {
     log.error("post-tool-use received unexpected input shape — skipping");
     return {};
   }
-  // grok's names and result shape, converted before the denylist sees the name (#459).
-  const grok = fromGrok(parsed as Record<string, unknown>);
+  const config = loadConfig();
+  // grok's names and result shape (#459). The denylist sees the converted name
+  // before any file grok saved is read, as it does for Claude Code's (#391).
+  const grok = fromGrok(parsed as Record<string, unknown>, (name) => isDenied(name, config));
   if (grok === null) return {};
   const input = (grok ?? parsed) as PostToolUseInput;
   const { tool_name, tool_input, tool_response, cwd, session_id } = input;
   // The shape the replacement must take: grok takes a plain string for every tool.
   const replyShape = grok ? undefined : tool_response;
-  const config = loadConfig();
   // The whole output, not the cut Claude Code hands over above ~50 KB (#316).
   let response = tool_name === "Bash" ? withPersistedOutput(tool_response) : tool_response;
 

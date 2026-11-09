@@ -14,9 +14,10 @@ import { log } from "../log";
  * already handles, so the denylist, the secret scan and every handler see the
  * same names and text they would under Claude Code. Its result is:
  * - `undefined` for an input that is not grok's: handle it as it is;
- * - `null` for grok's when the whole output cannot be had: deliver it unchanged,
- *   since storing the cut would misstate it, and the cut keeps grok's pointer to
- *   the full file;
+ * - `null` for grok's when `denied` refuses the converted name, which is checked
+ *   before any saved file is read, or when the whole output cannot be had:
+ *   deliver it unchanged, since storing the cut would misstate it, and the cut
+ *   keeps grok's pointer to the full file;
  * - otherwise the converted input. grok takes a plain string as the replacement
  *   for any tool, so the reply must not mimic the Bash object.
  */
@@ -140,10 +141,14 @@ function shellText(result: GrokShellResult, call: GrokCall | null): string | nul
 }
 
 /** Converts grok's PostToolUse input; see the module comment for the result. */
-export function fromGrok(input: Record<string, unknown>): Record<string, unknown> | null | undefined {
+export function fromGrok(
+  input: Record<string, unknown>,
+  denied: (toolName: string) => boolean,
+): Record<string, unknown> | null | undefined {
   const response = input["tool_response"];
   if (isGrokMcp(response)) {
     const name = `mcp__${response.server_name}__${response.tool_name}`;
+    if (denied(name)) return null;
     const ok = response.output["OkayOutput"];
     // An error result, or a shape this version does not know, is delivered as it is.
     if (typeof ok !== "string") return null;
@@ -155,6 +160,7 @@ export function fromGrok(input: Record<string, unknown>): Record<string, unknown
     return { ...input, tool_name: name, tool_response: [{ type: "text", text }] };
   }
   if (isGrokShell(response)) {
+    if (denied("Bash")) return null;
     const stdout = shellText(response, callOf(input));
     if (stdout === null) {
       log.debug("SKIP grok-cut-unverified · Bash");
