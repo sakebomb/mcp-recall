@@ -133,11 +133,11 @@ Eleven `recall__*` tools are available to Claude in every session. You don't cal
 
 ## Results
 
-- **How much smaller.** On one developer's real store (36,039 calls, July to October 2026), its 182 MCP calls replayed through the handlers of that date came out 96.6% smaller. All intercepted calls were 57.9% smaller as recorded by earlier releases, a reduction that was stored but not delivered to Claude's context until 1.15.1 for MCP and 1.15.2 for Bash (#298). One person's mix, dominated by Bash; yours will differ. Run `bun run measure` on your own store.
-- **What the summaries keep.** The [quality benchmark](docs/benchmarks.md#quality-benchmark) scores the facts each summary keeps against a same-size head cut, on a public corpus anyone can rerun with `bun run quality`. It names every family where mcp-recall does no better than the head cut.
-- **Whether the agent still solves the task.** In pre-registered paired runs of the same agent with and without mcp-recall, no study found a change in solved tasks that can be told apart from chance, in either direction; the one harm signal, in the first pilot, did not recur. Long sessions compacted less where they compacted at all, and on Haiku they cost less. Results and limits: [task-success benchmark](docs/benchmarks.md#task-success-benchmark).
+- **How much smaller.** On one developer's real store of about 36,000 tool calls, MCP output came out 96.6% smaller. Across everything intercepted, mostly Bash, earlier releases saved 57.9%; current ones pass more small reads through whole, so today's figure is lower. Your mix will differ: `bun run measure` reports it for your own store.
+- **What the summaries keep.** A smaller summary only helps if it keeps what Claude needs. The [quality benchmark](docs/benchmarks.md#quality-benchmark) checks each summary for the facts in the original, against simply cutting the output to the same size. It runs on a public corpus anyone can rerun with `bun run quality`, and lists every kind of output where mcp-recall does no better than the plain cut.
+- **Whether Claude still solves the task.** No measured change either way; [Is it for you?](#is-it-for-you) has the short version, and the [task-success benchmark](docs/benchmarks.md#task-success-benchmark) every study and its limits.
 
-Long, structured, repetitive output (Playwright snapshots, API JSON, large diffs, test logs) compresses well; short or one-off output has little to remove. Every figure, its method and its caveats: [Benchmarks](docs/benchmarks.md).
+Long, structured, repetitive output (browser snapshots, API JSON, large diffs, test logs) compresses well; short or one-off output has little to remove. Every figure, how it was measured, and its caveats: [Benchmarks](docs/benchmarks.md).
 
 ---
 
@@ -209,18 +209,18 @@ mcp-recall never breaks a tool call. Every failure mode — hook crash, SQLite e
 
 ## How it compares
 
-Context pressure builds at four distinct layers. Native Claude tooling covers the first two well. For **MCP** tool output it keeps everything, but either puts all of it in the window or hands Claude a file to read. That's the gap mcp-recall fills.
+Other tools already shrink what tool *definitions* and multi-step workflows put in the context window. None of them stops a large MCP result from filling the window while keeping the full output searchable later. That is the gap mcp-recall fills.
 
-| Layer | Problem | Solution |
-|---|---|---|
-| **① Tool definitions** | Every connected MCP loads its full schema upfront (~500 tokens/tool) | [Claude Code Tool Search](https://code.claude.com/docs/en/mcp#scale-with-mcp-tool-search) (built-in) · Switchboard |
-| **② Intermediate results** | Multi-step workflows pass each result back through context | [Code Mode](https://blog.cloudflare.com/code-mode/) · [FastMCP 3.1](https://www.jlowin.dev/blog/fastmcp-3-1-code-mode) |
-| **③ MCP tool outputs** | An MCP result under 25k tokens and 50k characters enters the window whole. Above either, Claude Code saves it to a file and Claude must read the file in chunks. Neither is searchable later | **mcp-recall** |
-| **④ Earlier sessions' output** | Tool output from a past session is gone; the API memory tool keeps a model-written summary, not a searchable verbatim archive | **mcp-recall** (verbatim tool output, not a memory layer) |
+Without it, [Claude Code](https://code.claude.com/docs/en/mcp) puts an MCP result into the window whole when it is under 25,000 tokens (`MAX_MCP_OUTPUT_TOKENS`) and 50,000 characters. A larger result is saved to a file that Claude reads in chunks. Neither can be searched in a later session. mcp-recall swaps the result for a summary before it reaches the window and keeps the full output searchable. If Claude Code has already saved the result to a file, mcp-recall summarizes the file's content instead of the notice.
 
-For layer ③, [Claude Code](https://code.claude.com/docs/en/mcp) puts an MCP result under `MAX_MCP_OUTPUT_TOKENS` (25,000 by default) and 50,000 characters into the window whole, and saves a larger one under the session's `tool-results` directory with a notice to read it in chunks. mcp-recall replaces a result with a summary before it reaches the window and keeps the full output searchable; for a result Claude Code already saved to a file, it stores and summarizes the file's content rather than the notice.
+| Where context goes | What helps |
+|---|---|
+| **① Tool definitions:** every connected MCP server loads its full schema up front, about 500 tokens per tool | [Claude Code Tool Search](https://code.claude.com/docs/en/mcp#scale-with-mcp-tool-search) (built in) · Switchboard |
+| **② Multi-step workflows:** each intermediate result passes back through context | [Code Mode](https://blog.cloudflare.com/code-mode/) · [FastMCP 3.1](https://www.jlowin.dev/blog/fastmcp-3-1-code-mode) |
+| **③ Large MCP results:** in the window whole, or in a file read in chunks | **mcp-recall** |
+| **④ Earlier sessions' output:** gone, or at best a model-written summary | **mcp-recall** keeps it verbatim and searchable (it is not a memory layer) |
 
-API [context editing](https://platform.claude.com/docs/en/build-with-claude/context-editing), [compaction](https://platform.claude.com/docs/en/build-with-claude/compaction) and the [memory tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool) also reduce context, through eviction or model-written summaries, with no verbatim retrieval of the original output. They stack with mcp-recall, which sits ahead of them as the tool-output layer.
+In the API, [context editing](https://platform.claude.com/docs/en/build-with-claude/context-editing), [compaction](https://platform.claude.com/docs/en/build-with-claude/compaction) and the [memory tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool) also reduce context, by dropping old content or summarizing it. None of them keeps the original output retrievable, and all of them work alongside mcp-recall.
 
 ---
 
