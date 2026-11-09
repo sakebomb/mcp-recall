@@ -1,56 +1,64 @@
-# mcp-recall demo tape
-# Requirements: vhs (https://github.com/charmbracelet/vhs)
-# Install: brew install vhs  OR  go install github.com/charmbracelet/vhs@latest
-# Run: vhs demo/demo.tape
-# Output: demo/demo.gif  (add to README as: ![demo](demo/demo.gif))
+# mcp-recall demo tape: every scene is a live run of demo/demo.ts, which pushes
+# real output from benchmark/corpus/ through the real hook and recall__* tools.
+# Requirements: vhs (https://github.com/charmbracelet/vhs), ttyd, ffmpeg, bun
+# Run from the repo root: vhs demo/demo.tape
+# Output: demo/demo.gif (shown at the top of the README)
 
 Output demo/demo.gif
 
 Set Shell "bash"
-Set FontSize 14
-Set Width 900
-Set Height 550
+Set FontSize 15
+Set Width 1200
+Set Height 500
 Set Theme "Catppuccin Mocha"
-Set TypingSpeed 70ms
-Set Padding 20
+Set TypingSpeed 40ms
+Set Padding 24
 
-# --- Scene 1: tests passing ---
-Type "bun test"
+Hide
+Type "export PS1='$ ' && clear"
+Enter
+Show
+
+# --- Scene 1: what Claude would get without mcp-recall ---
+Type "# Claude calls a GitHub MCP tool. Without mcp-recall, all of this lands in its context:"
+Enter
+Sleep 800ms
+Type "bun demo/demo.ts raw"
 Enter
 Sleep 5s
 
-# --- Scene 2: compression ---
+# --- Scene 2: what it gets instead ---
+Hide
 Type "clear"
 Enter
-Sleep 500ms
-Type "# A 56KB Playwright snapshot arrives..."
+Show
+Type "# With mcp-recall, the hook stores the full output and hands Claude a summary:"
 Enter
-Sleep 1.5s
-Type "# mcp-recall delivers this to Claude instead:"
+Sleep 800ms
+Type "bun demo/demo.ts claude"
 Enter
-Sleep 1s
-Type "cat demo/sample-compression.txt"
-Enter
-Sleep 4s
+Sleep 6s
 
-# --- Scene 3: stats ---
+# --- Scene 3: the detail is still there ---
+Hide
 Type "clear"
 Enter
-Sleep 500ms
-Type "# After a full session:"
+Show
+Type "# Need a detail the summary cut? Claude asks for it from the stored original:"
 Enter
-Sleep 1s
-Type "cat demo/sample-stats.txt"
+Sleep 800ms
+Type `bun demo/demo.ts retrieve "LFU expiry"`
 Enter
-Sleep 4s
+Sleep 5s
 
-# --- Scene 4: search ---
+# --- Scene 4: what it adds up to ---
+Hide
 Type "clear"
 Enter
-Sleep 500ms
-Type "# Find anything stored, no ID needed:"
+Show
+Type "# Every output in the public benchmark corpus, through the same hook:"
 Enter
-Sleep 1s
-Type "cat demo/sample-search.txt"
+Sleep 800ms
+Type "bun demo/demo.ts stats"
 Enter
-Sleep 4s
+Sleep 7s
