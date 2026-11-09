@@ -22,6 +22,25 @@ The goal is sessions that run for hours instead of hitting the context limit in 
 
 ---
 
+## Is it for you?
+
+**It is likely to help if:**
+
+- Your sessions run long and lean on MCP tools that return large, structured output, such as browser automation, GitHub, or search and API results. In the browser studies, sessions compacted less often with mcp-recall: 10 compactions fell to 6, and 50 to 29.
+- You pay per token on a smaller model. In two Haiku studies, one of long sessions and one of browser tasks, runs cost about a quarter less.
+- You want tool output from an earlier session to stay searchable instead of gone.
+
+**It will do little if:**
+
+- Your sessions are short, or your tools return small output. Output that a summary can't shrink by at least a quarter passes through untouched.
+- Most of your context goes to the built-in Read, Grep and Glob tools. Claude Code doesn't let a hook replace their output, so mcp-recall never sees it.
+
+**What it has not shown:** that Claude solves more tasks. In paired runs with and without it, no study found a difference in solved tasks larger than chance. Claude also almost never fetched the stored output, so the summaries carry the effect. See the [task-success benchmark](docs/benchmarks.md#task-success-benchmark) for every study and its limits.
+
+**What it costs you:** an install that edits your Claude Code config, and a local SQLite store on your own disk. Nothing leaves your machine, and credentials are never stored: see [Safety and privacy](#safety-and-privacy).
+
+---
+
 ## Quick start
 
 You need [Claude Code](https://claude.ai/claude-code) and [Bun](https://bun.sh) (`curl -fsSL https://bun.sh/install | bash`). To run without Bun, use the [standalone binary](docs/install.md#option-d--standalone-binary-no-bun).
@@ -64,11 +83,27 @@ The [architecture guide](docs/architecture.md#the-capture-pipeline) walks throug
 
 ## Using it
 
-Each compressed output starts with a header line that names the stored item, its sizes, and a few `search:` hints, which are salient terms from the full content so Claude's first `recall__search` lands without guessing keywords:
+Here is one real call, from the public [benchmark corpus](benchmark/corpus/mcp-github-list-issues.json): the GitHub MCP server's `list_issues`, returning five issues and pull requests from this repository. Without mcp-recall, all 31.2 KB of the GitHub API's JSON lands in Claude's context: every URL, user record and timestamp. With it, Claude receives this instead (shortened here; `…` marks the cuts):
 
 ```
-[recall:recall_abc12345 · 56.2KB→299B (99% reduction) · search: "checkout", "sessionToken", "orderId"]
+[recall:recall_6abcf99290d6b4e7 · 31.2KB→1.6KB (95% reduction) · search: "sakebomb", "github", "api", "users", "mcp"]
+#6 · "Phase 6: MCP Server" · [closed] · https://github.com/sakebomb/mcp-recall/issues/6 · labels: feature, P1: High, L · body: ## Summary
+The MCP server exposing all `recall__*` tools Claude can invoke. Five tools in v1. …
+#7 · "Phase 7: Polish + README" · [closed] · https://github.com/sakebomb/mcp-recall/issues/7 · labels: chore, docs, P2: Medium, S · body: ## Summary
+Final polish before v1.0.0 release — README, benchmarks, plugin manifest verification, and marketplace submission. …
+#8 … #10 follow in the same shape
 ```
+
+The header line names the stored item, its sizes, and a few `search:` hints, which are salient terms from the full content so Claude's first `recall__search` lands without guessing keywords. Each issue keeps its number, title, state, link, labels and the start of its body. Everything else is stored, not lost. Issue #8's body is cut at "Exempt item from LFU expir…", and if Claude needs the rest it asks for it (the reply is shortened the same way):
+
+```
+recall__retrieve(id: "recall_6abcf99290d6b4e7", query: "LFU expiry")
+
+[recall:recall_6abcf99290d6b4e7 · mcp__github__list_issues · 2026-11-09 · 31.2KB→1.6KB]
+… ### `recall__pin(id)`\n- Exempt item from LFU expiry — survives indefinitely until manually forgotten\n- `pinned = 1` column already in v1 schema …
+```
+
+The excerpt is the matching part of the original output, verbatim, escapes and all. In practice Claude rarely needs this step: in the [task-success studies](docs/benchmarks.md#task-success-benchmark) agents almost never called a `recall__*` tool, so the summaries alone carried the effect.
 
 Repeated identical tool calls return a cached header instead of re-compressing:
 
