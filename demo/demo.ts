@@ -5,14 +5,17 @@
  * Every scene runs real output from the public benchmark corpus (benchmark/corpus/)
  * through the real PostToolUse hook and recall__* tools, on a throwaway store, so
  * the GIF shows what mcp-recall does today rather than pre-written text. Re-record
- * after a handler change and the GIF follows.
+ * after a handler change and the GIF follows. The `agents` scene runs the same
+ * output through Claude Code's hook and through the pi extension (#458).
  *
- * Usage: bun demo/demo.ts raw | claude | retrieve <query> | stats
+ * Usage: bun demo/demo.ts raw | agents | retrieve <query> | stats
  */
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "fs";
+import { randomBytes } from "crypto";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { loadHook } from "../scripts/transcripts";
+import mcpRecallForPi from "../src/agents/pi-extension";
 
 const ROOT = join(import.meta.dir, "..");
 const CORPUS = join(ROOT, "benchmark/corpus");
@@ -52,13 +55,61 @@ function raw(): void {
   console.log(rows(c.stdout, 9).join("\n"));
 }
 
-async function claude(): Promise<void> {
+/**
+ * What pi's model receives for `c`, through the real pi extension and the CLI
+ * hook, on a store of its own. pi cuts an MCP result over 20 KB to its head and
+ * tail and saves the whole output to a temp file before extensions run, so this
+ * does the same: the extension has to find the whole output the way it does in pi.
+ */
+async function deliverViaPi(c: Case): Promise<string> {
+  const scratch = mkdtempSync(join(tmpdir(), "mcp-recall-demo-pi-"));
+  const saved = join(tmpdir(), `pi-mcp-${randomBytes(8).toString("hex")}.txt`);
+  const env = { ...process.env };
+  try {
+    // The hook runs as a child and reads these, so it stores here and nowhere else.
+    process.env.RECALL_DB_PATH = join(scratch, "store.db");
+    process.env.RECALL_CONFIG_PATH = join(scratch, "config.toml");
+    writeFileSync(process.env.RECALL_CONFIG_PATH, "[store]\nmax_size_mb = 100000\n");
+    process.env.RECALL_USER_PROFILES_PATH = join(scratch, "user-profiles");
+    process.env.RECALL_COMMUNITY_PROFILES_PATH = join(scratch, "community-profiles");
+    writeFileSync(saved, c.stdout);
+    const cut = c.stdout.length > 20_000
+      ? `${c.stdout.slice(0, 10_000)}\n…${c.stdout.length - 20_000} chars truncated…\n${c.stdout.slice(-10_000)}\n\n[Full output: ${saved}]`
+      : c.stdout;
+
+    let onResult: ((event: unknown, ctx: unknown) => Promise<unknown>) | undefined;
+    const pi = {
+      on: (name: string, handler: typeof onResult) => { if (name === "tool_result") onResult = handler; },
+      registerMcpServer: () => {},
+    };
+    mcpRecallForPi(pi as never, { cli: ["bun", join(ROOT, "src/cli.ts")], server: { command: "bun", args: [] } });
+    const out = (await onResult!(
+      { toolName: c.tool!, input: c.input, content: [{ type: "text", text: cut }], details: { fullOutputPath: saved }, isError: false },
+      { cwd: scratch, sessionManager: { getSessionId: () => "demo-pi" } },
+    )) as { content: Array<{ text: string }> } | undefined;
+    return out?.content[0]?.text ?? cut;
+  } finally {
+    process.env = env;
+    rmSync(saved, { force: true });
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+async function agents(): Promise<void> {
   const c = load(CASE);
-  const delivered = await withStore((hook) => hook.deliverMcp(c.tool!, c.input, c.stdout).delivered);
-  const [header, ...body] = delivered.split("\n");
-  console.log(`${GREEN}${header}${RESET}`);
-  console.log(rows(body.join("\n"), 14).join("\n"));
-  console.log(`\n${BOLD}Claude reads ${GREEN}~${tokens(Buffer.byteLength(delivered))} tokens${RESET}${BOLD} instead of ${YELLOW}~${tokens(Buffer.byteLength(c.stdout))}${RESET}${BOLD}.${RESET}`);
+  const viaClaude = await withStore((hook) => hook.deliverMcp(c.tool!, c.input, c.stdout).delivered);
+  const viaPi = await deliverViaPi(c);
+  const header = (d: string) => d.split("\n")[0]!;
+  // A case that no longer compresses would pass through whole: say so rather than show it.
+  for (const [agent, d] of [["Claude Code", viaClaude], ["pi", viaPi]] as const) {
+    if (!d.startsWith("[recall:")) throw new Error(`${CASE} was delivered whole to ${agent}; pick a case that compresses`);
+  }
+  console.log(`${DIM}Claude Code, through its PostToolUse hook:${RESET}`);
+  console.log(`${GREEN}${header(viaClaude)}${RESET}`);
+  console.log(`${DIM}pi, through the mcp-recall extension:${RESET}`);
+  console.log(`${GREEN}${header(viaPi)}${RESET}\n`);
+  console.log(rows(viaClaude.split("\n").slice(1).join("\n"), 9).join("\n"));
+  console.log(`\n${BOLD}Either agent reads ${GREEN}~${tokens(Buffer.byteLength(viaClaude))} tokens${RESET}${BOLD} instead of ${YELLOW}~${tokens(Buffer.byteLength(c.stdout))}${RESET}${BOLD}.${RESET}`);
 }
 
 async function retrieve(query: string): Promise<void> {
@@ -103,10 +154,10 @@ async function stats(): Promise<void> {
 const [scene, ...args] = process.argv.slice(2);
 switch (scene) {
   case "raw": raw(); break;
-  case "claude": await claude(); break;
+  case "agents": await agents(); break;
   case "retrieve": await retrieve(args.join(" ") || "LFU expiry"); break;
   case "stats": await stats(); break;
   default:
-    console.error("usage: bun demo/demo.ts raw | claude | retrieve <query> | stats");
+    console.error("usage: bun demo/demo.ts raw | agents | retrieve <query> | stats");
     process.exit(1);
 }

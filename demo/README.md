@@ -4,7 +4,7 @@ Files in this directory:
 
 | File | Purpose |
 |---|---|
-| `demo.gif` | Main README demo: a GitHub MCP result raw, the summary Claude receives, a retrieve, and stats over the whole public corpus |
+| `demo.gif` | Main README demo: a GitHub MCP result raw, the same summary arriving in Claude Code and in pi, a retrieve, and stats over the whole public corpus |
 | `demo.tape` | vhs script to regenerate `demo.gif` |
 | `demo.ts` | The scenes `demo.tape` records. Each runs real output from `benchmark/corpus/` through the real hook and `recall__*` tools on a throwaway store, so re-recording after a handler change keeps the GIF true |
 | `proof.gif` | Two-scene proof of real compression — raw GitHub API JSON vs. what Claude receives |
