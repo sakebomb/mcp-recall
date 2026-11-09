@@ -13,6 +13,7 @@ import { existsSync } from "fs";
 import { mkdir, rename, readFile, realpath, readlink, stat, chmod, rm, writeFile } from "fs/promises";
 import path from "path";
 import os from "os";
+import { defaultPiDir, installPi, piDetected, piExtensionDir, piLaunch, piStatus, uninstallPi } from "../agents/pi";
 import { loadProfiles } from "../profiles/loader";
 import { storeFootprint } from "../gc/index";
 import { loadConfig } from "../config";
@@ -402,6 +403,33 @@ export function upsertHook(
 
 // ── install ───────────────────────────────────────────────────────────────────
 
+/** The coding agents mcp-recall can install into (#458). */
+export const AGENTS = ["claude", "pi"] as const;
+export type Agent = (typeof AGENTS)[number];
+
+/** Claude Code always, as before #458; pi when its config dir exists. */
+export function detectAgents(piDir: string): Agent[] {
+  return piDetected(piDir) ? ["claude", "pi"] : ["claude"];
+}
+
+/** Parses `--agent claude,pi` (or repeated `--agent`); null when a name is unknown. */
+export function parseAgents(argv: string[]): Agent[] | null | undefined {
+  const names: string[] = [];
+  argv.forEach((arg, i) => {
+    if (arg === "--agent") names.push(...(argv[i + 1] ?? "").split(","));
+    else if (arg.startsWith("--agent=")) names.push(...arg.slice("--agent=".length).split(","));
+  });
+  if (names.length === 0) return undefined;
+  const wanted = names.map((n) => n.trim()).filter(Boolean);
+  if (wanted.length === 0 || wanted.some((n) => !(AGENTS as readonly string[]).includes(n))) return null;
+  return [...new Set(wanted)] as Agent[];
+}
+
+/** The launch as the pi extension's launch.json records it. */
+function piLaunchOf(launch: RecallLaunch) {
+  return piLaunch(shellWords(launch.cli), launch.server);
+}
+
 export interface InstallOptions {
   dryRun?: boolean;
   claudeJsonPath?: string;
@@ -409,6 +437,10 @@ export interface InstallOptions {
   claudeMdPath?: string;
   /** Defaults to {@link detectLaunch}; tests pass one. */
   launch?: RecallLaunch;
+  /** pi's config dir; defaults to {@link defaultPiDir}. */
+  piDir?: string;
+  /** Which agents to install into; defaults to {@link detectAgents}. */
+  agents?: Agent[];
 }
 
 export async function installCommand(opts: InstallOptions = {}): Promise<void> {
@@ -418,7 +450,9 @@ export async function installCommand(opts: InstallOptions = {}): Promise<void> {
     settingsPath   = defaultSettingsPath(),
     claudeMdPath   = defaultClaudeMdPath(),
     launch         = detectLaunch(),
+    piDir          = defaultPiDir(),
   } = opts;
+  const agents = opts.agents ?? detectAgents(piDir);
 
   const missing = launch.artifacts.find((a) => !existsSync(a.path));
   if (missing) {
@@ -432,6 +466,42 @@ export async function installCommand(opts: InstallOptions = {}): Promise<void> {
     console.log(`${DIM}dry run — no files will be modified${RESET}\n`);
   }
 
+  let anyChange = false;
+  if (agents.includes("claude")) {
+    anyChange = (await installClaude(claudeJsonPath, settingsPath, claudeMdPath, launch, dryRun)) || anyChange;
+  }
+  if (agents.includes("pi")) {
+    if (agents.includes("claude")) console.log("");
+    const dir = piExtensionDir(piDir);
+    const result = await installPi(piDir, piLaunchOf(launch), dryRun);
+    if (result === "added") {
+      console.log(`${GREEN}✓${RESET} pi extension added        ${DIM}(${dir})${RESET}`);
+    } else if (result === "updated") {
+      console.log(`${YELLOW}↺${RESET} pi extension updated      ${DIM}(${dir})${RESET}`);
+    } else {
+      console.log(`${DIM}ℹ pi extension already installed${RESET}`);
+    }
+    if (result !== "present") {
+      anyChange = true;
+      if (!dryRun) console.log(`\nRestart pi (or run /reload) to activate mcp-recall.`);
+    }
+  }
+
+  if (anyChange && !dryRun) {
+    console.log(`\nNext steps:`);
+    console.log(`  Install compression profiles for your MCPs:`);
+    console.log(`    ${BOLD}mcp-recall profiles seed${RESET}`);
+    console.log(`\n  Optional — enable shell completions:`);
+    console.log(`    ${BOLD}mcp-recall completions zsh > ~/.zfunc/_mcp-recall${RESET}   ${DIM}# zsh${RESET}`);
+    console.log(`    ${BOLD}mcp-recall completions bash >> ~/.bash_completion${RESET}    ${DIM}# bash${RESET}`);
+    console.log(`    ${BOLD}mcp-recall completions fish > ~/.config/fish/completions/mcp-recall.fish${RESET}  ${DIM}# fish${RESET}`);
+  }
+}
+
+/** Claude Code's part of install: the MCP server, both hooks and the CLAUDE.md block. */
+async function installClaude(
+  claudeJsonPath: string, settingsPath: string, claudeMdPath: string, launch: RecallLaunch, dryRun: boolean,
+): Promise<boolean> {
   let anyChange = false;
 
   // ── ~/.claude.json ──────────────────────────────────────────────────────────
@@ -518,14 +588,8 @@ export async function installCommand(opts: InstallOptions = {}): Promise<void> {
 
   if (anyChange && !dryRun) {
     console.log(`\nRestart Claude Code to activate mcp-recall.`);
-    console.log(`\nNext steps:`);
-    console.log(`  Install compression profiles for your MCPs:`);
-    console.log(`    ${BOLD}mcp-recall profiles seed${RESET}`);
-    console.log(`\n  Optional — enable shell completions:`);
-    console.log(`    ${BOLD}mcp-recall completions zsh > ~/.zfunc/_mcp-recall${RESET}   ${DIM}# zsh${RESET}`);
-    console.log(`    ${BOLD}mcp-recall completions bash >> ~/.bash_completion${RESET}    ${DIM}# bash${RESET}`);
-    console.log(`    ${BOLD}mcp-recall completions fish > ~/.config/fish/completions/mcp-recall.fish${RESET}  ${DIM}# fish${RESET}`);
   }
+  return anyChange;
 }
 
 // ── uninstall ─────────────────────────────────────────────────────────────────
@@ -536,6 +600,10 @@ export interface UninstallOptions {
   claudeMdPath?: string;
   /** Defaults to {@link detectLaunch}; tests pass one. */
   launch?: RecallLaunch;
+  /** pi's config dir; defaults to {@link defaultPiDir}. */
+  piDir?: string;
+  /** Which agents to uninstall from; defaults to all of them. */
+  agents?: Agent[];
 }
 
 export async function uninstallCommand(opts: UninstallOptions = {}): Promise<void> {
@@ -544,8 +612,28 @@ export async function uninstallCommand(opts: UninstallOptions = {}): Promise<voi
     settingsPath   = defaultSettingsPath(),
     claudeMdPath   = defaultClaudeMdPath(),
     launch         = detectLaunch(),
+    piDir          = defaultPiDir(),
+    agents         = [...AGENTS],
   } = opts;
 
+  if (agents.includes("claude")) await uninstallClaude(claudeJsonPath, settingsPath, claudeMdPath, launch);
+  // pi is mentioned only to someone who has it, or who asked for it by name.
+  const piNamed = opts.agents?.includes("pi") ?? false;
+  if (agents.includes("pi") && (piNamed || piDetected(piDir))) {
+    if (agents.includes("claude")) console.log("");
+    if (await uninstallPi(piDir)) {
+      console.log(`${GREEN}✓${RESET} Removed pi extension        ${DIM}(${piExtensionDir(piDir)})${RESET}`);
+      console.log(`\nRestart pi (or run /reload) to deactivate mcp-recall.`);
+    } else {
+      console.log(`${DIM}ℹ pi extension not present${RESET}`);
+    }
+  }
+}
+
+/** Claude Code's part of uninstall: the reverse of {@link installClaude}. */
+async function uninstallClaude(
+  claudeJsonPath: string, settingsPath: string, claudeMdPath: string, launch: RecallLaunch,
+): Promise<void> {
   let anyChange = false;
 
   // ~/.claude.json
@@ -657,6 +745,30 @@ export function registeredFiles(launches: string[][]): RegisteredFile[] {
   return [...files.values()];
 }
 
+/**
+ * pi's part of status, shown when pi is installed or the extension is: whether
+ * the extension is there and current, and whether what its launch.json runs exists.
+ */
+async function printPiStatus(piDir: string, launch: RecallLaunch): Promise<void> {
+  const st = await piStatus(piDir);
+  if (!piDetected(piDir) && !st.extension) return;
+  const tick = (ok: boolean) => (ok ? `${GREEN}✓${RESET}` : `${RED}✗${RESET}`);
+  const files = st.launch ? registeredFiles([st.launch.cli, [st.launch.server.command, ...st.launch.server.args]]) : [];
+  const ok = st.extension && st.launch !== null && !st.stale && files.every((f) => f.exists);
+  const label = ok ? `${GREEN}installed${RESET}` : st.extension ? `${YELLOW}partial / stale${RESET}` : `${RED}not installed${RESET}`;
+  const shown = piExtensionDir(piDir).replace(os.homedir(), "~");
+
+  console.log(`\npi: ${BOLD}${label}${RESET}\n`);
+  console.log(`  ${shown}`);
+  console.log(`    ${tick(st.extension && !st.stale)} extension${st.stale ? " (from another version)" : ""}`);
+  console.log(`    ${tick(st.launch !== null)} launch.json`);
+  for (const f of files) console.log(`    ${tick(f.exists)} ${f.label} ${DIM}${f.path}${RESET}`);
+  if (st.launch && JSON.stringify(st.launch) !== JSON.stringify(piLaunchOf(launch))) {
+    console.log(`\n  The extension runs another install of mcp-recall than this one.`);
+  }
+  if (!ok) console.log(`\n  Run ${BOLD}mcp-recall install${RESET}`);
+}
+
 /** The commands of recall's own hooks among an event's entries, not their neighbours'. */
 function ourHookCommands(entries: unknown, ours: OurHooks): string[] {
   return ((entries as unknown[] | undefined) ?? [])
@@ -670,6 +782,8 @@ export interface StatusOptions {
   claudeMdPath?: string;
   /** Defaults to {@link detectLaunch}; tests pass one. */
   launch?: RecallLaunch;
+  /** pi's config dir; defaults to {@link defaultPiDir}. */
+  piDir?: string;
 }
 
 export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
@@ -678,6 +792,7 @@ export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
     settingsPath   = defaultSettingsPath(),
     claudeMdPath   = defaultClaudeMdPath(),
     launch         = detectLaunch(),
+    piDir          = defaultPiDir(),
   } = opts;
 
   function tick(ok: boolean) { return ok ? `${GREEN}✓${RESET}` : `${RED}✗${RESET}`; }
@@ -750,6 +865,8 @@ export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
       console.log(`  Or add instructions manually: see ${BOLD}https://github.com/sakebomb/mcp-recall/blob/main/docs/install.md#claude-instructions${RESET}`);
     }
   }
+
+  await printPiStatus(piDir, launch);
 
   // Profiles
   console.log("");

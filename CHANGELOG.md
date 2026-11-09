@@ -6,6 +6,17 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Added
+
+- **pi support** ([#458](https://github.com/sakebomb/mcp-recall/issues/458)).
+  `mcp-recall install` now also installs into [pi](https://pi.dev) when pi is
+  present: it writes an extension to `~/.pi/agent/extensions/mcp-recall/` that
+  runs pi's MCP and bash results through the same hook Claude Code uses and
+  registers the `recall` MCP server. pi cuts a large result before extensions
+  see it, so the extension stores the full output pi saved to disk. `--agent
+  claude` or `--agent pi` limits install and uninstall to one agent;
+  `mcp-recall status` reports pi when it is installed.
+
 ### Security
 
 - **smol-toml 1.9.1** fixes a TOML parser denial-of-service advisory

@@ -31,13 +31,14 @@ export async function getVersion(): Promise<string> {
 
 export function printHelp(): void {
   console.log(`
-mcp-recall — context compression for Claude Code
+mcp-recall — context compression for Claude Code and pi
 
 Usage: mcp-recall <command> [options]
 
 Commands:
-  install              Register hooks + MCP server in Claude Code
-  uninstall            Remove hooks + MCP server
+  install              Register hooks + MCP server in Claude Code, and in pi if installed
+    --agent NAME       Only these agents: claude, pi (comma-separated)
+  uninstall            Remove hooks + MCP server (--agent NAME to limit)
   status               Show current configuration and health
   serve                Run the MCP server on stdio (Claude Code starts this)
   gc [--force]         Reclaim disk: list/delete orphaned project DBs
@@ -338,16 +339,18 @@ export async function main(): Promise<void> {
     process.exit(0);
   }
 
-  if (subcommand === "install") {
-    const { installCommand } = await import("./install/index");
-    const dryRun = process.argv.includes("--dry-run");
-    await installCommand({ dryRun });
-    process.exit(0);
-  }
-
-  if (subcommand === "uninstall") {
-    const { uninstallCommand } = await import("./install/index");
-    await uninstallCommand();
+  if (subcommand === "install" || subcommand === "uninstall") {
+    const { installCommand, uninstallCommand, parseAgents, AGENTS } = await import("./install/index");
+    const agents = parseAgents(process.argv.slice(3));
+    if (agents === null) {
+      console.error(`--agent takes ${AGENTS.join(", ")} (comma-separated for more than one)`);
+      process.exit(1);
+    }
+    if (subcommand === "install") {
+      await installCommand({ dryRun: process.argv.includes("--dry-run"), agents });
+    } else {
+      await uninstallCommand({ agents });
+    }
     process.exit(0);
   }
 

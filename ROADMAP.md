@@ -13,6 +13,12 @@ train ([CONTRIBUTING.md](CONTRIBUTING.md#releases)) with bug, security,
 compatibility and install fixes, and with handler fixes where a summary drops
 what Claude needs. New features are not planned.
 
+One exception, opened deliberately in
+[#458](https://github.com/sakebomb/mcp-recall/issues/458): running under coding
+agents other than Claude Code. The same hook pipeline serves each agent through
+a thin adapter that translates shapes and adds no logic; pi is the first. An
+agent qualifies only if it can rewrite a tool's output before the model sees it.
+
 The decision follows the paired task-success studies in
 [#414](https://github.com/sakebomb/mcp-recall/issues/414), with an exit rule
 agreed before they ran. Where sessions were long enough to compact, mcp-recall
