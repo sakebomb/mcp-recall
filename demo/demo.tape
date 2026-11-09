@@ -8,7 +8,7 @@ Output demo/demo.gif
 
 Set Shell "bash"
 Set FontSize 15
-Set Width 1200
+Set Width 1320
 Set Height 500
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 40ms
@@ -19,8 +19,8 @@ Type "export PS1='$ ' && clear"
 Enter
 Show
 
-# --- Scene 1: what Claude would get without mcp-recall ---
-Type "# Claude calls a GitHub MCP tool. Without mcp-recall, all of this lands in its context:"
+# --- Scene 1: what the agent would get without mcp-recall ---
+Type "# Your agent calls a GitHub MCP tool. Without mcp-recall, all of this lands in its context:"
 Enter
 Sleep 800ms
 Type "bun demo/demo.ts raw"
@@ -32,19 +32,19 @@ Hide
 Type "clear"
 Enter
 Show
-Type "# With mcp-recall, the hook stores the full output and hands Claude a summary:"
+Type "# With mcp-recall, Claude Code and pi both store the full output and hand the agent a summary:"
 Enter
 Sleep 800ms
-Type "bun demo/demo.ts claude"
+Type "bun demo/demo.ts agents"
 Enter
-Sleep 6s
+Sleep 8s
 
 # --- Scene 3: the detail is still there ---
 Hide
 Type "clear"
 Enter
 Show
-Type "# Need a detail the summary cut? Claude asks for it from the stored original:"
+Type "# Need a detail the summary cut? The agent asks for it from the stored original:"
 Enter
 Sleep 800ms
 Type `bun demo/demo.ts retrieve "LFU expiry"`
