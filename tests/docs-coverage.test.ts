@@ -163,3 +163,15 @@ describe("docs coverage: CLAUDE.md block", () => {
     expect(shown).toBe(CLAUDE_MD_BLOCK);
   });
 });
+
+// ── the docs index ──────────────────────────────────────────────────────────
+
+describe("docs coverage: docs index", () => {
+  test("every page under docs/ is linked from docs/README.md", () => {
+    const pages = [...new Glob("**/*.md").scanSync("docs")].filter((p) => p !== "README.md");
+    // Parsed link targets, not a substring search: a page named in prose is not a link.
+    const index = readFileSync("docs/README.md", "utf8");
+    const linked = [...index.matchAll(/\]\(([^)#\s]+\.md)(?:#[^)]*)?\)/g)].map((m) => m[1]);
+    assertAllDocumented(pages, linked, "the docs/README.md index");
+  });
+});
