@@ -6,6 +6,8 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+## [1.21.0] — 2026-11-11
+
 ### Added
 
 - **pi support** ([#458](https://github.com/sakebomb/mcp-recall/issues/458)).
@@ -1201,7 +1203,8 @@ Ten `recall__*` tools available in every Claude session:
 
 ---
 
-[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.20.0...HEAD
+[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.21.0...HEAD
+[1.21.0]: https://github.com/sakebomb/mcp-recall/compare/v1.20.0...v1.21.0
 [1.20.0]: https://github.com/sakebomb/mcp-recall/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/sakebomb/mcp-recall/compare/v1.18.1...v1.19.0
 [1.18.1]: https://github.com/sakebomb/mcp-recall/compare/v1.18.0...v1.18.1
