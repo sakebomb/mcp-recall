@@ -37,7 +37,7 @@ mcp-recall profiles seed --skip-verify
 mcp-recall profiles install grafana --skip-verify
 ```
 
-`npx mcp-recall` and `bunx mcp-recall` also work without a global install — useful for one-off commands.
+`npx mcp-recall` and `bunx mcp-recall` also run these commands without a global install. `mcp-recall install` is the exception: it needs a global install ([Install](install.md)).
 
 ---
 

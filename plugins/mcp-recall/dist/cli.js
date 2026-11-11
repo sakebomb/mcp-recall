@@ -13551,6 +13551,7 @@ __export(exports_install, {
   isBunfsPath: () => isBunfsPath,
   installCommand: () => installCommand,
   injectClaudeMd: () => injectClaudeMd,
+  ephemeralRunner: () => ephemeralRunner,
   detectLaunch: () => detectLaunch,
   detectAgents: () => detectAgents,
   defaultSettingsPath: () => defaultSettingsPath,
@@ -13620,6 +13621,9 @@ function shellWords(cmd) {
     words.push(word);
   }
   return words;
+}
+function ephemeralRunner(p) {
+  return RUNNER_CACHES.find(([, segment]) => segment.test(p))?.[0] ?? null;
 }
 function detectLaunch(standalone = isStandaloneBinary()) {
   if (standalone) {
@@ -13849,6 +13853,14 @@ async function installCommand(opts = {}) {
     console.error(`${RED}\u2717 Build artifacts not found.${RESET}`);
     console.error(`  Expected: ${DIM}${missing.path}${RESET}`);
     console.error(`  Run ${BOLD}bun run build${RESET} first.`);
+    process.exit(1);
+  }
+  const runner = launch.artifacts.map((a) => ephemeralRunner(a.path)).find((r) => r !== null);
+  if (runner) {
+    console.error(`${RED}\u2717 mcp-recall is running from ${runner}'s temporary cache.${RESET}`);
+    console.error(`  Registering it there breaks once that cache is cleaned. Install it globally, then install from there:`);
+    console.error(`    ${BOLD}npm install -g mcp-recall${RESET}   ${DIM}# or: bun add -g mcp-recall${RESET}`);
+    console.error(`    ${BOLD}mcp-recall install${RESET}`);
     process.exit(1);
   }
   if (dryRun) {
@@ -14191,7 +14203,7 @@ Installation: ${BOLD}${label}${RESET}
   }
   console.log("");
 }
-var BOLD = "\x1B[1m", GREEN = "\x1B[32m", YELLOW = "\x1B[33m", RED = "\x1B[31m", DIM = "\x1B[2m", RESET = "\x1B[0m", MAX_LINK_HOPS = 40, CLAUDE_MD_MARKER_START = "<!-- BEGIN mcp-recall -->", CLAUDE_MD_MARKER_END = "<!-- END mcp-recall -->", CLAUDE_MD_SNIPPET = `## mcp-recall
+var BOLD = "\x1B[1m", GREEN = "\x1B[32m", YELLOW = "\x1B[33m", RED = "\x1B[31m", DIM = "\x1B[2m", RESET = "\x1B[0m", RUNNER_CACHES, MAX_LINK_HOPS = 40, CLAUDE_MD_MARKER_START = "<!-- BEGIN mcp-recall -->", CLAUDE_MD_MARKER_END = "<!-- END mcp-recall -->", CLAUDE_MD_SNIPPET = `## mcp-recall
 
 Session context from previous sessions is automatically injected at startup (pinned items, notes, recent activity). If it was truncated, call \`recall__context()\` for the full view.
 
@@ -14206,6 +14218,11 @@ var init_install = __esm(() => {
   init_loader();
   init_gc();
   init_config();
+  RUNNER_CACHES = [
+    ["npx", /[\\/]_npx[\\/]/],
+    ["bunx", /[\\/]\.?bunx-[^\\/]*[\\/]/],
+    ["pnpm dlx", /[\\/]pnpm[\\/]dlx[\\/]/]
+  ];
   CLAUDE_MD_BLOCK = `${CLAUDE_MD_MARKER_START}
 ${CLAUDE_MD_SNIPPET}
 ${CLAUDE_MD_MARKER_END}`;
