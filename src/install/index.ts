@@ -48,6 +48,11 @@ export function defaultClaudeMdPath(): string {
   return path.join(os.homedir(), ".claude", "CLAUDE.md");
 }
 
+/** Claude Code's record of installed plugins, which a marketplace install of recall is in (#456). */
+export function defaultPluginsPath(): string {
+  return path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json");
+}
+
 // ── Launch detection ─────────────────────────────────────────────────────────
 
 /** How Claude Code runs mcp-recall: through bun and the bundled dist, or a standalone binary (#361). */
@@ -816,10 +821,131 @@ function ourHookCommands(entries: unknown, ours: OurHooks): string[] {
     .flatMap((e) => (e as HookEntry).hooks.filter(ours.hook).map((h) => h.command));
 }
 
+/** recall installed through the Claude Code plugin marketplace. */
+export interface PluginInstall { key: string; installPath: string; enabled: boolean }
+
+/**
+ * A user-scope `mcp-recall@<marketplace>` plugin in Claude Code's registry, and
+ * whether `enabledPlugins` turns it off. Claude Code does not document the
+ * registry, so any shape this does not recognise reads as no plugin (#456).
+ */
+export function findPluginInstall(registry: Record<string, unknown>, settings: Record<string, unknown>): PluginInstall | null {
+  const plugins = registry["plugins"];
+  if (typeof plugins !== "object" || plugins === null) return null;
+  const enabledPlugins = settings["enabledPlugins"] as Record<string, unknown> | undefined;
+  for (const [key, entries] of Object.entries(plugins)) {
+    if (!key.startsWith("mcp-recall@") || !Array.isArray(entries)) continue;
+    const user = entries.find((e) => e?.scope === "user" && typeof e?.installPath === "string");
+    if (user) return { key, installPath: user.installPath, enabled: enabledPlugins?.[key] !== false };
+  }
+  return null;
+}
+
+/** The plugin registry, or nothing when it is absent or not JSON: status must still run. */
+async function readPluginRegistry(filePath: string): Promise<Record<string, unknown>> {
+  try { return await readJsonFile(filePath); } catch { return {}; }
+}
+
+/**
+ * The plugin part of status. Alone, the plugin is the install, so its files and
+ * the CLAUDE.md block decide the label. Beside a CLI install it is a second
+ * registration, and disabled it is a note above the CLI's own checks.
+ */
+function printPluginStatus(plugin: PluginInstall, claudeMdOk: boolean, cliRegistered: boolean): void {
+  if (!plugin.enabled) {
+    console.log(`\n  Claude Code plugin ${plugin.key}: disabled`);
+    return;
+  }
+  const files = [
+    { label: "dist/server.js", ...locate(path.join(plugin.installPath, "dist", "server.js")) },
+    { label: "bin/recall", ...locate(path.join(plugin.installPath, "bin", "recall")) },
+    { label: "bun", ...locate("bun") },
+  ];
+  const filesOk = files.every((f) => f.exists);
+  const tick = (ok: boolean) => (ok ? `${GREEN}✓${RESET}` : `${RED}✗${RESET}`);
+  if (!cliRegistered) {
+    const label = filesOk && claudeMdOk ? `${GREEN}installed${RESET}` : `${YELLOW}partial / stale${RESET}`;
+    console.log(`\nInstallation: ${BOLD}${label}${RESET}\n`);
+  }
+  console.log(`${cliRegistered ? "\n" : ""}  Claude Code plugin ${plugin.key}  ${DIM}${plugin.installPath.replace(os.homedir(), "~")}${RESET}`);
+  for (const f of files) console.log(`    ${tick(f.exists)} ${f.label} ${DIM}${f.path}${RESET}`);
+  if (cliRegistered) {
+    console.log(`\n  ${YELLOW}mcp-recall is registered twice:${RESET} by the plugin and by the entries above. Keep one:`);
+    console.log(`    ${BOLD}mcp-recall uninstall${RESET}   ${DIM}# removes the CLI entries${RESET}`);
+    console.log(`    ${BOLD}claude plugin uninstall ${plugin.key}${RESET}   ${DIM}# removes the plugin${RESET}`);
+    return;
+  }
+  console.log(`  ${pad30("~/.claude/CLAUDE.md")}  ${tick(claudeMdOk)} mcp-recall instructions`);
+  if (!filesOk) console.log(`\n  What is marked ${RED}✗${RESET} is gone: run ${BOLD}claude plugin update ${plugin.key}${RESET}`);
+  if (!claudeMdOk) {
+    console.log(`  Add the instructions yourself: see ${BOLD}https://github.com/sakebomb/mcp-recall/blob/main/docs/install.md#claude-instructions${RESET}`);
+  }
+}
+
+function pad30(s: string): string {
+  return s + " ".repeat(Math.max(0, 30 - s.length));
+}
+
+/** What status found of a CLI install (`mcp-recall install`): its entries and what they run. */
+interface CliStatus {
+  serverRegistered: boolean;
+  ssRegistered: boolean;
+  ptuRegistered: boolean;
+  claudeMdOk: boolean;
+  files: RegisteredFile[];
+  elsewhere: boolean;
+  server: Record<string, unknown> | undefined;
+  launch: RecallLaunch;
+}
+
+/** The CLI install's part of status: its four entries, the files they run, and what to do. */
+function printCliStatus(c: CliStatus): void {
+  const tick = (ok: boolean) => (ok ? `${GREEN}✓${RESET}` : `${RED}✗${RESET}`);
+  const filesOk = c.files.every((f) => f.exists);
+  const fullyInstalled = c.serverRegistered && c.ssRegistered && c.ptuRegistered && c.claudeMdOk && filesOk;
+  const label = fullyInstalled
+    ? `${GREEN}installed${RESET}`
+    : (c.serverRegistered || c.ssRegistered || c.ptuRegistered)
+      ? `${YELLOW}partial / stale${RESET}`
+      : `${RED}not installed${RESET}`;
+
+  console.log(`\nInstallation: ${BOLD}${label}${RESET}\n`);
+
+  console.log(`  ${pad30("~/.claude.json")}  ${tick(c.serverRegistered)} mcpServers.recall`);
+  console.log(`  ${pad30("~/.claude/settings.json")}  ${tick(c.ssRegistered)} SessionStart hook`);
+  console.log(`  ${pad30("")}  ${tick(c.ptuRegistered)} PostToolUse hook`);
+  console.log(`  ${pad30("~/.claude/CLAUDE.md")}  ${tick(c.claudeMdOk)} mcp-recall instructions`);
+  if (c.files.length > 0) {
+    console.log("");
+    console.log(`  ${pad30("Registered launch")}`);
+    for (const f of c.files) {
+      console.log(`  ${pad30(`  ${f.label}`)}  ${tick(f.exists)} ${DIM}${f.path}${RESET}`);
+    }
+  }
+  if (c.elsewhere && c.server) {
+    console.log("");
+    console.log(`  Registered: ${describeLaunch(c.server["command"])}; this is ${describeLaunch(c.launch.server.command)}.`);
+    console.log(`  Run ${BOLD}mcp-recall install${RESET} from this one to switch Claude Code to it.`);
+  }
+
+  if (!fullyInstalled) {
+    console.log("");
+    if (!filesOk) {
+      console.log(`  Run ${BOLD}mcp-recall install${RESET} from the install Claude Code should use: what is marked ${RED}✗${RESET} is gone`);
+    } else {
+      console.log(`  Run ${BOLD}mcp-recall install${RESET}`);
+    }
+    if (!c.claudeMdOk) {
+      console.log(`  Or add instructions manually: see ${BOLD}https://github.com/sakebomb/mcp-recall/blob/main/docs/install.md#claude-instructions${RESET}`);
+    }
+  }
+}
+
 export interface StatusOptions {
   claudeJsonPath?: string;
   settingsPath?: string;
   claudeMdPath?: string;
+  pluginsPath?: string;
   /** Defaults to {@link detectLaunch}; tests pass one. */
   launch?: RecallLaunch;
   /** pi's config dir; defaults to {@link defaultPiDir}. */
@@ -831,12 +957,10 @@ export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
     claudeJsonPath = defaultClaudeJsonPath(),
     settingsPath   = defaultSettingsPath(),
     claudeMdPath   = defaultClaudeMdPath(),
+    pluginsPath    = defaultPluginsPath(),
     launch         = detectLaunch(),
     piDir          = defaultPiDir(),
   } = opts;
-
-  function tick(ok: boolean) { return ok ? `${GREEN}✓${RESET}` : `${RED}✗${RESET}`; }
-  function pad(s: string, n: number) { return s + " ".repeat(Math.max(0, n - s.length)); }
 
   // Config entries
   const claudeJson   = await readJsonFile(claudeJsonPath);
@@ -865,45 +989,17 @@ export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
     ...ourHookCommands(hooks["SessionStart"], ours.SessionStart).map(shellWords),
     ...ourHookCommands(hooks["PostToolUse"], ours.PostToolUse).map(shellWords),
   ]);
-  const filesOk   = files.every((f) => f.exists);
   const elsewhere = server !== undefined && !runsServer(server, launch.server);
+  const cli: CliStatus = { serverRegistered, ssRegistered, ptuRegistered, claudeMdOk, files, elsewhere, server, launch };
 
-  const fullyInstalled = serverRegistered && ssRegistered && ptuRegistered && claudeMdOk && filesOk;
-  const label = fullyInstalled
-    ? `${GREEN}installed${RESET}`
-    : (serverRegistered || ssRegistered || ptuRegistered)
-      ? `${YELLOW}partial / stale${RESET}`
-      : `${RED}not installed${RESET}`;
-
-  console.log(`\nInstallation: ${BOLD}${label}${RESET}\n`);
-
-  console.log(`  ${pad("~/.claude.json", 30)}  ${tick(serverRegistered)} mcpServers.recall`);
-  console.log(`  ${pad("~/.claude/settings.json", 30)}  ${tick(ssRegistered)} SessionStart hook`);
-  console.log(`  ${pad("", 30)}  ${tick(ptuRegistered)} PostToolUse hook`);
-  console.log(`  ${pad("~/.claude/CLAUDE.md", 30)}  ${tick(claudeMdOk)} mcp-recall instructions`);
-  if (files.length > 0) {
-    console.log("");
-    console.log(`  ${pad("Registered launch", 30)}`);
-    for (const f of files) {
-      console.log(`  ${pad(`  ${f.label}`, 30)}  ${tick(f.exists)} ${DIM}${f.path}${RESET}`);
-    }
-  }
-  if (elsewhere) {
-    console.log("");
-    console.log(`  Registered: ${describeLaunch(server["command"])}; this is ${describeLaunch(launch.server.command)}.`);
-    console.log(`  Run ${BOLD}mcp-recall install${RESET} from this one to switch Claude Code to it.`);
-  }
-
-  if (!fullyInstalled) {
-    console.log("");
-    if (!filesOk) {
-      console.log(`  Run ${BOLD}mcp-recall install${RESET} from the install Claude Code should use: what is marked ${RED}✗${RESET} is gone`);
-    } else {
-      console.log(`  Run ${BOLD}mcp-recall install${RESET}`);
-    }
-    if (!claudeMdOk) {
-      console.log(`  Or add instructions manually: see ${BOLD}https://github.com/sakebomb/mcp-recall/blob/main/docs/install.md#claude-instructions${RESET}`);
-    }
+  // A marketplace install writes none of the entries above: Claude Code runs the plugin's own (#456).
+  const plugin = findPluginInstall(await readPluginRegistry(pluginsPath), settings);
+  const cliRegistered = serverRegistered || ssRegistered || ptuRegistered;
+  if (plugin?.enabled && !cliRegistered) {
+    printPluginStatus(plugin, claudeMdOk, false);
+  } else {
+    printCliStatus(cli);
+    if (plugin) printPluginStatus(plugin, claudeMdOk, cliRegistered);
   }
 
   await printPiStatus(piDir, launch);

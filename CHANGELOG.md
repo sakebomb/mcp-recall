@@ -14,6 +14,14 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   that runner's cache, so cleaning the cache left Claude Code silently running
   without mcp-recall. It now stops, names the runner and says to install
   globally first. Other commands still run through a package runner.
+- **`mcp-recall status` recognizes a plugin marketplace install**
+  ([#456](https://github.com/sakebomb/mcp-recall/issues/456)). A plugin
+  install writes no `mcpServers.recall` entry and no `settings.json` hooks, so
+  `status` reported it as not installed. It now finds the plugin in Claude
+  Code's plugin registry, checks the plugin's own files, says when the plugin
+  is disabled, and warns when the plugin and a CLI install are both
+  registered. The install docs tell plugin users to run `status` and
+  `profiles seed` through `bunx`.
 
 ## [1.21.0] — 2026-11-11
 
