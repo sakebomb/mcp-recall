@@ -14220,7 +14220,7 @@ var init_install = __esm(() => {
   init_config();
   RUNNER_CACHES = [
     ["npx", /[\\/]_npx[\\/]/],
-    ["bunx", /[\\/]\.?bunx-[^\\/]*[\\/]/],
+    ["bunx", /[\\/]\.bunx-[^\\/]*[\\/]/],
     ["pnpm dlx", /[\\/]pnpm[\\/]dlx[\\/]/]
   ];
   CLAUDE_MD_BLOCK = `${CLAUDE_MD_MARKER_START}

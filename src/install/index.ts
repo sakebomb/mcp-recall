@@ -126,7 +126,7 @@ export function shellWords(cmd: string): string[] {
  */
 const RUNNER_CACHES: Array<[runner: string, segment: RegExp]> = [
   ["npx",      /[\\/]_npx[\\/]/],
-  ["bunx",     /[\\/]\.?bunx-[^\\/]*[\\/]/],
+  ["bunx",     /[\\/]\.bunx-[^\\/]*[\\/]/],
   ["pnpm dlx", /[\\/]pnpm[\\/]dlx[\\/]/],
 ];
 

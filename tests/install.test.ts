@@ -468,6 +468,7 @@ describe("install refuses a launch inside a package runner's cache (#455)", () =
     `/home/u/.bun/install/global/node_modules/mcp-recall/plugins/mcp-recall/dist/server.js`,
     `/home/u/code/mcp-recall/plugins/mcp-recall/dist/server.js`,
     `/home/u/my_npx_tools/mcp-recall/dist/server.js`, // _npx only as a whole segment
+    `/home/u/bunx-experiments/node_modules/mcp-recall/dist/server.js`, // only bunx's dotted cache dir
     `/usr/local/bin/mcp-recall`,
   ];
 
