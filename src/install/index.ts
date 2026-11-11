@@ -119,6 +119,25 @@ export function shellWords(cmd: string): string[] {
   return words;
 }
 
+/**
+ * Package runners whose cache a run leaves behind, keyed by a path-segment pattern
+ * from their real layout (1.21.0): npx `…/_npx/<hash>/`, bunx `…/.bunx-<uid>/`,
+ * pnpm dlx `…/pnpm/dlx/<hash>/`. Either separator, so Windows paths match too.
+ */
+const RUNNER_CACHES: Array<[runner: string, segment: RegExp]> = [
+  ["npx",      /[\\/]_npx[\\/]/],
+  ["bunx",     /[\\/]\.bunx-[^\\/]*[\\/]/],
+  ["pnpm dlx", /[\\/]pnpm[\\/]dlx[\\/]/],
+];
+
+/**
+ * The package runner whose cache holds `p`, or null. A launch registered there
+ * breaks silently when the cache is cleaned, so install refuses it (#455).
+ */
+export function ephemeralRunner(p: string): string | null {
+  return RUNNER_CACHES.find(([, segment]) => segment.test(p))?.[0] ?? null;
+}
+
 export function detectLaunch(standalone = isStandaloneBinary()): RecallLaunch {
   if (standalone) {
     const bin = process.execPath;
@@ -471,6 +490,15 @@ export async function installCommand(opts: InstallOptions = {}): Promise<void> {
     console.error(`${RED}✗ Build artifacts not found.${RESET}`);
     console.error(`  Expected: ${DIM}${missing.path}${RESET}`);
     console.error(`  Run ${BOLD}bun run build${RESET} first.`);
+    process.exit(1);
+  }
+
+  const runner = launch.artifacts.map((a) => ephemeralRunner(a.path)).find((r) => r !== null);
+  if (runner) {
+    console.error(`${RED}✗ mcp-recall is running from ${runner}'s temporary cache.${RESET}`);
+    console.error(`  Registering it there breaks once that cache is cleaned. Install it globally, then install from there:`);
+    console.error(`    ${BOLD}npm install -g mcp-recall${RESET}   ${DIM}# or: bun add -g mcp-recall${RESET}`);
+    console.error(`    ${BOLD}mcp-recall install${RESET}`);
     process.exit(1);
   }
 

@@ -26,6 +26,7 @@ import {
   isStandaloneBinary,
   shellWord,
   shellWords,
+  ephemeralRunner,
   type RecallLaunch,
 } from "../src/install/index";
 
@@ -447,6 +448,81 @@ describe("launch detection", () => {
     expect(launch.cli).toMatch(/^bun \S+\/plugins\/mcp-recall\/dist\/cli\.js$/);
     expect(launch.server.command).toBe("bun");
     expect(launch.server.args[0]).toMatch(/\/plugins\/mcp-recall\/dist\/server\.js$/);
+  });
+});
+
+// ── a launch inside a package runner's cache (#455) ──────────────────────────
+
+describe("install refuses a launch inside a package runner's cache (#455)", () => {
+  // Paths as npx, bunx and pnpm dlx really lay them out (1.21.0, isolated caches).
+  const PKG = "node_modules/mcp-recall/plugins/mcp-recall/dist/server.js";
+  const cached: Array<[string, string]> = [
+    ["npx",      `/home/u/.npm/_npx/b20cda29a9821e35/${PKG}`],
+    ["npx",      `C:\\Users\\u\\AppData\\Local\\npm-cache\\_npx\\b20cda29\\${PKG.replaceAll("/", "\\")}`],
+    ["bunx",     `/tmp/.bunx-1000/mcp-recall@1.21.0/${PKG}`],
+    ["pnpm dlx", `/home/u/.cache/pnpm/dlx/0aa50a96/mwcr7dmw-57sj/node_modules/.pnpm/mcp-recall@1.21.0/${PKG}`],
+  ];
+  const durable = [
+    `/usr/lib/node_modules/mcp-recall/plugins/mcp-recall/dist/server.js`,
+    `/home/u/.npm-global/lib/node_modules/mcp-recall/plugins/mcp-recall/dist/server.js`,
+    `/home/u/.bun/install/global/node_modules/mcp-recall/plugins/mcp-recall/dist/server.js`,
+    `/home/u/code/mcp-recall/plugins/mcp-recall/dist/server.js`,
+    `/home/u/my_npx_tools/mcp-recall/dist/server.js`, // _npx only as a whole segment
+    `/home/u/bunx-experiments/node_modules/mcp-recall/dist/server.js`, // only bunx's dotted cache dir
+    `/usr/local/bin/mcp-recall`,
+  ];
+
+  it("names the runner for each cache layout", () => {
+    for (const [runner, p] of cached) expect(ephemeralRunner(p)).toBe(runner);
+  });
+
+  it("leaves global, bun-global, checkout and binary paths alone", () => {
+    for (const p of durable) expect(ephemeralRunner(p)).toBeNull();
+  });
+
+  describe("installCommand", () => {
+    let claudeMdPath: string;
+    afterEach(() => mock.restore());
+
+    async function launchUnder(dir: string): Promise<RecallLaunch> {
+      const distDir = path.join(tmpDir, dir, "node_modules", "mcp-recall", "plugins", "mcp-recall", "dist");
+      const serverJs = path.join(distDir, "server.js");
+      const cliJs = path.join(distDir, "cli.js");
+      await Bun.write(serverJs, "");
+      await Bun.write(cliJs, "");
+      claudeMdPath = path.join(tmpDir, "CLAUDE.md");
+      return {
+        cli: `bun ${shellWord(cliJs)}`,
+        server: { type: "stdio", command: "bun", args: [serverJs] },
+        artifacts: [{ label: "dist/server.js", path: serverJs }, { label: "dist/cli.js", path: cliJs }],
+      };
+    }
+
+    it("refuses an npx launch, writes nothing, and says to install globally", async () => {
+      const launch = await launchUnder(path.join("_npx", "b20cda29a9821e35"));
+      const err = spyOn(console, "error").mockImplementation(() => {});
+      spyOn(console, "log").mockImplementation(() => {});
+      spyOn(process, "exit").mockImplementation(((code?: number) => { throw new Error(`exit ${code}`); }) as never);
+
+      await expect(
+        installCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch, agents: ["claude"] }),
+      ).rejects.toThrow("exit 1");
+
+      expect(existsSync(claudeJsonPath)).toBe(false);
+      expect(existsSync(settingsPath)).toBe(false);
+      expect(existsSync(claudeMdPath)).toBe(false);
+      const out = err.mock.calls.flat().join("\n");
+      expect(out).toContain("npx");
+      expect(out).toContain("npm install -g mcp-recall");
+    });
+
+    it("installs the same layout outside a runner's cache", async () => {
+      const launch = await launchUnder(path.join("lib", "b20cda29a9821e35"));
+      spyOn(console, "log").mockImplementation(() => {});
+      await installCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch, agents: ["claude"] });
+      const claudeJson = await readJsonFile(claudeJsonPath) as any;
+      expect(claudeJson.mcpServers.recall.args).toEqual(launch.server.args);
+    });
   });
 });
 

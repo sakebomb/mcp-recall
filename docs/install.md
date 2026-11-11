@@ -14,7 +14,7 @@ bun add -g mcp-recall    # or: npm i -g mcp-recall
 mcp-recall install       # register hooks + MCP server in Claude Code
 ```
 
-Install globally rather than through `npx` or `bunx`. `mcp-recall install` registers the path of the copy it runs from, and an `npx`/`bunx` copy lives in a cache that can be cleared, which would leave Claude Code pointing at files that are gone ([#455](https://github.com/sakebomb/mcp-recall/issues/455)).
+Install globally, not through `npx`, `bunx` or `pnpm dlx`. `mcp-recall install` registers the path of the copy it runs from, and a package runner's copy lives in a cache that can be cleared, which would leave Claude Code pointing at files that are gone. So `install` refuses to run from one and says to install globally ([#455](https://github.com/sakebomb/mcp-recall/issues/455)).
 
 `mcp-recall install` writes the MCP server entry and hooks to `~/.claude.json` and `~/.claude/settings.json`, and adds a short [instruction block](#claude-instructions) to `~/.claude/CLAUDE.md` so Claude knows how to use the recall tools. It's idempotent — safe to re-run after updates.
 

@@ -6,6 +6,15 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Fixed
+
+- **`mcp-recall install` refuses to run from a package runner's cache**
+  ([#455](https://github.com/sakebomb/mcp-recall/issues/455)). Run through
+  `npx`, `bunx` or `pnpm dlx`, install registered the server and hooks inside
+  that runner's cache, so cleaning the cache left Claude Code silently running
+  without mcp-recall. It now stops, names the runner and says to install
+  globally first. Other commands still run through a package runner.
+
 ## [1.21.0] — 2026-11-11
 
 ### Added
