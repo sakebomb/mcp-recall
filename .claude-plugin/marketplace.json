@@ -1,0 +1,15 @@
+{
+  "name": "mcp-recall",
+  "description": "mcp-recall as a Claude Code plugin: compresses large MCP and Bash output and keeps the full text retrievable",
+  "owner": {
+    "name": "sakebomb",
+    "url": "https://github.com/sakebomb/mcp-recall"
+  },
+  "plugins": [
+    {
+      "name": "mcp-recall",
+      "source": "./plugins/mcp-recall",
+      "description": "Context compression and persistent retrieval for Claude Code"
+    }
+  ]
+}
