@@ -92,7 +92,7 @@ Restart pi, or run `/reload`, after installing. `mcp-recall status` lists pi bel
 
 ## grok
 
-xAI's `grok` CLI reads Claude Code's setup, so no mcp-recall step is needed for it: with Option A, C or D it reads the hooks in `~/.claude/settings.json` and the MCP servers in `~/.claude.json`, and with Option B it loads the Claude Code plugin.
+xAI's `grok` CLI reads Claude Code's setup, so installing mcp-recall for Claude Code also installs it for grok: with Option A, C or D it reads the hooks in `~/.claude/settings.json` and the MCP servers in `~/.claude.json`, and with Option B it loads the Claude Code plugin.
 
 grok runs those hooks only in a folder you have trusted. Elsewhere it still lists the `recall` server but skips the hooks, so nothing is compressed. grok asks about trust when you open a folder, your home directory counts as trusted, and `/hooks-trust` or starting grok with `--trust` grants it later. A headless `grok -p` run counts the folder as trusted for these hooks.
 
