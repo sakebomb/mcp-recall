@@ -10,6 +10,7 @@ task's own verify.py then checks the forum's final state.
 """
 import argparse
 import json
+import os
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -36,9 +37,10 @@ CHAIN_PREFIX = ("This is a new task. The forum has been reset to its original st
 # network, started by hand (see the spec). The agent joins that network instead of the
 # default bridge, so a local run has no route to the internet at all.
 OLLAMA_MODELS = ("qwen3-coder:64k", "qwen3.6:35b")
-# Self-hosted models behind LiteLLM, priced at $0 there: Qwen3-Coder-Next FP8 on vLLM
-# (blackwell), 131,072-token context.
-FREE_MODELS = ("blackwell-coder-next",)
+# Self-hosted models behind LiteLLM, priced at $0 there: Qwen3-Coder-Next FP8 on vLLM,
+# 131,072-token context. These are gateway route names, so set BENCH_FREE_MODELS
+# (comma-separated) to match your own gateway's.
+FREE_MODELS = tuple(os.environ.get("BENCH_FREE_MODELS", "self-hosted-qwen3-coder-next").split(","))
 OLLAMA_NET = "recall-bench-llm"
 
 
