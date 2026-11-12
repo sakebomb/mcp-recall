@@ -6,6 +6,16 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Added
+
+- **OpenCode support** ([#474](https://github.com/sakebomb/mcp-recall/issues/474)).
+  `mcp-recall install` now also installs into [OpenCode](https://opencode.ai)
+  when OpenCode's config dir exists, or with `--agent opencode`. It writes a
+  plugin that runs each MCP and bash result through the same hook Claude Code
+  uses and registers the `recall` server itself, so `opencode.json` is not
+  edited. Large bash output is stored whole from the file OpenCode saves it to.
+  `uninstall` and `status` cover OpenCode too.
+
 ### Fixed
 
 - **`mcp-recall install` refuses to run from a package runner's cache**
