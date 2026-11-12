@@ -14,7 +14,7 @@
 
 MCP tool outputs (Playwright snapshots, GitHub API responses, Linear queries) and long Bash output can consume tens of kilobytes of context per call, and a busy session fills even a large context window long before the work is done. mcp-recall intercepts those outputs, stores them in full locally, and delivers compressed summaries to Claude instead. When Claude needs more detail, it can search the stored output and retrieve it, without re-running the tool.
 
-It works in [Claude Code](https://claude.ai/claude-code), [pi](https://pi.dev), [OpenCode](https://opencode.ai) and xAI's `grok` CLI: `mcp-recall install` sets up each one it finds, and grok reads Claude Code's setup.
+It works in [Claude Code](https://claude.ai/claude-code), [pi](https://pi.dev), [OpenCode](https://opencode.ai) and xAI's `grok` CLI. [Where it runs](#where-it-runs) gives every agent's status, including the ones still to come.
 
 The goal is sessions that run for hours instead of hitting the context limit in minutes. [Results](#results) shows what is measured today, and the [quality benchmark](docs/benchmarks.md) what the summaries keep.
 
@@ -40,6 +40,25 @@ The goal is sessions that run for hours instead of hitting the context limit in 
 **What it has not shown:** that Claude solves more tasks. In paired runs with and without it, no study found a difference in solved tasks larger than chance. Claude also almost never fetched the stored output, so the summaries carry the effect. See the [task-success benchmark](docs/benchmarks.md#task-success-benchmark) for every study and its limits.
 
 **What it costs you:** an install that edits your Claude Code config, and a local SQLite store on your own disk. Nothing leaves your machine, and credentials are never stored: see [Safety and privacy](#safety-and-privacy).
+
+---
+
+## Where it runs
+
+mcp-recall needs an agent that lets a hook rewrite a tool's result before the model sees it, without marking the result as an error. Each agent below runs the same pipeline through a thin adapter.
+
+| Agent | Status | Setup |
+|---|---|---|
+| [Claude Code](https://claude.ai/claude-code) | **Supported** | `mcp-recall install`, or the [plugin marketplace](docs/install.md#option-b--claude-code-plugin-marketplace) |
+| [pi](https://pi.dev) | **Supported** | `mcp-recall install` adds an extension ([details](docs/install.md#pi)) |
+| [OpenCode](https://opencode.ai) | **Supported** | `mcp-recall install` adds a plugin ([details](docs/install.md#opencode)) |
+| xAI `grok` CLI | **Supported** in folders you trust in grok | Reads Claude Code's setup ([details](docs/install.md#grok)) |
+| GitHub Copilot CLI | **On request** | Its hooks look able to; ask in [#476](https://github.com/sakebomb/mcp-recall/issues/476) |
+| OpenAI Codex CLI | **Waiting on Codex** | A hook can't yet replace a result without an error ([openai/codex#38135](https://github.com/openai/codex/issues/38135)) |
+| Gemini CLI, Qwen Code | **Not possible today** | A hook can replace a result only by reporting an error |
+| Cursor | **Not possible today** | Its hook doesn't say which MCP server a result came from |
+
+Using an agent that isn't listed? Say so in [#473](https://github.com/sakebomb/mcp-recall/issues/473).
 
 ---
 
