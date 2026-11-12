@@ -28,7 +28,7 @@ claude plugin install mcp-recall@mcp-recall
 Both hooks and the MCP server register automatically; restart Claude Code once to load them. Two things differ from Option A:
 
 - The plugin does not write the [Claude instructions](#claude-instructions) block. Paste it into `~/.claude/CLAUDE.md` yourself.
-- The plugin puts no `mcp-recall` command on your `PATH`, so the CLI steps in [After installing](#after-installing) (`profiles seed`, `status`) are not available. Don't add Option A on top: it writes its own server entry and hooks beside the plugin's, so mcp-recall would be registered twice. If you want the CLI, use Option A instead ([#456](https://github.com/sakebomb/mcp-recall/issues/456)).
+- The plugin puts no `mcp-recall` command on your `PATH`. Run the CLI steps in [After installing](#after-installing) through `bunx` instead: `bunx mcp-recall status` reports the plugin as the install, and `bunx mcp-recall profiles seed` installs profiles. Don't add Option A on top: it writes its own server entry and hooks beside the plugin's, so mcp-recall would be registered twice, and `status` says so ([#456](https://github.com/sakebomb/mcp-recall/issues/456)).
 
 To check a plugin install, run `/mcp` in Claude Code: the mcp-recall plugin's `recall` server should show as connected.
 
@@ -101,7 +101,7 @@ Earlier installs registered a hook matcher that grok's regex engine rejects, so 
 ## After installing
 
 1. **Restart Claude Code.** The MCP server and hooks register at startup.
-2. **Check the install:** `mcp-recall status` should show every check green.
+2. **Check the install:** `mcp-recall status` should show every check green. With the plugin (Option B), run `bunx mcp-recall status`; it checks the plugin's files instead of the entries `mcp-recall install` writes.
 3. **Optional: install compression profiles** for the MCP servers you use. Profiles teach mcp-recall how to summarize a specific server's output.
 
    ```bash
@@ -109,6 +109,8 @@ Earlier installs registered a hook matcher that grok's regex engine rejects, so 
    mcp-recall profiles seed --all  # or the full community catalog
    mcp-recall learn                # generate profiles for MCPs the catalog doesn't cover
    ```
+
+   With the plugin, put `bunx` in front: `bunx mcp-recall profiles seed`.
 
    See the [profiles quickstart](profiles-quickstart.md) for more.
 

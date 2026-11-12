@@ -40,11 +40,13 @@ const FAKE_SERVER = "/fake/mcp-recall/dist/server.js";
 let tmpDir: string;
 let claudeJsonPath: string;
 let settingsPath: string;
+let pluginsPath: string;
 
 beforeEach(async () => {
   tmpDir = await mkdtemp(path.join(os.tmpdir(), "mcp-recall-install-test-"));
   claudeJsonPath = path.join(tmpDir, ".claude.json");
   settingsPath   = path.join(tmpDir, "settings.json");
+  pluginsPath    = path.join(tmpDir, "plugins", "installed_plugins.json"); // none: status must not read the real one
 });
 
 afterEach(async () => {
@@ -565,7 +567,7 @@ describe("status checks the launch that is registered, not its own (#364)", () =
 
   async function statusOf(launch: RecallLaunch): Promise<string> {
     const log = spyOn(console, "log").mockImplementation(() => {});
-    await statusCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch });
+    await statusCommand({ claudeJsonPath, settingsPath, claudeMdPath, pluginsPath, launch });
     const out = log.mock.calls.flat().join("\n").replace(/\x1b\[[0-9;]*m/g, "");
     log.mockRestore();
     return out;
@@ -685,7 +687,7 @@ describe("install / uninstall / status with a binary launch", () => {
     const log = quiet();
     await installCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch });
     log.mockClear();
-    await statusCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch });
+    await statusCommand({ claudeJsonPath, settingsPath, claudeMdPath, pluginsPath, launch });
     const out = log.mock.calls.flat().join("\n");
     expect(out).toContain("installed");
     expect(out).not.toContain("partial");
@@ -698,7 +700,7 @@ describe("install / uninstall / status with a binary launch", () => {
     await installCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch });
     await rm(binary);
     log.mockClear();
-    await statusCommand({ claudeJsonPath, settingsPath, claudeMdPath, launch });
+    await statusCommand({ claudeJsonPath, settingsPath, claudeMdPath, pluginsPath, launch });
     expect(log.mock.calls.flat().join("\n")).toContain("partial / stale");
   });
 });

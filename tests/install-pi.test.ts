@@ -12,7 +12,7 @@ import { PI_EXTENSION_SOURCE, piExtensionDir, defaultPiDir } from "../src/agents
 // config paths and pi dir; nothing touches the real ~/.claude or ~/.pi.
 
 let tmpDir: string;
-let claude: { claudeJsonPath: string; settingsPath: string; claudeMdPath: string };
+let claude: { claudeJsonPath: string; settingsPath: string; claudeMdPath: string; pluginsPath: string };
 let piDir: string;
 let launch: RecallLaunch;
 let binary: string;
@@ -25,6 +25,7 @@ beforeEach(async () => {
     claudeJsonPath: path.join(tmpDir, ".claude.json"),
     settingsPath: path.join(tmpDir, "settings.json"),
     claudeMdPath: path.join(tmpDir, "CLAUDE.md"),
+    pluginsPath: path.join(tmpDir, "plugins", "installed_plugins.json"), // none: status must not read the real one
   };
   piDir = path.join(tmpDir, ".pi", "agent");
   binary = path.join(tmpDir, "bin", "mcp-recall");
