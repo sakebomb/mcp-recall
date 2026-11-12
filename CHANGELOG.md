@@ -29,6 +29,11 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   so the marketplace could not be added and the plugin could not be installed.
   The repo now ships the manifest, and the install docs give
   `claude plugin marketplace add sakebomb/mcp-recall`.
+- **The plugin's hooks run when the plugin's path contains a space**
+  ([#468](https://github.com/sakebomb/mcp-recall/issues/468)). The hook
+  commands left `${CLAUDE_PLUGIN_ROOT}` unquoted, so a path such as
+  `/Users/first last/…` split into several words, both hooks failed, and the
+  plugin stopped compressing without saying so. The commands now quote it.
 
 ## [1.21.0] — 2026-11-11
 

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "bun:test";
-import { existsSync, readFileSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import path from "path";
 
 // The plugin marketplace install (docs/install.md, Option B) needs a marketplace
@@ -51,4 +52,43 @@ describe("plugin marketplace manifest (#465)", () => {
     const ids = marketplace.plugins.map((p) => `${p.name}@${marketplace.name}`);
     for (const cmd of installs) expect(ids).toContain(cmd.split(/\s+/)[3]);
   });
+});
+
+// Claude Code runs a hook command through a shell, so an unquoted ${CLAUDE_PLUGIN_ROOT}
+// splits on a plugin path with a space and the hook never runs (#468).
+describe.skipIf(process.platform === "win32")("plugin hook commands (#468)", () => {
+  const hookCommands = (file: string): string[] => {
+    const { hooks } = JSON.parse(read(file)) as {
+      hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
+    };
+    return Object.values(hooks).flat().flatMap((group) => group.hooks.map((h) => h.command));
+  };
+
+  for (const file of ["hooks/hooks.json", "plugins/mcp-recall/hooks/hooks.json"]) {
+    it(`${file} reaches bin/recall from a plugin root with a space`, () => {
+      const base = mkdtempSync(path.join(tmpdir(), "recall hooks "));
+      try {
+        const root = path.join(base, "plugin root");
+        mkdirSync(path.join(root, "bin"), { recursive: true });
+        const recall = path.join(root, "bin", "recall");
+        writeFileSync(recall, '#!/bin/sh\nprintf "%s\\n" "$@"\n');
+        chmodSync(recall, 0o755);
+
+        const commands = hookCommands(file);
+        expect(commands.length).toBe(2);
+        for (const command of commands) {
+          const subcommand = command.split(/\s+/).at(-1);
+          // Claude Code may expand the placeholder itself or leave it to the shell; both must work.
+          for (const script of [command, command.replaceAll("${CLAUDE_PLUGIN_ROOT}", root)]) {
+            const run = Bun.spawnSync(["sh", "-c", script], {
+              env: { PATH: process.env.PATH ?? "", CLAUDE_PLUGIN_ROOT: root },
+            });
+            expect(run.stdout.toString()).toBe(`${subcommand}\n`);
+          }
+        }
+      } finally {
+        rmSync(base, { recursive: true, force: true });
+      }
+    });
+  }
 });
