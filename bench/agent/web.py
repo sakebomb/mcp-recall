@@ -40,7 +40,8 @@ OLLAMA_MODELS = ("qwen3-coder:64k", "qwen3.6:35b")
 # Self-hosted models behind LiteLLM, priced at $0 there: Qwen3-Coder-Next FP8 on vLLM,
 # 131,072-token context. These are gateway route names, so set BENCH_FREE_MODELS
 # (comma-separated) to match your own gateway's.
-FREE_MODELS = tuple(os.environ.get("BENCH_FREE_MODELS", "self-hosted-qwen3-coder-next").split(","))
+FREE_MODELS = tuple(m.strip() for m in os.environ.get("BENCH_FREE_MODELS", "").split(",")
+                    if m.strip()) or ("self-hosted-qwen3-coder-next",)
 OLLAMA_NET = "recall-bench-llm"
 
 
