@@ -13527,6 +13527,293 @@ var init_pi = __esm(() => {
   PI_EXTENSION_SOURCE = pi_extension_default;
 });
 
+// src/agents/opencode-plugin.ts
+var opencode_plugin_default = `/**
+ * mcp-recall for OpenCode (https://opencode.ai) \u2014 installed by \`mcp-recall install\` (#474).
+ *
+ * OpenCode loads this file from ~/.config/opencode/plugins/mcp-recall.ts. It is
+ * the OpenCode side of what Claude Code's hooks do: each MCP or bash result goes
+ * through mcp-recall's own \`post-tool-use\` hook, unchanged, and the summary it
+ * returns replaces the result before the model sees it. The plugin adds no logic
+ * of its own; it translates OpenCode's shapes into the hook's input and back.
+ *
+ * Self-contained by design: it imports only node builtins, because it runs
+ * inside OpenCode, and mcp-recall may be a standalone binary with no JS to
+ * import. \`mcp-recall.launch.json\` beside it says how to run mcp-recall;
+ * \`mcp-recall install\` writes both files. OpenCode treats every function this
+ * module exports as a plugin, so the helpers ride on \`McpRecall.internals\`.
+ */
+import { spawn } from "node:child_process";
+import { lstatSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+export interface Launch {
+  /** argv that runs the mcp-recall CLI, e.g. ["bun", "/\u2026/dist/cli.js"] or ["/\u2026/mcp-recall"]. */
+  cli: string[];
+  /** The MCP server's command and arguments. */
+  server: { command: string; args: string[] };
+}
+
+interface TextBlock { type: "text"; text: string }
+
+/** What \`tool.execute.after\` gets for an MCP tool: the server's raw CallToolResult. */
+export interface McpResult { content?: Array<{ type: string; text?: string } | null>; [key: string]: unknown }
+
+/** What \`tool.execute.after\` gets for bash. */
+export interface BashResult {
+  title?: string;
+  output?: unknown;
+  metadata?: { exit?: unknown; truncated?: unknown; outputPath?: unknown; [key: string]: unknown } | null;
+}
+
+/** The first argument of \`tool.execute.after\`. */
+export interface ToolCall { tool: string; sessionID: string; callID?: string; args?: unknown }
+
+/** Claude Code's hook timeout for mcp-recall's own hooks, in ms. */
+const HOOK_TIMEOUT_MS = 10_000;
+/** The hook reads back at most this much of a saved full output, as it does for Claude Code. */
+const MAX_FULL_OUTPUT_BYTES = 20 * 1024 * 1024;
+/** OpenCode's own names for the files it saves a cut bash result to. */
+const OPENCODE_FULL_OUTPUT = /^tool_[0-9A-Za-z]+$/;
+const LAUNCH_FILE = "mcp-recall.launch.json";
+
+/** Where OpenCode saves cut output: its data dir, as OpenCode resolves it. */
+function toolOutputDir(): string {
+  return join(process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "opencode", "tool-output");
+}
+
+/**
+ * Claude Code's name for an OpenCode MCP tool. OpenCode names one \`<server>_<tool>\`,
+ * keeping the server name as configured, so the longest configured server that
+ * prefixes the name is its server. Null for anything else (a built-in tool).
+ */
+function mcpToolName(tool: string, servers: string[]): string | null {
+  const server = servers
+    .filter((s) => tool.startsWith(\`\${s}_\`) && tool.length > s.length + 1)
+    .sort((a, b) => b.length - a.length)[0];
+  return server === undefined ? null : \`mcp__\${server}__\${tool.slice(server.length + 1)}\`;
+}
+
+/**
+ * The whole output of a bash result. OpenCode cuts a large one before plugins see
+ * it and saves the whole output to the file named in \`metadata.outputPath\`. Read
+ * it back only when it is plainly OpenCode's file: absolute, directly in its
+ * tool-output dir, named as OpenCode names them, a regular file rather than a
+ * link, and not huge. Anything else keeps the text OpenCode delivered.
+ */
+function bashText(out: BashResult): string {
+  const delivered = typeof out.output === "string" ? out.output : "";
+  const p = out.metadata?.outputPath;
+  if (out.metadata?.truncated !== true || typeof p !== "string" || !isAbsolute(p)) return delivered;
+  if (resolve(dirname(p)) !== resolve(toolOutputDir()) || !OPENCODE_FULL_OUTPUT.test(basename(p))) return delivered;
+  try {
+    const st = lstatSync(p);
+    if (!st.isFile() || st.size > MAX_FULL_OUTPUT_BYTES) return delivered;
+    return readFileSync(p, "utf8");
+  } catch {
+    return delivered;
+  }
+}
+
+/**
+ * The PostToolUse input Claude Code would send for this result, or null when
+ * mcp-recall should leave it alone: a built-in tool other than bash, recall's own
+ * tools, or an MCP result carrying an image or other non-text block (the hook
+ * passes those through anyway). OpenCode throws on an MCP error, so none arrive.
+ */
+function toHookInput(call: ToolCall, output: unknown, servers: string[], cwd: string): Record<string, unknown> | null {
+  const base = { session_id: call.sessionID, cwd, hook_event_name: "PostToolUse", tool_input: call.args ?? {} };
+  if (call.tool === "bash") {
+    const out = output as BashResult;
+    if (typeof out?.output !== "string") return null;
+    const exit = out.metadata?.exit;
+    const response = { stdout: bashText(out), stderr: "", interrupted: false };
+    return { ...base, tool_name: "Bash", tool_response: typeof exit === "number" ? { ...response, exit_code: exit } : response };
+  }
+  const name = mcpToolName(call.tool, servers);
+  if (name === null || name.startsWith("mcp__recall__")) return null;
+  const content = (output as McpResult)?.content;
+  if (!Array.isArray(content) || content.length === 0 || content.some((c) => c?.type !== "text")) return null;
+  return { ...base, tool_name: name, tool_response: content.map((c) => ({ type: "text", text: c?.text ?? "" })) };
+}
+
+/** Puts the summary where OpenCode reads each kind of result. */
+function applySummary(call: ToolCall, output: unknown, text: string): void {
+  if (call.tool === "bash") {
+    (output as BashResult).output = text;
+    return;
+  }
+  const mcp = output as McpResult;
+  mcp.content = [{ type: "text", text }];
+  delete mcp["structuredContent"]; // the model would otherwise still see the full data
+}
+
+/** The content to deliver from the hook's stdout, or null to keep OpenCode's result. */
+function fromHookOutput(stdout: string): TextBlock[] | null {
+  let out: unknown;
+  try {
+    out = JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+  const updated = (out as { hookSpecificOutput?: { updatedToolOutput?: unknown } } | null)
+    ?.hookSpecificOutput?.updatedToolOutput;
+  if (typeof updated === "string") return [{ type: "text", text: updated }];
+  const stdoutField = (updated as { stdout?: unknown } | null | undefined)?.stdout;
+  if (typeof stdoutField === "string") return [{ type: "text", text: stdoutField }];
+  return null;
+}
+
+/**
+ * Runs one mcp-recall hook with \`input\` on stdin; resolves to its stdout, ""
+ * on any failure. Never rejects, and never waits past \`timeoutMs\`: a hook
+ * that hangs is killed and OpenCode keeps its own result.
+ */
+function runHook(
+  cli: string[], hook: string, input: unknown, signal?: AbortSignal, timeoutMs = HOOK_TIMEOUT_MS,
+): Promise<string> {
+  return new Promise((done) => {
+    const [program, ...args] = cli;
+    if (!program) return done("");
+    let settled = false;
+    const finish = (out: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      done(out);
+    };
+    let stdout = "";
+    const child = spawn(program, [...args, hook], { stdio: ["pipe", "pipe", "ignore"], signal });
+    const timer = setTimeout(() => { child.kill("SIGKILL"); finish(""); }, timeoutMs);
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (d: string) => { stdout += d; });
+    child.on("error", () => finish(""));
+    child.on("close", () => finish(stdout));
+    child.stdin.on("error", () => {});
+    child.stdin.end(JSON.stringify(input));
+  });
+}
+
+function asLaunch(value: unknown): Launch | null {
+  const launch = value as Launch | null | undefined;
+  return Array.isArray(launch?.cli) && typeof launch?.server?.command === "string" && Array.isArray(launch.server.args)
+    ? launch
+    : null;
+}
+
+/** The launch file beside this plugin, or null when it is missing or malformed. */
+function readLaunch(file: string): Launch | null {
+  try {
+    return asLaunch(JSON.parse(readFileSync(file, "utf8")));
+  } catch {
+    return null;
+  }
+}
+
+interface OpenCodeEvent { type?: string; properties?: { sessionID?: unknown; info?: { id?: unknown } } }
+interface OpenCodeConfig { mcp?: Record<string, unknown> }
+
+/** The plugin. \`options.launch\` stands in for the launch file in tests. */
+async function plugin(ctx: { directory?: string } | null, options?: { launch?: unknown } | null) {
+  const launch = asLaunch(options?.launch) ?? readLaunch(join(dirname(fileURLToPath(import.meta.url)), LAUNCH_FILE));
+  if (!launch) return {}; // no launch file: re-run \`mcp-recall install\`
+  const cwd = ctx?.directory ?? process.cwd();
+  let servers: string[] = [];
+
+  // None of these may throw into OpenCode: whatever goes wrong, OpenCode keeps its own result.
+  return {
+    config: async (cfg: OpenCodeConfig) => {
+      try {
+        const mcp = (cfg.mcp ??= {});
+        mcp["recall"] ??= { type: "local", command: [launch.server.command, ...launch.server.args], enabled: true };
+        servers = Object.keys(mcp);
+      } catch { /* OpenCode keeps its config as it was */ }
+    },
+    event: async ({ event }: { event: OpenCodeEvent | null }) => {
+      try {
+        if (event?.type !== "session.created") return;
+        const id = event.properties?.sessionID ?? event.properties?.info?.id;
+        if (typeof id !== "string") return;
+        await runHook(launch.cli, "session-start", { session_id: id, cwd, hook_event_name: "SessionStart" });
+      } catch { /* recording the session day is best-effort */ }
+    },
+    "tool.execute.after": async (call: ToolCall, output: unknown) => {
+      try {
+        const input = toHookInput(call, output, servers, cwd);
+        if (!input) return;
+        const content = fromHookOutput(await runHook(launch.cli, "post-tool-use", input));
+        if (content?.[0]) applySummary(call, output, content[0].text);
+      } catch { /* OpenCode keeps its own result */ }
+    },
+  };
+}
+
+export const McpRecall = Object.assign(plugin, {
+  internals: { mcpToolName, bashText, toHookInput, applySummary, toolOutputDir, readLaunch, runHook, fromHookOutput },
+});
+`;
+var init_opencode_plugin = () => {};
+
+// src/agents/opencode.ts
+import { existsSync as existsSync4 } from "fs";
+import { mkdir as mkdir2, readFile as readFile2, rm as rm2, writeFile as writeFile2 } from "fs/promises";
+import os2 from "os";
+import path2 from "path";
+function defaultOpencodeDir() {
+  return path2.join(process.env.XDG_CONFIG_HOME || path2.join(os2.homedir(), ".config"), "opencode");
+}
+function opencodeDetected(dir) {
+  return existsSync4(dir);
+}
+function opencodePluginPath(dir) {
+  return path2.join(dir, "plugins", "mcp-recall.ts");
+}
+function launchPath(dir) {
+  return path2.join(dir, "plugins", "mcp-recall.launch.json");
+}
+async function readText2(p) {
+  try {
+    return await readFile2(p, "utf8");
+  } catch {
+    return null;
+  }
+}
+async function installOpencode(dir, launch, dryRun = false) {
+  const launchJson = JSON.stringify(launch, null, 2) + `
+`;
+  const [oldPlugin, oldLaunch] = await Promise.all([readText2(opencodePluginPath(dir)), readText2(launchPath(dir))]);
+  if (oldPlugin === OPENCODE_PLUGIN_SOURCE && oldLaunch === launchJson)
+    return "present";
+  if (!dryRun) {
+    await mkdir2(path2.join(dir, "plugins"), { recursive: true });
+    await writeFile2(opencodePluginPath(dir), OPENCODE_PLUGIN_SOURCE);
+    await writeFile2(launchPath(dir), launchJson);
+  }
+  return oldPlugin === null && oldLaunch === null ? "added" : "updated";
+}
+async function uninstallOpencode(dir) {
+  const files = [opencodePluginPath(dir), launchPath(dir)].filter((p) => existsSync4(p));
+  await Promise.all(files.map((p) => rm2(p, { force: true })));
+  return files.length > 0;
+}
+async function opencodeStatus(dir) {
+  const plugin = await readText2(opencodePluginPath(dir));
+  let launch = null;
+  try {
+    const parsed = JSON.parse(await readText2(launchPath(dir)) ?? "");
+    if (Array.isArray(parsed.cli) && typeof parsed.server?.command === "string")
+      launch = parsed;
+  } catch {}
+  return { plugin: plugin !== null, launch, stale: plugin !== null && plugin !== OPENCODE_PLUGIN_SOURCE };
+}
+var OPENCODE_PLUGIN_SOURCE;
+var init_opencode = __esm(() => {
+  init_opencode_plugin();
+  OPENCODE_PLUGIN_SOURCE = opencode_plugin_default;
+});
+
 // src/install/index.ts
 var exports_install = {};
 __export(exports_install, {
@@ -13569,24 +13856,24 @@ __export(exports_install, {
   CLAUDE_MD_BLOCK: () => CLAUDE_MD_BLOCK,
   AGENTS: () => AGENTS
 });
-import { existsSync as existsSync4 } from "fs";
-import { mkdir as mkdir2, rename, readFile as readFile2, realpath, readlink, stat, chmod, rm as rm2, writeFile as writeFile2 } from "fs/promises";
-import path2 from "path";
-import os2 from "os";
+import { existsSync as existsSync5 } from "fs";
+import { mkdir as mkdir3, rename, readFile as readFile3, realpath, readlink, stat, chmod, rm as rm3, writeFile as writeFile3 } from "fs/promises";
+import path3 from "path";
+import os3 from "os";
 function isEnoent(e) {
   return typeof e === "object" && e !== null && e.code === "ENOENT";
 }
 function defaultClaudeJsonPath() {
-  return path2.join(os2.homedir(), ".claude.json");
+  return path3.join(os3.homedir(), ".claude.json");
 }
 function defaultSettingsPath() {
-  return path2.join(os2.homedir(), ".claude", "settings.json");
+  return path3.join(os3.homedir(), ".claude", "settings.json");
 }
 function defaultClaudeMdPath() {
-  return path2.join(os2.homedir(), ".claude", "CLAUDE.md");
+  return path3.join(os3.homedir(), ".claude", "CLAUDE.md");
 }
 function defaultPluginsPath() {
-  return path2.join(os2.homedir(), ".claude", "plugins", "installed_plugins.json");
+  return path3.join(os3.homedir(), ".claude", "plugins", "installed_plugins.json");
 }
 function isBunfsPath(modulePath) {
   return /^(\/\$bunfs\/|[A-Za-z]:[\\/]~BUN[\\/])/.test(modulePath);
@@ -13640,9 +13927,9 @@ function detectLaunch(standalone = isStandaloneBinary()) {
     };
   }
   const isBuilt = import.meta.path.endsWith(".js");
-  const distDir = isBuilt ? import.meta.dir : path2.resolve(import.meta.dir, "../../plugins/mcp-recall/dist");
-  const serverJs = path2.join(distDir, "server.js");
-  const cliJs = path2.join(distDir, "cli.js");
+  const distDir = isBuilt ? import.meta.dir : path3.resolve(import.meta.dir, "../../plugins/mcp-recall/dist");
+  const serverJs = path3.join(distDir, "server.js");
+  const cliJs = path3.join(distDir, "cli.js");
   return {
     cli: `bun ${shellWord(cliJs)}`,
     server: { type: "stdio", command: "bun", args: [serverJs] },
@@ -13651,7 +13938,7 @@ function detectLaunch(standalone = isStandaloneBinary()) {
 }
 async function readJsonFile(filePath) {
   try {
-    const content = await readFile2(filePath, "utf8");
+    const content = await readFile3(filePath, "utf8");
     return JSON.parse(content);
   } catch (e) {
     if (e instanceof Error && e.code === "ENOENT")
@@ -13673,7 +13960,7 @@ async function writeTarget(filePath) {
   let target = filePath;
   for (let hop = 0;hop < MAX_LINK_HOPS; hop++) {
     try {
-      target = path2.resolve(path2.dirname(target), await readlink(target));
+      target = path3.resolve(path3.dirname(target), await readlink(target));
     } catch {
       return target;
     }
@@ -13682,13 +13969,13 @@ async function writeTarget(filePath) {
 }
 async function writeTextFile(filePath, content) {
   const target = await writeTarget(filePath);
-  await mkdir2(path2.dirname(target), { recursive: true });
+  await mkdir3(path3.dirname(target), { recursive: true });
   const mode = await stat(target).then((s) => s.mode & 4095, () => {
     return;
   });
   const tmp = target + ".tmp";
-  await rm2(tmp, { force: true });
-  await writeFile2(tmp, content, mode === undefined ? undefined : { mode });
+  await rm3(tmp, { force: true });
+  await writeFile3(tmp, content, mode === undefined ? undefined : { mode });
   if (mode !== undefined)
     await chmod(tmp, mode);
   await rename(tmp, target);
@@ -13699,7 +13986,7 @@ function isClaudeMdInjected(content) {
 async function injectClaudeMd(filePath, dryRun = false) {
   let existing = "";
   try {
-    existing = await readFile2(filePath, "utf8");
+    existing = await readFile3(filePath, "utf8");
   } catch (e) {
     if (!isEnoent(e))
       throw e;
@@ -13729,7 +14016,7 @@ async function injectClaudeMd(filePath, dryRun = false) {
 async function removeClaudeMd(filePath) {
   let existing = "";
   try {
-    existing = await readFile2(filePath, "utf8");
+    existing = await readFile3(filePath, "utf8");
   } catch (e) {
     if (isEnoent(e))
       return false;
@@ -13822,8 +14109,42 @@ function upsertHook(entries, ours, fresh) {
   const updated = matcher === undefined ? { ...entry, hooks } : { ...entry, matcher, hooks };
   return { entries: [...entries.slice(0, idx), updated, ...dupes.entries], result: "updated" };
 }
-function detectAgents(piDir) {
-  return piDetected(piDir) ? ["claude", "pi"] : ["claude"];
+function fileAgents(piDir, opencodeDir) {
+  return [
+    {
+      agent: "pi",
+      name: "pi",
+      thing: "pi extension",
+      fileLabels: ["extension", "launch.json"],
+      restart: "Restart pi (or run /reload)",
+      location: piExtensionDir(piDir),
+      detected: piDetected(piDir),
+      install: (launch, dryRun) => installPi(piDir, launch, dryRun),
+      uninstall: () => uninstallPi(piDir),
+      status: async () => {
+        const s = await piStatus(piDir);
+        return { installed: s.extension, launch: s.launch, stale: s.stale };
+      }
+    },
+    {
+      agent: "opencode",
+      name: "OpenCode",
+      thing: "OpenCode plugin",
+      fileLabels: ["plugin", "mcp-recall.launch.json"],
+      restart: "Restart OpenCode",
+      location: opencodePluginPath(opencodeDir),
+      detected: opencodeDetected(opencodeDir),
+      install: (launch, dryRun) => installOpencode(opencodeDir, launch, dryRun),
+      uninstall: () => uninstallOpencode(opencodeDir),
+      status: async () => {
+        const s = await opencodeStatus(opencodeDir);
+        return { installed: s.plugin, launch: s.launch, stale: s.stale };
+      }
+    }
+  ];
+}
+function detectAgents(piDir, opencodeDir = defaultOpencodeDir()) {
+  return ["claude", ...fileAgents(piDir, opencodeDir).filter((a) => a.detected).map((a) => a.agent)];
 }
 function parseAgents(argv) {
   const names = [];
@@ -13850,10 +14171,11 @@ async function installCommand(opts = {}) {
     settingsPath = defaultSettingsPath(),
     claudeMdPath = defaultClaudeMdPath(),
     launch = detectLaunch(),
-    piDir = defaultPiDir()
+    piDir = defaultPiDir(),
+    opencodeDir = defaultOpencodeDir()
   } = opts;
-  const agents = opts.agents ?? detectAgents(piDir);
-  const missing = launch.artifacts.find((a) => !existsSync4(a.path));
+  const agents = opts.agents ?? detectAgents(piDir, opencodeDir);
+  const missing = launch.artifacts.find((a) => !existsSync5(a.path));
   if (missing) {
     console.error(`${RED}\u2717 Build artifacts not found.${RESET}`);
     console.error(`  Expected: ${DIM}${missing.path}${RESET}`);
@@ -13876,23 +14198,24 @@ async function installCommand(opts = {}) {
   if (agents.includes("claude")) {
     anyChange = await installClaude(claudeJsonPath, settingsPath, claudeMdPath, launch, dryRun) || anyChange;
   }
-  if (agents.includes("pi")) {
-    if (agents.includes("claude"))
+  let printed = agents.includes("claude");
+  for (const a of fileAgents(piDir, opencodeDir).filter((f) => agents.includes(f.agent))) {
+    if (printed)
       console.log("");
-    const dir = piExtensionDir(piDir);
-    const result = await installPi(piDir, piLaunchOf(launch), dryRun);
+    printed = true;
+    const result = await a.install(piLaunchOf(launch), dryRun);
     if (result === "added") {
-      console.log(`${GREEN}\u2713${RESET} pi extension added        ${DIM}(${dir})${RESET}`);
+      console.log(`${GREEN}\u2713${RESET} ${`${a.thing} added`.padEnd(26)}${DIM}(${a.location})${RESET}`);
     } else if (result === "updated") {
-      console.log(`${YELLOW}\u21BA${RESET} pi extension updated      ${DIM}(${dir})${RESET}`);
+      console.log(`${YELLOW}\u21BA${RESET} ${`${a.thing} updated`.padEnd(26)}${DIM}(${a.location})${RESET}`);
     } else {
-      console.log(`${DIM}\u2139 pi extension already installed${RESET}`);
+      console.log(`${DIM}\u2139 ${a.thing} already installed${RESET}`);
     }
     if (result !== "present") {
       anyChange = true;
       if (!dryRun)
         console.log(`
-Restart pi (or run /reload) to activate mcp-recall.`);
+${a.restart} to activate mcp-recall.`);
     }
   }
   if (anyChange && !dryRun) {
@@ -13984,20 +14307,24 @@ async function uninstallCommand(opts = {}) {
     claudeMdPath = defaultClaudeMdPath(),
     launch = detectLaunch(),
     piDir = defaultPiDir(),
+    opencodeDir = defaultOpencodeDir(),
     agents = [...AGENTS]
   } = opts;
   if (agents.includes("claude"))
     await uninstallClaude(claudeJsonPath, settingsPath, claudeMdPath, launch);
-  const piNamed = opts.agents?.includes("pi") ?? false;
-  if (agents.includes("pi") && (piNamed || piDetected(piDir))) {
-    if (agents.includes("claude"))
+  let printed = agents.includes("claude");
+  for (const a of fileAgents(piDir, opencodeDir)) {
+    if (!agents.includes(a.agent) || !(opts.agents?.includes(a.agent) || a.detected))
+      continue;
+    if (printed)
       console.log("");
-    if (await uninstallPi(piDir)) {
-      console.log(`${GREEN}\u2713${RESET} Removed pi extension        ${DIM}(${piExtensionDir(piDir)})${RESET}`);
+    printed = true;
+    if (await a.uninstall()) {
+      console.log(`${GREEN}\u2713${RESET} ${`Removed ${a.thing}`.padEnd(28)}${DIM}(${a.location})${RESET}`);
       console.log(`
-Restart pi (or run /reload) to deactivate mcp-recall.`);
+${a.restart} to deactivate mcp-recall.`);
     } else {
-      console.log(`${DIM}\u2139 pi extension not present${RESET}`);
+      console.log(`${DIM}\u2139 ${a.thing} not present${RESET}`);
     }
   }
 }
@@ -14062,8 +14389,8 @@ function describeLaunch(command) {
   return typeof command === "string" && !isBunProgram(command) ? `the binary at ${command}` : "the npm install";
 }
 function locate(program) {
-  if (path2.isAbsolute(program) || path2.win32.isAbsolute(program)) {
-    return { path: program, exists: existsSync4(program) };
+  if (path3.isAbsolute(program) || path3.win32.isAbsolute(program)) {
+    return { path: program, exists: existsSync5(program) };
   }
   const found = Bun.which(program);
   return { path: found ?? program, exists: found !== null };
@@ -14080,33 +14407,33 @@ function registeredFiles(launches) {
     if (isBunProgram(program)) {
       add("bun", program);
       if (script)
-        add(path2.basename(script), script);
+        add(path3.basename(script), script);
     } else {
       add("binary", program);
     }
   }
   return [...files.values()];
 }
-async function printPiStatus(piDir, launch) {
-  const st = await piStatus(piDir);
-  if (!piDetected(piDir) && !st.extension)
+async function printFileAgentStatus(a, launch) {
+  const st = await a.status();
+  if (!a.detected && !st.installed)
     return;
   const tick = (ok2) => ok2 ? `${GREEN}\u2713${RESET}` : `${RED}\u2717${RESET}`;
   const files = st.launch ? registeredFiles([st.launch.cli, [st.launch.server.command, ...st.launch.server.args]]) : [];
-  const ok = st.extension && st.launch !== null && !st.stale && files.every((f) => f.exists);
-  const label = ok ? `${GREEN}installed${RESET}` : st.extension ? `${YELLOW}partial / stale${RESET}` : `${RED}not installed${RESET}`;
-  const shown = piExtensionDir(piDir).replace(os2.homedir(), "~");
+  const ok = st.installed && st.launch !== null && !st.stale && files.every((f) => f.exists);
+  const label = ok ? `${GREEN}installed${RESET}` : st.installed ? `${YELLOW}partial / stale${RESET}` : `${RED}not installed${RESET}`;
+  const shown = a.location.replace(os3.homedir(), "~");
   console.log(`
-pi: ${BOLD}${label}${RESET}
+${a.name}: ${BOLD}${label}${RESET}
 `);
   console.log(`  ${shown}`);
-  console.log(`    ${tick(st.extension && !st.stale)} extension${st.stale ? " (from another version)" : ""}`);
-  console.log(`    ${tick(st.launch !== null)} launch.json`);
+  console.log(`    ${tick(st.installed && !st.stale)} ${a.fileLabels[0]}${st.stale ? " (from another version)" : ""}`);
+  console.log(`    ${tick(st.launch !== null)} ${a.fileLabels[1]}`);
   for (const f of files)
     console.log(`    ${tick(f.exists)} ${f.label} ${DIM}${f.path}${RESET}`);
   if (st.launch && JSON.stringify(st.launch) !== JSON.stringify(piLaunchOf(launch))) {
     console.log(`
-  The extension runs another install of mcp-recall than this one.`);
+  The ${a.fileLabels[0]} runs another install of mcp-recall than this one.`);
   }
   if (!ok)
     console.log(`
@@ -14143,8 +14470,8 @@ function printPluginStatus(plugin, claudeMdOk, cliRegistered) {
     return;
   }
   const files = [
-    { label: "dist/server.js", ...locate(path2.join(plugin.installPath, "dist", "server.js")) },
-    { label: "bin/recall", ...locate(path2.join(plugin.installPath, "bin", "recall")) },
+    { label: "dist/server.js", ...locate(path3.join(plugin.installPath, "dist", "server.js")) },
+    { label: "bin/recall", ...locate(path3.join(plugin.installPath, "bin", "recall")) },
     { label: "bun", ...locate("bun") }
   ];
   const filesOk = files.every((f) => f.exists);
@@ -14156,7 +14483,7 @@ Installation: ${BOLD}${label}${RESET}
 `);
   }
   console.log(`${cliRegistered ? `
-` : ""}  Claude Code plugin ${plugin.key}  ${DIM}${plugin.installPath.replace(os2.homedir(), "~")}${RESET}`);
+` : ""}  Claude Code plugin ${plugin.key}  ${DIM}${plugin.installPath.replace(os3.homedir(), "~")}${RESET}`);
   for (const f of files)
     console.log(`    ${tick(f.exists)} ${f.label} ${DIM}${f.path}${RESET}`);
   if (cliRegistered) {
@@ -14220,7 +14547,8 @@ async function statusCommand(opts = {}) {
     claudeMdPath = defaultClaudeMdPath(),
     pluginsPath = defaultPluginsPath(),
     launch = detectLaunch(),
-    piDir = defaultPiDir()
+    piDir = defaultPiDir(),
+    opencodeDir = defaultOpencodeDir()
   } = opts;
   const claudeJson = await readJsonFile(claudeJsonPath);
   const settings = await readJsonFile(settingsPath);
@@ -14233,7 +14561,7 @@ async function statusCommand(opts = {}) {
   const ptuRegistered = (hooks["PostToolUse"] ?? []).some(ours.PostToolUse.entry);
   let claudeMdContent = "";
   try {
-    claudeMdContent = await readFile2(claudeMdPath, "utf8");
+    claudeMdContent = await readFile3(claudeMdPath, "utf8");
   } catch {}
   const claudeMdOk = isClaudeMdInjected(claudeMdContent);
   const serverWords = typeof server?.["command"] === "string" ? [[server["command"], ...Array.isArray(server["args"]) ? server["args"].map(String) : []]] : [];
@@ -14253,7 +14581,8 @@ async function statusCommand(opts = {}) {
     if (plugin)
       printPluginStatus(plugin, claudeMdOk, cliRegistered);
   }
-  await printPiStatus(piDir, launch);
+  for (const a of fileAgents(piDir, opencodeDir))
+    await printFileAgentStatus(a, launch);
   console.log("");
   const profiles = loadProfiles();
   if (profiles.length === 0) {
@@ -14290,6 +14619,7 @@ Proactively:
 - \`recall__search("query")\` \u2014 find stored outputs by content when you don't have an ID`, CLAUDE_MD_BLOCK, SESSION_START_MARKER = "session-start", POST_TOOL_USE_MARKER = "post-tool-use", POST_TOOL_USE_MATCHER = "mcp__.*|Bash", LEGACY_POST_TOOL_USE_MATCHER = "(mcp__(?!recall__).*|Bash)", AGENTS;
 var init_install = __esm(() => {
   init_pi();
+  init_opencode();
   init_loader();
   init_gc();
   init_config();
@@ -14301,7 +14631,7 @@ var init_install = __esm(() => {
   CLAUDE_MD_BLOCK = `${CLAUDE_MD_MARKER_START}
 ${CLAUDE_MD_SNIPPET}
 ${CLAUDE_MD_MARKER_END}`;
-  AGENTS = ["claude", "pi"];
+  AGENTS = ["claude", "pi", "opencode"];
 });
 
 // src/discover/index.ts
@@ -14316,7 +14646,7 @@ __export(exports_discover, {
   DEFAULT_LIMIT: () => DEFAULT_LIMIT
 });
 import { Database as Database4 } from "bun:sqlite";
-import { existsSync as existsSync5, readdirSync as readdirSync5 } from "fs";
+import { existsSync as existsSync6, readdirSync as readdirSync5 } from "fs";
 import { join as join10 } from "path";
 function hasHandlerColumn(db) {
   const cols = db.prepare(`PRAGMA table_info(stored_outputs)`).all();
@@ -14377,10 +14707,10 @@ function mergeReports(reports) {
 function storeFiles(all, cwd = process.cwd()) {
   if (!all) {
     const file = defaultDbPath(getProjectKey(cwd));
-    return existsSync5(file) ? [file] : [];
+    return existsSync6(file) ? [file] : [];
   }
   const dir = dataDir();
-  if (!existsSync5(dir))
+  if (!existsSync6(dir))
     return [];
   return readdirSync5(dir).filter((n) => n.endsWith(".db")).map((n) => join10(dir, n));
 }
@@ -15103,8 +15433,8 @@ mcp-recall \u2014 context compression for Claude Code and pi
 Usage: mcp-recall <command> [options]
 
 Commands:
-  install              Register hooks + MCP server in Claude Code, and in pi if installed
-    --agent NAME       Only these agents: claude, pi (comma-separated)
+  install              Register hooks + MCP server in Claude Code, and in pi and OpenCode if installed
+    --agent NAME       Only these agents: claude, pi, opencode (comma-separated)
   uninstall            Remove hooks + MCP server (--agent NAME to limit)
   status               Show current configuration and health
   serve                Run the MCP server on stdio (Claude Code starts this)
