@@ -21,7 +21,7 @@ Install globally, not through `npx`, `bunx` or `pnpm dlx`. `mcp-recall install` 
 ## Option B — Claude Code plugin marketplace
 
 ```bash
-claude plugin marketplace add mcp-recall https://github.com/sakebomb/mcp-recall
+claude plugin marketplace add sakebomb/mcp-recall
 claude plugin install mcp-recall@mcp-recall
 ```
 

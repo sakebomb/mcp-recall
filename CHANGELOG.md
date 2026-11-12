@@ -22,6 +22,13 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   is disabled, and warns when the plugin and a CLI install are both
   registered. The install docs tell plugin users to run `status` and
   `profiles seed` through `bunx`.
+- **The plugin marketplace install works**
+  ([#465](https://github.com/sakebomb/mcp-recall/issues/465)). The documented
+  `claude plugin marketplace add` command passed two arguments where Claude
+  Code takes one source, and the repo had no `.claude-plugin/marketplace.json`,
+  so the marketplace could not be added and the plugin could not be installed.
+  The repo now ships the manifest, and the install docs give
+  `claude plugin marketplace add sakebomb/mcp-recall`.
 
 ## [1.21.0] — 2026-11-11
 
