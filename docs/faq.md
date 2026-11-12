@@ -4,7 +4,7 @@ Short answers for deciding whether to install. Each one links to the page that c
 
 ### Does it work outside Claude Code?
 
-Yes, with [pi](https://pi.dev) and xAI's `grok` CLI, when you install with `mcp-recall install` rather than the plugin marketplace. Install sets up pi when it finds pi's config, and grok reads the Claude Code config that install writes, so it needs no step of its own. See [pi](install.md#pi) and [grok](install.md#grok). Other agents don't run mcp-recall's hook, so nothing would be compressed or stored.
+Yes, with [pi](https://pi.dev) and xAI's `grok` CLI. `mcp-recall install` sets up pi when it finds pi's config; the plugin marketplace install does not cover pi. grok reads Claude Code's setup from either install, and runs mcp-recall's hooks in folders you have trusted in grok. See [pi](install.md#pi) and [grok](install.md#grok). Other agents don't run mcp-recall's hook, so nothing would be compressed or stored.
 
 ### Will it make Claude better at my tasks?
 

@@ -34,6 +34,11 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   commands left `${CLAUDE_PLUGIN_ROOT}` unquoted, so a path such as
   `/Users/first last/…` split into several words, both hooks failed, and the
   plugin stopped compressing without saying so. The commands now quote it.
+- **The install docs say grok runs mcp-recall's hooks only in trusted folders**
+  ([#471](https://github.com/sakebomb/mcp-recall/issues/471)). They said grok
+  needed no step of its own, but grok skips all user hooks in a folder you
+  have not trusted, so it ran there without compression. The FAQ also wrongly
+  said the plugin install doesn't cover grok.
 
 ## [1.21.0] — 2026-11-11
 
