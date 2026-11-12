@@ -228,6 +228,7 @@ In the API, [context editing](https://platform.claude.com/docs/en/build-with-cla
 
 ## Learn more
 
+- **Deciding whether to install:** the [FAQ](docs/faq.md) answers the common questions in a line or two each.
 - **All the docs:** the [documentation index](docs/README.md) lists every page by what you came to do, with a glossary of the terms used here.
 - **Something not working:** [Troubleshooting guide](docs/troubleshooting.md).
 - **Contributing:** the easiest contribution is a TOML profile, with no TypeScript and no clone of this repo. Check the [community profiles repo](https://github.com/sakebomb/mcp-recall-profiles) or open a [profile request](https://github.com/sakebomb/mcp-recall/issues/new?template=profile-request.md). TypeScript handlers are welcome for complex non-JSON output (HTML, DOM trees, binary formats): [CONTRIBUTING.md](CONTRIBUTING.md) has the workflow (`bun install && bun test`) and how to add one, and [docs/architecture.md](docs/architecture.md) the pipeline and the invariants a change must not break.
