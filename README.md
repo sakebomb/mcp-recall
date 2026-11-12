@@ -45,7 +45,7 @@ The goal is sessions that run for hours instead of hitting the context limit in 
 
 ## Where it runs
 
-mcp-recall needs an agent that lets a hook rewrite a tool's result before the model sees it, without marking the result as an error. Each agent below runs the same pipeline through a thin adapter.
+mcp-recall needs an agent that lets a hook rewrite a tool's result before the model sees it, without marking the result as an error. Each supported agent runs the same pipeline through a thin adapter.
 
 | Agent | Status | Setup |
 |---|---|---|
@@ -53,7 +53,7 @@ mcp-recall needs an agent that lets a hook rewrite a tool's result before the mo
 | [pi](https://pi.dev) | **Supported** | `mcp-recall install` adds an extension ([details](docs/install.md#pi)) |
 | [OpenCode](https://opencode.ai) | **Supported** | `mcp-recall install` adds a plugin ([details](docs/install.md#opencode)) |
 | xAI `grok` CLI | **Supported** in folders you trust in grok | Reads Claude Code's setup ([details](docs/install.md#grok)) |
-| GitHub Copilot CLI | **On request** | Its hooks look able to; ask in [#476](https://github.com/sakebomb/mcp-recall/issues/476) |
+| GitHub Copilot CLI | **On request** | Its documented hooks should work, untested; ask in [#476](https://github.com/sakebomb/mcp-recall/issues/476) |
 | OpenAI Codex CLI | **Waiting on Codex** | A hook can't yet replace a result without an error ([openai/codex#38135](https://github.com/openai/codex/issues/38135)) |
 | Gemini CLI, Qwen Code | **Not possible today** | A hook can replace a result only by reporting an error |
 | Cursor | **Not possible today** | Its hook doesn't say which MCP server a result came from |
