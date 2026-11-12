@@ -301,7 +301,7 @@ decision; this report does not make it.
   `web.py chain --model claude-haiku-5-5 --run-id web-fix --sequences 3 --seed 414 --compact-window 200000 --run-budget 2 --cap 100 --jobs 3`.
 - Analysis: `bench/agent/analyze.py --chains <run ids>`, checked by `bench/agent/check_analyze.py`.
 - Study 6: `web-local-r01`…`web-local-r03`, from
-  `web.py single --model blackwell-coder-next --run-id web-local --repeats 3 --jobs 2 --timeout 3600 --compact-window 131072 --max-output 16384`.
+  `web.py single --model self-hosted-qwen3-coder-next --run-id web-local --repeats 3 --jobs 2 --timeout 3600 --compact-window 131072 --max-output 16384`.
   The six first attempts replaced by reruns are in `study6-infra-first-attempts`, the void attempt in
   `void-study6-attempt1`. All are sealed and in the same private dataset.
 - Excluded smoke runs, disclosed in the spec: `long-smoke-s01`, `web-smoke-s01`, `web-smoke2-s01`, and

@@ -369,8 +369,8 @@ context. This study asks the same question of a smaller, self-hosted model whose
 forum task does fill, at no API cost.
 
 - **Model:** Qwen/Qwen3-Coder-Next-FP8 (about 80B mixture-of-experts, 3B active), served by vLLM
-  0.29.0 on blackwell (RTX PRO 6000, prefix caching on, fp8 KV cache), reached through LiteLLM as
-  `blackwell-coder-next`, priced at $0 there. Its context is 131,072 tokens and its output is capped
+  0.29.0 on a single self-hosted GPU (prefix caching on, fp8 KV cache), reached through LiteLLM as
+  `self-hosted-qwen3-coder-next`, priced at $0 there. Its context is 131,072 tokens and its output is capped
   at 16,384, and `CLAUDE_CODE_AUTO_COMPACT_WINDOW=131072` tells Claude Code so. `--max-budget-usd` is
   not passed: Claude Code would price the unknown model and could end runs early.
 - **Build:** mcp-recall at main `b1c72bd` (#424, #428, #430 and #425 fixed), standalone binary built
@@ -408,9 +408,9 @@ what this study is about. The restart changes two things and nothing else:
 Known when this was written: in the void attempt's first repeat, `recall` solved 6 of 12 and
 `nohook` 4 of 12. The reading, measures and tasks above stand unchanged.
 
-**Smoke runs, disclosed and excluded from the analysis.** `smoke6`: qwen3-coder 30B on jupiter's
+**Smoke runs, disclosed and excluded from the analysis.** `smoke6`: qwen3-coder 30B on a local
 Ollama, 64k window, solved 0 of 2 easy tasks (it never registered), so it failed the floor.
-`smoke6b`: qwen3.6 35B on jupiter, solved 1 of 2, but 6 to 22 minutes a task with a third of the
+`smoke6b`: qwen3.6 35B on the same Ollama, solved 1 of 2, but 6 to 22 minutes a task with a third of the
 model on the CPU. `smoke6c`: this model, `nohook`, solved `easy/movie_reviewer_analysis` in 72 s
 with no compaction and failed `easy/llm_research_summary` after 81 turns and 8 compactions, each at
 about 104k tokens. `smoke6d`: this model, `recall`, solved `easy/movie_reviewer_analysis` in 55 s,
