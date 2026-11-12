@@ -8,7 +8,7 @@ Yes, with [pi](https://pi.dev) and xAI's `grok` CLI, when you install with `mcp-
 
 ### Will it make Claude better at my tasks?
 
-Not shown. In paired runs with and without it, no study found a difference in solved tasks larger than chance. What it changed was cost and compaction: long sessions compacted less often, and Haiku runs cost about a quarter less. [Is it for you?](../README.md#is-it-for-you) says who it helps, and the [task-success benchmark](benchmarks.md#task-success-benchmark) has every study and its limits.
+Not shown. In paired runs with and without it, no study found a difference in solved tasks larger than chance. What it changed was compaction and cost: in the browser studies, sessions compacted less often, and in two Haiku studies, runs cost about a quarter less. [Is it for you?](../README.md#is-it-for-you) says who it helps, and the [task-success benchmark](benchmarks.md#task-success-benchmark) has every study and its limits.
 
 ### Will it hide something Claude needs?
 
