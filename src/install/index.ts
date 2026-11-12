@@ -14,6 +14,10 @@ import { mkdir, rename, readFile, realpath, readlink, stat, chmod, rm, writeFile
 import path from "path";
 import os from "os";
 import { defaultPiDir, installPi, piDetected, piExtensionDir, piLaunch, piStatus, uninstallPi } from "../agents/pi";
+import {
+  defaultOpencodeDir, installOpencode, opencodeDetected, opencodePluginPath, opencodeStatus, uninstallOpencode,
+} from "../agents/opencode";
+import type { Launch as AgentLaunch } from "../agents/pi-extension";
 import { loadProfiles } from "../profiles/loader";
 import { storeFootprint } from "../gc/index";
 import { loadConfig } from "../config";
@@ -439,13 +443,53 @@ export function upsertHook(
 
 // ── install ───────────────────────────────────────────────────────────────────
 
-/** The coding agents mcp-recall can install into (#458). */
-export const AGENTS = ["claude", "pi"] as const;
+/** The coding agents mcp-recall can install into (#458, #474). */
+export const AGENTS = ["claude", "pi", "opencode"] as const;
 export type Agent = (typeof AGENTS)[number];
 
-/** Claude Code always, as before #458; pi when its config dir exists. */
-export function detectAgents(piDir: string): Agent[] {
-  return piDetected(piDir) ? ["claude", "pi"] : ["claude"];
+/**
+ * An agent mcp-recall joins by writing a plugin file and a launch file into the
+ * agent's config dir: everything but Claude Code. Install, uninstall and status
+ * treat each the same way; only the names and paths differ.
+ */
+interface FileAgent {
+  agent: Exclude<Agent, "claude">;
+  /** As status heads its section: `pi`, `OpenCode`. */
+  name: string;
+  /** What install writes, as its messages name it: `pi extension`. */
+  thing: string;
+  /** Status's labels for the two files. */
+  fileLabels: [plugin: string, launch: string];
+  restart: string;
+  location: string;
+  detected: boolean;
+  install(launch: AgentLaunch, dryRun: boolean): Promise<"added" | "updated" | "present">;
+  uninstall(): Promise<boolean>;
+  status(): Promise<{ installed: boolean; launch: AgentLaunch | null; stale: boolean }>;
+}
+
+function fileAgents(piDir: string, opencodeDir: string): FileAgent[] {
+  return [
+    {
+      agent: "pi", name: "pi", thing: "pi extension", fileLabels: ["extension", "launch.json"],
+      restart: "Restart pi (or run /reload)", location: piExtensionDir(piDir), detected: piDetected(piDir),
+      install: (launch, dryRun) => installPi(piDir, launch, dryRun),
+      uninstall: () => uninstallPi(piDir),
+      status: async () => { const s = await piStatus(piDir); return { installed: s.extension, launch: s.launch, stale: s.stale }; },
+    },
+    {
+      agent: "opencode", name: "OpenCode", thing: "OpenCode plugin", fileLabels: ["plugin", "mcp-recall.launch.json"],
+      restart: "Restart OpenCode", location: opencodePluginPath(opencodeDir), detected: opencodeDetected(opencodeDir),
+      install: (launch, dryRun) => installOpencode(opencodeDir, launch, dryRun),
+      uninstall: () => uninstallOpencode(opencodeDir),
+      status: async () => { const s = await opencodeStatus(opencodeDir); return { installed: s.plugin, launch: s.launch, stale: s.stale }; },
+    },
+  ];
+}
+
+/** Claude Code always, as before #458; each other agent when its config dir exists. */
+export function detectAgents(piDir: string, opencodeDir = defaultOpencodeDir()): Agent[] {
+  return ["claude", ...fileAgents(piDir, opencodeDir).filter((a) => a.detected).map((a) => a.agent)];
 }
 
 /** Parses `--agent claude,pi` (or repeated `--agent`); null when a name is unknown. */
@@ -475,6 +519,8 @@ export interface InstallOptions {
   launch?: RecallLaunch;
   /** pi's config dir; defaults to {@link defaultPiDir}. */
   piDir?: string;
+  /** OpenCode's config dir; defaults to {@link defaultOpencodeDir}. */
+  opencodeDir?: string;
   /** Which agents to install into; defaults to {@link detectAgents}. */
   agents?: Agent[];
 }
@@ -487,8 +533,9 @@ export async function installCommand(opts: InstallOptions = {}): Promise<void> {
     claudeMdPath   = defaultClaudeMdPath(),
     launch         = detectLaunch(),
     piDir          = defaultPiDir(),
+    opencodeDir    = defaultOpencodeDir(),
   } = opts;
-  const agents = opts.agents ?? detectAgents(piDir);
+  const agents = opts.agents ?? detectAgents(piDir, opencodeDir);
 
   const missing = launch.artifacts.find((a) => !existsSync(a.path));
   if (missing) {
@@ -515,20 +562,21 @@ export async function installCommand(opts: InstallOptions = {}): Promise<void> {
   if (agents.includes("claude")) {
     anyChange = (await installClaude(claudeJsonPath, settingsPath, claudeMdPath, launch, dryRun)) || anyChange;
   }
-  if (agents.includes("pi")) {
-    if (agents.includes("claude")) console.log("");
-    const dir = piExtensionDir(piDir);
-    const result = await installPi(piDir, piLaunchOf(launch), dryRun);
+  let printed = agents.includes("claude");
+  for (const a of fileAgents(piDir, opencodeDir).filter((f) => agents.includes(f.agent))) {
+    if (printed) console.log("");
+    printed = true;
+    const result = await a.install(piLaunchOf(launch), dryRun);
     if (result === "added") {
-      console.log(`${GREEN}✓${RESET} pi extension added        ${DIM}(${dir})${RESET}`);
+      console.log(`${GREEN}✓${RESET} ${`${a.thing} added`.padEnd(26)}${DIM}(${a.location})${RESET}`);
     } else if (result === "updated") {
-      console.log(`${YELLOW}↺${RESET} pi extension updated      ${DIM}(${dir})${RESET}`);
+      console.log(`${YELLOW}↺${RESET} ${`${a.thing} updated`.padEnd(26)}${DIM}(${a.location})${RESET}`);
     } else {
-      console.log(`${DIM}ℹ pi extension already installed${RESET}`);
+      console.log(`${DIM}ℹ ${a.thing} already installed${RESET}`);
     }
     if (result !== "present") {
       anyChange = true;
-      if (!dryRun) console.log(`\nRestart pi (or run /reload) to activate mcp-recall.`);
+      if (!dryRun) console.log(`\n${a.restart} to activate mcp-recall.`);
     }
   }
 
@@ -647,6 +695,8 @@ export interface UninstallOptions {
   launch?: RecallLaunch;
   /** pi's config dir; defaults to {@link defaultPiDir}. */
   piDir?: string;
+  /** OpenCode's config dir; defaults to {@link defaultOpencodeDir}. */
+  opencodeDir?: string;
   /** Which agents to uninstall from; defaults to all of them. */
   agents?: Agent[];
 }
@@ -658,19 +708,22 @@ export async function uninstallCommand(opts: UninstallOptions = {}): Promise<voi
     claudeMdPath   = defaultClaudeMdPath(),
     launch         = detectLaunch(),
     piDir          = defaultPiDir(),
+    opencodeDir    = defaultOpencodeDir(),
     agents         = [...AGENTS],
   } = opts;
 
   if (agents.includes("claude")) await uninstallClaude(claudeJsonPath, settingsPath, claudeMdPath, launch);
-  // pi is mentioned only to someone who has it, or who asked for it by name.
-  const piNamed = opts.agents?.includes("pi") ?? false;
-  if (agents.includes("pi") && (piNamed || piDetected(piDir))) {
-    if (agents.includes("claude")) console.log("");
-    if (await uninstallPi(piDir)) {
-      console.log(`${GREEN}✓${RESET} Removed pi extension        ${DIM}(${piExtensionDir(piDir)})${RESET}`);
-      console.log(`\nRestart pi (or run /reload) to deactivate mcp-recall.`);
+  let printed = agents.includes("claude");
+  for (const a of fileAgents(piDir, opencodeDir)) {
+    // An agent is mentioned only to someone who has it, or who asked for it by name.
+    if (!agents.includes(a.agent) || !(opts.agents?.includes(a.agent) || a.detected)) continue;
+    if (printed) console.log("");
+    printed = true;
+    if (await a.uninstall()) {
+      console.log(`${GREEN}✓${RESET} ${`Removed ${a.thing}`.padEnd(28)}${DIM}(${a.location})${RESET}`);
+      console.log(`\n${a.restart} to deactivate mcp-recall.`);
     } else {
-      console.log(`${DIM}ℹ pi extension not present${RESET}`);
+      console.log(`${DIM}ℹ ${a.thing} not present${RESET}`);
     }
   }
 }
@@ -791,25 +844,25 @@ export function registeredFiles(launches: string[][]): RegisteredFile[] {
 }
 
 /**
- * pi's part of status, shown when pi is installed or the extension is: whether
- * the extension is there and current, and whether what its launch.json runs exists.
+ * One agent's part of status, shown when the agent is installed or our file is:
+ * whether the file is there and current, and whether what its launch file runs exists.
  */
-async function printPiStatus(piDir: string, launch: RecallLaunch): Promise<void> {
-  const st = await piStatus(piDir);
-  if (!piDetected(piDir) && !st.extension) return;
+async function printFileAgentStatus(a: FileAgent, launch: RecallLaunch): Promise<void> {
+  const st = await a.status();
+  if (!a.detected && !st.installed) return;
   const tick = (ok: boolean) => (ok ? `${GREEN}✓${RESET}` : `${RED}✗${RESET}`);
   const files = st.launch ? registeredFiles([st.launch.cli, [st.launch.server.command, ...st.launch.server.args]]) : [];
-  const ok = st.extension && st.launch !== null && !st.stale && files.every((f) => f.exists);
-  const label = ok ? `${GREEN}installed${RESET}` : st.extension ? `${YELLOW}partial / stale${RESET}` : `${RED}not installed${RESET}`;
-  const shown = piExtensionDir(piDir).replace(os.homedir(), "~");
+  const ok = st.installed && st.launch !== null && !st.stale && files.every((f) => f.exists);
+  const label = ok ? `${GREEN}installed${RESET}` : st.installed ? `${YELLOW}partial / stale${RESET}` : `${RED}not installed${RESET}`;
+  const shown = a.location.replace(os.homedir(), "~");
 
-  console.log(`\npi: ${BOLD}${label}${RESET}\n`);
+  console.log(`\n${a.name}: ${BOLD}${label}${RESET}\n`);
   console.log(`  ${shown}`);
-  console.log(`    ${tick(st.extension && !st.stale)} extension${st.stale ? " (from another version)" : ""}`);
-  console.log(`    ${tick(st.launch !== null)} launch.json`);
+  console.log(`    ${tick(st.installed && !st.stale)} ${a.fileLabels[0]}${st.stale ? " (from another version)" : ""}`);
+  console.log(`    ${tick(st.launch !== null)} ${a.fileLabels[1]}`);
   for (const f of files) console.log(`    ${tick(f.exists)} ${f.label} ${DIM}${f.path}${RESET}`);
   if (st.launch && JSON.stringify(st.launch) !== JSON.stringify(piLaunchOf(launch))) {
-    console.log(`\n  The extension runs another install of mcp-recall than this one.`);
+    console.log(`\n  The ${a.fileLabels[0]} runs another install of mcp-recall than this one.`);
   }
   if (!ok) console.log(`\n  Run ${BOLD}mcp-recall install${RESET}`);
 }
@@ -950,6 +1003,8 @@ export interface StatusOptions {
   launch?: RecallLaunch;
   /** pi's config dir; defaults to {@link defaultPiDir}. */
   piDir?: string;
+  /** OpenCode's config dir; defaults to {@link defaultOpencodeDir}. */
+  opencodeDir?: string;
 }
 
 export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
@@ -960,6 +1015,7 @@ export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
     pluginsPath    = defaultPluginsPath(),
     launch         = detectLaunch(),
     piDir          = defaultPiDir(),
+    opencodeDir    = defaultOpencodeDir(),
   } = opts;
 
   // Config entries
@@ -1002,7 +1058,7 @@ export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
     if (plugin) printPluginStatus(plugin, claudeMdOk, cliRegistered);
   }
 
-  await printPiStatus(piDir, launch);
+  for (const a of fileAgents(piDir, opencodeDir)) await printFileAgentStatus(a, launch);
 
   // Profiles
   console.log("");

@@ -6,3 +6,5 @@ import os from "os";
 import path from "path";
 
 process.env.PI_CODING_AGENT_DIR = path.join(os.tmpdir(), `mcp-recall-test-no-pi-${process.pid}`);
+// The same for OpenCode, whose config dir is $XDG_CONFIG_HOME/opencode.
+process.env.XDG_CONFIG_HOME = path.join(os.tmpdir(), `mcp-recall-test-no-xdg-config-${process.pid}`);

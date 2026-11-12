@@ -14,7 +14,7 @@
 
 MCP tool outputs (Playwright snapshots, GitHub API responses, Linear queries) and long Bash output can consume tens of kilobytes of context per call, and a busy session fills even a large context window long before the work is done. mcp-recall intercepts those outputs, stores them in full locally, and delivers compressed summaries to Claude instead. When Claude needs more detail, it can search the stored output and retrieve it, without re-running the tool.
 
-It works in [Claude Code](https://claude.ai/claude-code), in [pi](https://pi.dev) and in xAI's `grok` CLI: `mcp-recall install` sets up each one it finds, and grok reads Claude Code's setup.
+It works in [Claude Code](https://claude.ai/claude-code), [pi](https://pi.dev), [OpenCode](https://opencode.ai) and xAI's `grok` CLI: `mcp-recall install` sets up each one it finds, and grok reads Claude Code's setup.
 
 The goal is sessions that run for hours instead of hitting the context limit in minutes. [Results](#results) shows what is measured today, and the [quality benchmark](docs/benchmarks.md) what the summaries keep.
 
@@ -75,7 +75,7 @@ The [architecture guide](docs/architecture.md#the-capture-pipeline) walks throug
 
 **Two hooks, one MCP server.**
 
-- `SessionStart` hook: injects a short snapshot of pinned items, notes and recent activity before the first message, records the active day, and prunes expired items.
+- `SessionStart` hook: injects a short snapshot of pinned items, notes and recent activity before the first message, records the active day, and prunes expired items. Under pi and OpenCode it records and prunes but shows no snapshot.
 - `PostToolUse` hook: replaces large MCP and Bash output with a summary and stores the full output. A Bash read of 8 KB or less (`cat`, `git diff`, `| head -40`, `sed -n 900,1000p`) is delivered whole, and identical output from the same tool and command returns a cached header.
 - `recall` MCP server: eleven `recall__*` tools Claude uses to search and retrieve what was stored.
 

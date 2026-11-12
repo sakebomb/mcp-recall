@@ -88,7 +88,15 @@ mcp-recall also runs under [pi](https://pi.dev). Install it with Option A, C or 
 
 For pi, install writes one folder, `~/.pi/agent/extensions/mcp-recall/`: an extension and a `launch.json` naming this install of mcp-recall. The extension runs each MCP and bash result through the same hook Claude Code uses and registers the `recall` MCP server, so pi's `mcp.json` is not edited. pi cuts a large result to about 20 KB before extensions see it and saves the whole output to a temp file; mcp-recall stores that whole output, not the cut.
 
-Restart pi, or run `/reload`, after installing. `mcp-recall status` lists pi below Claude Code. pi has no `CLAUDE.md`, so the [Claude instructions](#claude-instructions) block does not apply; pi's model finds the `recall__*` tools from the `[recall:…]` header and the tools' own descriptions.
+Restart pi, or run `/reload`, after installing. `mcp-recall status` lists pi below Claude Code. pi has no `CLAUDE.md`, so the [Claude instructions](#claude-instructions) block does not apply; pi's model finds the `recall__*` tools from the `[recall:…]` header and the tools' own descriptions. The session-start hook records the day and prunes expired items, but pi's model does not get the start-of-session snapshot of pinned items and notes; `recall__context()` returns it.
+
+## OpenCode
+
+mcp-recall also runs under [OpenCode](https://opencode.ai). Install it with Option A, C or D, and `mcp-recall install` sets up OpenCode as well whenever OpenCode's config dir (`~/.config/opencode`, or `$XDG_CONFIG_HOME/opencode`) exists. `--agent opencode` sets up OpenCode alone.
+
+For OpenCode, install writes two files to its plugins dir: `mcp-recall.ts`, a plugin, and `mcp-recall.launch.json`, naming this install of mcp-recall. The plugin runs each MCP and bash result through the same hook Claude Code uses, and registers the `recall` MCP server itself, so your `opencode.json` is not edited; a `recall` server you defined there yourself is left as it is. OpenCode cuts a large bash result before plugins see it and saves the whole output under its data dir; mcp-recall stores that whole output, not the cut. MCP results reach the plugin whole.
+
+Restart OpenCode after installing. `mcp-recall status` lists OpenCode below Claude Code. In OpenCode the recall tools are named `recall_recall__retrieve` and so on. As under pi, the model does not get the start-of-session snapshot, and `opencode run --pure`, which skips plugins, runs without mcp-recall.
 
 ## grok
 
@@ -185,7 +193,7 @@ mcp-recall profiles update
 | Option C — from source | `./bin/recall uninstall` from the clone, then delete the clone and any alias or symlink you added |
 | Option D — standalone binary | `mcp-recall uninstall`, then delete the binary |
 
-`mcp-recall uninstall` removes the MCP server entry, both hooks and the `CLAUDE.md` block, and pi's extension folder when there is one (`--agent` limits it to one agent). Neither it nor `claude plugin uninstall` touches your stored output (`~/.local/share/mcp-recall/`) or your config (`~/.config/mcp-recall/`); delete those folders too to remove everything.
+`mcp-recall uninstall` removes the MCP server entry, both hooks and the `CLAUDE.md` block, and pi's extension folder and OpenCode's two plugin files when they are there (`--agent` limits it to the agents you name). Neither it nor `claude plugin uninstall` touches your stored output (`~/.local/share/mcp-recall/`) or your config (`~/.config/mcp-recall/`); delete those folders too to remove everything.
 
 ## Running alongside rtk
 

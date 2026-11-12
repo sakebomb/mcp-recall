@@ -36,8 +36,8 @@ mcp-recall — context compression for Claude Code and pi
 Usage: mcp-recall <command> [options]
 
 Commands:
-  install              Register hooks + MCP server in Claude Code, and in pi if installed
-    --agent NAME       Only these agents: claude, pi (comma-separated)
+  install              Register hooks + MCP server in Claude Code, and in pi and OpenCode if installed
+    --agent NAME       Only these agents: claude, pi, opencode (comma-separated)
   uninstall            Remove hooks + MCP server (--agent NAME to limit)
   status               Show current configuration and health
   serve                Run the MCP server on stdio (Claude Code starts this)
