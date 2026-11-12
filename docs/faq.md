@@ -4,7 +4,7 @@ Short answers for deciding whether to install. Each one links to the page that c
 
 ### Does it work outside Claude Code?
 
-Yes, with [pi](https://pi.dev), [OpenCode](https://opencode.ai) and xAI's `grok` CLI. `mcp-recall install` sets up pi and OpenCode when it finds their config; the plugin marketplace install covers neither. grok reads Claude Code's setup from either install, and runs mcp-recall's hooks in folders you have trusted in grok. See [pi](install.md#pi), [OpenCode](install.md#opencode) and [grok](install.md#grok). Other agents don't run mcp-recall's hook, so nothing would be compressed or stored.
+Yes, with [pi](https://pi.dev), [OpenCode](https://opencode.ai) and xAI's `grok` CLI. `mcp-recall install` sets up pi and OpenCode when it finds their config; the plugin marketplace install covers neither. grok reads Claude Code's setup from either install, and runs mcp-recall's hooks in folders you have trusted in grok. See [pi](install.md#pi), [OpenCode](install.md#opencode) and [grok](install.md#grok). Other agents don't run mcp-recall's hook, so nothing would be compressed or stored; [Where it runs](../README.md#where-it-runs) gives each one's status.
 
 ### Will it make Claude better at my tasks?
 
