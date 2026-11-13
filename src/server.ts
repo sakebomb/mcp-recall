@@ -131,10 +131,10 @@ server.tool(
 
 server.tool(
   "recall__forget",
-  "Delete stored items by ID, tool pattern, session, age, or clear all. Pinned items are skipped unless force: true. Note: single-ID deletes (id:) always bypass pin protection.",
+  "Delete stored items by ID, tool name, session, age, or clear all. Pinned items are skipped unless force: true. Note: single-ID deletes (id:) always bypass pin protection.",
   {
     id: z.string().optional().describe("Delete a single item by ID"),
-    tool: z.string().optional().describe("Delete all items matching tool name substring"),
+    tool: z.string().optional().describe("Delete all items from this tool. Exact name as recall__list_stored shows it (e.g. mcp__github__list_issues), not a substring"),
     session_id: z.string().optional().describe("Delete all items from a session"),
     older_than_days: z
       .number()

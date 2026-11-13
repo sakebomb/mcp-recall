@@ -21,6 +21,12 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ### Fixed
 
+- **`recall__forget` describes its `tool` filter correctly**
+  ([#484](https://github.com/sakebomb/mcp-recall/issues/484)). The description
+  the model reads called it a substring match, but `forget` deletes only on the
+  exact stored name, so a model passing part of a name deleted nothing. The
+  description now asks for the exact name `recall__list_stored` shows. The
+  match stays exact, the safer choice for a delete.
 - **`mcp-recall install` refuses to run from a package runner's cache**
   ([#455](https://github.com/sakebomb/mcp-recall/issues/455)). Run through
   `npx`, `bunx` or `pnpm dlx`, install registered the server and hooks inside
