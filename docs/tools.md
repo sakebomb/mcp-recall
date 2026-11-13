@@ -255,6 +255,8 @@ recall__forget(id?, tool?, session_id?, older_than_days?, all?, confirmed?, forc
 | `forget(all: true, confirmed: true)` | Wipe the entire store (pinned items skipped) |
 | `forget(all: true, confirmed: true, force: true)` | Wipe including pinned items |
 
+`tool` takes the exact name `recall__list_stored` shows. Unlike the substring filter in `recall__search` and `recall__list_stored`, `forget(tool: "github")` deletes nothing.
+
 All modes return `[recall: deleted N item(s)]`. Calling `forget(all: true)` without `confirmed: true` returns `[recall: clearing all stored items requires confirmed: true]`.
 
 Pinned items are skipped by default. Pass `force: true` to override.

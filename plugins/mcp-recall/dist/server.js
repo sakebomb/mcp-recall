@@ -24214,9 +24214,9 @@ server.tool("recall__note", "Store a short project note \u2014 a conclusion, fin
 server.tool("recall__export", "Export all stored items for this project as JSON. Use before a full clear to preserve data.", {}, safeTool(() => ({
   content: [{ type: "text", text: toolExport(db, projectKey) }]
 })));
-server.tool("recall__forget", "Delete stored items by ID, tool pattern, session, age, or clear all. Pinned items are skipped unless force: true. Note: single-ID deletes (id:) always bypass pin protection.", {
+server.tool("recall__forget", "Delete stored items by ID, tool name, session, age, or clear all. Pinned items are skipped unless force: true. Note: single-ID deletes (id:) always bypass pin protection.", {
   id: string2().optional().describe("Delete a single item by ID"),
-  tool: string2().optional().describe("Delete all items matching tool name substring"),
+  tool: string2().optional().describe("Delete all items from this tool. Exact name as recall__list_stored shows it (e.g. mcp__github__list_issues), not a substring"),
   session_id: string2().optional().describe("Delete all items from a session"),
   older_than_days: number2().optional().describe("Delete items older than N calendar days"),
   all: boolean2().optional().describe("Clear entire store (requires confirmed: true)"),

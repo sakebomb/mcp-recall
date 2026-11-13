@@ -265,6 +265,15 @@ describe("MCP tool handlers", () => {
       expect(result).toContain("deleted 2 items");
     });
 
+    it("deletes by the exact tool name only, never a part of one (#484)", () => {
+      storeOutput(db, makeInput({ tool_name: "mcp__github__list_issues" }));
+      storeOutput(db, makeInput({ tool_name: "Bash" }));
+      for (const tool of ["github", "github__list_issues", "mcp__github", "bash"]) {
+        expect(toolForget(db, PROJECT_KEY, { tool })).toContain("nothing deleted");
+      }
+      expect(toolForget(db, PROJECT_KEY, { tool: "mcp__github__list_issues" })).toContain("deleted 1 item");
+    });
+
     it("returns nothing-deleted message when no match", () => {
       const result = toolForget(db, PROJECT_KEY, { id: "recall_00000000" });
       expect(result).toContain("nothing deleted");
