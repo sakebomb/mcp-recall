@@ -154,7 +154,7 @@ Eleven `recall__*` tools are available to Claude in every session. You don't cal
 
 ## Results
 
-- **How much smaller.** On one developer's real store of about 36,000 tool calls, MCP output came out 96.6% smaller. Across everything intercepted, mostly Bash, earlier releases saved 57.9%; current ones pass more small reads through whole, so today's figure is lower. Your mix will differ: `bun run measure` reports it for your own store.
+- **How much smaller.** On one developer's real store, the 182 MCP calls came out 96.6% smaller when replayed through current handlers. Across all 36,039 intercepted calls, mostly Bash, earlier releases saved 57.9%; current ones pass more small reads through whole, so today's figure is lower. Your mix will differ: `bun run measure` reports it for your own store.
 - **What the summaries keep.** A smaller summary only helps if it keeps what Claude needs. The [quality benchmark](docs/benchmarks.md#quality-benchmark) checks each summary for the facts in the original, against simply cutting the output to the same size. It runs on a public corpus anyone can rerun with `bun run quality`, and lists every kind of output where mcp-recall does no better than the plain cut.
 - **Whether Claude still solves the task.** No measured change either way. [Is it for you?](#is-it-for-you) has the short version, and the [task-success benchmark](docs/benchmarks.md#task-success-benchmark) has every study and its limits.
 
