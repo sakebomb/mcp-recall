@@ -14,6 +14,9 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   plugin that runs each MCP and bash result through the same hook Claude Code
   uses and registers the `recall` server itself, so `opencode.json` is not
   edited. Large bash output is stored whole from the file OpenCode saves it to.
+  A `tool` filter on `recall__search`, `recall__list_stored` or `recall__forget`
+  accepts OpenCode's own tool names, such as `github_list_issues` and `bash`
+  ([#483](https://github.com/sakebomb/mcp-recall/issues/483)).
   `uninstall` and `status` cover OpenCode too.
 
 ### Fixed

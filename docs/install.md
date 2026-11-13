@@ -96,7 +96,7 @@ mcp-recall also runs under [OpenCode](https://opencode.ai). Install it with Opti
 
 For OpenCode, install writes two files to its plugins dir: `mcp-recall.ts`, a plugin, and `mcp-recall.launch.json`, naming this install of mcp-recall. The plugin runs each MCP and bash result through the same hook Claude Code uses, and registers the `recall` MCP server itself, so your `opencode.json` is not edited; a `recall` server you defined there yourself is left as it is. OpenCode cuts a large bash result before plugins see it and saves the whole output under its data dir; mcp-recall stores that whole output, not the cut. MCP results reach the plugin whole.
 
-Restart OpenCode after installing. `mcp-recall status` lists OpenCode below Claude Code. In OpenCode the recall tools are named `recall_recall__retrieve` and so on. As under pi, the model does not get the start-of-session snapshot, and `opencode run --pure`, which skips plugins, runs without mcp-recall.
+Restart OpenCode after installing. `mcp-recall status` lists OpenCode below Claude Code. In OpenCode the recall tools are named `recall_recall__retrieve` and so on. Their `tool` filter accepts OpenCode's tool names (`github_list_issues`, `bash`) as well as the stored ones (`mcp__github__list_issues`, `Bash`). As under pi, the model does not get the start-of-session snapshot, and `opencode run --pure`, which skips plugins, runs without mcp-recall.
 
 ## grok
 

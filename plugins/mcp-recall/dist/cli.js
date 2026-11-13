@@ -13597,6 +13597,18 @@ function mcpToolName(tool: string, servers: string[]): string | null {
 }
 
 /**
+ * A recall tool's \`tool\` filter in the names mcp-recall stores. OpenCode's model
+ * knows a tool by OpenCode's name (\`github_list_issues\`, \`bash\`), and mcp-recall
+ * stores Claude Code's (\`mcp__github__list_issues\`, \`Bash\`), so a filter written
+ * the OpenCode way would match nothing (#483). Anything else is left as written.
+ */
+function storedToolName(filter: string, servers: string[]): string {
+  if (filter === "bash") return "Bash";
+  if (filter.startsWith("mcp__")) return filter;
+  return mcpToolName(filter, servers) ?? filter;
+}
+
+/**
  * The whole output of a bash result. OpenCode cuts a large one before plugins see
  * it and saves the whole output to the file named in \`metadata.outputPath\`. Read
  * it back only when it is plainly OpenCode's file: absolute, directly in its
@@ -13739,6 +13751,13 @@ async function plugin(ctx: { directory?: string } | null, options?: { launch?: u
         await runHook(launch.cli, "session-start", { session_id: id, cwd, hook_event_name: "SessionStart" });
       } catch { /* recording the session day is best-effort */ }
     },
+    "tool.execute.before": async (call: ToolCall, output: { args?: unknown } | null) => {
+      try {
+        if (!mcpToolName(call.tool, servers)?.startsWith("mcp__recall__")) return;
+        const args = output?.args as { tool?: unknown } | null | undefined;
+        if (typeof args?.tool === "string") args.tool = storedToolName(args.tool, servers);
+      } catch { /* the call goes ahead as the model wrote it */ }
+    },
     "tool.execute.after": async (call: ToolCall, output: unknown) => {
       try {
         const input = toHookInput(call, output, servers, cwd);
@@ -13751,7 +13770,7 @@ async function plugin(ctx: { directory?: string } | null, options?: { launch?: u
 }
 
 export const McpRecall = Object.assign(plugin, {
-  internals: { mcpToolName, bashText, toHookInput, applySummary, toolOutputDir, readLaunch, runHook, fromHookOutput },
+  internals: { mcpToolName, storedToolName, bashText, toHookInput, applySummary, toolOutputDir, readLaunch, runHook, fromHookOutput },
 });
 `;
 var init_opencode_plugin = () => {};
