@@ -56,6 +56,15 @@ Learnings captured after corrections. Updated after any mistake or course correc
 
 ---
 
+## Check the installed version before filing a bug seen live
+
+**Pattern**: mcp-recall misbehaves during a session (screenshots stripped, JSON reduced to its keys) and the next step looks like filing an issue
+**Mistake**: The hooks and MCP server ran a global install three releases old (1.18.1 vs 1.21.0). Both symptoms were already fixed (#441/#442, #403/#406), and an issue filed from them would have charged fixed bugs to current code
+**Rule**: Before filing, compare `jq -r .version` of the install the hooks run (the path in `~/.claude/settings.json`) with the latest release, and re-run the stored original through main's handlers. File only what still reproduces on current code. After upgrading, restart every session: a running MCP server keeps the old code
+**Date**: 2026-11-13
+
+---
+
 ## Git
 
 **Pattern**: Pushing commits to GitHub repos with email privacy enabled
