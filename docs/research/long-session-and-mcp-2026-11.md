@@ -295,7 +295,10 @@ decision; this report does not make it.
 - Sealed run directories, each with a `SHA256SUMS` and a manifest recording the model, the Claude Code
   and mcp-recall binaries by sha256, the images by digest and the exact command:
   `long-s01`…`long-s06`, `web-s01`…`web-s03`, `web-fix-s01`…`web-fix-s03`. They are in the
-  Hugging Face dataset `sakebomb/mcp-recall-task-success`, which is private for now.
+  public Hugging Face dataset
+  [`sakebomb/mcp-recall-studies`](https://huggingface.co/datasets/sakebomb/mcp-recall-studies), a copy
+  with infrastructure details redacted and its checksums regenerated; the original stays private as
+  the audit record.
 - Harness: `bench/agent/bench.py chain` (Study 3) and `bench/agent/web.py chain` (Studies 4 and 5).
   Study 5's command:
   `web.py chain --model claude-haiku-5-5 --run-id web-fix --sequences 3 --seed 414 --compact-window 200000 --run-budget 2 --cap 100 --jobs 3`.
@@ -303,6 +306,6 @@ decision; this report does not make it.
 - Study 6: `web-local-r01`…`web-local-r03`, from
   `web.py single --model self-hosted-qwen3-coder-next --run-id web-local --repeats 3 --jobs 2 --timeout 3600 --compact-window 131072 --max-output 16384`.
   The six first attempts replaced by reruns are in `study6-infra-first-attempts`, the void attempt in
-  `void-study6-attempt1`. All are sealed and in the same private dataset.
+  `void-study6-attempt1`. All are sealed and in the same dataset.
 - Excluded smoke runs, disclosed in the spec: `long-smoke-s01`, `web-smoke-s01`, `web-smoke2-s01`, and
   `smoke6-r01`, `smoke6b-r01` … `smoke6e-r01`.
