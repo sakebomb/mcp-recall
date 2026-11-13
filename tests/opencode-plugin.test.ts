@@ -5,7 +5,7 @@ import path from "path";
 import { McpRecall, type BashResult, type McpResult } from "../src/agents/opencode-plugin";
 import { closeDb, getDb, retrieveOutput } from "../src/db/index";
 
-const { mcpToolName, bashText, toHookInput, applySummary, toolOutputDir } = McpRecall.internals;
+const { mcpToolName, storedToolName, bashText, toHookInput, applySummary, toolOutputDir } = McpRecall.internals;
 
 // Shapes recorded from OpenCode 1.18.31 (#474 spike). MCP tools are named
 // `<server>_<tool>` and the hook gets the raw CallToolResult, whole. bash gets
@@ -39,6 +39,17 @@ describe("OpenCode plugin: which results it handles", () => {
     expect(mcpToolName("git_status", ["git", "git_hub"])).toBe("mcp__git__status");
     expect(mcpToolName("read", SERVERS)).toBeNull();     // a built-in tool
     expect(mcpToolName("github_", SERVERS)).toBeNull();  // no tool part
+  });
+
+  it("turns a tool filter in OpenCode's names into the name mcp-recall stores (#483)", () => {
+    expect(storedToolName("github_list_issues", SERVERS)).toBe("mcp__github__list_issues");
+    expect(storedToolName("bash", SERVERS)).toBe("Bash");
+    // Already stored names, partial names and unknown servers are left as written.
+    expect(storedToolName("mcp__github__list_issues", SERVERS)).toBe("mcp__github__list_issues");
+    expect(storedToolName("mcp__github__list_issues", ["mcp", "github"])).toBe("mcp__github__list_issues");
+    expect(storedToolName("github", SERVERS)).toBe("github");
+    expect(storedToolName("gitlab_list", SERVERS)).toBe("gitlab_list");
+    expect(storedToolName("Bash", SERVERS)).toBe("Bash");
   });
 
   it("leaves recall's own tools, built-ins, images and odd shapes to OpenCode", () => {
@@ -186,6 +197,25 @@ describe("OpenCode plugin: end to end through the real hook", () => {
     const stored = retrieveOutput(getDb(dbPath), id!);
     expect(stored?.full_content).toBe(whole);
     expect(stored?.session_id).toBe("ses_1");
+  });
+
+  it("rewrites a recall tool's filter to the stored name, and no other tool's args (#483)", async () => {
+    const { hooks } = await loaded();
+    const before = hooks["tool.execute.before"]!;
+    const recallArgs = { args: { tool: "github_list_issues", limit: 5 } };
+    await before({ tool: "recall_recall__list_stored", sessionID: "s" } as never, recallArgs as never);
+    expect(recallArgs.args).toEqual({ tool: "mcp__github__list_issues", limit: 5 });
+
+    const forgetArgs = { args: { tool: "bash" } };
+    await before({ tool: "recall_recall__forget", sessionID: "s" } as never, forgetArgs as never);
+    expect(forgetArgs.args.tool).toBe("Bash");
+
+    const otherArgs = { args: { tool: "github_list_issues" } };
+    await before({ tool: "github_list_issues", sessionID: "s" } as never, otherArgs as never);
+    expect(otherArgs.args.tool).toBe("github_list_issues");
+
+    expect(await before(null as never, null as never)).toBeUndefined();
+    expect(await before({ tool: "recall_recall__search", sessionID: "s" } as never, { args: null } as never)).toBeUndefined();
   });
 
   it("leaves a result the hook passes through unchanged", async () => {
