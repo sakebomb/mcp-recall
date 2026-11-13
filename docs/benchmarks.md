@@ -162,8 +162,10 @@ called a `recall__*` tool, so what effect there is comes from the summaries alon
 - **Studies 5 and 6 predate v1.20.0**, which caps large Playwright sections
   ([#435](https://github.com/sakebomb/mcp-recall/pull/435)).
 - **Fewer compactions are a count, not a consequence.** The solve rate did not rise with them.
-- **The run data is private for now.** The harness and analysis are in the repo; the sealed runs are in a private
-  Hugging Face dataset. The harness's own known limits are in its README.
+- **The run data is public, lightly redacted.** The harness and analysis are in the repo; the sealed runs are in
+  the Hugging Face dataset
+  [`sakebomb/mcp-recall-studies`](https://huggingface.co/datasets/sakebomb/mcp-recall-studies), with
+  infrastructure details removed and checksums regenerated. The harness's own known limits are in its README.
 
 ## Compression measurements
 

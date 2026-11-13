@@ -65,8 +65,10 @@ graded, and both are excluded.
 
 The same as the pilot's: each run's full event stream, Claude Code's transcript and config, the
 mcp-recall store, the graded patch, the exact prompt and the grading log, checksummed by
-`bench.py seal`. The runs are in the Hugging Face dataset `sakebomb/mcp-recall-task-success` under
-`runs/comp-r1` to `runs/comp-r3`. The dataset is private for now.
+`bench.py seal`. The runs are public in the Hugging Face dataset
+[`sakebomb/mcp-recall-studies`](https://huggingface.co/datasets/sakebomb/mcp-recall-studies) under
+`runs/comp-r1` to `runs/comp-r3`, a copy with infrastructure details redacted and its checksums
+regenerated. The original stays private as the audit record.
 
 ## Analysis
 

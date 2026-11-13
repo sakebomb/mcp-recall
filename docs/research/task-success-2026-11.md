@@ -69,7 +69,10 @@ graded patch, the exact prompt, and the SWE-bench grading log. Each `run` invoca
 entry pinning the harness commit, binary hashes, image digests and the dataset fingerprint. After
 grading, `bench.py seal` checks that the API key appears in no file and writes `SHA256SUMS`.
 
-The archive is the Hugging Face dataset `sakebomb/mcp-recall-task-success`, private for now. Layout and verification:
+The archive is public as the Hugging Face dataset
+[`sakebomb/mcp-recall-studies`](https://huggingface.co/datasets/sakebomb/mcp-recall-studies), a copy
+with infrastructure details redacted and its checksums regenerated; the original stays private as the
+audit record. Layout and verification:
 [`bench/agent/README.md`](../../bench/agent/README.md).
 
 ## Analysis
