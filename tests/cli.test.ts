@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { getVersion, printHelp, completionScript } from "../src/cli";
@@ -193,5 +193,59 @@ describe("hook startup", () => {
     const bundle = await Bun.file(join(import.meta.dir, "..", "plugins", "mcp-recall", "dist", "cli.js")).text();
     const locales = bundle.match(/^\/\/ node_modules\/zod\/v4\/locales\/[^\n]+/gm) ?? [];
     expect(locales.length).toBeLessThanOrEqual(2);
+  });
+});
+
+// ── uninstall --dry-run (#490) ────────────────────────────────────────────────
+
+// Through the real CLI, since the flag was dropped in cli.ts, not in uninstallCommand.
+// Every config path points into a throwaway HOME, so no real config is touched.
+describe("uninstall --dry-run", () => {
+  function run(home: string, ...args: string[]) {
+    const proc = Bun.spawnSync([process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), ...args], {
+      env: {
+        ...process.env,
+        HOME: home,
+        XDG_CONFIG_HOME: join(home, ".config"),
+        PI_CODING_AGENT_DIR: join(home, ".pi", "agent"),
+      },
+    });
+    expect(proc.exitCode).toBe(0);
+    return proc.stdout.toString();
+  }
+
+  function snapshot(home: string): Record<string, string> {
+    const files = [
+      ".claude.json",
+      ".claude/settings.json",
+      ".claude/CLAUDE.md",
+      ".pi/agent/extensions/mcp-recall/index.ts",
+      ".pi/agent/extensions/mcp-recall/launch.json",
+      ".config/opencode/plugins/mcp-recall.ts",
+      ".config/opencode/plugins/mcp-recall.launch.json",
+    ];
+    return Object.fromEntries(files.map((f) => [f, readFileSync(join(home, f), "utf8")]));
+  }
+
+  test("changes no file, and a real uninstall then removes them", () => {
+    const home = mkdtempSync(join(tmpdir(), "recall-uninstall-dry-"));
+    try {
+      mkdirSync(join(home, ".pi", "agent"), { recursive: true });
+      mkdirSync(join(home, ".config", "opencode"), { recursive: true });
+      run(home, "install");
+      const before = snapshot(home);
+
+      const out = run(home, "uninstall", "--dry-run");
+      expect(out).toContain("dry run");
+      expect(snapshot(home)).toEqual(before);
+
+      // The snapshot can see a removal: without --dry-run the same files go.
+      run(home, "uninstall");
+      expect(existsSync(join(home, ".pi", "agent", "extensions", "mcp-recall"))).toBe(false);
+      expect(existsSync(join(home, ".config", "opencode", "plugins", "mcp-recall.ts"))).toBe(false);
+      expect(readFileSync(join(home, ".claude.json"), "utf8")).not.toContain("\"recall\"");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

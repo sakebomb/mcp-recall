@@ -112,6 +112,15 @@ describe("uninstall from OpenCode", () => {
 });
 
 describe("status for OpenCode", () => {
+  it("reports OpenCode as detected but not set up, in yellow, with the --agent command (#490)", async () => {
+    await mkdir(opencodeDir, { recursive: true });
+    await statusCommand(dirs());
+    const oc = out().slice(out().indexOf("OpenCode:"));
+    expect(oc).toMatch(/OpenCode: .*\x1b\[33mdetected, not set up/);
+    expect(oc).toContain("mcp-recall install --agent opencode");
+    expect(oc).not.toContain("\x1b[31m");
+  });
+
   it("says nothing about OpenCode when it is absent", async () => {
     await statusCommand(dirs());
     expect(out()).not.toContain("OpenCode:");

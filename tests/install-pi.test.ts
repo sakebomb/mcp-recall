@@ -183,9 +183,15 @@ describe("status for pi", () => {
     expect(out()).toContain("from another version");
   });
 
-  it("reports pi as not installed when pi is present but the extension is not", async () => {
+  // pi being present is no fault: setting it up is optional (#490). So no red
+  // check, and the command named must add pi only. A bare `mcp-recall install`
+  // would also register Claude Code, a second copy beside a plugin install.
+  it("reports pi as detected but not set up, in yellow, with the --agent command", async () => {
     await mkdir(piDir, { recursive: true });
     await statusCommand({ ...claude, piDir, launch });
-    expect(out()).toMatch(/pi: .*not installed/);
+    const pi = out().slice(out().indexOf("pi:"));
+    expect(pi).toMatch(/pi: .*\x1b\[33mdetected, not set up/);
+    expect(pi).toContain("mcp-recall install --agent pi");
+    expect(pi).not.toContain("\x1b[31m");
   });
 });

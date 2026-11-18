@@ -38,7 +38,8 @@ Usage: mcp-recall <command> [options]
 Commands:
   install              Register hooks + MCP server in Claude Code, and in pi and OpenCode if installed
     --agent NAME       Only these agents: claude, pi, opencode (comma-separated)
-  uninstall            Remove hooks + MCP server (--agent NAME to limit)
+    --dry-run          Show what would change; write nothing
+  uninstall            Remove hooks + MCP server (--agent NAME, --dry-run)
   status               Show current configuration and health
   serve                Run the MCP server on stdio (Claude Code starts this)
   gc [--force]         Reclaim disk: list/delete orphaned project DBs
@@ -346,10 +347,11 @@ export async function main(): Promise<void> {
       console.error(`--agent takes ${AGENTS.join(", ")} (comma-separated for more than one)`);
       process.exit(1);
     }
+    const dryRun = process.argv.includes("--dry-run");
     if (subcommand === "install") {
-      await installCommand({ dryRun: process.argv.includes("--dry-run"), agents });
+      await installCommand({ dryRun, agents });
     } else {
-      await uninstallCommand({ agents });
+      await uninstallCommand({ dryRun, agents });
     }
     process.exit(0);
   }

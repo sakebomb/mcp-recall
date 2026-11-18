@@ -897,3 +897,28 @@ describe("a binary renamed without \"recall\" in its path (#366)", () => {
     expect(await commands("PostToolUse")).toEqual([]);
   });
 });
+
+// ── status: profiles are optional (#490) ─────────────────────────────────────
+
+describe("status with no profiles", () => {
+  const ENV = ["RECALL_USER_PROFILES_PATH", "RECALL_COMMUNITY_PROFILES_PATH", "RECALL_BUNDLED_PROFILES_PATH"] as const;
+
+  afterEach(() => {
+    for (const k of ENV) delete process.env[k];
+    mock.restore();
+  });
+
+  it("warns in yellow, not red, and names the seed command", async () => {
+    for (const k of ENV) process.env[k] = path.join(tmpDir, "no-profiles", k);
+    const log = spyOn(console, "log").mockImplementation(() => {});
+    await statusCommand({
+      claudeJsonPath, settingsPath, pluginsPath,
+      claudeMdPath: path.join(tmpDir, "CLAUDE.md"),
+      piDir: path.join(tmpDir, "no-pi"), opencodeDir: path.join(tmpDir, "no-opencode"),
+    });
+    const line = log.mock.calls.flat().join("\n").split("\n").find((l) => l.includes("Profiles:")) ?? "";
+    expect(line).toContain("\x1b[33m!");
+    expect(line).not.toContain("\x1b[31m");
+    expect(log.mock.calls.flat().join("\n")).toContain("mcp-recall profiles seed");
+  });
+});

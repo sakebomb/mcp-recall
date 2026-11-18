@@ -62,11 +62,11 @@ export async function installPi(piDir: string, launch: Launch, dryRun = false): 
   return oldIndex === null && oldLaunch === null ? "added" : "updated";
 }
 
-/** Removes the extension dir; true when there was one. */
-export async function uninstallPi(piDir: string): Promise<boolean> {
+/** Removes the extension dir (unless `dryRun`); true when there was one. */
+export async function uninstallPi(piDir: string, dryRun = false): Promise<boolean> {
   const dir = piExtensionDir(piDir);
   if (!existsSync(dir)) return false;
-  await rm(dir, { recursive: true, force: true });
+  if (!dryRun) await rm(dir, { recursive: true, force: true });
   return true;
 }
 
