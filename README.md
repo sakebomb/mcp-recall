@@ -72,7 +72,7 @@ mcp-recall install       # register the hooks and MCP server in Claude Code
 mcp-recall profiles seed # optional: compression profiles for the MCPs you use
 ```
 
-Restart Claude Code, then run `mcp-recall status`: every check should be green. That's it. Claude now receives summaries, and uses the `recall__*` tools when it needs the full output.
+Restart Claude Code, then run `mcp-recall status`: every check should be green. A yellow `detected, not set up` or `Profiles: none installed` line is optional; `partial / stale` is a fault: follow the fix line status prints under it. That's it. Claude now receives summaries, and uses the `recall__*` tools when it needs the full output.
 
 `mcp-recall install` writes the MCP server entry and hooks to `~/.claude.json` and `~/.claude/settings.json`, and adds a short instruction block to `~/.claude/CLAUDE.md`. It is idempotent, so re-run it after every update.
 

@@ -16,7 +16,7 @@ mcp-recall install       # register hooks + MCP server in Claude Code
 
 Install globally, not through `npx`, `bunx` or `pnpm dlx`. `mcp-recall install` registers the path of the copy it runs from, and a package runner's copy lives in a cache that can be cleared, which would leave Claude Code pointing at files that are gone. So `install` refuses to run from one and says to install globally ([#455](https://github.com/sakebomb/mcp-recall/issues/455)).
 
-`mcp-recall install` writes the MCP server entry and hooks to `~/.claude.json` and `~/.claude/settings.json`, and adds a short [instruction block](#claude-instructions) to `~/.claude/CLAUDE.md` so Claude knows how to use the recall tools. It's idempotent — safe to re-run after updates.
+`mcp-recall install` writes the MCP server entry and hooks to `~/.claude.json` and `~/.claude/settings.json`, and adds a short [instruction block](#claude-instructions) to `~/.claude/CLAUDE.md` so Claude knows how to use the recall tools. It's idempotent — safe to re-run after updates. `mcp-recall install --dry-run` prints what it would write and writes nothing; `uninstall --dry-run` does the same for removal.
 
 ## Option B — Claude Code plugin marketplace
 
@@ -49,12 +49,14 @@ echo 'alias mcp-recall="bun /path/to/mcp-recall/plugins/mcp-recall/dist/cli.js"'
 source ~/.zshrc
 ```
 
-Or symlink it:
+Or symlink the clone's `bin/recall`, which follows the link back to the clone:
 
 ```bash
 mkdir -p ~/.local/bin
-ln -sf /path/to/mcp-recall/plugins/mcp-recall/dist/cli.js ~/.local/bin/mcp-recall
+ln -sf /path/to/mcp-recall/bin/recall ~/.local/bin/mcp-recall
 ```
+
+Link `bin/recall`, not `dist/cli.js`: the bundle is not executable and has no `#!` line, so a link to it fails with "Permission denied".
 
 ## Option D — standalone binary (no Bun)
 
@@ -84,15 +86,15 @@ A binary is 60–95 MB, since it carries the Bun runtime. Its bundled profiles a
 
 ## pi
 
-mcp-recall also runs under [pi](https://pi.dev). Install it with Option A, C or D, and `mcp-recall install` sets up pi as well as Claude Code whenever pi's config dir (`~/.pi/agent`, or `$PI_CODING_AGENT_DIR`) exists. `--agent pi` sets up pi alone; `--agent claude` skips it.
+mcp-recall also runs under [pi](https://pi.dev). Install it with Option A, C or D, and `mcp-recall install` sets up pi as well as Claude Code whenever pi's config dir (`~/.pi/agent`, or `$PI_CODING_AGENT_DIR`) exists. `--agent pi` sets up pi alone, even before pi's config dir exists; `--agent claude` skips it. `--agent` takes a comma-separated list (`--agent claude,pi`). With the plugin (Option B), which covers Claude Code only, add pi from a global install with `mcp-recall install --agent pi`, so Claude Code is not registered a second time.
 
-For pi, install writes one folder, `~/.pi/agent/extensions/mcp-recall/`: an extension and a `launch.json` naming this install of mcp-recall. The extension runs each MCP and bash result through the same hook Claude Code uses and registers the `recall` MCP server, so pi's `mcp.json` is not edited. pi cuts a large result to about 20 KB before extensions see it and saves the whole output to a temp file; mcp-recall stores that whole output, not the cut.
+For pi, install writes one folder, `extensions/mcp-recall/` in pi's config dir: an extension and a `launch.json` naming this install of mcp-recall. The extension runs each MCP and bash result through the same hook Claude Code uses and registers the `recall` MCP server, so pi's `mcp.json` is not edited. pi cuts a large result before extensions see it (an MCP result to about 20 KB, bash output to its last 2,000 lines) and saves the whole output to a temp file. mcp-recall stores that whole output, not the cut, unless it is over 20 MB or is not plainly pi's temp file; then it stores the cut.
 
 Restart pi, or run `/reload`, after installing. `mcp-recall status` lists pi below Claude Code. pi has no `CLAUDE.md`, so the [Claude instructions](#claude-instructions) block does not apply; pi's model finds the `recall__*` tools from the `[recall:…]` header and the tools' own descriptions. The session-start hook records the day and prunes expired items, but pi's model does not get the start-of-session snapshot of pinned items and notes; `recall__context()` returns it.
 
 ## OpenCode
 
-mcp-recall also runs under [OpenCode](https://opencode.ai). Install it with Option A, C or D, and `mcp-recall install` sets up OpenCode as well whenever OpenCode's config dir (`~/.config/opencode`, or `$XDG_CONFIG_HOME/opencode`) exists. `--agent opencode` sets up OpenCode alone.
+mcp-recall also runs under [OpenCode](https://opencode.ai). Install it with Option A, C or D, and `mcp-recall install` sets up OpenCode as well whenever OpenCode's config dir (`~/.config/opencode`, or `$XDG_CONFIG_HOME/opencode`) exists. `--agent opencode` sets up OpenCode alone, even before its config dir exists. With the plugin (Option B), add OpenCode from a global install with `mcp-recall install --agent opencode`.
 
 For OpenCode, install writes two files to its plugins dir: `mcp-recall.ts`, a plugin, and `mcp-recall.launch.json`, naming this install of mcp-recall. The plugin runs each MCP and bash result through the same hook Claude Code uses, and registers the `recall` MCP server itself, so your `opencode.json` is not edited; a `recall` server you defined there yourself is left as it is. OpenCode cuts a large bash result before plugins see it and saves the whole output under its data dir; mcp-recall stores that whole output, not the cut. MCP results reach the plugin whole.
 
@@ -113,7 +115,7 @@ Earlier installs registered a hook matcher that grok's regex engine rejects, so 
 ## After installing
 
 1. **Restart Claude Code.** The MCP server and hooks register at startup.
-2. **Check the install:** `mcp-recall status` should show every check green. With the plugin (Option B), run `bunx mcp-recall status`; it checks the plugin's files instead of the entries `mcp-recall install` writes.
+2. **Check the install:** `mcp-recall status` should show every check green. Two yellow lines are optional: `detected, not set up` for pi or OpenCode, and `Profiles: none installed`. A yellow `partial / stale` is a fault: follow the fix line status prints under it (`mcp-recall install` for a CLI install, `--agent <name>` for pi or OpenCode, `claude plugin update` or the instructions block for the plugin). Under "Registered launch", status checks that each file the registered entries run exists, and says so when they belong to another install of mcp-recall than the one you ran. With the plugin (Option B), run `bunx mcp-recall status`; it checks the plugin's files instead of the entries `mcp-recall install` writes.
 3. **Optional: install compression profiles** for the MCP servers you use. Profiles teach mcp-recall how to summarize a specific server's output.
 
    ```bash
@@ -174,7 +176,7 @@ mcp-recall install   # re-registers hooks with the new binary path
 
 ### Option D — standalone binary
 
-Download the new release's file over the old one, as in [Option D](#option-d--standalone-binary-no-bun) above, then run `mcp-recall install`. It is a no-op unless the binary's path changed.
+Download the new release's file over the old one, as in [Option D](#option-d--standalone-binary-no-bun) above, then run `mcp-recall install`. The hook paths stay the same unless the binary moved, but install also refreshes the Claude instructions block and the pi and OpenCode files when the new version changed them.
 
 ### After updating
 
@@ -193,7 +195,7 @@ mcp-recall profiles update
 | Option C — from source | `./bin/recall uninstall` from the clone, then delete the clone and any alias or symlink you added |
 | Option D — standalone binary | `mcp-recall uninstall`, then delete the binary |
 
-`mcp-recall uninstall` removes the MCP server entry, both hooks and the `CLAUDE.md` block, and pi's extension folder and OpenCode's two plugin files when they are there (`--agent` limits it to the agents you name). Neither it nor `claude plugin uninstall` touches your stored output (`~/.local/share/mcp-recall/`) or your config (`~/.config/mcp-recall/`); delete those folders too to remove everything.
+`mcp-recall uninstall` removes the MCP server entry, both hooks and the `CLAUDE.md` block, and pi's extension folder and OpenCode's two plugin files when they are there (`--agent` limits it to the agents you name, `--dry-run` lists what it would remove). Neither it nor `claude plugin uninstall` touches your stored output (`~/.local/share/mcp-recall/`) or your config (`~/.config/mcp-recall/`); delete those folders too to remove everything.
 
 ## Running alongside rtk
 
