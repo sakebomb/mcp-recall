@@ -11402,7 +11402,7 @@ var init_handlers = __esm(() => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "mcp-recall",
-    version: "1.21.0",
+    version: "1.22.0",
     description: "Context compression and persistent retrieval for Claude Code",
     author: {
       name: "sakebomb",

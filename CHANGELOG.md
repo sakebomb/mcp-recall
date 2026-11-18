@@ -6,6 +6,8 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+## [1.22.0] — 2026-11-18
+
 ### Added
 
 - **OpenCode support** ([#474](https://github.com/sakebomb/mcp-recall/issues/474)).
@@ -1256,7 +1258,8 @@ Ten `recall__*` tools available in every Claude session:
 
 ---
 
-[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.21.0...HEAD
+[Unreleased]: https://github.com/sakebomb/mcp-recall/compare/v1.22.0...HEAD
+[1.22.0]: https://github.com/sakebomb/mcp-recall/compare/v1.21.0...v1.22.0
 [1.21.0]: https://github.com/sakebomb/mcp-recall/compare/v1.20.0...v1.21.0
 [1.20.0]: https://github.com/sakebomb/mcp-recall/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/sakebomb/mcp-recall/compare/v1.18.1...v1.19.0
