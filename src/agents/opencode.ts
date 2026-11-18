@@ -61,10 +61,10 @@ export async function installOpencode(dir: string, launch: Launch, dryRun = fals
   return oldPlugin === null && oldLaunch === null ? "added" : "updated";
 }
 
-/** Removes the plugin and its launch file, and nothing else in the plugins dir; true when there was one. */
-export async function uninstallOpencode(dir: string): Promise<boolean> {
+/** Removes the plugin and its launch file (unless `dryRun`), and nothing else in the plugins dir; true when there was one. */
+export async function uninstallOpencode(dir: string, dryRun = false): Promise<boolean> {
   const files = [opencodePluginPath(dir), launchPath(dir)].filter((p) => existsSync(p));
-  await Promise.all(files.map((p) => rm(p, { force: true })));
+  if (!dryRun) await Promise.all(files.map((p) => rm(p, { force: true })));
   return files.length > 0;
 }
 

@@ -13503,11 +13503,12 @@ async function installPi(piDir, launch, dryRun = false) {
   }
   return oldIndex === null && oldLaunch === null ? "added" : "updated";
 }
-async function uninstallPi(piDir) {
+async function uninstallPi(piDir, dryRun = false) {
   const dir = piExtensionDir(piDir);
   if (!existsSync3(dir))
     return false;
-  await rm(dir, { recursive: true, force: true });
+  if (!dryRun)
+    await rm(dir, { recursive: true, force: true });
   return true;
 }
 async function piStatus(piDir) {
@@ -13812,9 +13813,10 @@ async function installOpencode(dir, launch, dryRun = false) {
   }
   return oldPlugin === null && oldLaunch === null ? "added" : "updated";
 }
-async function uninstallOpencode(dir) {
+async function uninstallOpencode(dir, dryRun = false) {
   const files = [opencodePluginPath(dir), launchPath(dir)].filter((p) => existsSync4(p));
-  await Promise.all(files.map((p) => rm2(p, { force: true })));
+  if (!dryRun)
+    await Promise.all(files.map((p) => rm2(p, { force: true })));
   return files.length > 0;
 }
 async function opencodeStatus(dir) {
@@ -14032,7 +14034,7 @@ async function injectClaudeMd(filePath, dryRun = false) {
   }
   return "added";
 }
-async function removeClaudeMd(filePath) {
+async function removeClaudeMd(filePath, dryRun = false) {
   let existing = "";
   try {
     existing = await readFile3(filePath, "utf8");
@@ -14049,7 +14051,8 @@ async function removeClaudeMd(filePath) {
   const after = existing.slice(endIdx + CLAUDE_MD_MARKER_END.length).replace(/^\n+/, `
 `);
   const result = (before + after).trimEnd();
-  await writeTextFile(filePath, result ? result + `
+  if (!dryRun)
+    await writeTextFile(filePath, result ? result + `
 ` : "");
   return true;
 }
@@ -14139,7 +14142,7 @@ function fileAgents(piDir, opencodeDir) {
       location: piExtensionDir(piDir),
       detected: piDetected(piDir),
       install: (launch, dryRun) => installPi(piDir, launch, dryRun),
-      uninstall: () => uninstallPi(piDir),
+      uninstall: (dryRun) => uninstallPi(piDir, dryRun),
       status: async () => {
         const s = await piStatus(piDir);
         return { installed: s.extension, launch: s.launch, stale: s.stale };
@@ -14154,7 +14157,7 @@ function fileAgents(piDir, opencodeDir) {
       location: opencodePluginPath(opencodeDir),
       detected: opencodeDetected(opencodeDir),
       install: (launch, dryRun) => installOpencode(opencodeDir, launch, dryRun),
-      uninstall: () => uninstallOpencode(opencodeDir),
+      uninstall: (dryRun) => uninstallOpencode(opencodeDir, dryRun),
       status: async () => {
         const s = await opencodeStatus(opencodeDir);
         return { installed: s.plugin, launch: s.launch, stale: s.stale };
@@ -14327,10 +14330,14 @@ async function uninstallCommand(opts = {}) {
     launch = detectLaunch(),
     piDir = defaultPiDir(),
     opencodeDir = defaultOpencodeDir(),
-    agents = [...AGENTS]
+    agents = [...AGENTS],
+    dryRun = false
   } = opts;
+  if (dryRun)
+    console.log(`${DIM}dry run \u2014 no files will be modified${RESET}
+`);
   if (agents.includes("claude"))
-    await uninstallClaude(claudeJsonPath, settingsPath, claudeMdPath, launch);
+    await uninstallClaude(claudeJsonPath, settingsPath, claudeMdPath, launch, dryRun);
   let printed = agents.includes("claude");
   for (const a of fileAgents(piDir, opencodeDir)) {
     if (!agents.includes(a.agent) || !(opts.agents?.includes(a.agent) || a.detected))
@@ -14338,23 +14345,26 @@ async function uninstallCommand(opts = {}) {
     if (printed)
       console.log("");
     printed = true;
-    if (await a.uninstall()) {
+    if (await a.uninstall(dryRun)) {
       console.log(`${GREEN}\u2713${RESET} ${`Removed ${a.thing}`.padEnd(28)}${DIM}(${a.location})${RESET}`);
-      console.log(`
+      if (!dryRun)
+        console.log(`
 ${a.restart} to deactivate mcp-recall.`);
     } else {
       console.log(`${DIM}\u2139 ${a.thing} not present${RESET}`);
     }
   }
 }
-async function uninstallClaude(claudeJsonPath, settingsPath, claudeMdPath, launch) {
+async function uninstallClaude(claudeJsonPath, settingsPath, claudeMdPath, launch, dryRun) {
   let anyChange = false;
   const claudeJson = await readJsonFile(claudeJsonPath);
   const mcpServers = claudeJson["mcpServers"];
   const ours = recallHooks(knownClis(launch, mcpServers?.["recall"]));
   if (mcpServers?.["recall"]) {
-    delete mcpServers["recall"];
-    await writeJsonFile(claudeJsonPath, claudeJson);
+    if (!dryRun) {
+      delete mcpServers["recall"];
+      await writeJsonFile(claudeJsonPath, claudeJson);
+    }
     console.log(`${GREEN}\u2713${RESET} Removed mcpServers.recall  ${DIM}(${claudeJsonPath})${RESET}`);
     anyChange = true;
   } else {
@@ -14381,18 +14391,18 @@ async function uninstallClaude(claudeJsonPath, settingsPath, claudeMdPath, launc
   } else {
     console.log(`${DIM}\u2139 PostToolUse hook not present${RESET}`);
   }
-  if (settingsChanged) {
+  if (settingsChanged && !dryRun) {
     settings["hooks"] = hooks;
     await writeJsonFile(settingsPath, settings);
   }
-  const removed = await removeClaudeMd(claudeMdPath);
+  const removed = await removeClaudeMd(claudeMdPath, dryRun);
   if (removed) {
     console.log(`${GREEN}\u2713${RESET} Removed CLAUDE.md instructions  ${DIM}(${claudeMdPath})${RESET}`);
     anyChange = true;
   } else {
     console.log(`${DIM}\u2139 CLAUDE.md instructions not present${RESET}`);
   }
-  if (anyChange) {
+  if (anyChange && !dryRun) {
     console.log(`
 Restart Claude Code to deactivate mcp-recall.`);
   }
@@ -14437,11 +14447,18 @@ async function printFileAgentStatus(a, launch) {
   const st = await a.status();
   if (!a.detected && !st.installed)
     return;
+  const shown = a.location.replace(os3.homedir(), "~");
+  if (!st.installed && st.launch === null) {
+    console.log(`
+${a.name}: ${BOLD}${YELLOW}detected, not set up${RESET}
+`);
+    console.log(`  To add it: ${BOLD}mcp-recall install --agent ${a.agent}${RESET}`);
+    return;
+  }
   const tick = (ok2) => ok2 ? `${GREEN}\u2713${RESET}` : `${RED}\u2717${RESET}`;
   const files = st.launch ? registeredFiles([st.launch.cli, [st.launch.server.command, ...st.launch.server.args]]) : [];
   const ok = st.installed && st.launch !== null && !st.stale && files.every((f) => f.exists);
   const label = ok ? `${GREEN}installed${RESET}` : st.installed ? `${YELLOW}partial / stale${RESET}` : `${RED}not installed${RESET}`;
-  const shown = a.location.replace(os3.homedir(), "~");
   console.log(`
 ${a.name}: ${BOLD}${label}${RESET}
 `);
@@ -14456,7 +14473,7 @@ ${a.name}: ${BOLD}${label}${RESET}
   }
   if (!ok)
     console.log(`
-  Run ${BOLD}mcp-recall install${RESET}`);
+  Run ${BOLD}mcp-recall install --agent ${a.agent}${RESET}`);
 }
 function ourHookCommands(entries, ours) {
   return (entries ?? []).filter(ours.entry).flatMap((e) => e.hooks.filter(ours.hook).map((h) => h.command));
@@ -14605,7 +14622,7 @@ async function statusCommand(opts = {}) {
   console.log("");
   const profiles = loadProfiles();
   if (profiles.length === 0) {
-    console.log(`  ${RED}\u2717${RESET} Profiles: none installed`);
+    console.log(`  ${YELLOW}!${RESET} Profiles: none installed (optional)`);
     console.log(`    \u2192 Run: ${BOLD}mcp-recall profiles seed${RESET}`);
   } else {
     const counts = profiles.reduce((acc, p) => {
@@ -15465,7 +15482,8 @@ Usage: mcp-recall <command> [options]
 Commands:
   install              Register hooks + MCP server in Claude Code, and in pi and OpenCode if installed
     --agent NAME       Only these agents: claude, pi, opencode (comma-separated)
-  uninstall            Remove hooks + MCP server (--agent NAME to limit)
+    --dry-run          Show what would change; write nothing
+  uninstall            Remove hooks + MCP server (--agent NAME, --dry-run)
   status               Show current configuration and health
   serve                Run the MCP server on stdio (Claude Code starts this)
   gc [--force]         Reclaim disk: list/delete orphaned project DBs
@@ -15755,10 +15773,11 @@ async function main() {
       console.error(`--agent takes ${AGENTS2.join(", ")} (comma-separated for more than one)`);
       process.exit(1);
     }
+    const dryRun = process.argv.includes("--dry-run");
     if (subcommand === "install") {
-      await installCommand2({ dryRun: process.argv.includes("--dry-run"), agents });
+      await installCommand2({ dryRun, agents });
     } else {
-      await uninstallCommand2({ agents });
+      await uninstallCommand2({ dryRun, agents });
     }
     process.exit(0);
   }

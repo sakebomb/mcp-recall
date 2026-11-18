@@ -16,6 +16,18 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   listed it as `legacy` until the 90-day staleness rule. The tool hook now
   records the path when the store has none, with the same real-directory check.
   Stores already pathless still age out on the staleness rule.
+- **`mcp-recall uninstall --dry-run` no longer uninstalls**
+  ([#490](https://github.com/sakebomb/mcp-recall/issues/490)). `install`
+  honoured `--dry-run` but `uninstall` ignored it and removed everything. It now
+  reports what it would remove and writes nothing, and `--help` lists the flag
+  for both commands.
+- **`mcp-recall status` no longer shows optional things as failures**
+  ([#490](https://github.com/sakebomb/mcp-recall/issues/490)). No profiles is a
+  yellow warning, not a red cross. pi or OpenCode present but never set up is
+  one yellow `detected, not set up` line naming
+  `mcp-recall install --agent <name>`, instead of a red section whose bare
+  `mcp-recall install` would also register Claude Code a second time beside a
+  plugin install.
 
 ## [1.22.0] — 2026-11-18
 
