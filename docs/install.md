@@ -115,7 +115,7 @@ Earlier installs registered a hook matcher that grok's regex engine rejects, so 
 ## After installing
 
 1. **Restart Claude Code.** The MCP server and hooks register at startup.
-2. **Check the install:** `mcp-recall status` should show every check green. Two yellow lines are optional: `detected, not set up` for pi or OpenCode, and `Profiles: none installed`. A yellow `partial / stale` is a fault: run `mcp-recall install` again. Under "Registered launch", status checks that each file the registered entries run exists, and says so when they belong to another install of mcp-recall than the one you ran. With the plugin (Option B), run `bunx mcp-recall status`; it checks the plugin's files instead of the entries `mcp-recall install` writes.
+2. **Check the install:** `mcp-recall status` should show every check green. Two yellow lines are optional: `detected, not set up` for pi or OpenCode, and `Profiles: none installed`. A yellow `partial / stale` is a fault: fix the red items listed under it (for a CLI install, `mcp-recall install` again; for the plugin, the instructions block or `claude plugin update`). Under "Registered launch", status checks that each file the registered entries run exists, and says so when they belong to another install of mcp-recall than the one you ran. With the plugin (Option B), run `bunx mcp-recall status`; it checks the plugin's files instead of the entries `mcp-recall install` writes.
 3. **Optional: install compression profiles** for the MCP servers you use. Profiles teach mcp-recall how to summarize a specific server's output.
 
    ```bash
