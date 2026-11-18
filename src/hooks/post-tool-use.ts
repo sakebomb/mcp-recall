@@ -3,6 +3,7 @@ import { readFileSync, statSync } from "fs";
 import { basename, dirname, isAbsolute } from "path";
 import { loadConfig } from "../config";
 import { getProjectKey } from "../project-key";
+import { recordProjectPath } from "./project-path";
 import { isDenied } from "../denylist";
 import { findSecrets } from "../secrets";
 import { getHandler, extractText } from "../handlers/index";
@@ -224,6 +225,9 @@ export function handlePostToolUse(raw: string): HookOutput {
   // 4. Setup DB (needed for dedup check before compression)
   const projectKey = getProjectKey(cwd);
   const db = getDb(defaultDbPath(projectKey));
+  // Opening the store creates it, so record its path now, before any skip below.
+  // session-start may never run for it, as for a subagent in its worktree (#488).
+  recordProjectPath(db, cwd, true);
 
   // 5. Dedup check: reuse a stored summary only for identical content from the
   //    same tool and command family. A matching input alone is not enough, since
