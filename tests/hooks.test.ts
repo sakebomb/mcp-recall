@@ -713,6 +713,19 @@ describe("handlePostToolUse — records the project path session-start never saw
     expect(getMeta(db, "project_path")).toBe(getProjectPath(TEST_CWD));
   });
 
+  // A call from a subdirectory belongs to the repo's store, so it must record the
+  // repo root. Recording the subdirectory would let gc delete the whole repo's
+  // store once that subdirectory is removed.
+  it("records the repo root, not the subdirectory a call ran in", () => {
+    const sub = join(TEST_CWD, "src", "hooks");
+    handlePostToolUse(makePostToolUseInput("mcp__github__list_issues", {
+      content: [{ type: "text", text: LARGE_GITHUB_RESPONSE }],
+    }, { cwd: sub }));
+    const recorded = getMeta(getDb(":memory:"), "project_path");
+    expect(recorded).toBe(getProjectPath(TEST_CWD));
+    expect(recorded).not.toBe(sub);
+  });
+
   it("leaves an already-recorded path alone", () => {
     setMeta(getDb(":memory:"), "project_path", "/recorded/by/session-start");
     handlePostToolUse(makePostToolUseInput("mcp__github__list_issues", {
