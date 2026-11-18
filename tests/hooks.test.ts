@@ -4,7 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { handleSessionStart } from "../src/hooks/session-start";
 import { handlePostToolUse, savesEnough } from "../src/hooks/post-tool-use";
-import { getDb, closeDb, listOutputs, getSessionDays, retrieveOutput, storeOutput, pinOutput, getMeta, hashContent } from "../src/db/index";
+import { getDb, closeDb, listOutputs, getSessionDays, retrieveOutput, storeOutput, pinOutput, getMeta, setMeta, hashContent } from "../src/db/index";
 import { resetConfig } from "../src/config";
 import { getProjectKey, getProjectPath } from "../src/project-key";
 
@@ -680,6 +680,56 @@ describe("handlePostToolUse", () => {
 // ---------------------------------------------------------------------------
 // handlePostToolUse — malformed input
 // ---------------------------------------------------------------------------
+
+// A store opened with no SessionStart for it, as by a subagent in its own worktree,
+// used to stay pathless: gc could not see it as orphaned once the worktree was
+// deleted, and listed it as legacy until the 90-day staleness rule (#488).
+describe("handlePostToolUse — records the project path session-start never saw (#488)", () => {
+  beforeEach(() => {
+    process.env.RECALL_DB_PATH = ":memory:";
+  });
+
+  afterEach(() => {
+    closeDb();
+    resetConfig();
+    delete process.env.RECALL_DB_PATH;
+  });
+
+  it("records project_path on a store that has none", () => {
+    handlePostToolUse(makePostToolUseInput("mcp__github__list_issues", {
+      content: [{ type: "text", text: LARGE_GITHUB_RESPONSE }],
+    }));
+    expect(getMeta(getDb(":memory:"), "project_path")).toBe(getProjectPath(TEST_CWD));
+  });
+
+  // Opening the store creates it, so an output too small to store still leaves a
+  // database behind; that one needs its path too.
+  it("records project_path even when the output is too small to store", () => {
+    handlePostToolUse(makePostToolUseInput("mcp__github__list_issues", {
+      content: [{ type: "text", text: "ok" }],
+    }));
+    const db = getDb(":memory:");
+    expect(listOutputs(db, { project_key: getProjectKey(TEST_CWD), limit: 10 })).toHaveLength(0);
+    expect(getMeta(db, "project_path")).toBe(getProjectPath(TEST_CWD));
+  });
+
+  it("leaves an already-recorded path alone", () => {
+    setMeta(getDb(":memory:"), "project_path", "/recorded/by/session-start");
+    handlePostToolUse(makePostToolUseInput("mcp__github__list_issues", {
+      content: [{ type: "text", text: LARGE_GITHUB_RESPONSE }],
+    }));
+    expect(getMeta(getDb(":memory:"), "project_path")).toBe("/recorded/by/session-start");
+  });
+
+  // Same guard as session-start: a path that is not a real directory would let gc
+  // read "path gone, parent present" and delete a live project's store.
+  it("does not record a path that is not an existing directory", () => {
+    handlePostToolUse(makePostToolUseInput("mcp__github__list_issues", {
+      content: [{ type: "text", text: LARGE_GITHUB_RESPONSE }],
+    }, { cwd: "definitely-not-a-real-dir-xyz" }));
+    expect(getMeta(getDb(":memory:"), "project_path")).toBeNull();
+  });
+});
 
 describe("handlePostToolUse — malformed input", () => {
   beforeEach(() => {

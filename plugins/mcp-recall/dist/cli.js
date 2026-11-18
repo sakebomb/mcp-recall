@@ -7764,7 +7764,7 @@ __export(exports_gc, {
   executeDeletions: () => executeDeletions
 });
 import { Database as Database2 } from "bun:sqlite";
-import { readdirSync, existsSync, statSync, rmSync } from "fs";
+import { readdirSync, existsSync, statSync as statSync2, rmSync } from "fs";
 import { join as join3, basename, dirname as dirname2, resolve as resolve2, isAbsolute } from "path";
 function isDeletionCandidate(status) {
   return STATUS_POLICY[status].deletable;
@@ -7774,7 +7774,7 @@ function vacuumTargets(entries) {
 }
 function fileSizeSafe(path) {
   try {
-    return statSync(path).size;
+    return statSync2(path).size;
   } catch {
     return 0;
   }
@@ -7848,7 +7848,7 @@ function scanDatabases(dir, currentFile, staleDays, nowMs = Date.now()) {
     const file = join3(dir, name);
     let mtimeMs = 0;
     try {
-      mtimeMs = statSync(file).mtimeMs;
+      mtimeMs = statSync2(file).mtimeMs;
     } catch {
       continue;
     }
@@ -14825,7 +14825,29 @@ var init_discover = __esm(() => {
 init_config();
 init_project_key();
 init_db();
-import { statSync as statSync2 } from "fs";
+
+// src/hooks/project-path.ts
+init_project_key();
+init_db();
+init_log();
+import { statSync } from "fs";
+function isExistingDir(path) {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+function recordProjectPath(db, cwd, onlyIfMissing = false) {
+  if (onlyIfMissing && getMeta(db, "project_path") !== null)
+    return;
+  const projectPath = getProjectPath(cwd);
+  if (isExistingDir(projectPath)) {
+    setMeta(db, "project_path", projectPath);
+  } else {
+    log.debug(`resolved project path is not a directory, leaving meta as-is: ${projectPath}`);
+  }
+}
 
 // src/tools.ts
 init_db();
@@ -14924,13 +14946,6 @@ function toolContext(db, projectKey, args) {
 init_gc();
 init_log();
 var INJECT_MAX_CHARS = 2000;
-function isExistingDir(path) {
-  try {
-    return statSync2(path).isDirectory();
-  } catch {
-    return false;
-  }
-}
 function handleSessionStart(raw) {
   let parsed;
   try {
@@ -14947,12 +14962,7 @@ function handleSessionStart(raw) {
   const config2 = loadConfig();
   const projectKey = getProjectKey(input.cwd);
   const db = getDb(defaultDbPath(projectKey));
-  const projectPath = getProjectPath(input.cwd);
-  if (isExistingDir(projectPath)) {
-    setMeta(db, "project_path", projectPath);
-  } else {
-    log.debug(`session-start \xB7 resolved project path is not a directory, leaving meta as-is: ${projectPath}`);
-  }
+  recordProjectPath(db, input.cwd);
   const today = new Date().toISOString().slice(0, 10);
   recordSession(db, today);
   pruneExpired(db, projectKey, config2.store.expire_after_session_days);
@@ -14983,14 +14993,14 @@ function handleSessionStart(raw) {
 // src/hooks/post-tool-use.ts
 init_config();
 init_project_key();
+import { createHash as createHash3 } from "crypto";
+import { readFileSync as readFileSync4, statSync as statSync4 } from "fs";
+import { basename as basename3, dirname as dirname4, isAbsolute as isAbsolute3 } from "path";
 init_denylist();
 init_secrets();
 init_handlers();
 init_types();
 init_generic();
-import { createHash as createHash3 } from "crypto";
-import { readFileSync as readFileSync4, statSync as statSync4 } from "fs";
-import { basename as basename3, dirname as dirname4, isAbsolute as isAbsolute3 } from "path";
 
 // src/hints.ts
 var DEFAULT_MAX_HINTS = 5;
@@ -15366,6 +15376,7 @@ function handlePostToolUse(raw) {
   }
   const projectKey = getProjectKey(cwd);
   const db = getDb(defaultDbPath(projectKey));
+  recordProjectPath(db, cwd, true);
   const command_fp = tool_name === "Bash" && command ? bashFingerprint(command) || null : null;
   const input_hash = tool_input !== undefined ? createHash3("sha256").update(tool_name + JSON.stringify(tool_input)).digest("hex") : null;
   const output_hash = hashContent(fullContent);

@@ -165,7 +165,8 @@ Tables (`db/schema.ts`):
   by `storeChunks` on write and cleaned up by a delete trigger (unlike `outputs_fts`,
   which is fully trigger-maintained on both insert and delete).
 - **`sessions`** — one row per active-use date; underpins "session days" expiry.
-- **`meta`** — key/value; holds `project_path` (written by session-start). Migrations
+- **`meta`** — key/value; holds `project_path` (written by session-start, and by
+  post-tool-use when the store has none yet, #488). Migrations
   live in `MIGRATIONS` in `schema.ts`, applied unconditionally on open and each
   idempotent (`CREATE … IF NOT EXISTS` + a duplicate-column catch); no version row is
   tracked.
@@ -186,8 +187,9 @@ relative path would read as "parent survived, project deleted" and get the DB
 removed. Two defenses hold this: `project-key.ts` guarantees the recorded path is always
 absolute — git's `--show-toplevel` is already absolute (and is left verbatim to
 avoid re-keying every existing DB), and the non-git fallback is run through
-`resolve(cwd)` rather than used bare (`project-key.ts:49-51`) — and session-start
-records a path *only* when it resolves to a real directory (`session-start.ts:60`). A
+`resolve(cwd)` rather than used bare (`project-key.ts:49-51`) — and both hooks
+record a path *only* when it resolves to a real directory (`recordProjectPath` in
+`hooks/project-path.ts`). A
 relative recorded path is never deleted on that deleted-project inference; instead it
 falls through to the staleness rule as `unrooted-fresh`/`unrooted-stale` (#214), so it
 can eventually be reclaimed once untouched past the stale window without ever being

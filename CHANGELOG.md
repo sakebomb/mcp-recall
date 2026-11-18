@@ -6,6 +6,17 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Fixed
+
+- **A store opened only by tool calls records its project path**
+  ([#488](https://github.com/sakebomb/mcp-recall/issues/488)). Only the
+  session-start hook recorded the path, and a subagent working in its own
+  worktree fires no `SessionStart`, so its store stayed pathless. Once the
+  worktree was deleted, `mcp-recall gc` could not see the store as orphaned and
+  listed it as `legacy` until the 90-day staleness rule. The tool hook now
+  records the path when the store has none, with the same real-directory check.
+  Stores already pathless still age out on the staleness rule.
+
 ## [1.22.0] — 2026-11-18
 
 ### Added
