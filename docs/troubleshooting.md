@@ -2,7 +2,7 @@
 
 ## Version not updating after upgrade
 
-If `mcp-recall --version` still shows the old version after upgrading, the hook script is pointing at a stale binary path. Re-run the install step to fix it:
+`mcp-recall --version` shows the version of the CLI on your `PATH`, not what Claude Code runs. To see what Claude Code runs, use `mcp-recall status`: under "Registered launch" it lists each file the registered hooks and server run, and says when they belong to another install than the one you ran. If they point at an old or missing install, re-run the install step:
 
 ```bash
 # npm / bun global install
@@ -31,7 +31,9 @@ bun --version
 
 ## Hook not firing
 
-The most common cause is the hook script not being executable:
+Run `mcp-recall status` first (`bunx mcp-recall status` with the plugin). With a CLI install (Options A, C, D), a hook runs the files listed under "Registered launch"; a missing one shows a red cross, and `mcp-recall install` registers the current install again.
+
+With the plugin (Option B), the hooks run the plugin's `bin/recall`. The most common cause there is that script not being executable:
 
 ```bash
 ls -la $(claude plugin path mcp-recall)/bin/recall
@@ -169,9 +171,9 @@ If you installed from source and `mcp-recall` is not on PATH:
 echo 'alias mcp-recall="bun /path/to/mcp-recall/plugins/mcp-recall/dist/cli.js"' >> ~/.zshrc
 source ~/.zshrc
 
-# Option 2 — symlink
+# Option 2 — symlink bin/recall (not dist/cli.js, which is not executable)
 mkdir -p ~/.local/bin
-ln -sf /path/to/mcp-recall/plugins/mcp-recall/dist/cli.js ~/.local/bin/mcp-recall
+ln -sf /path/to/mcp-recall/bin/recall ~/.local/bin/mcp-recall
 # Ensure ~/.local/bin is in your PATH
 ```
 

@@ -73,7 +73,7 @@ source ~/.zshrc
 
 ```bash
 mkdir -p ~/.local/bin
-ln -sf /path/to/mcp-recall/plugins/mcp-recall/dist/cli.js ~/.local/bin/mcp-recall
+ln -sf /path/to/mcp-recall/bin/recall ~/.local/bin/mcp-recall   # bin/recall, not dist/cli.js (not executable)
 # make sure ~/.local/bin is in your PATH
 ```
 

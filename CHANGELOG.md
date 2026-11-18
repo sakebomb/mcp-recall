@@ -28,6 +28,15 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   `mcp-recall install --agent <name>`, instead of a red section whose bare
   `mcp-recall install` would also register Claude Code a second time beside a
   plugin install.
+- **The install docs match what the commands do**
+  ([#492](https://github.com/sakebomb/mcp-recall/issues/492)). The
+  from-source symlink pointed at `dist/cli.js`, which is not executable, so the
+  command failed with "Permission denied"; it now links `bin/recall`. The
+  stale-install check used `--version`, which shows the CLI on `PATH`, not what
+  Claude Code runs; it now uses `status`. "Hook not firing" covered only the
+  plugin layout. The pi section gives pi's real cut and path, and the docs name
+  `--dry-run`, the `--agent` list form, and how a plugin user adds pi or
+  OpenCode.
 
 ## [1.22.0] — 2026-11-18
 
