@@ -22,7 +22,7 @@ import { Database } from "bun:sqlite";
 import { readdirSync, existsSync, statSync, rmSync } from "fs";
 import { join, basename, dirname, resolve, isAbsolute } from "path";
 import { dataDir, defaultDbPath, migrateFtsToExternalContent, truncateWal, verifyFtsIndex } from "../db/schema";
-import { getMeta } from "../db/queries";
+import { getMeta, callLogFiles } from "../db/queries";
 import { getProjectKey } from "../project-key";
 import { formatBytes, formatRelativeTime } from "../format";
 import { log } from "../log";
@@ -317,7 +317,8 @@ function vacuumSkipReason(error: string): string {
 }
 
 function deleteDbFiles(file: string): void {
-  for (const f of [file, `${file}-wal`, `${file}-shm`]) {
+  // The call-count log and its claimed copies go with the store (#495).
+  for (const f of [file, `${file}-wal`, `${file}-shm`, ...callLogFiles(file)]) {
     rmSync(f, { force: true });
   }
 }

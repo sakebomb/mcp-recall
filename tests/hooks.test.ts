@@ -681,6 +681,64 @@ describe("handlePostToolUse", () => {
 // handlePostToolUse — malformed input
 // ---------------------------------------------------------------------------
 
+// Calls that pass through leave no stored row, so only the counters say they
+// happened (#495). Each outcome must be counted, and nothing about a denied or
+// secret-bearing call may be written.
+describe("handlePostToolUse — counts every call by outcome (#495)", () => {
+  const bash = (stdout: string) => ({ stdout, stderr: "", interrupted: false, isImage: false, noOutputExpected: false });
+  const counts = () =>
+    getDb(":memory:")
+      .prepare("SELECT tool_name, command_fp, outcome, calls, original_bytes, delivered_bytes FROM call_counts ORDER BY outcome")
+      .all() as Array<{ tool_name: string; command_fp: string; outcome: string; calls: number; original_bytes: number; delivered_bytes: number }>;
+
+  beforeEach(() => { process.env.RECALL_DB_PATH = ":memory:"; });
+  afterEach(() => {
+    closeDb();
+    resetConfig();
+    delete process.env.RECALL_DB_PATH;
+  });
+
+  it("counts a short file read, with its command family", () => {
+    handlePostToolUse(makePostToolUseInput("Bash", bash("line one\nline two"), { tool_input: { command: "cat notes.txt" } }));
+    expect(counts()).toEqual([
+      { tool_name: "Bash", command_fp: "cat", outcome: "content_read", calls: 1, original_bytes: 17, delivered_bytes: 17 },
+    ]);
+  });
+
+  it("counts output too small to summarize as passed through", () => {
+    handlePostToolUse(makePostToolUseInput("Bash", bash("ok"), { tool_input: { command: "echo ok" } }));
+    expect(counts().map((r) => [r.outcome, r.calls, r.delivered_bytes === r.original_bytes])).toEqual([["too_small", 1, true]]);
+  });
+
+  it("counts a new summary with the same sizes as its stored row", () => {
+    handlePostToolUse(makePostToolUseInput("mcp__github__list_issues", { content: [{ type: "text", text: LARGE_GITHUB_RESPONSE }] }));
+    const row = getDb(":memory:").prepare("SELECT original_size, delivered_size FROM stored_outputs").get() as
+      { original_size: number; delivered_size: number };
+    expect(counts()).toEqual([{
+      tool_name: "mcp__github__list_issues", command_fp: "", outcome: "summarized", calls: 1,
+      original_bytes: row.original_size, delivered_bytes: row.delivered_size,
+    }]);
+  });
+
+  it("counts a replayed summary as reused, and adds repeat calls up", () => {
+    const call = makePostToolUseInput("mcp__github__list_issues", { content: [{ type: "text", text: LARGE_GITHUB_RESPONSE }] });
+    handlePostToolUse(call);
+    handlePostToolUse(call);
+    handlePostToolUse(call);
+    expect(counts().map((r) => [r.outcome, r.calls])).toEqual([["cached", 2], ["summarized", 1]]);
+  });
+
+  it("writes nothing for a denied tool or a secret-bearing output", () => {
+    handlePostToolUse(makePostToolUseInput("mcp__1password__item_lookup", { content: [{ type: "text", text: "x".repeat(5000) }] }));
+    handlePostToolUse(makePostToolUseInput("mcp__github__get_file_contents", {
+      content: [{ type: "text", text: "-----BEGIN RSA PRIVATE KEY-----\nMIIE..." }],
+    }));
+    // Neither path opens the store, so there is no call_counts table to hold a row.
+    const db = getDb(":memory:");
+    expect(db.prepare("SELECT COUNT(*) AS n FROM call_counts").get()).toEqual({ n: 0 });
+  });
+});
+
 // A store opened with no SessionStart for it, as by a subagent in its own worktree,
 // used to stay pathless: gc could not see it as orphaned once the worktree was
 // deleted, and listed it as legacy until the 90-day staleness rule (#488).

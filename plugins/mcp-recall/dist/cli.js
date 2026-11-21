@@ -7109,6 +7109,13 @@ var pathCache;
 var init_project_key = __esm(() => {
   pathCache = new Map;
 });
+
+// src/db/types.ts
+var CALL_OUTCOMES;
+var init_types = __esm(() => {
+  CALL_OUTCOMES = ["summarized", "cached", "too_small", "content_read"];
+});
+
 // src/db/schema.ts
 import { Database } from "bun:sqlite";
 import { join as join2, dirname } from "path";
@@ -7270,6 +7277,22 @@ var init_schema = __esm(() => {
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+
+  -- What happened to each intercepted call, counted per day (#495): calls that
+  -- passed through leave no stored_outputs row, and eviction removes the rows of
+  -- those that did, so these counters are the only record of either. Tool name,
+  -- command family and sizes only, never content. command_fp is '' off Bash.
+  CREATE TABLE IF NOT EXISTS call_counts (
+    project_key     TEXT NOT NULL,
+    day             TEXT NOT NULL,
+    tool_name       TEXT NOT NULL,
+    command_fp      TEXT NOT NULL DEFAULT '',
+    outcome         TEXT NOT NULL,
+    calls           INTEGER NOT NULL DEFAULT 0,
+    original_bytes  INTEGER NOT NULL DEFAULT 0,
+    delivered_bytes INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (project_key, day, tool_name, command_fp, outcome)
+  );
 `;
   MIGRATIONS = [
     "ALTER TABLE stored_outputs ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
@@ -7303,6 +7326,8 @@ var CHUNK_SIZE = 512, CHUNK_OVERLAP = 64;
 
 // src/db/queries.ts
 import { randomBytes, createHash as createHash2 } from "crypto";
+import { appendFileSync, existsSync, readdirSync, readFileSync as readFileSync2, renameSync, statSync, unlinkSync } from "fs";
+import { basename, dirname as dirname2, join as join3 } from "path";
 function generateId() {
   return `recall_${randomBytes(8).toString("hex")}`;
 }
@@ -7378,6 +7403,103 @@ function storeOutput(db, input) {
     handler
   };
 }
+function callLogPath(dbFile) {
+  return dbFile === "" || dbFile === ":memory:" ? null : `${dbFile}.calls`;
+}
+function callLogFiles(dbFile) {
+  const live = callLogPath(dbFile);
+  if (live === null)
+    return [];
+  const dir = dirname2(live);
+  const prefix = basename(live) + ".";
+  let claimed = [];
+  try {
+    claimed = readdirSync(dir).filter((n) => n.startsWith(prefix) && n.endsWith(FOLDING_SUFFIX)).map((n) => join3(dir, n));
+  } catch {}
+  return [...existsSync(live) ? [live] : [], ...claimed];
+}
+function parseCallLog(file) {
+  let text;
+  try {
+    text = readFileSync2(file, "utf8");
+  } catch {
+    return [];
+  }
+  const calls = [];
+  for (const line of text.split(`
+`)) {
+    if (line === "")
+      continue;
+    try {
+      const c = JSON.parse(line);
+      if (typeof c.project_key === "string" && typeof c.tool_name === "string" && typeof c.day === "string" && CALL_OUTCOMES.includes(c.outcome))
+        calls.push(c);
+    } catch {}
+  }
+  return calls;
+}
+function readCallLog(dbFile) {
+  return callLogFiles(dbFile).flatMap(parseCallLog);
+}
+function upsertCalls(db, calls) {
+  const stmt = db.prepare(`
+    INSERT INTO call_counts (project_key, day, tool_name, command_fp, outcome, calls, original_bytes, delivered_bytes)
+    VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+    ON CONFLICT (project_key, day, tool_name, command_fp, outcome) DO UPDATE SET
+      calls           = calls + 1,
+      original_bytes  = original_bytes + excluded.original_bytes,
+      delivered_bytes = delivered_bytes + excluded.delivered_bytes
+  `);
+  db.transaction(() => {
+    for (const c of calls) {
+      stmt.run(c.project_key, c.day, c.tool_name, c.command_fp ?? "", c.outcome, c.original_bytes, c.delivered_bytes);
+    }
+  })();
+}
+function recordCall(db, call) {
+  try {
+    const pending = { ...call, day: new Date().toISOString().slice(0, 10) };
+    const log_ = callLogPath(db.filename);
+    if (log_ === null)
+      upsertCalls(db, [pending]);
+    else
+      appendFileSync(log_, JSON.stringify(pending) + `
+`);
+  } catch (e) {
+    log.debug(`recordCall failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+function foldCallLog(db) {
+  const live = callLogPath(db.filename);
+  if (live === null)
+    return;
+  const claims = [];
+  const claim2 = (file) => {
+    const to = `${live}.${process.pid}-${Date.now()}-${claims.length}${FOLDING_SUFFIX}`;
+    try {
+      renameSync(file, to);
+      claims.push(to);
+    } catch {}
+  };
+  if (existsSync(live))
+    claim2(live);
+  for (const file of callLogFiles(db.filename)) {
+    if (file === live || claims.includes(file))
+      continue;
+    try {
+      if (Date.now() - statSync(file).mtimeMs > STALE_FOLD_MS)
+        claim2(file);
+    } catch {}
+  }
+  for (const file of claims) {
+    try {
+      upsertCalls(db, parseCallLog(file));
+      unlinkSync(file);
+    } catch (e) {
+      log.debug(`foldCallLog failed on ${file}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+}
 function hashContent(content) {
   return createHash2("sha256").update(content).digest("hex");
 }
@@ -7439,13 +7561,57 @@ function recordSession(db, date2) {
 function getSessionDays(db) {
   return db.prepare(`SELECT date FROM sessions ORDER BY date DESC`).all().map((r) => r.date);
 }
-var EFFECTIVE_SIZE_EXPR = "CASE WHEN full_retained = 1 THEN original_size ELSE summary_size END", VACUUM_THRESHOLD = 50, DEFAULT_EVICTION_HALF_LIFE_DAYS = 7, SECONDS_PER_DAY = 86400;
+var EFFECTIVE_SIZE_EXPR = "CASE WHEN full_retained = 1 THEN original_size ELSE summary_size END", VACUUM_THRESHOLD = 50, FOLDING_SUFFIX = ".folding", STALE_FOLD_MS = 60000, DEFAULT_EVICTION_HALF_LIFE_DAYS = 7, SECONDS_PER_DAY = 86400;
 var init_queries = __esm(() => {
   init_log();
+  init_types();
   init_schema();
 });
 
 // src/db/analytics.ts
+function hasCallCounts(db) {
+  return !!db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='call_counts'`).get();
+}
+function pendingCallKeys(db) {
+  return [...new Set(readCallLog(db.filename).map((c) => c.project_key))];
+}
+function getCallBreakdown(db, project_key) {
+  const folded = db.prepare(`
+    SELECT tool_name, command_fp, outcome, day,
+           SUM(calls) AS calls, SUM(original_bytes) AS original_bytes, SUM(delivered_bytes) AS delivered_bytes
+    FROM call_counts
+    WHERE project_key = ?
+    GROUP BY tool_name, command_fp, outcome, day
+  `).all(project_key);
+  const pending = readCallLog(db.filename).filter((c) => c.project_key === project_key).map((c) => ({
+    tool_name: c.tool_name,
+    command_fp: c.command_fp ?? "",
+    outcome: c.outcome,
+    day: c.day,
+    calls: 1,
+    original_bytes: c.original_bytes,
+    delivered_bytes: c.delivered_bytes
+  }));
+  const raw = [...folded, ...pending];
+  const since = raw.map((r) => r.day).sort()[0] ?? null;
+  const rows = new Map;
+  for (const r of raw) {
+    const key = `${r.tool_name}\x00${r.command_fp}`;
+    const row = rows.get(key) ?? {
+      tool_name: r.tool_name,
+      command_fp: r.command_fp,
+      calls: Object.fromEntries(CALL_OUTCOMES.map((o) => [o, 0])),
+      original_bytes: 0,
+      delivered_bytes: 0
+    };
+    row.calls[r.outcome] = (row.calls[r.outcome] ?? 0) + r.calls;
+    row.original_bytes += r.original_bytes;
+    row.delivered_bytes += r.delivered_bytes;
+    rows.set(key, row);
+  }
+  const total = (r) => CALL_OUTCOMES.reduce((n, o) => n + r.calls[o], 0);
+  return { rows: [...rows.values()].sort((a, b) => total(b) - total(a)), since };
+}
 function sampleBySession(db, where, params, perSession = SAMPLE_PER_SESSION) {
   const items = db.prepare(`
     WITH ranked AS (
@@ -7649,6 +7815,7 @@ function getContext(db, project_key, opts = {}) {
 }
 var SAMPLE_LIMIT = 10, SAMPLE_PER_SESSION = 3, DELIVERED_EXPR = "COALESCE(delivered_size, summary_size)", FALLBACK_HANDLERS, HANDLER_AGGREGATES;
 var init_analytics = __esm(() => {
+  init_types();
   init_queries();
   FALLBACK_HANDLERS = ["genericHandler", "jsonHandler", "shellHandler", "contentReadHandler"];
   HANDLER_AGGREGATES = `
@@ -7660,6 +7827,7 @@ var init_analytics = __esm(() => {
 
 // src/db/index.ts
 var init_db = __esm(() => {
+  init_types();
   init_schema();
   init_queries();
   init_analytics();
@@ -7780,8 +7948,8 @@ __export(exports_gc, {
   executeDeletions: () => executeDeletions
 });
 import { Database as Database2 } from "bun:sqlite";
-import { readdirSync, existsSync, statSync as statSync2, rmSync } from "fs";
-import { join as join3, basename, dirname as dirname2, resolve as resolve2, isAbsolute } from "path";
+import { readdirSync as readdirSync2, existsSync as existsSync2, statSync as statSync3, rmSync } from "fs";
+import { join as join4, basename as basename2, dirname as dirname3, resolve as resolve2, isAbsolute } from "path";
 function isDeletionCandidate(status) {
   return STATUS_POLICY[status].deletable;
 }
@@ -7790,7 +7958,7 @@ function vacuumTargets(entries) {
 }
 function fileSizeSafe(path) {
   try {
-    return statSync2(path).size;
+    return statSync3(path).size;
   } catch {
     return 0;
   }
@@ -7799,15 +7967,15 @@ function dbFootprint(file) {
   return fileSizeSafe(file) + fileSizeSafe(`${file}-wal`) + fileSizeSafe(`${file}-shm`);
 }
 function storeFootprint(dir = dataDir()) {
-  if (!existsSync(dir))
+  if (!existsSync2(dir))
     return { totalBytes: 0, dbCount: 0 };
   let totalBytes = 0;
   let dbCount = 0;
-  for (const name of readdirSync(dir)) {
+  for (const name of readdirSync2(dir)) {
     if (!name.endsWith(".db"))
       continue;
     dbCount++;
-    totalBytes += dbFootprint(join3(dir, name));
+    totalBytes += dbFootprint(join4(dir, name));
   }
   return { totalBytes, dbCount };
 }
@@ -7846,25 +8014,25 @@ function classify(probe, mtimeMs, staleCutoffMs) {
     if (!isAbsolute(probe.projectPath)) {
       return mtimeMs < staleCutoffMs ? "unrooted-stale" : "unrooted-fresh";
     }
-    if (existsSync(probe.projectPath))
+    if (existsSync2(probe.projectPath))
       return "active";
-    return existsSync(dirname2(probe.projectPath)) ? "orphaned" : "unverifiable";
+    return existsSync2(dirname3(probe.projectPath)) ? "orphaned" : "unverifiable";
   }
   return mtimeMs < staleCutoffMs ? "legacy-stale" : "legacy-fresh";
 }
 function scanDatabases(dir, currentFile, staleDays, nowMs = Date.now()) {
-  if (!existsSync(dir))
+  if (!existsSync2(dir))
     return [];
   const staleCutoffMs = nowMs - staleDays * 86400 * 1000;
   const currentResolved = resolve2(currentFile);
   const entries = [];
-  for (const name of readdirSync(dir)) {
+  for (const name of readdirSync2(dir)) {
     if (!name.endsWith(".db"))
       continue;
-    const file = join3(dir, name);
+    const file = join4(dir, name);
     let mtimeMs = 0;
     try {
-      mtimeMs = statSync2(file).mtimeMs;
+      mtimeMs = statSync3(file).mtimeMs;
     } catch {
       continue;
     }
@@ -7879,7 +8047,7 @@ function reportLine(e, nowMs) {
   const flag = isDeletionCandidate(e.status) ? "\u2717" : " ";
   const age = formatRelativeTime(nowMs - e.mtimeMs);
   const where = e.projectPath ?? "(no recorded path)";
-  return `  ${flag} ${STATUS_LABEL[e.status].padEnd(14)} ${formatBytes(e.sizeBytes).padStart(9)}` + `  ${String(e.items).padStart(6)} items  ${age.padEnd(14)}  ${basename(e.file)}
+  return `  ${flag} ${STATUS_LABEL[e.status].padEnd(14)} ${formatBytes(e.sizeBytes).padStart(9)}` + `  ${String(e.items).padStart(6)} items  ${age.padEnd(14)}  ${basename2(e.file)}
 ` + `      ${where}`;
 }
 function vacuumFile(file) {
@@ -7895,7 +8063,7 @@ function vacuumFile(file) {
     truncateWal(db);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    log.warn(`vacuum failed for ${basename(file)} \u2014 ${message}`);
+    log.warn(`vacuum failed for ${basename2(file)} \u2014 ${message}`);
     return { error: message };
   } finally {
     db?.close();
@@ -7910,7 +8078,7 @@ function vacuumSkipReason(error2) {
   return "unreadable or errored (see RECALL_DEBUG logs)";
 }
 function deleteDbFiles(file) {
-  for (const f of [file, `${file}-wal`, `${file}-shm`]) {
+  for (const f of [file, `${file}-wal`, `${file}-shm`, ...callLogFiles(file)]) {
     rmSync(f, { force: true });
   }
 }
@@ -7957,7 +8125,7 @@ Vacuuming ${survivors.length} database(s) to keep (${formatBytes(sumBytes(surviv
     let skipped = 0;
     for (let i = 0;i < survivors.length; i++) {
       const e = survivors[i];
-      process.stdout.write(`  [${i + 1}/${survivors.length}] ${basename(e.file)} (${formatBytes(e.sizeBytes)})\u2026 `);
+      process.stdout.write(`  [${i + 1}/${survivors.length}] ${basename2(e.file)} (${formatBytes(e.sizeBytes)})\u2026 `);
       const result = vacuumFile(e.file);
       if ("after" in result) {
         const freed = Math.max(0, result.before - result.after);
@@ -8107,7 +8275,7 @@ function extractText(output) {
   return JSON.stringify(output);
 }
 var MCP_BINARY_TYPES;
-var init_types = __esm(() => {
+var init_types2 = __esm(() => {
   MCP_BINARY_TYPES = new Set(["image", "image_url", "audio", "resource", "resource_link"]);
 });
 
@@ -8230,7 +8398,7 @@ var SNAPSHOT_HEADING = "### Snapshot", EVENTS_HEADING = "### Events", EVENT_LINE
   return { summary: summary || EMPTY, originalSize };
 };
 var init_playwright = __esm(() => {
-  init_types();
+  init_types2();
   PAGE_SECTION = /^### (Snapshot|Result|Ran Playwright code)$/m;
   KEEP_BARE = new Set([
     "article",
@@ -8311,7 +8479,7 @@ var BODY_EXCERPT_CHARS = 200, githubHandler = (_toolName, output) => {
   return { summary: String(parsed), originalSize };
 };
 var init_github = __esm(() => {
-  init_types();
+  init_types2();
 });
 
 // src/handlers/gitlab.ts
@@ -8370,7 +8538,7 @@ var DESCRIPTION_EXCERPT_CHARS = 200, gitlabHandler = (_toolName, output) => {
   return { summary: String(parsed), originalSize };
 };
 var init_gitlab = __esm(() => {
-  init_types();
+  init_types2();
 });
 
 // src/handlers/filesystem.ts
@@ -8390,7 +8558,7 @@ ${head}${truncated ? `
   return { summary, originalSize };
 };
 var init_filesystem = __esm(() => {
-  init_types();
+  init_types2();
 });
 
 // src/handlers/json.ts
@@ -8508,7 +8676,7 @@ var JSON_BUDGET = 4096, SHARE_FLOOR = 512, MIN_PART = 24, size = (v) => JSON.str
   return { summary, originalSize };
 };
 var init_json = __esm(() => {
-  init_types();
+  init_types2();
 });
 
 // src/handlers/clip.ts
@@ -8641,7 +8809,7 @@ var MAX_CHARS = 500, HEAD_CHARS = 380, TAIL_CHARS = 100, HEAD_LINES2 = 5, TAIL_L
   return { summary, originalSize };
 };
 var init_generic = __esm(() => {
-  init_types();
+  init_types2();
   init_collapse();
   init_clip();
   init_rtk();
@@ -8758,7 +8926,7 @@ ${fmt.body}`,
 }
 var HEAD_STDOUT = 25, HEAD_STDERR = 20, ANSI_RE, SSH_NOISE_RE, shellHandler = (toolName, output) => summarizeShell(toolName, output, true), contentReadHandler = (toolName, output) => summarizeShell(toolName, output, false);
 var init_shell = __esm(() => {
-  init_types();
+  init_types2();
   init_json();
   init_collapse();
   init_clip();
@@ -8861,7 +9029,7 @@ function extractExitCode(output) {
 }
 var MAX_LOG_COMMITS = 20, MAX_TERRAFORM_RESOURCES = 10, MAX_DOCKER_CONTAINERS = 20, MAX_BUILD_ERRORS = 20;
 var init_bash_shared = __esm(() => {
-  init_types();
+  init_types2();
   init_shell();
 });
 
@@ -10310,7 +10478,7 @@ ${lines.join(`
   };
 };
 var init_linear = __esm(() => {
-  init_types();
+  init_types2();
   PRIORITY_LABEL = {
     0: "No Priority",
     1: "Urgent",
@@ -10408,7 +10576,7 @@ ${lines.join(`
   };
 };
 var init_slack = __esm(() => {
-  init_types();
+  init_types2();
 });
 
 // src/handlers/tavily.ts
@@ -10479,7 +10647,7 @@ var SNIPPET_CHARS = 150, MAX_RESULTS = 10, tavilyHandler = (_toolName, output) =
 `), originalSize };
 };
 var init_tavily = __esm(() => {
-  init_types();
+  init_types2();
 });
 
 // src/handlers/database.ts
@@ -10558,7 +10726,7 @@ var MAX_PREVIEW_ROWS = 10, MAX_COLS_DISPLAY = 8, databaseHandler = (_toolName, o
   return { summary, originalSize };
 };
 var init_database = __esm(() => {
-  init_types();
+  init_types2();
 });
 
 // src/handlers/sentry.ts
@@ -10628,7 +10796,7 @@ var MAX_FRAMES = 8, sentryHandler = (_toolName, output) => {
   return { summary: String(parsed), originalSize };
 };
 var init_sentry = __esm(() => {
-  init_types();
+  init_types2();
 });
 
 // src/handlers/stripe.ts
@@ -10899,7 +11067,7 @@ var ZERO_DECIMAL, MAX_ITEMS = 10, stripeHandler = (toolName, output) => {
   return { summary: String(parsed), originalSize };
 };
 var init_stripe = __esm(() => {
-  init_types();
+  init_types2();
   ZERO_DECIMAL = new Set([
     "bif",
     "clp",
@@ -10973,27 +11141,27 @@ var MAX_PREVIEW_ROWS2 = 5, csvHandler = (_toolName, output) => {
   return { summary, originalSize };
 };
 var init_csv = __esm(() => {
-  init_types();
+  init_types2();
 });
 
 // src/profiles/loader.ts
-import { readdirSync as readdirSync2, readFileSync as readFileSync2, statSync as statSync3 } from "fs";
-import { join as join4 } from "path";
+import { readdirSync as readdirSync3, readFileSync as readFileSync3, statSync as statSync4 } from "fs";
+import { join as join5 } from "path";
 import { homedir as homedir3 } from "os";
 function getUserProfilesDir() {
-  return process.env.RECALL_USER_PROFILES_PATH ?? join4(homedir3(), ".config", "mcp-recall", "profiles");
+  return process.env.RECALL_USER_PROFILES_PATH ?? join5(homedir3(), ".config", "mcp-recall", "profiles");
 }
 function getCommunityProfilesDir() {
-  return process.env.RECALL_COMMUNITY_PROFILES_PATH ?? join4(homedir3(), ".local", "share", "mcp-recall", "profiles", "community");
+  return process.env.RECALL_COMMUNITY_PROFILES_PATH ?? join5(homedir3(), ".local", "share", "mcp-recall", "profiles", "community");
 }
 function getBundledProfilesDir() {
   if (process.env.RECALL_BUNDLED_PROFILES_PATH) {
     return process.env.RECALL_BUNDLED_PROFILES_PATH;
   }
-  const devPath = join4(import.meta.dir, "../../profiles");
-  const distPath = join4(import.meta.dir, "../profiles");
+  const devPath = join5(import.meta.dir, "../../profiles");
+  const distPath = join5(import.meta.dir, "../profiles");
   try {
-    statSync3(devPath);
+    statSync4(devPath);
     return devPath;
   } catch (e) {
     if (e.code !== "ENOENT")
@@ -11004,7 +11172,7 @@ function getBundledProfilesDir() {
 function loadSpec(filePath) {
   let mtime;
   try {
-    mtime = statSync3(filePath).mtimeMs;
+    mtime = statSync4(filePath).mtimeMs;
   } catch {
     fileCache.delete(filePath);
     return null;
@@ -11014,7 +11182,7 @@ function loadSpec(filePath) {
     return cached3.spec;
   let raw;
   try {
-    raw = readFileSync2(filePath, "utf8");
+    raw = readFileSync3(filePath, "utf8");
   } catch {
     return null;
   }
@@ -11077,16 +11245,16 @@ function validateSpec(raw, filePath) {
 function scanDir(dir, tier) {
   let entries;
   try {
-    entries = readdirSync2(dir);
+    entries = readdirSync3(dir);
   } catch {
     return [];
   }
   const results = [];
   for (const entry of entries) {
-    const full = join4(dir, entry);
+    const full = join5(dir, entry);
     let stat;
     try {
-      stat = statSync3(full);
+      stat = statSync4(full);
     } catch {
       continue;
     }
@@ -11246,7 +11414,7 @@ function applyTextTruncate(strategy, _toolName, output) {
   return { summary: excerpt(raw, strategy.max_chars ?? 500), originalSize: Buffer.byteLength(raw, "utf8") };
 }
 var init_strategies = __esm(() => {
-  init_types();
+  init_types2();
 });
 
 // src/profiles/index.ts
@@ -11359,9 +11527,9 @@ var init_handlers = __esm(() => {
   init_csv();
   init_json();
   init_generic();
-  init_types();
+  init_types2();
   init_profiles();
-  init_types();
+  init_types2();
   HANDLER_REGISTRY = [
     {
       match: (t, output) => t.includes("playwright") && (t.includes("snapshot") || isPlaywrightResponse(output)),
@@ -11495,7 +11663,7 @@ var require_package = __commonJS((exports, module) => {
 });
 
 // src/learn/retrain.ts
-import { readFileSync as readFileSync5, writeFileSync } from "fs";
+import { readFileSync as readFileSync6, writeFileSync } from "fs";
 function detectItemsPath(parsed) {
   if (Array.isArray(parsed))
     return { path: "", items: parsed };
@@ -11683,7 +11851,7 @@ function applyResult(result, date2) {
     return;
   let toml;
   try {
-    toml = readFileSync5(result.profileFilePath, "utf8");
+    toml = readFileSync6(result.profileFilePath, "utf8");
   } catch (e) {
     console.log(`  \u2717 Could not read ${result.profileFilePath}: ${e instanceof Error ? e.message : String(e)}`);
     return;
@@ -11769,8 +11937,8 @@ var init_retrain = __esm(() => {
 });
 
 // src/profiles/shared.ts
-import { readFileSync as readFileSync6, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync3, unlinkSync } from "fs";
-import { join as join6 } from "path";
+import { readFileSync as readFileSync7, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync4, unlinkSync as unlinkSync2 } from "fs";
+import { join as join7 } from "path";
 import { homedir as homedir5, tmpdir } from "os";
 import { createHash as createHash4 } from "crypto";
 function assertSafeId(id) {
@@ -11787,10 +11955,10 @@ function sanitize(value) {
   return value.replace(/[\x00-\x1F\x7F]|\x9B|\x1B\[[0-9;]*[a-zA-Z]/g, "");
 }
 function communityDir() {
-  return process.env.RECALL_COMMUNITY_PROFILES_PATH ?? join6(homedir5(), ".local", "share", "mcp-recall", "profiles", "community");
+  return process.env.RECALL_COMMUNITY_PROFILES_PATH ?? join7(homedir5(), ".local", "share", "mcp-recall", "profiles", "community");
 }
 function userDir() {
-  return process.env.RECALL_USER_PROFILES_PATH ?? join6(homedir5(), ".config", "mcp-recall", "profiles");
+  return process.env.RECALL_USER_PROFILES_PATH ?? join7(homedir5(), ".config", "mcp-recall", "profiles");
 }
 function manifestShortName(e) {
   return e.short_name ?? e.id.replace(/^mcp__/, "");
@@ -11859,14 +12027,14 @@ async function fetchManifest(skipVerify = false) {
     throw new Error(`manifest fetch failed: ${res.status} ${res.statusText}`);
   const text = await res.text();
   if (!skipVerify) {
-    const tmpPath = join6(tmpdir(), `mcp-recall-manifest-${process.pid}.json`);
+    const tmpPath = join7(tmpdir(), `mcp-recall-manifest-${process.pid}.json`);
     try {
       writeFileSync2(tmpPath, text, "utf8");
       const config2 = loadConfig();
       verifyManifest(tmpPath, config2.profiles.verify_signature);
     } finally {
       try {
-        unlinkSync(tmpPath);
+        unlinkSync2(tmpPath);
       } catch {}
     }
   }
@@ -11874,9 +12042,9 @@ async function fetchManifest(skipVerify = false) {
   return data.profiles;
 }
 function saveToCommunityDir(profileId, content) {
-  const dir = join6(communityDir(), profileId);
+  const dir = join7(communityDir(), profileId);
   mkdirSync2(dir, { recursive: true });
-  const filePath = join6(dir, "default.toml");
+  const filePath = join7(dir, "default.toml");
   writeFileSync2(filePath, content);
   return filePath;
 }
@@ -11884,14 +12052,14 @@ function installedCommunityMap() {
   const map = new Map;
   let entries;
   try {
-    entries = readdirSync3(communityDir());
+    entries = readdirSync4(communityDir());
   } catch {
     return map;
   }
   for (const entry of entries) {
-    const toml = join6(communityDir(), entry, "default.toml");
+    const toml = join7(communityDir(), entry, "default.toml");
     try {
-      const p = parse(readFileSync6(toml, "utf8"));
+      const p = parse(readFileSync7(toml, "utf8"));
       const version2 = p["profile"]["version"];
       map.set(entry, version2 ?? "0.0.0");
     } catch {}
@@ -11958,8 +12126,8 @@ var init_shared = __esm(() => {
 });
 
 // src/profiles/cmd-local.ts
-import { readFileSync as readFileSync7, readdirSync as readdirSync4, rmSync as rmSync2 } from "fs";
-import { join as join7 } from "path";
+import { readFileSync as readFileSync8, readdirSync as readdirSync5, rmSync as rmSync2 } from "fs";
+import { join as join8 } from "path";
 function patternsOverlap(a, b) {
   const aExact = !a.endsWith("*");
   const bExact = !b.endsWith("*");
@@ -12027,7 +12195,7 @@ function cmdRemove(args) {
   }
   const id = target.spec.profile.id;
   assertSafeId(id);
-  rmSync2(join7(communityDir(), id), { recursive: true });
+  rmSync2(join8(communityDir(), id), { recursive: true });
   clearProfileCache();
   console.log(`\u2713 Removed ${id}`);
 }
@@ -12037,9 +12205,9 @@ function cmdFeed(args) {
     const dir = userDir();
     const files = [];
     try {
-      for (const entry of readdirSync4(dir)) {
+      for (const entry of readdirSync5(dir)) {
         if (entry.endsWith(".toml"))
-          files.push(join7(dir, entry));
+          files.push(join8(dir, entry));
       }
     } catch {}
     console.log("Usage: mcp-recall profiles feed <path-to-profile.toml>");
@@ -12053,7 +12221,7 @@ Your local profiles:`);
   }
   let content;
   try {
-    content = readFileSync7(profilePath, "utf8");
+    content = readFileSync8(profilePath, "utf8");
   } catch {
     console.error(`Cannot read: ${profilePath}`);
     process.exit(1);
@@ -12165,7 +12333,7 @@ function tildePath(p) {
 var init_claude_paths = () => {};
 
 // src/profiles/cmd-catalog.ts
-import { readFileSync as readFileSync8 } from "fs";
+import { readFileSync as readFileSync9 } from "fs";
 async function cmdInstall(args) {
   const skipVerify = args.includes("--skip-verify");
   const nameOrId = args.find((a) => !a.startsWith("-"));
@@ -12254,7 +12422,7 @@ ${installCount} profile(s) installed (${alreadyCount} already installed, ${entri
   let serverKeys = [];
   const shownJson = tildePath(claudeJsonPath());
   try {
-    const raw = JSON.parse(readFileSync8(claudeJsonPath(), "utf8"));
+    const raw = JSON.parse(readFileSync9(claudeJsonPath(), "utf8"));
     const mcpServers = raw["mcpServers"];
     serverKeys = Object.keys(mcpServers ?? {}).filter((k) => k !== "recall");
   } catch {
@@ -12376,7 +12544,7 @@ var init_cmd_catalog = __esm(() => {
 });
 
 // src/profiles/cmd-test.ts
-import { readFileSync as readFileSync9 } from "fs";
+import { readFileSync as readFileSync10 } from "fs";
 function testProfile(toolName, content) {
   const profiles = loadProfiles();
   const matchedProfile = resolveProfile(toolName, profiles);
@@ -12427,7 +12595,7 @@ Examples:`);
     contentSource = `stored:${storedId}`;
   } else {
     try {
-      content = readFileSync9(inputFile, "utf8");
+      content = readFileSync10(inputFile, "utf8");
     } catch {
       console.error(`Cannot read: ${inputFile}`);
       process.exit(1);
@@ -12987,14 +13155,14 @@ var exports_learn = {};
 __export(exports_learn, {
   handleLearnCommand: () => handleLearnCommand
 });
-import { readFileSync as readFileSync10, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3 } from "fs";
-import { join as join8 } from "path";
+import { readFileSync as readFileSync11, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3 } from "fs";
+import { join as join9 } from "path";
 import { homedir as homedir6 } from "os";
 function userProfilesDir() {
-  return process.env.RECALL_USER_PROFILES_PATH ?? join8(homedir6(), ".config", "mcp-recall", "profiles");
+  return process.env.RECALL_USER_PROFILES_PATH ?? join9(homedir6(), ".config", "mcp-recall", "profiles");
 }
 function readClaudeJson() {
-  const raw = JSON.parse(readFileSync10(claudeJsonPath(), "utf8"));
+  const raw = JSON.parse(readFileSync11(claudeJsonPath(), "utf8"));
   return raw["mcpServers"] ?? {};
 }
 async function handleLearnCommand(args) {
@@ -13056,9 +13224,9 @@ Learning from ${candidates.length} MCP server(s)\u2026
       console.log(toml);
       continue;
     }
-    const profileDir = join8(outputDir, `mcp__${key.replace(/-/g, "_")}`);
+    const profileDir = join9(outputDir, `mcp__${key.replace(/-/g, "_")}`);
     mkdirSync3(profileDir, { recursive: true });
-    const filePath = join8(profileDir, "default.toml");
+    const filePath = join9(profileDir, "default.toml");
     writeFileSync3(filePath, toml);
     console.log(`     \u2192 ${filePath}`);
     written++;
@@ -13091,7 +13259,7 @@ __export(exports_import, {
   handleImportCommand: () => handleImportCommand,
   MAX_REPORTED_ISSUES: () => MAX_REPORTED_ISSUES
 });
-import { readFileSync as readFileSync11, statSync as statSync5, existsSync as existsSync2 } from "fs";
+import { readFileSync as readFileSync12, statSync as statSync6, existsSync as existsSync3 } from "fs";
 import { resolve as resolve3 } from "path";
 import { Database as Database3 } from "bun:sqlite";
 function validateExport(parsed) {
@@ -13132,7 +13300,7 @@ ${item.full_content}`);
   return { clean, withheld, patterns: [...patterns].sort() };
 }
 function dryRunCount(dbPath, items, overwrite) {
-  if (dbPath === ":memory:" || !existsSync2(dbPath)) {
+  if (dbPath === ":memory:" || !existsSync3(dbPath)) {
     return { imported: items.length, skipped: 0, overwritten: 0 };
   }
   let db = null;
@@ -13210,18 +13378,18 @@ async function handleImportCommand(args) {
   let raw;
   if (filePath) {
     try {
-      const size2 = statSync5(filePath).size;
+      const size2 = statSync6(filePath).size;
       if (size2 > LARGE_FILE_BYTES) {
         console.error(`Warning: file is ${Math.round(size2 / 1024 / 1024)} MB \u2014 this may take a while.`);
       }
-      raw = readFileSync11(filePath, "utf8");
+      raw = readFileSync12(filePath, "utf8");
     } catch {
       console.error(`Cannot read file: ${filePath}`);
       process.exit(1);
     }
   } else {
     try {
-      raw = readFileSync11("/dev/stdin", "utf8");
+      raw = readFileSync12("/dev/stdin", "utf8");
     } catch {
       console.error("No file specified and stdin is not readable.");
       console.error("Usage: mcp-recall import <file.json> [--overwrite] [--dry-run]");
@@ -13499,7 +13667,7 @@ export default function mcpRecall(pi: PiApi, launch = readLaunch(dirname(fileURL
 var init_pi_extension = () => {};
 
 // src/agents/pi.ts
-import { existsSync as existsSync3 } from "fs";
+import { existsSync as existsSync4 } from "fs";
 import { mkdir, readFile, rm, writeFile } from "fs/promises";
 import os2 from "os";
 import path2 from "path";
@@ -13507,7 +13675,7 @@ function defaultPiDir() {
   return process.env.PI_CODING_AGENT_DIR || path2.join(os2.homedir(), ".pi", "agent");
 }
 function piDetected(piDir) {
-  return existsSync3(piDir);
+  return existsSync4(piDir);
 }
 function piExtensionDir(piDir) {
   return path2.join(piDir, "extensions", "mcp-recall");
@@ -13540,7 +13708,7 @@ async function installPi(piDir, launch, dryRun = false) {
 }
 async function uninstallPi(piDir, dryRun = false) {
   const dir = piExtensionDir(piDir);
-  if (!existsSync3(dir))
+  if (!existsSync4(dir))
     return false;
   if (!dryRun)
     await rm(dir, { recursive: true, force: true });
@@ -13812,7 +13980,7 @@ export const McpRecall = Object.assign(plugin, {
 var init_opencode_plugin = () => {};
 
 // src/agents/opencode.ts
-import { existsSync as existsSync4 } from "fs";
+import { existsSync as existsSync5 } from "fs";
 import { mkdir as mkdir2, readFile as readFile2, rm as rm2, writeFile as writeFile2 } from "fs/promises";
 import os3 from "os";
 import path3 from "path";
@@ -13820,7 +13988,7 @@ function defaultOpencodeDir() {
   return path3.join(process.env.XDG_CONFIG_HOME || path3.join(os3.homedir(), ".config"), "opencode");
 }
 function opencodeDetected(dir) {
-  return existsSync4(dir);
+  return existsSync5(dir);
 }
 function opencodePluginPath(dir) {
   return path3.join(dir, "plugins", "mcp-recall.ts");
@@ -13849,7 +14017,7 @@ async function installOpencode(dir, launch, dryRun = false) {
   return oldPlugin === null && oldLaunch === null ? "added" : "updated";
 }
 async function uninstallOpencode(dir, dryRun = false) {
-  const files = [opencodePluginPath(dir), launchPath(dir)].filter((p) => existsSync4(p));
+  const files = [opencodePluginPath(dir), launchPath(dir)].filter((p) => existsSync5(p));
   if (!dryRun)
     await Promise.all(files.map((p) => rm2(p, { force: true })));
   return files.length > 0;
@@ -13912,7 +14080,7 @@ __export(exports_install, {
   CLAUDE_MD_BLOCK: () => CLAUDE_MD_BLOCK,
   AGENTS: () => AGENTS
 });
-import { existsSync as existsSync5 } from "fs";
+import { existsSync as existsSync6 } from "fs";
 import { mkdir as mkdir3, rename, readFile as readFile3, realpath, readlink, stat, chmod, rm as rm3, writeFile as writeFile3 } from "fs/promises";
 import path4 from "path";
 import os4 from "os";
@@ -14232,7 +14400,7 @@ async function installCommand(opts = {}) {
     opencodeDir = defaultOpencodeDir()
   } = opts;
   const agents = opts.agents ?? detectAgents(piDir, opencodeDir);
-  const missing = launch.artifacts.find((a) => !existsSync5(a.path));
+  const missing = launch.artifacts.find((a) => !existsSync6(a.path));
   if (missing) {
     console.error(`${RED}\u2717 Build artifacts not found.${RESET}`);
     console.error(`  Expected: ${DIM}${missing.path}${RESET}`);
@@ -14454,7 +14622,7 @@ function describeLaunch(command) {
 }
 function locate(program) {
   if (path4.isAbsolute(program) || path4.win32.isAbsolute(program)) {
-    return { path: program, exists: existsSync5(program) };
+    return { path: program, exists: existsSync6(program) };
   }
   const found = Bun.which(program);
   return { path: found ?? program, exists: found !== null };
@@ -14728,8 +14896,8 @@ __export(exports_discover, {
   DEFAULT_LIMIT: () => DEFAULT_LIMIT
 });
 import { Database as Database4 } from "bun:sqlite";
-import { existsSync as existsSync6, readdirSync as readdirSync5 } from "fs";
-import { join as join9 } from "path";
+import { existsSync as existsSync7, readdirSync as readdirSync6 } from "fs";
+import { join as join10 } from "path";
 function hasHandlerColumn(db) {
   const cols = db.prepare(`PRAGMA table_info(stored_outputs)`).all();
   return cols.some((c) => c.name === "handler");
@@ -14789,12 +14957,12 @@ function mergeReports(reports) {
 function storeFiles(all, cwd = process.cwd()) {
   if (!all) {
     const file = defaultDbPath(getProjectKey(cwd));
-    return existsSync6(file) ? [file] : [];
+    return existsSync7(file) ? [file] : [];
   }
   const dir = dataDir();
-  if (!existsSync6(dir))
+  if (!existsSync7(dir))
     return [];
-  return readdirSync5(dir).filter((n) => n.endsWith(".db")).map((n) => join9(dir, n));
+  return readdirSync6(dir).filter((n) => n.endsWith(".db")).map((n) => join10(dir, n));
 }
 function pct(part, whole) {
   return whole > 0 ? `${(part / whole * 100).toFixed(0)}%` : "\u2014";
@@ -14894,6 +15062,9 @@ __export(exports_stats, {
   MAX_TOOL_ROWS: () => MAX_TOOL_ROWS
 });
 import { Database as Database5 } from "bun:sqlite";
+function totalCalls(row) {
+  return CALL_OUTCOMES.reduce((n, o) => n + row.calls[o], 0);
+}
 function readStatsStore(file, projectKey) {
   let db = null;
   try {
@@ -14901,19 +15072,28 @@ function readStatsStore(file, projectKey) {
     const isRecallDb = db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='stored_outputs'`).get();
     if (!isRecallDb)
       return EMPTY3;
-    const keys = projectKey !== undefined ? [projectKey] : db.prepare(`SELECT DISTINCT project_key FROM stored_outputs`).all().map((r) => r.project_key);
+    const counted = hasCallCounts(db);
+    const keySql = counted ? `SELECT project_key FROM stored_outputs UNION SELECT project_key FROM call_counts` : `SELECT DISTINCT project_key FROM stored_outputs`;
+    const keys = projectKey !== undefined ? [projectKey] : [...new Set([
+      ...db.prepare(keySql).all().map((r) => r.project_key),
+      ...counted ? pendingCallKeys(db) : []
+    ])];
     const reports = keys.map((key) => {
       const s = getStats(db, key);
+      const c = counted ? getCallBreakdown(db, key) : { rows: [], since: null };
       return {
         items: s.total_items,
         original_bytes: s.total_original_bytes,
         delivered_bytes: s.total_summary_bytes,
         tools: getToolBreakdown(db, key).filter((r) => r.tool_name !== NOTE_TOOL),
+        calls: c.rows,
+        callsSince: c.since,
+        uncounted: 0,
         stores: 0,
         unreadable: 0
       };
     });
-    return { ...mergeStats(reports), stores: 1 };
+    return { ...mergeStats(reports), uncounted: counted ? 0 : 1, stores: 1 };
   } catch {
     return { ...EMPTY3, unreadable: 1 };
   } finally {
@@ -14931,12 +15111,27 @@ function mergeStats(reports) {
       summary_bytes: prev.summary_bytes + row.summary_bytes
     } : row);
   }
+  const calls = new Map;
+  for (const row of reports.flatMap((r) => r.calls)) {
+    const key = `${row.tool_name}\x00${row.command_fp}`;
+    const prev = calls.get(key);
+    calls.set(key, prev ? {
+      ...row,
+      calls: Object.fromEntries(CALL_OUTCOMES.map((o) => [o, prev.calls[o] + row.calls[o]])),
+      original_bytes: prev.original_bytes + row.original_bytes,
+      delivered_bytes: prev.delivered_bytes + row.delivered_bytes
+    } : row);
+  }
+  const days = reports.map((r) => r.callsSince).filter((d) => d !== null).sort();
   const sum = (f) => reports.reduce((n, r) => n + f(r), 0);
   return {
     items: sum((r) => r.items),
     original_bytes: sum((r) => r.original_bytes),
     delivered_bytes: sum((r) => r.delivered_bytes),
     tools: [...tools.values()].sort((a, b) => b.original_bytes - a.original_bytes),
+    calls: [...calls.values()].sort((a, b) => totalCalls(b) - totalCalls(a)),
+    callsSince: days[0] ?? null,
+    uncounted: sum((r) => r.uncounted),
     stores: sum((r) => r.stores),
     unreadable: sum((r) => r.unreadable)
   };
@@ -14949,23 +15144,72 @@ function table2(header, rows) {
   const fmt = (cells) => "  " + cells.map((c, i) => i === 0 ? c.padEnd(widths[i]) : c.padStart(widths[i])).join("  ");
   return [fmt(header), ...rows.map(fmt)];
 }
-function formatStats(report, all) {
-  const lines = [];
-  if (report.items === 0 && report.unreadable > 0) {
-    lines.push(all ? "Nothing to report from the stores that could be read." : "Nothing to report: this project's store could not be read.");
-  } else if (report.items === 0) {
-    lines.push(all ? "Nothing summarized yet in any store." : "Nothing summarized yet for this project.", "That is normal right after install: there is no warm-up, and output too small to", "summarize passes through untouched and is not stored. To see it work, follow", `step 3 of the Quick start: ${QUICK_START_URL}`);
-  } else {
-    const saved = report.original_bytes - report.delivered_bytes;
-    const shown = report.tools.slice(0, MAX_TOOL_ROWS);
-    const hidden = report.tools.length - shown.length;
-    lines.push(`  Outputs summarized:  ${report.items}`, `  Original size:       ${formatBytes(report.original_bytes)}`, `  Delivered to Claude: ${formatBytes(report.delivered_bytes)}`, `  Kept out of context: ${formatBytes(saved)} (${reduction2(report.original_bytes, report.delivered_bytes)} smaller, ` + `~${Math.floor(saved / BYTES_PER_TOKEN).toLocaleString()} tokens at ~${BYTES_PER_TOKEN} bytes each)`, "", "By tool:", ...table2(["tool", "outputs", "original", "delivered", "reduction"], shown.map((r) => [
+function tokens(bytes) {
+  return `~${Math.floor(bytes / BYTES_PER_TOKEN).toLocaleString()} tokens at ~${BYTES_PER_TOKEN} bytes each`;
+}
+function folded(hidden, one, many) {
+  return hidden > 0 ? [`  \u2026 ${hidden} more ${hidden === 1 ? one : many}`] : [];
+}
+function callsSection(report) {
+  const byOutcome = Object.fromEntries(CALL_OUTCOMES.map((o) => [o, report.calls.reduce((n, r) => n + r.calls[o], 0)]));
+  const total = CALL_OUTCOMES.reduce((n, o) => n + byOutcome[o], 0);
+  const saved = report.calls.reduce((n, r) => n + r.original_bytes - r.delivered_bytes, 0);
+  const width = Math.max(...CALL_OUTCOMES.map((o) => String(byOutcome[o]).length));
+  const shown = report.calls.slice(0, MAX_TOOL_ROWS);
+  return [
+    `Calls seen since ${report.callsSince}: ${total}`,
+    ...CALL_OUTCOMES.map((o) => `  ${OUTCOME_LABEL[o].padEnd(11)}  ${String(byOutcome[o]).padStart(width)}  ${OUTCOME_NOTE[o]}`),
+    `  Kept out of context since then: ${formatBytes(saved)} (${tokens(saved)})`,
+    "",
+    "Calls by tool:",
+    ...table2(["tool / command", "calls", ...CALL_OUTCOMES.map((o) => OUTCOME_LABEL[o])], shown.map((r) => [
+      r.command_fp ? `${r.tool_name}: ${r.command_fp}` : r.tool_name,
+      String(totalCalls(r)),
+      ...CALL_OUTCOMES.map((o) => String(r.calls[o]))
+    ])),
+    ...folded(report.calls.length - shown.length, "tool or command with fewer calls", "tools or commands with fewer calls")
+  ];
+}
+function storeSection(report) {
+  const saved = report.original_bytes - report.delivered_bytes;
+  const shown = report.tools.slice(0, MAX_TOOL_ROWS);
+  return [
+    "In the store now:",
+    `  Outputs summarized:  ${report.items}`,
+    `  Original size:       ${formatBytes(report.original_bytes)}`,
+    `  Delivered to Claude: ${formatBytes(report.delivered_bytes)}`,
+    `  Kept out of context: ${formatBytes(saved)} ` + `(${reduction2(report.original_bytes, report.delivered_bytes)} smaller, ${tokens(saved)})`,
+    "",
+    "Stored by tool:",
+    ...table2(["tool", "outputs", "original", "delivered", "reduction"], shown.map((r) => [
       r.tool_name,
       String(r.items),
       formatBytes(r.original_bytes),
       formatBytes(r.summary_bytes),
       reduction2(r.original_bytes, r.summary_bytes)
-    ])), ...hidden > 0 ? [`  \u2026 ${hidden} more tool${hidden === 1 ? "" : "s"} with less output`] : [], "", "Counts cover what is in the store now: expired or evicted output no longer counts,", "and output too small to summarize is never stored.");
+    ])),
+    ...folded(report.tools.length - shown.length, "tool with less output", "tools with less output"),
+    "",
+    "The store drops output once it expires or is evicted; the call counts keep every call."
+  ];
+}
+function formatStats(report, all) {
+  const lines = [];
+  const hasCalls = report.calls.length > 0;
+  if (report.items === 0 && !hasCalls && report.unreadable > 0) {
+    lines.push(all ? "Nothing to report from the stores that could be read." : "Nothing to report: this project's store could not be read.");
+  } else if (report.items === 0 && !hasCalls) {
+    lines.push(all ? "Nothing summarized yet in any store." : "Nothing summarized yet for this project.", "That is normal right after install: there is no warm-up, and output too small to", "summarize passes through untouched and is not stored. To see it work, follow", `step 3 of the Quick start: ${QUICK_START_URL}`);
+  } else {
+    if (hasCalls)
+      lines.push(...callsSection(report));
+    if (hasCalls && report.items > 0)
+      lines.push("");
+    if (report.items > 0)
+      lines.push(...storeSection(report));
+  }
+  if (report.uncounted > 0) {
+    lines.push(all ? `${report.uncounted} store${report.uncounted === 1 ? " has" : "s have"} no call counts yet: ` + "counting starts with the next Claude Code session in that project." : "Calls are not counted yet: counting starts with the next Claude Code session in this project.");
   }
   if (report.unreadable > 0) {
     const one = report.unreadable === 1;
@@ -14984,12 +15228,34 @@ function statsCommand(opts = {}) {
 `);
   console.log(formatStats(report, all));
 }
-var NOTE_TOOL = "recall__note", BYTES_PER_TOKEN = 4, QUICK_START_URL = "https://github.com/sakebomb/mcp-recall#quick-start", MAX_TOOL_ROWS = 15, EMPTY3;
+var NOTE_TOOL = "recall__note", BYTES_PER_TOKEN = 4, QUICK_START_URL = "https://github.com/sakebomb/mcp-recall#quick-start", MAX_TOOL_ROWS = 15, EMPTY3, OUTCOME_LABEL, OUTCOME_NOTE;
 var init_stats = __esm(() => {
   init_db();
   init_discover();
   init_project_key();
-  EMPTY3 = { items: 0, original_bytes: 0, delivered_bytes: 0, tools: [], stores: 0, unreadable: 0 };
+  EMPTY3 = {
+    items: 0,
+    original_bytes: 0,
+    delivered_bytes: 0,
+    tools: [],
+    calls: [],
+    callsSince: null,
+    uncounted: 0,
+    stores: 0,
+    unreadable: 0
+  };
+  OUTCOME_LABEL = {
+    summarized: "summarized",
+    cached: "reused",
+    too_small: "too small",
+    content_read: "short reads"
+  };
+  OUTCOME_NOTE = {
+    summarized: "a new summary replaced the output",
+    cached: "an earlier summary of the same output was reused",
+    too_small: "passed through: a summary would not have saved a quarter",
+    content_read: "passed through whole: a short file read"
+  };
 });
 
 // src/hooks/session-start.ts
@@ -15001,10 +15267,10 @@ init_db();
 init_project_key();
 init_db();
 init_log();
-import { statSync } from "fs";
+import { statSync as statSync2 } from "fs";
 function isExistingDir(path) {
   try {
-    return statSync(path).isDirectory();
+    return statSync2(path).isDirectory();
   } catch {
     return false;
   }
@@ -15136,6 +15402,7 @@ function handleSessionStart(raw) {
   recordProjectPath(db, input.cwd);
   const today = new Date().toISOString().slice(0, 10);
   recordSession(db, today);
+  foldCallLog(db);
   pruneExpired(db, projectKey, config2.store.expire_after_session_days);
   const parts = [];
   const reminder = gcReminderText(storeFootprint(), config2.store.gc_reminder_mb);
@@ -15165,12 +15432,12 @@ function handleSessionStart(raw) {
 init_config();
 init_project_key();
 import { createHash as createHash3 } from "crypto";
-import { readFileSync as readFileSync4, statSync as statSync4 } from "fs";
-import { basename as basename3, dirname as dirname4, isAbsolute as isAbsolute3 } from "path";
+import { readFileSync as readFileSync5, statSync as statSync5 } from "fs";
+import { basename as basename4, dirname as dirname5, isAbsolute as isAbsolute3 } from "path";
 init_denylist();
 init_secrets();
 init_handlers();
-init_types();
+init_types2();
 init_generic();
 
 // src/hints.ts
@@ -15307,9 +15574,9 @@ init_log();
 
 // src/hooks/grok.ts
 init_log();
-import { lstatSync, readFileSync as readFileSync3, realpathSync } from "fs";
+import { lstatSync, readFileSync as readFileSync4, realpathSync } from "fs";
 import { homedir as homedir4 } from "os";
-import { basename as basename2, dirname as dirname3, isAbsolute as isAbsolute2, join as join5, normalize, relative, sep } from "path";
+import { basename as basename3, dirname as dirname4, isAbsolute as isAbsolute2, join as join6, normalize, relative, sep } from "path";
 var MAX_SAVED_BYTES = 20 * 1024 * 1024;
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -15324,7 +15591,7 @@ function isGrokShell(value) {
   return isRecord(value) && value["type"] === "Bash" && "output" in value && "output_for_prompt" in value;
 }
 function grokHome() {
-  return process.env["GROK_HOME"] || join5(homedir4(), ".grok");
+  return process.env["GROK_HOME"] || join6(homedir4(), ".grok");
 }
 function callOf(input) {
   const sessionId = input["session_id"] ?? input["sessionId"];
@@ -15335,20 +15602,20 @@ function callOf(input) {
 function readSaved(path, call, kind, ext) {
   if (!isAbsolute2(path) || normalize(path) !== path)
     return null;
-  const sessions = join5(grokHome(), "sessions") + sep;
-  if (!path.startsWith(sessions) || basename2(path) !== `${call.toolUseId}.${ext}`)
+  const sessions = join6(grokHome(), "sessions") + sep;
+  if (!path.startsWith(sessions) || basename3(path) !== `${call.toolUseId}.${ext}`)
     return null;
-  const folder = dirname3(path);
-  if (basename2(folder) !== kind || basename2(dirname3(folder)) !== call.sessionId)
+  const folder = dirname4(path);
+  if (basename3(folder) !== kind || basename3(dirname4(folder)) !== call.sessionId)
     return null;
   try {
     const root = realpathSync(sessions);
-    if (realpathSync(folder) !== join5(root, relative(sessions, folder)))
+    if (realpathSync(folder) !== join6(root, relative(sessions, folder)))
       return null;
     const stat = lstatSync(path);
     if (!stat.isFile() || stat.size > MAX_SAVED_BYTES)
       return null;
-    return readFileSync3(path);
+    return readFileSync4(path);
   } catch (err) {
     log.debug(`grok saved output unreadable \xB7 ${path} \xB7 ${String(err)}`);
     return null;
@@ -15440,13 +15707,13 @@ function withPersistedOutput(toolResponse) {
   const size2 = bash?.persistedOutputSize;
   if (!bash || typeof path !== "string" || typeof size2 !== "number")
     return toolResponse;
-  if (!isAbsolute3(path) || basename3(dirname4(path)) !== "tool-results" || size2 > MAX_PERSISTED_BYTES) {
+  if (!isAbsolute3(path) || basename4(dirname5(path)) !== "tool-results" || size2 > MAX_PERSISTED_BYTES) {
     return toolResponse;
   }
   try {
-    if (statSync4(path).size !== size2)
+    if (statSync5(path).size !== size2)
       return toolResponse;
-    return { ...bash, stdout: readFileSync4(path, "utf8"), stderr: "" };
+    return { ...bash, stdout: readFileSync5(path, "utf8"), stderr: "" };
   } catch (err) {
     log.debug(`persisted output unreadable \xB7 ${path} \xB7 ${String(err)}`);
     return toolResponse;
@@ -15469,12 +15736,12 @@ function withSavedMcpResult(toolResponse) {
   const chars = count(match[1]);
   const lines = match[2] === undefined ? null : count(match[2]);
   const path = match[3];
-  if (!isAbsolute3(path) || basename3(dirname4(path)) !== "tool-results")
+  if (!isAbsolute3(path) || basename4(dirname5(path)) !== "tool-results")
     return null;
   try {
-    if (statSync4(path).size > MAX_PERSISTED_BYTES)
+    if (statSync5(path).size > MAX_PERSISTED_BYTES)
       return null;
-    const saved = readFileSync4(path, "utf8");
+    const saved = readFileSync5(path, "utf8");
     if (saved.length !== chars || lines !== null && !hasLines(saved, lines))
       return null;
     if (typeof toolResponse === "string")
@@ -15541,25 +15808,31 @@ function handlePostToolUse(raw) {
     return {};
   }
   const command = tool_input !== null && typeof tool_input === "object" && typeof tool_input.command === "string" ? tool_input.command : undefined;
-  if (tool_name === "Bash" && command && isContentRead(command) && Buffer.byteLength(fullContent, "utf8") <= READ_PASSTHROUGH_MAX_BYTES) {
-    log.debug(`SKIP content-read \xB7 ${formatBytes(Buffer.byteLength(fullContent, "utf8"))}`);
-    return {};
-  }
   const projectKey = getProjectKey(cwd);
   const db = getDb(defaultDbPath(projectKey));
   recordProjectPath(db, cwd, true);
   const command_fp = tool_name === "Bash" && command ? bashFingerprint(command) || null : null;
+  const contentBytes = Buffer.byteLength(fullContent, "utf8");
+  const count = (outcome, delivered, original = contentBytes) => recordCall(db, { project_key: projectKey, tool_name, command_fp, outcome, original_bytes: original, delivered_bytes: delivered });
+  if (tool_name === "Bash" && command && isContentRead(command) && contentBytes <= READ_PASSTHROUGH_MAX_BYTES) {
+    log.debug(`SKIP content-read \xB7 ${formatBytes(contentBytes)}`);
+    count("content_read", contentBytes);
+    return {};
+  }
   const input_hash = tool_input !== undefined ? createHash3("sha256").update(tool_name + JSON.stringify(tool_input)).digest("hex") : null;
   const output_hash = hashContent(fullContent);
   const cachedResponse = (cached4) => {
     const cachedDate = new Date(cached4.created_at * 1000).toISOString().slice(0, 10);
     const text = `[recall:${cached4.id} \xB7 cached \xB7 ${cachedDate}]
 ${cached4.summary}`;
-    if (!savesEnough(Buffer.byteLength(text, "utf8"), Buffer.byteLength(fullContent, "utf8"))) {
+    const textBytes = Buffer.byteLength(text, "utf8");
+    if (!savesEnough(textBytes, contentBytes)) {
       log.debug(`SKIP cached-not-smaller \xB7 ${tool_name} \xB7 id=${cached4.id}`);
+      count("too_small", contentBytes);
       return {};
     }
     log.debug(`CACHE HIT \xB7 ${tool_name} \xB7 id=${cached4.id} \xB7 cached ${cachedDate}`);
+    count("cached", textBytes);
     return replaceOutput(text, replyShape);
   };
   const cached3 = checkOutputDedup(db, projectKey, output_hash, tool_name, command_fp);
@@ -15579,6 +15852,7 @@ ${cached4.summary}`;
   const deliveredSize = deliveredBytes(summary, originalSize, hints);
   if (!savesEnough(deliveredSize, originalSize)) {
     log.debug(`SKIP no-compression \xB7 ${tool_name} \xB7 ${formatBytes(deliveredSize)} of ${formatBytes(originalSize)}`);
+    count("too_small", contentBytes);
     return {};
   }
   const full_retained = shouldRetainFullBody(config2.store.retention, tool_name, command, summary) ? 1 : 0;
@@ -15598,6 +15872,8 @@ ${cached4.summary}`;
     delivered_size: deliveredSize,
     handler: handlerName
   });
+  count("summarized", deliveredSize, originalSize);
+  foldCallLog(db);
   evictIfNeeded(db, projectKey, config2.store.max_size_mb, config2.store.eviction_half_life_days);
   log.debug(`STORED \xB7 ${tool_name} \xB7 id=${stored.id} \xB7 ${formatBytes(originalSize)}\u2192${formatBytes(summarySize)} (${reductionPercent(summarySize, originalSize)}% reduction)`);
   return replaceOutput(`${recallHeader(stored.id, originalSize, summarySize, hints)}
@@ -15622,7 +15898,7 @@ function deliveredBytes(summary, originalSize, hints) {
 
 // src/cli.ts
 init_log();
-import { join as join10 } from "path";
+import { join as join11 } from "path";
 async function getVersion() {
   const pkg = await Promise.resolve().then(() => __toESM(require_package(), 1));
   return pkg.version;
@@ -15972,7 +16248,7 @@ async function main() {
     process.exit(0);
   }
   if (subcommand === "serve") {
-    await import(join10(import.meta.dir, import.meta.path.endsWith(".js") ? "server.js" : "server.ts"));
+    await import(join11(import.meta.dir, import.meta.path.endsWith(".js") ? "server.js" : "server.ts"));
     return;
   }
   if (subcommand === "gc") {

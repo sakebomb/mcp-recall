@@ -341,10 +341,13 @@ describe("gc executeDeletions (destructive path)", () => {
     const orphanFile = makeDb("orphan", join(projectsDir, "gone"));
     writeFileSync(`${orphanFile}-wal`, "wal");
     writeFileSync(`${orphanFile}-shm`, "shm");
+    writeFileSync(`${orphanFile}.calls`, "{}\n");                 // call-count log (#495)
+    writeFileSync(`${orphanFile}.calls.1-2-0.folding`, "{}\n");   // and a claimed copy
     // active: recorded path exists → must be preserved
     const liveDir = join(projectsDir, "live");
     mkdirSync(liveDir);
     const activeFile = makeDb("active", liveDir);
+    writeFileSync(`${activeFile}.calls`, "{}\n");
 
     const entries = scanDatabases(workDir, "/current.db", 90);
     const candidates = entries.filter((e) => isDeletionCandidate(e.status));
@@ -355,7 +358,10 @@ describe("gc executeDeletions (destructive path)", () => {
     expect(existsSync(orphanFile)).toBe(false);
     expect(existsSync(`${orphanFile}-wal`)).toBe(false);
     expect(existsSync(`${orphanFile}-shm`)).toBe(false);
+    expect(existsSync(`${orphanFile}.calls`)).toBe(false);
+    expect(existsSync(`${orphanFile}.calls.1-2-0.folding`)).toBe(false);
     expect(existsSync(activeFile)).toBe(true); // non-candidate untouched
+    expect(existsSync(`${activeFile}.calls`)).toBe(true);
   });
 });
 

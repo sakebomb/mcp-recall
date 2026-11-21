@@ -16,7 +16,7 @@ No. mcp-recall does not learn from your sessions: each tool output is summarized
 
 ### How do I know it's working?
 
-`mcp-recall status` checks the install. For what it has done, run `mcp-recall stats` (add `--all` for every project), or ask Claude "what has recall saved in this project?", which calls `recall__stats`. A summarized output starts with a `[recall:…]` line in what Claude receives. If the totals stay near zero, your tools may return little worth summarizing: output a summary can't shrink by at least a quarter passes through untouched, and is not counted. Most of the gain comes from tools with large, structured output, such as browser automation and GitHub or API results. See [Is it for you?](../README.md#is-it-for-you), and [Troubleshooting](troubleshooting.md) if `status` shows a fault.
+`mcp-recall status` checks the install. For what it has done, run `mcp-recall stats` (add `--all` for every project), or ask Claude "what has recall saved in this project?", which calls `recall__stats`. A summarized output starts with a `[recall:…]` line in what Claude receives. If the totals stay near zero, your tools may return little worth summarizing: output a summary can't shrink by at least a quarter passes through untouched. `mcp-recall stats` counts those calls too, so it shows how many calls it saw and why each passed through. Most of the gain comes from tools with large, structured output, such as browser automation and GitHub or API results. See [Is it for you?](../README.md#is-it-for-you), and [Troubleshooting](troubleshooting.md) if `status` shows a fault.
 
 ### Will it hide something Claude needs?
 

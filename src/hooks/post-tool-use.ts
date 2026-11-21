@@ -10,7 +10,10 @@ import { getHandler, extractText } from "../handlers/index";
 import { asMcpContentBlocks, hasNonTextContentBlocks, joinTextBlocks } from "../handlers/types";
 import { genericHandler } from "../handlers/generic";
 import { extractHints } from "../hints";
-import { getDb, defaultDbPath, storeOutput, checkOutputDedup, hashContent, evictIfNeeded } from "../db/index";
+import {
+  getDb, defaultDbPath, storeOutput, checkOutputDedup, hashContent, evictIfNeeded, recordCall, foldCallLog,
+  type CallOutcome,
+} from "../db/index";
 import { shouldRetainFullBody } from "../retention";
 import { bashFingerprint, isContentRead, READ_PASSTHROUGH_MAX_BYTES } from "../handlers/bash";
 import { bashOutputText } from "../handlers/bash-shared";
@@ -213,31 +216,35 @@ export function handlePostToolUse(raw: string): HookOutput {
       ? (tool_input as { command: string }).command
       : undefined;
 
-  // 3. A content read (`cat`, `git diff`, `| head -40`, `sed -n a,bp`) returns
-  //    what Claude asked for: deliver it whole below a size floor, since a
-  //    summary keeps only stats or a head and tail (#327, #332).
-  if (tool_name === "Bash" && command && isContentRead(command) &&
-      Buffer.byteLength(fullContent, "utf8") <= READ_PASSTHROUGH_MAX_BYTES) {
-    log.debug(`SKIP content-read · ${formatBytes(Buffer.byteLength(fullContent, "utf8"))}`);
-    return {};
-  }
-
-  // 4. Setup DB (needed for dedup check before compression)
+  // 3. Setup DB, before the content-read skip so that skip is counted too (#495).
   const projectKey = getProjectKey(cwd);
   const db = getDb(defaultDbPath(projectKey));
   // Opening the store creates it, so record its path now, before any skip below.
   // session-start may never run for it, as for a subagent in its worktree (#488).
   recordProjectPath(db, cwd, true);
 
-  // 5. Dedup check: reuse a stored summary only for identical content from the
-  //    same tool and command family. A matching input alone is not enough, since
-  //    a re-run exists to see changed output (#324).
   // Privacy-safe command family fingerprint for per-command savings attribution
   // (#251). Bash only; a "" fingerprint (no bare verb) is stored as NULL/unknown.
   const command_fp =
     tool_name === "Bash" && command
       ? bashFingerprint(command) || null
       : null;
+  const contentBytes = Buffer.byteLength(fullContent, "utf8");
+  const count = (outcome: CallOutcome, delivered: number, original: number = contentBytes): void =>
+    recordCall(db, { project_key: projectKey, tool_name, command_fp, outcome, original_bytes: original, delivered_bytes: delivered });
+
+  // 4. A content read (`cat`, `git diff`, `| head -40`, `sed -n a,bp`) returns
+  //    what Claude asked for: deliver it whole below a size floor, since a
+  //    summary keeps only stats or a head and tail (#327, #332).
+  if (tool_name === "Bash" && command && isContentRead(command) && contentBytes <= READ_PASSTHROUGH_MAX_BYTES) {
+    log.debug(`SKIP content-read · ${formatBytes(contentBytes)}`);
+    count("content_read", contentBytes);
+    return {};
+  }
+
+  // 5. Dedup check: reuse a stored summary only for identical content from the
+  //    same tool and command family. A matching input alone is not enough, since
+  //    a re-run exists to see changed output (#324).
   const input_hash =
     tool_input !== undefined
       ? createHash("sha256")
@@ -251,11 +258,14 @@ export function handlePostToolUse(raw: string): HookOutput {
     const text = `[recall:${cached.id} · cached · ${cachedDate}]\n${cached.summary}`;
     // A row stored before #319 may only have beaten the original without its
     // header; replaying it must save as much as a fresh summary would.
-    if (!savesEnough(Buffer.byteLength(text, "utf8"), Buffer.byteLength(fullContent, "utf8"))) {
+    const textBytes = Buffer.byteLength(text, "utf8");
+    if (!savesEnough(textBytes, contentBytes)) {
       log.debug(`SKIP cached-not-smaller · ${tool_name} · id=${cached.id}`);
+      count("too_small", contentBytes);
       return {};
     }
     log.debug(`CACHE HIT · ${tool_name} · id=${cached.id} · cached ${cachedDate}`);
+    count("cached", textBytes);
     return replaceOutput(text, replyShape);
   };
 
@@ -285,6 +295,7 @@ export function handlePostToolUse(raw: string): HookOutput {
   const deliveredSize = deliveredBytes(summary, originalSize, hints);
   if (!savesEnough(deliveredSize, originalSize)) {
     log.debug(`SKIP no-compression · ${tool_name} · ${formatBytes(deliveredSize)} of ${formatBytes(originalSize)}`);
+    count("too_small", contentBytes);
     return {};
   }
 
@@ -310,6 +321,10 @@ export function handlePostToolUse(raw: string): HookOutput {
     delivered_size: deliveredSize,
     handler: handlerName,
   });
+  // The same sizes as the stored row, so call counts and store totals agree.
+  count("summarized", deliveredSize, originalSize);
+  // This call is writing the store anyway: fold the logged counts in now.
+  foldCallLog(db);
 
   // 9. Evict if store exceeds size limit
   evictIfNeeded(db, projectKey, config.store.max_size_mb, config.store.eviction_half_life_days);

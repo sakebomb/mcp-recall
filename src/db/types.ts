@@ -66,6 +66,37 @@ export interface ListOptions {
   sort?: "newest" | "oldest";
 }
 
+/**
+ * What the hook did with an intercepted call (#495). `summarized` stored a new
+ * summary, `cached` replayed a stored one, `too_small` passed through because
+ * no summary saved enough, `content_read` passed a short file read through whole.
+ */
+export type CallOutcome = "summarized" | "cached" | "too_small" | "content_read";
+
+export const CALL_OUTCOMES: readonly CallOutcome[] = ["summarized", "cached", "too_small", "content_read"];
+
+/** One intercepted call, as {@link recordCall} counts it. */
+export interface CallRecord {
+  project_key: string;
+  tool_name: string;
+  /** Bash command family, or null off Bash. */
+  command_fp: string | null;
+  outcome: CallOutcome;
+  original_bytes: number;
+  /** Bytes Claude received: the original when the call passed through. */
+  delivered_bytes: number;
+}
+
+/** Counted calls for one tool (and Bash command family), by outcome. */
+export interface CallBreakdownRow {
+  tool_name: string;
+  /** '' off Bash, and for a Bash command with no recognisable family. */
+  command_fp: string;
+  calls: Record<CallOutcome, number>;
+  original_bytes: number;
+  delivered_bytes: number;
+}
+
 /** Criteria for bulk-deleting stored outputs. Exactly one selector should be set. */
 export interface ForgetOptions {
   id?: string;

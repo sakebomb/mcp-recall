@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { initSchema, storeOutput, type StoreInput } from "../src/db/index";
+import { initSchema, storeOutput, recordCall, forgetOutputs, type StoreInput, type CallRecord } from "../src/db/index";
 import { readStatsStore, mergeStats, formatStats, MAX_TOOL_ROWS, type StatsReport } from "../src/stats/index";
 
 function input(overrides: Partial<StoreInput> = {}): StoreInput {
@@ -22,15 +22,81 @@ let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "recall-stats-")); });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-/** A store file on disk holding the given rows; closed, so the report opens it itself. */
-function storeWith(name: string, rows: Partial<StoreInput>[]): string {
+function call(overrides: Partial<CallRecord> = {}): CallRecord {
+  return {
+    project_key: "statsA", tool_name: "Bash", command_fp: "git log",
+    outcome: "too_small", original_bytes: 100, delivered_bytes: 100, ...overrides,
+  };
+}
+
+/** A store file on disk holding the given rows and calls; closed, so the report opens it itself. */
+function storeWith(name: string, rows: Partial<StoreInput>[], calls: Partial<CallRecord>[] = []): string {
   const file = join(dir, name);
   const db = new Database(file);
   initSchema(db);
   for (const r of rows) storeOutput(db, input(r));
+  for (const c of calls) recordCall(db, call(c));
   db.close();
   return file;
 }
+
+describe("call counts (#495 part 2)", () => {
+  it("adds repeat calls of the same tool, command and outcome into one row", () => {
+    const r = readStatsStore(storeWith("a.db", [], [
+      { outcome: "too_small", original_bytes: 100, delivered_bytes: 100 },
+      { outcome: "too_small", original_bytes: 300, delivered_bytes: 300 },
+      { outcome: "summarized", original_bytes: 9000, delivered_bytes: 900 },
+      { outcome: "content_read", command_fp: "cat", original_bytes: 50, delivered_bytes: 50 },
+    ]), "statsA");
+
+    expect(r.calls.map((c) => [c.tool_name, c.command_fp, c.calls])).toEqual([
+      ["Bash", "git log", { summarized: 1, cached: 0, too_small: 2, content_read: 0 }],
+      ["Bash", "cat", { summarized: 0, cached: 0, too_small: 0, content_read: 1 }],
+    ]);
+    expect(r.calls[0].original_bytes - r.calls[0].delivered_bytes).toBe(8100);
+    expect(r.callsSince).toBe(new Date().toISOString().slice(0, 10));
+  });
+
+  it("reports a project whose every call passed through, which has no stored rows", () => {
+    const file = storeWith("a.db", [{ project_key: "statsA" }], [{ project_key: "onlyPassed" }]);
+    expect(readStatsStore(file, "onlyPassed").calls).toHaveLength(1);
+    expect(readStatsStore(file).calls).toHaveLength(1); // --all reaches it through the key union
+  });
+
+  it("keeps a store with no counters yet readable, and says so", () => {
+    const file = storeWith("a.db", [{ original_size: 1000 }]);
+    const db = new Database(file);
+    db.run("DROP TABLE call_counts");
+    db.close();
+    const r = readStatsStore(file, "statsA");
+
+    expect(r).toMatchObject({ items: 1, unreadable: 0, uncounted: 1, calls: [] });
+    expect(formatStats(r, false)).toContain("Calls are not counted yet");
+  });
+
+  it("forget all clears the project's counters and no other project's", () => {
+    const file = storeWith("a.db", [], [{ project_key: "statsA" }, { project_key: "statsB" }]);
+    const db = new Database(file);
+    forgetOutputs(db, "statsA", { all: true });
+    const left = db.prepare("SELECT project_key FROM call_counts").all();
+    db.close();
+    expect(left).toEqual([{ project_key: "statsB" }]);
+  });
+
+  it("explains a project where every call passed through instead of saying nothing happened", () => {
+    const r = readStatsStore(storeWith("a.db", [], [
+      { outcome: "too_small" }, { outcome: "too_small" }, { outcome: "content_read", command_fp: "cat" },
+    ]), "statsA");
+    const out = formatStats(r, false);
+
+    expect(out).toMatch(/Calls seen since \d{4}-\d{2}-\d{2}: 3/);
+    expect(out).toMatch(/too small\s+2\s+passed through: a summary would not have saved a quarter/);
+    expect(out).toMatch(/short reads\s+1\s+passed through whole/);
+    expect(out).toContain("Bash: git log");
+    expect(out).not.toContain("Nothing summarized yet");
+    expect(out).not.toContain("In the store now:");
+  });
+});
 
 describe("readStatsStore", () => {
   it("sums every project key in a store and breaks it down by tool", () => {
@@ -105,7 +171,7 @@ describe("mergeStats", () => {
       { tool_name: "Bash", original_size: 2000 },
       { tool_name: "mcp__x__y", original_size: 500 },
     ]));
-    const m = mergeStats([a, b, { ...a, items: 0, original_bytes: 0, delivered_bytes: 0, tools: [], stores: 0, unreadable: 1 }]);
+    const m = mergeStats([a, b, { ...a, items: 0, original_bytes: 0, delivered_bytes: 0, tools: [], calls: [], stores: 0, unreadable: 1 }]);
 
     expect(m).toMatchObject({ items: 3, original_bytes: 3500, stores: 2, unreadable: 1 });
     expect(m.tools.map((t) => [t.tool_name, t.items, t.original_bytes])).toEqual([
@@ -116,7 +182,10 @@ describe("mergeStats", () => {
 });
 
 describe("formatStats", () => {
-  const empty: StatsReport = { items: 0, original_bytes: 0, delivered_bytes: 0, tools: [], stores: 1, unreadable: 0 };
+  const empty: StatsReport = {
+    items: 0, original_bytes: 0, delivered_bytes: 0, tools: [],
+    calls: [], callsSince: null, uncounted: 0, stores: 1, unreadable: 0,
+  };
 
   it("explains an empty store instead of printing zeros", () => {
     const out = formatStats(empty, false);
@@ -135,7 +204,8 @@ describe("formatStats", () => {
     expect(out).toMatch(/Outputs summarized:\s+1\n/);
     expect(out).toContain("90% smaller");
     expect(out).toMatch(/Bash\s+1\s+9\.8KB\s+1000B\s+90%/);
-    expect(out).toContain("too small to summarize is never stored");
+    expect(out).toContain("In the store now:");
+    expect(out).toContain("the call counts keep every call");
   });
 
   it("folds tools past the row cap into one line", () => {

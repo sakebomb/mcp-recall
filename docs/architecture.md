@@ -32,19 +32,20 @@ PostToolUse hook  ── mcp__* (except mcp__recall__*) and Bash
  2. extract text, scan for secrets
       │                    ──hit──▶ pass through untouched
       │ clean
- 3. Bash content read, ≤ 8 KB?
-      │                    ──yes──▶ pass through untouched
-      │ no
- 4. open project DB        getProjectKey(cwd) → defaultDbPath(key)
+ 3. open project DB        getProjectKey(cwd) → defaultDbPath(key)
       │
+ 4. Bash content read, ≤ 8 KB?
+      │                    ──yes──▶ pass through untouched          [counted: content_read]
+      │ no
  5. dedup: output_hash, same tool + command family
-      │                    ──hit──▶ return the already-stored summary
+      │                    ──hit──▶ return the already-stored summary [counted: cached]
       │ miss
  6. compress               getHandler(tool_name, response, input) → handler(…)
       │
- 7. saves < 25%?          ──yes──▶ pass through untouched
+ 7. saves < 25%?          ──yes──▶ pass through untouched          [counted: too_small]
       │ no
- 8. store                  stored_outputs (+ FTS + chunks, via triggers)
+ 8. store                  stored_outputs (+ FTS + chunks, via triggers)  [counted: summarized]
+      │                    then fold the call log into call_counts
       │
  9. evict if over store.max_size_mb   (decay-scored, pinned exempt)
       │
@@ -57,10 +58,10 @@ flowchart TD
     S1{"1. denylisted?"} -->|yes| PASS["pass through untouched"]
     S1 -->|no| S2{"2. secret detected?"}
     S2 -->|yes| PASS
-    S2 -->|no| S3{"3. Bash content read (cat, git diff, head…), ≤ 8 KB?"}
-    S3 -->|yes| PASS
-    S3 -->|no| S4["4. open project DB"]
-    S4 --> S5{"5. dedup hit? same output, tool and command family"}
+    S2 -->|no| S3["3. open project DB"]
+    S3 --> S4{"4. Bash content read (cat, git diff, head…), ≤ 8 KB?"}
+    S4 -->|yes| PASS
+    S4 -->|no| S5{"5. dedup hit? same output, tool and command family"}
     S5 -->|yes| CACHE["return already-stored summary"]
     S5 -->|no| S6["6. compress via getHandler"]
     S6 --> S7{"7. header + summary saves < 25%?"}
@@ -166,6 +167,15 @@ Tables (`db/schema.ts`):
   by `storeChunks` on write and cleaned up by a delete trigger (unlike `outputs_fts`,
   which is fully trigger-maintained on both insert and delete).
 - **`sessions`** — one row per active-use date; underpins "session days" expiry.
+- **`call_counts`** — what happened to each intercepted call after the secret scan,
+  per project, day, tool, Bash command family and outcome (`summarized`, `cached`,
+  `too_small`, `content_read`), with byte totals (#495). Calls that pass through
+  leave no `stored_outputs` row, and eviction removes the rows of those that did, so
+  this is the only record of either. Tool name, command family and sizes only. The
+  hook does not write it directly: a SQLite commit per pass-through call cost 15-20
+  ms on Bun 1.4, so each call is appended to `<store>.calls` and the log is folded in
+  by writes that happen anyway (storing a summary, session start, forget-all).
+  Readers add the unfolded lines; `gc` deletes the log with its store.
 - **`meta`** — key/value; holds `project_path` (written by session-start, and by
   post-tool-use when the store has none yet, #488). Migrations
   live in `MIGRATIONS` in `schema.ts`, applied unconditionally on open and each
