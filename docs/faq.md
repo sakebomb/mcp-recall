@@ -1,6 +1,6 @@
 # FAQ
 
-Short answers for deciding whether to install. Each one links to the page that covers it in full.
+Short answers for deciding whether to install, and for your first sessions after. Each one links to the page that covers it in full.
 
 ### Does it work outside Claude Code?
 
@@ -9,6 +9,14 @@ Yes, with [pi](https://pi.dev), [OpenCode](https://opencode.ai) and xAI's `grok`
 ### Will it make Claude better at my tasks?
 
 Not shown. In paired runs with and without it, no study found a difference in solved tasks larger than chance. What it changed was compaction and cost: in the browser studies, sessions compacted less often, and in two Haiku studies, runs cost about a quarter less. [Is it for you?](../README.md#is-it-for-you) says who it helps, and the [task-success benchmark](benchmarks.md#task-success-benchmark) has every study and its limits.
+
+### Does it need time to build up?
+
+No. mcp-recall does not learn from your sessions: each tool output is summarized on its own, from the first call, and an empty store right after install is normal. What builds up over time is a searchable history of past output, which Claude can reach with `recall__search`. Step 3 of the [Quick start](../README.md#quick-start) shows it working.
+
+### How do I know it's working?
+
+`mcp-recall status` checks the install. For what it has done, ask Claude "what has recall saved in this project?", which calls `recall__stats`. A summarized output starts with a `[recall:…]` line in what Claude receives. If the totals stay near zero, your tools may return little worth summarizing: output a summary can't shrink by at least a quarter passes through untouched, and is not counted. Most of the gain comes from tools with large, structured output, such as browser automation and GitHub or API results. See [Is it for you?](../README.md#is-it-for-you), and [Troubleshooting](troubleshooting.md) if `status` shows a fault.
 
 ### Will it hide something Claude needs?
 
