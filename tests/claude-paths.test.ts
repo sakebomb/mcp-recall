@@ -17,7 +17,7 @@ describe("claude-paths", () => {
   it("puts every file under CLAUDE_CONFIG_DIR when it is set", () => {
     process.env.CLAUDE_CONFIG_DIR = "/x/claude-alt";
     expect(claudeConfigDir()).toBe("/x/claude-alt");
-    expect(claudeJsonPath()).toBe("/x/claude-alt/.claude.json");
+    expect(claudeJsonPath()).toBe(join("/x/claude-alt", ".claude.json"));
   });
 
   it("keeps .claude.json in the home dir and the rest in ~/.claude when unset or empty", () => {
