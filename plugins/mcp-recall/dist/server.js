@@ -21803,6 +21803,9 @@ function resolveProjectPath(cwd) {
 function hashPath(path) {
   return createHash("sha256").update(path).digest("hex").slice(0, 16);
 }
+
+// src/db/types.ts
+var CALL_OUTCOMES = ["summarized", "cached", "too_small", "content_read"];
 // src/db/schema.ts
 import { Database } from "bun:sqlite";
 import { join, dirname } from "path";
@@ -21898,6 +21901,22 @@ var SCHEMA = `
   CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
+  );
+
+  -- What happened to each intercepted call, counted per day (#495): calls that
+  -- passed through leave no stored_outputs row, and eviction removes the rows of
+  -- those that did, so these counters are the only record of either. Tool name,
+  -- command family and sizes only, never content. command_fp is '' off Bash.
+  CREATE TABLE IF NOT EXISTS call_counts (
+    project_key     TEXT NOT NULL,
+    day             TEXT NOT NULL,
+    tool_name       TEXT NOT NULL,
+    command_fp      TEXT NOT NULL DEFAULT '',
+    outcome         TEXT NOT NULL,
+    calls           INTEGER NOT NULL DEFAULT 0,
+    original_bytes  INTEGER NOT NULL DEFAULT 0,
+    delivered_bytes INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (project_key, day, tool_name, command_fp, outcome)
   );
 `;
 var MIGRATIONS = [
@@ -22014,6 +22033,8 @@ function sanitizeFtsQuery(query) {
 }
 // src/db/queries.ts
 import { randomBytes, createHash as createHash2 } from "crypto";
+import { appendFileSync, existsSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, utimesSync } from "fs";
+import { basename, dirname as dirname2, join as join2 } from "path";
 var EFFECTIVE_SIZE_EXPR = "CASE WHEN full_retained = 1 THEN original_size ELSE summary_size END";
 function generateId() {
   return `recall_${randomBytes(8).toString("hex")}`;
@@ -22082,6 +22103,98 @@ function storeOutput(db, input) {
     delivered_size,
     handler
   };
+}
+var FOLDING_SUFFIX = ".folding";
+var STALE_FOLD_MS = 60000;
+function callLogPath(dbFile) {
+  return dbFile === "" || dbFile === ":memory:" ? null : `${dbFile}.calls`;
+}
+function callLogFiles(dbFile) {
+  const live = callLogPath(dbFile);
+  if (live === null)
+    return [];
+  const dir = dirname2(live);
+  const prefix = basename(live) + ".";
+  let claimed = [];
+  try {
+    claimed = readdirSync(dir).filter((n) => n.startsWith(prefix) && n.endsWith(FOLDING_SUFFIX)).map((n) => join2(dir, n));
+  } catch {}
+  return [...existsSync(live) ? [live] : [], ...claimed];
+}
+function parseCallLog(file) {
+  let text;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    return [];
+  }
+  const calls = [];
+  for (const line of text.split(`
+`)) {
+    if (line === "")
+      continue;
+    try {
+      const c = JSON.parse(line);
+      if (typeof c.project_key === "string" && typeof c.tool_name === "string" && typeof c.day === "string" && CALL_OUTCOMES.includes(c.outcome))
+        calls.push(c);
+    } catch {}
+  }
+  return calls;
+}
+function readCallLog(dbFile) {
+  return callLogFiles(dbFile).flatMap(parseCallLog);
+}
+function upsertCalls(db, calls) {
+  const stmt = db.prepare(`
+    INSERT INTO call_counts (project_key, day, tool_name, command_fp, outcome, calls, original_bytes, delivered_bytes)
+    VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+    ON CONFLICT (project_key, day, tool_name, command_fp, outcome) DO UPDATE SET
+      calls           = calls + 1,
+      original_bytes  = original_bytes + excluded.original_bytes,
+      delivered_bytes = delivered_bytes + excluded.delivered_bytes
+  `);
+  db.transaction(() => {
+    for (const c of calls) {
+      stmt.run(c.project_key, c.day, c.tool_name, c.command_fp ?? "", c.outcome, c.original_bytes, c.delivered_bytes);
+    }
+  })();
+}
+function foldCallLog(db) {
+  const live = callLogPath(db.filename);
+  if (live === null)
+    return;
+  const claims = [];
+  const claim2 = (file) => {
+    const to = `${live}.${process.pid}-${Date.now()}-${claims.length}${FOLDING_SUFFIX}`;
+    try {
+      renameSync(file, to);
+    } catch {
+      return;
+    }
+    claims.push(to);
+    try {
+      const now = new Date;
+      utimesSync(to, now, now);
+    } catch {}
+  };
+  if (existsSync(live))
+    claim2(live);
+  for (const file of callLogFiles(db.filename)) {
+    if (file === live || claims.includes(file))
+      continue;
+    try {
+      if (Date.now() - statSync(file).mtimeMs > STALE_FOLD_MS)
+        claim2(file);
+    } catch {}
+  }
+  for (const file of claims) {
+    try {
+      upsertCalls(db, parseCallLog(file));
+      unlinkSync(file);
+    } catch (e) {
+      log.debug(`foldCallLog failed on ${file}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
 }
 function hashContent(content) {
   return createHash2("sha256").update(content).digest("hex");
@@ -22281,6 +22394,8 @@ function forgetOutputs(db, project_key, options) {
   let deleted = 0;
   if (options.all) {
     deleted = countAndDelete(db, `project_key = ? ${pinGuard}`, [project_key]);
+    foldCallLog(db);
+    db.prepare(`DELETE FROM call_counts WHERE project_key = ?`).run(project_key);
   } else if (options.id) {
     deleted = countAndDelete(db, "id = ? AND project_key = ?", [options.id, project_key]);
   } else if (options.tool) {
@@ -22305,6 +22420,46 @@ function getSessionDays(db) {
   return db.prepare(`SELECT date FROM sessions ORDER BY date DESC`).all().map((r) => r.date);
 }
 // src/db/analytics.ts
+function hasCallCounts(db) {
+  return !!db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='call_counts'`).get();
+}
+function getCallBreakdown(db, project_key) {
+  const folded = db.prepare(`
+    SELECT tool_name, command_fp, outcome, day,
+           SUM(calls) AS calls, SUM(original_bytes) AS original_bytes, SUM(delivered_bytes) AS delivered_bytes
+    FROM call_counts
+    WHERE project_key = ?
+    GROUP BY tool_name, command_fp, outcome, day
+  `).all(project_key);
+  const pending = readCallLog(db.filename).filter((c) => c.project_key === project_key).map((c) => ({
+    tool_name: c.tool_name,
+    command_fp: c.command_fp ?? "",
+    outcome: c.outcome,
+    day: c.day,
+    calls: 1,
+    original_bytes: c.original_bytes,
+    delivered_bytes: c.delivered_bytes
+  }));
+  const raw = [...folded, ...pending];
+  const since = raw.map((r) => r.day).sort()[0] ?? null;
+  const rows = new Map;
+  for (const r of raw) {
+    const key = `${r.tool_name}\x00${r.command_fp}`;
+    const row = rows.get(key) ?? {
+      tool_name: r.tool_name,
+      command_fp: r.command_fp,
+      calls: Object.fromEntries(CALL_OUTCOMES.map((o) => [o, 0])),
+      original_bytes: 0,
+      delivered_bytes: 0
+    };
+    row.calls[r.outcome] = (row.calls[r.outcome] ?? 0) + r.calls;
+    row.original_bytes += r.original_bytes;
+    row.delivered_bytes += r.delivered_bytes;
+    rows.set(key, row);
+  }
+  const total = (r) => CALL_OUTCOMES.reduce((n, o) => n + r.calls[o], 0);
+  return { rows: [...rows.values()].sort((a, b) => total(b) - total(a)), since };
+}
 var SAMPLE_LIMIT = 10;
 var SAMPLE_PER_SESSION = 3;
 var DELIVERED_EXPR = "COALESCE(delivered_size, summary_size)";
@@ -23496,9 +23651,9 @@ var HAS_WELLFORMED = !!"".isWellFormed;
  */
 
 // src/config.ts
-import { readFileSync } from "fs";
+import { readFileSync as readFileSync2 } from "fs";
 import { homedir as homedir2 } from "os";
-import { join as join2 } from "path";
+import { join as join3 } from "path";
 var DEFAULT_PINNED_FRACTION = 0.5;
 var DEFAULTS = {
   store: {
@@ -23528,7 +23683,7 @@ var DEFAULTS = {
   }
 };
 function getConfigPath() {
-  return process.env.RECALL_CONFIG_PATH ?? join2(homedir2(), ".config", "mcp-recall", "config.toml");
+  return process.env.RECALL_CONFIG_PATH ?? join3(homedir2(), ".config", "mcp-recall", "config.toml");
 }
 function deepMerge(defaults, overrides) {
   const result = { ...defaults };
@@ -23548,7 +23703,7 @@ function loadConfig() {
   if (cached2)
     return cached2;
   try {
-    const raw = readFileSync(getConfigPath(), "utf8");
+    const raw = readFileSync2(getConfigPath(), "utf8");
     const { PartialConfigSchema: PartialConfigSchema2 } = (init_config_schema(), __toCommonJS(exports_config_schema));
     const result = PartialConfigSchema2.safeParse(parse6(raw));
     if (result.success) {
@@ -24039,10 +24194,21 @@ function toolSessionSummary(db, projectKey, args) {
   return lines.join(`
 `);
 }
+function callsSeenLine(db, projectKey) {
+  if (!hasCallCounts(db))
+    return null;
+  const { rows, since } = getCallBreakdown(db, projectKey);
+  if (since === null)
+    return null;
+  const n = (o) => rows.reduce((sum, r) => sum + r.calls[o], 0);
+  const seen = CALL_OUTCOMES.reduce((sum, o) => sum + n(o), 0);
+  return `  Calls seen:        ${seen} since ${since} (${n("summarized")} summarized, ${n("cached")} reused, ` + `${n("too_small")} passed through as too small to summarize, ${n("content_read")} short file reads passed through)`;
+}
 function toolStats(db, projectKey, args = {}) {
   const stats = getStats(db, projectKey);
   const sessionDays = getSessionDays(db);
-  if (stats.total_items === 0 && stats.note_items === 0) {
+  const callsSeen = callsSeenLine(db, projectKey);
+  if (stats.total_items === 0 && stats.note_items === 0 && callsSeen === null) {
     return `[recall: no data stored for this project yet]`;
   }
   const lines = [`Session stats for current project:`];
@@ -24067,7 +24233,9 @@ function toolStats(db, projectKey, args = {}) {
       lines.push(`  \u26A0 Pinned data is ${capPct.toFixed(0)}% of the ${maxPinnedMb} MB store.max_pinned_mb cap.` + ` New pins are refused once it is full \u2014 unpin or raise the cap to make room.`);
     }
   }
-  const breakdown = getToolBreakdown(db, projectKey);
+  if (callsSeen !== null)
+    lines.push(callsSeen);
+  const breakdown = getToolBreakdown(db, projectKey).filter((r) => r.tool_name !== "recall__note");
   if (breakdown.length > 0) {
     lines.push("", "By tool (sorted by original size):");
     const colW = Math.min(40, Math.max(...breakdown.map((r) => r.tool_name.length)));

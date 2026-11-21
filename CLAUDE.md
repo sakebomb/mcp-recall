@@ -88,6 +88,8 @@ plugins/mcp-recall/     Marketplace-installable plugin bundle
 
 That skip guard matters when reasoning about behaviour: output which does not compress usefully — a short, error-dense log, for instance — passes through untouched rather than being stored.
 
+Every call that reaches the store is counted by outcome in `call_counts` (#495), passed through or not. The hook appends each count to `<store>.calls`, never a SQLite write, since a commit cost 15-20 ms per call on Bun 1.4; the log is folded in by writes that happen anyway (storing a summary, session start, forget-all). Keep it that way: a counter that writes the store on every pass-through call brings that cost back.
+
 **Deletion safety**: `gc --force` is the only thing in the project that deletes user data. Its deleted-project rule is "recorded `project_path` gone but its parent present ⇒ project deleted", which is valid *only* for an absolute path — `dirname("")` and `dirname("bare-name")` are both `"."`, which always exists. Non-absolute paths are therefore never deleted on that inference; they fall through to the staleness rule as `unrooted-fresh`/`unrooted-stale` (#214), reclaimable only once untouched past `--stale-days`. An absolute path whose parent is also gone (unmounted volume) stays `unverifiable` and is never deleted at any age. `session-start` and `post-tool-use` only record a path that resolves to a real directory (`src/hooks/project-path.ts`); post-tool-use writes one only when the store has none, since a store can be opened with no `SessionStart` for it, as by a subagent in its own worktree (#488). When changing `src/gc/`, build a store containing the dangerous shapes and assert what survives; do not reason about it.
 
 **MCP server tools** (all `recall__` prefixed):

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { getDb, closeDb, storeOutput, pinOutput, recordAccess, recordSession, type StoreInput } from "../src/db/index";
+import { getDb, closeDb, storeOutput, pinOutput, recordAccess, recordSession, recordCall, type StoreInput } from "../src/db/index";
 import {
   toolRetrieve,
   toolSearch,
@@ -575,6 +575,25 @@ describe("MCP tool handlers", () => {
     it("returns no-data message when store is empty", () => {
       const result = toolStats(db, PROJECT_KEY);
       expect(result).toContain("no data stored");
+    });
+
+    it("reports counted calls for a project where every call passed through (#495)", () => {
+      const base = { project_key: PROJECT_KEY, tool_name: "Bash", command_fp: "echo", original_bytes: 10, delivered_bytes: 10 };
+      recordCall(db, { ...base, outcome: "too_small" });
+      recordCall(db, { ...base, outcome: "too_small" });
+      recordCall(db, { ...base, outcome: "content_read", command_fp: "cat" });
+      const result = toolStats(db, PROJECT_KEY);
+      expect(result).not.toContain("no data stored");
+      expect(result).toMatch(/Calls seen:\s+3 since \d{4}-\d{2}-\d{2} \(0 summarized, 0 reused, 2 passed through/);
+      expect(result).toContain("1 short file reads passed through");
+    });
+
+    it("leaves recall__note out of the per-tool table (#495)", () => {
+      storeOutput(db, makeInput({ tool_name: "Bash", original_size: 10000, summary: "x".repeat(100) }));
+      storeOutput(db, makeInput({ tool_name: "recall__note", original_size: 500, summary: "note" }));
+      const byTool = toolStats(db, PROJECT_KEY).split("By tool")[1]?.split("\n\n")[0] ?? "";
+      expect(byTool).toContain("Bash");
+      expect(byTool).not.toContain("recall__note");
     });
 
     it("shows item count, sizes, and reduction", () => {

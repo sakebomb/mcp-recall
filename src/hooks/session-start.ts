@@ -1,6 +1,6 @@
 import { loadConfig } from "../config";
 import { getProjectKey } from "../project-key";
-import { getDb, defaultDbPath, recordSession, pruneExpired } from "../db/index";
+import { getDb, defaultDbPath, recordSession, pruneExpired, foldCallLog } from "../db/index";
 import { recordProjectPath } from "./project-path";
 import { toolContext, CONTEXT_EMPTY_RESPONSE } from "../tools";
 import { storeFootprint, gcReminderText } from "../gc/index";
@@ -40,6 +40,8 @@ export function handleSessionStart(raw: string): void {
 
   const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
   recordSession(db, today);
+  // The session is writing the store anyway: fold the calls logged since (#495).
+  foldCallLog(db);
   pruneExpired(db, projectKey, config.store.expire_after_session_days);
 
   // Inject a compact context snapshot into Claude's initial context via stdout.

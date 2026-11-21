@@ -15,8 +15,72 @@ import type {
   SessionSample,
   SessionSummaryOptions,
   SessionSummaryData,
+  CallBreakdownRow,
+  CallOutcome,
 } from "./types";
-import { getSessionDays, EFFECTIVE_SIZE_EXPR } from "./queries";
+import { CALL_OUTCOMES } from "./types";
+import { getSessionDays, EFFECTIVE_SIZE_EXPR, readCallLog } from "./queries";
+
+/**
+ * Whether the store has the call_counts table (#495). A store no session has
+ * opened since that release lacks it, and a readonly reader cannot create it.
+ */
+export function hasCallCounts(db: Database): boolean {
+  return !!db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='call_counts'`).get();
+}
+
+/** Project keys with counted calls still in the store's log, not yet folded. */
+export function pendingCallKeys(db: Database): string[] {
+  return [...new Set(readCallLog(db.filename).map((c) => c.project_key))];
+}
+
+/**
+ * Counted calls per tool and Bash command family, most calls first, with the
+ * first day counted (null when nothing is). Folded counts and the lines still in
+ * the store's log both count, so a reader never has to write. Call
+ * {@link hasCallCounts} first.
+ */
+export function getCallBreakdown(
+  db: Database,
+  project_key: string,
+): { rows: CallBreakdownRow[]; since: string | null } {
+  const folded = db.prepare(`
+    SELECT tool_name, command_fp, outcome, day,
+           SUM(calls) AS calls, SUM(original_bytes) AS original_bytes, SUM(delivered_bytes) AS delivered_bytes
+    FROM call_counts
+    WHERE project_key = ?
+    GROUP BY tool_name, command_fp, outcome, day
+  `).all(project_key) as Array<{
+    tool_name: string; command_fp: string; outcome: CallOutcome; day: string;
+    calls: number; original_bytes: number; delivered_bytes: number;
+  }>;
+  const pending = readCallLog(db.filename)
+    .filter((c) => c.project_key === project_key)
+    .map((c) => ({
+      tool_name: c.tool_name, command_fp: c.command_fp ?? "", outcome: c.outcome, day: c.day,
+      calls: 1, original_bytes: c.original_bytes, delivered_bytes: c.delivered_bytes,
+    }));
+  const raw = [...folded, ...pending];
+  const since = raw.map((r) => r.day).sort()[0] ?? null;
+
+  const rows = new Map<string, CallBreakdownRow>();
+  for (const r of raw) {
+    const key = `${r.tool_name}\0${r.command_fp}`;
+    const row = rows.get(key) ?? {
+      tool_name: r.tool_name,
+      command_fp: r.command_fp,
+      calls: Object.fromEntries(CALL_OUTCOMES.map((o) => [o, 0])) as Record<CallOutcome, number>,
+      original_bytes: 0,
+      delivered_bytes: 0,
+    };
+    row.calls[r.outcome] = (row.calls[r.outcome] ?? 0) + r.calls;
+    row.original_bytes += r.original_bytes;
+    row.delivered_bytes += r.delivered_bytes;
+    rows.set(key, row);
+  }
+  const total = (r: CallBreakdownRow) => CALL_OUTCOMES.reduce((n, o) => n + r.calls[o], 0);
+  return { rows: [...rows.values()].sort((a, b) => total(b) - total(a)), since };
+}
 
 /** Most rows a {@link sampleBySession} sample returns, across all sessions. */
 export const SAMPLE_LIMIT = 10;

@@ -76,6 +76,22 @@ const SCHEMA = `
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+
+  -- What happened to each intercepted call, counted per day (#495): calls that
+  -- passed through leave no stored_outputs row, and eviction removes the rows of
+  -- those that did, so these counters are the only record of either. Tool name,
+  -- command family and sizes only, never content. command_fp is '' off Bash.
+  CREATE TABLE IF NOT EXISTS call_counts (
+    project_key     TEXT NOT NULL,
+    day             TEXT NOT NULL,
+    tool_name       TEXT NOT NULL,
+    command_fp      TEXT NOT NULL DEFAULT '',
+    outcome         TEXT NOT NULL,
+    calls           INTEGER NOT NULL DEFAULT 0,
+    original_bytes  INTEGER NOT NULL DEFAULT 0,
+    delivered_bytes INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (project_key, day, tool_name, command_fp, outcome)
+  );
 `;
 
 // Schema changes applied after initial creation, each idempotent: columns rely on

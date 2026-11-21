@@ -1,7 +1,10 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { randomBytes, createHash } from "crypto";
 import { log } from "../log";
-import type { StoredOutput, StoreInput, SearchOptions, ListOptions, ForgetOptions } from "./types";
+import { appendFileSync, existsSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, utimesSync } from "fs";
+import { basename, dirname, join } from "path";
+import type { StoredOutput, StoreInput, SearchOptions, ListOptions, ForgetOptions, CallRecord } from "./types";
+import { CALL_OUTCOMES } from "./types";
 import { chunkText, sanitizeFtsQuery } from "./chunking";
 import { truncateWal } from "./schema";
 
@@ -132,6 +135,132 @@ export function storeOutput(db: Database, input: StoreInput): StoredOutput {
 }
 
 /** SHA-256 of tool output content, used as a path-independent dedup key. */
+// ── Call counters (#495) ──────────────────────────────────────────────────────
+//
+// A SQLite commit costs a pass-through call 15-20 ms on Bun 1.4 (a bare
+// open-write-exit takes 24 ms there against 9 ms on 1.3). So the hook appends
+// each call to a log beside the store, `<store>.calls`, and the log is folded
+// into call_counts by writes that happen anyway: storing a summary, a session
+// starting, forget-all. Readers add the unfolded lines, so counts are current.
+
+/** A counted call with the UTC day it happened. */
+export interface PendingCall extends CallRecord {
+  day: string;
+}
+
+/** A fold claims the log by renaming it to `<log>.<unique>.folding` first. */
+const FOLDING_SUFFIX = ".folding";
+/** A claimed log this old belongs to a fold that died before deleting it. */
+const STALE_FOLD_MS = 60_000;
+
+/** The pending-count log beside a store file, or null for an in-memory store. */
+export function callLogPath(dbFile: string): string | null {
+  return dbFile === "" || dbFile === ":memory:" ? null : `${dbFile}.calls`;
+}
+
+/** The log and any claimed copies of it: every file holding unfolded counts. */
+export function callLogFiles(dbFile: string): string[] {
+  const live = callLogPath(dbFile);
+  if (live === null) return [];
+  const dir = dirname(live);
+  const prefix = basename(live) + ".";
+  let claimed: string[] = [];
+  try {
+    claimed = readdirSync(dir).filter((n) => n.startsWith(prefix) && n.endsWith(FOLDING_SUFFIX)).map((n) => join(dir, n));
+  } catch { /* no directory: nothing pending */ }
+  return [...(existsSync(live) ? [live] : []), ...claimed];
+}
+
+function parseCallLog(file: string): PendingCall[] {
+  let text: string;
+  try { text = readFileSync(file, "utf8"); } catch { return []; }
+  const calls: PendingCall[] = [];
+  for (const line of text.split("\n")) {
+    if (line === "") continue;
+    try {
+      const c = JSON.parse(line) as PendingCall;
+      if (typeof c.project_key === "string" && typeof c.tool_name === "string" && typeof c.day === "string" &&
+          (CALL_OUTCOMES as readonly string[]).includes(c.outcome)) calls.push(c);
+    } catch { /* a torn or foreign line: skip it, never fail the reader */ }
+  }
+  return calls;
+}
+
+/** Every counted call not yet folded into call_counts, for a reader. */
+export function readCallLog(dbFile: string): PendingCall[] {
+  return callLogFiles(dbFile).flatMap(parseCallLog);
+}
+
+function upsertCalls(db: Database, calls: PendingCall[]): void {
+  const stmt = db.prepare(`
+    INSERT INTO call_counts (project_key, day, tool_name, command_fp, outcome, calls, original_bytes, delivered_bytes)
+    VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+    ON CONFLICT (project_key, day, tool_name, command_fp, outcome) DO UPDATE SET
+      calls           = calls + 1,
+      original_bytes  = original_bytes + excluded.original_bytes,
+      delivered_bytes = delivered_bytes + excluded.delivered_bytes
+  `);
+  db.transaction(() => {
+    for (const c of calls) {
+      stmt.run(c.project_key, c.day, c.tool_name, c.command_fp ?? "", c.outcome, c.original_bytes, c.delivered_bytes);
+    }
+  })();
+}
+
+/**
+ * Counts one intercepted call under today's UTC date: one appended line, no
+ * SQLite write. An in-memory store has no file to log beside, so it is
+ * written directly. Never throws: a counter must not cost the user the summary.
+ */
+export function recordCall(db: Database, call: CallRecord): void {
+  try {
+    const pending: PendingCall = { ...call, day: new Date().toISOString().slice(0, 10) };
+    const log_ = callLogPath(db.filename);
+    if (log_ === null) upsertCalls(db, [pending]);
+    else appendFileSync(log_, JSON.stringify(pending) + "\n");
+  } catch (e) {
+    log.debug(`recordCall failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/**
+ * Moves the store's logged counts into call_counts. Each file is claimed by an
+ * atomic rename before it is read, so two folds never count a line twice; a
+ * hook appending meanwhile starts a fresh log. Call it where the store is being
+ * written anyway. Never throws.
+ *
+ * The counts are best effort, never exact: an append already open on the log
+ * when it is claimed can land after the read and be lost; a crash between the
+ * upsert and the unlink counts that file again once its claim goes stale; and a
+ * reader between those two steps sees the file's lines twice, briefly.
+ */
+export function foldCallLog(db: Database): void {
+  const live = callLogPath(db.filename);
+  if (live === null) return;
+  const claims: string[] = [];
+  const claim = (file: string): void => {
+    const to = `${live}.${process.pid}-${Date.now()}-${claims.length}${FOLDING_SUFFIX}`;
+    try { renameSync(file, to); } catch { return; /* gone, or another fold took it */ }
+    claims.push(to);
+    // A rename keeps the log's last-append mtime, so a quiet project's log would
+    // look stale the moment it is claimed and another fold could take it over.
+    try { const now = new Date(); utimesSync(to, now, now); } catch { /* best effort */ }
+  };
+  if (existsSync(live)) claim(live);
+  for (const file of callLogFiles(db.filename)) {
+    if (file === live || claims.includes(file)) continue;
+    try { if (Date.now() - statSync(file).mtimeMs > STALE_FOLD_MS) claim(file); } catch { /* gone */ }
+  }
+  for (const file of claims) {
+    try {
+      upsertCalls(db, parseCallLog(file));
+      unlinkSync(file);
+    } catch (e) {
+      log.debug(`foldCallLog failed on ${file}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+}
+
 export function hashContent(content: string): string {
   return createHash("sha256").update(content).digest("hex");
 }
@@ -609,6 +738,10 @@ export function forgetOutputs(
 
   if (options.all) {
     deleted = countAndDelete(db, `project_key = ? ${pinGuard}`, [project_key]);
+    // "Forget everything" covers the call counters too (#495); they hold no content.
+    // Fold first, so counts still in the log are not left behind.
+    foldCallLog(db);
+    db.prepare(`DELETE FROM call_counts WHERE project_key = ?`).run(project_key);
   } else if (options.id) {
     // Single-item delete: ignore pin guard (explicit ID targets are intentional)
     deleted = countAndDelete(db, "id = ? AND project_key = ?", [options.id, project_key]);

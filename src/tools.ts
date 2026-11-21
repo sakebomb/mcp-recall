@@ -21,6 +21,10 @@ import {
   foreignKeyBreakdown,
   getStats,
   getToolBreakdown,
+  hasCallCounts,
+  getCallBreakdown,
+  CALL_OUTCOMES,
+  type CallOutcome,
   getBashCommandBreakdown,
   getHandlerBreakdown,
   countUnrecordedHandler,
@@ -670,6 +674,22 @@ export interface StatsArgs {
   stale_days?: number;
 }
 
+/**
+ * One line on every intercepted call since counting began, passed through or
+ * not (#495), or null when none is counted.
+ */
+function callsSeenLine(db: Database, projectKey: string): string | null {
+  if (!hasCallCounts(db)) return null;
+  const { rows, since } = getCallBreakdown(db, projectKey);
+  if (since === null) return null;
+  const n = (o: CallOutcome) => rows.reduce((sum, r) => sum + r.calls[o], 0);
+  const seen = CALL_OUTCOMES.reduce((sum, o) => sum + n(o), 0);
+  return (
+    `  Calls seen:        ${seen} since ${since} (${n("summarized")} summarized, ${n("cached")} reused, ` +
+    `${n("too_small")} passed through as too small to summarize, ${n("content_read")} short file reads passed through)`
+  );
+}
+
 export function toolStats(
   db: Database,
   projectKey: string,
@@ -677,8 +697,10 @@ export function toolStats(
 ): string {
   const stats = getStats(db, projectKey);
   const sessionDays = getSessionDays(db);
+  const callsSeen = callsSeenLine(db, projectKey);
 
-  if (stats.total_items === 0 && stats.note_items === 0) {
+  // A project whose every call passed through has counted calls and no rows (#495).
+  if (stats.total_items === 0 && stats.note_items === 0 && callsSeen === null) {
     return `[recall: no data stored for this project yet]`;
   }
 
@@ -726,8 +748,11 @@ export function toolStats(
     }
   }
 
-  // Per-tool breakdown
-  const breakdown = getToolBreakdown(db, projectKey);
+  if (callsSeen !== null) lines.push(callsSeen);
+
+  // Per-tool breakdown. recall__note rows are memory, not compressed output: a
+  // note's "reduction" would be meaningless here.
+  const breakdown = getToolBreakdown(db, projectKey).filter((r) => r.tool_name !== "recall__note");
   if (breakdown.length > 0) {
     lines.push("", "By tool (sorted by original size):");
     const colW = Math.min(40, Math.max(...breakdown.map((r) => r.tool_name.length)));

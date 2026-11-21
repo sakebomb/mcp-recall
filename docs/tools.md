@@ -140,9 +140,15 @@ chose, so a dedicated handler that hands an unparseable output to the shell
 summary still counts as itself. `mcp-recall discover` ranks the items that
 went to a fallback handler.
 
-`mcp-recall stats` prints the same headline totals from the command line, with a
-per-tool table that leaves `recall__note` out, for this project or every store
-with `--all`, without asking Claude.
+A `Calls seen` line counts every intercepted call since counting began, including
+the ones that passed through and left no stored item: how many were summarized,
+reused from an earlier summary, too small to summarize, or short file reads passed
+through whole. The per-tool table leaves `recall__note` out, since a note is not
+compressed output.
+
+`mcp-recall stats` prints the same totals from the command line, for this project
+or every store with `--all`, without asking Claude. It also breaks the counted
+calls down by tool and Bash command family.
 
 ```
 recall__stats()
