@@ -16,6 +16,7 @@ import type { McpTool } from "./client";
 import { listMcpToolsHttp } from "./http-client";
 import { generateProfile } from "./generate";
 import { clearProfileCache } from "../profiles/loader";
+import { claudeJsonPath, tildePath } from "../claude-paths";
 
 interface McpServerConfig {
   command?: string;
@@ -32,8 +33,7 @@ function userProfilesDir(): string {
 }
 
 function readClaudeJson(): Record<string, McpServerConfig> {
-  const path = join(homedir(), ".claude.json");
-  const raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+  const raw = JSON.parse(readFileSync(claudeJsonPath(), "utf8")) as Record<string, unknown>;
   return (raw["mcpServers"] as Record<string, McpServerConfig>) ?? {};
 }
 
@@ -45,7 +45,7 @@ export async function handleLearnCommand(args: string[]): Promise<void> {
   try {
     servers = readClaudeJson();
   } catch {
-    console.error("Could not read ~/.claude.json");
+    console.error(`Could not read ${tildePath(claudeJsonPath())}`);
     process.exit(1);
   }
 

@@ -12129,10 +12129,27 @@ var init_cmd_local = __esm(() => {
   init_shared();
 });
 
+// src/claude-paths.ts
+import os from "os";
+import path from "path";
+function configDirOverride() {
+  return process.env.CLAUDE_CONFIG_DIR || undefined;
+}
+function claudeConfigDir() {
+  return configDirOverride() ?? path.join(os.homedir(), ".claude");
+}
+function claudeJsonPath() {
+  const dir = configDirOverride();
+  return dir ? path.join(dir, ".claude.json") : path.join(os.homedir(), ".claude.json");
+}
+function tildePath(p) {
+  const home = os.homedir();
+  return p === home || p.startsWith(home + path.sep) ? "~" + p.slice(home.length) : p;
+}
+var init_claude_paths = () => {};
+
 // src/profiles/cmd-catalog.ts
 import { readFileSync as readFileSync8 } from "fs";
-import { join as join8 } from "path";
-import { homedir as homedir6 } from "os";
 async function cmdInstall(args) {
   const skipVerify = args.includes("--skip-verify");
   const nameOrId = args.find((a) => !a.startsWith("-"));
@@ -12219,16 +12236,17 @@ ${installCount} profile(s) installed (${alreadyCount} already installed, ${entri
     return;
   }
   let serverKeys = [];
+  const shownJson = tildePath(claudeJsonPath());
   try {
-    const raw = JSON.parse(readFileSync8(join8(homedir6(), ".claude.json"), "utf8"));
+    const raw = JSON.parse(readFileSync8(claudeJsonPath(), "utf8"));
     const mcpServers = raw["mcpServers"];
     serverKeys = Object.keys(mcpServers ?? {}).filter((k) => k !== "recall");
   } catch {
-    console.log("Could not read ~/.claude.json \u2014 no MCPs detected.");
+    console.log(`Could not read ${shownJson} \u2014 no MCPs detected.`);
     return;
   }
   if (serverKeys.length === 0) {
-    console.log("No MCP servers found in ~/.claude.json (other than recall).");
+    console.log(`No MCP servers found in ${shownJson} (other than recall).`);
     return;
   }
   console.log(`Detected MCPs: ${serverKeys.join(", ")}`);
@@ -12336,6 +12354,7 @@ ${entries.length} available, ${installedCount} installed
 `);
 }
 var init_cmd_catalog = __esm(() => {
+  init_claude_paths();
   init_loader();
   init_shared();
 });
@@ -12868,9 +12887,9 @@ function suggestItemsPaths(serverKey, tools) {
     ["node", "nodes"],
     ["message", "messages"]
   ];
-  for (const [keyword, path] of keywords) {
+  for (const [keyword, path2] of keywords) {
     if (allNames.includes(keyword) || serverKey.includes(keyword))
-      paths.push(path);
+      paths.push(path2);
   }
   for (const fb of ["items", "results", "data", "nodes"]) {
     if (!paths.includes(fb))
@@ -12953,14 +12972,13 @@ __export(exports_learn, {
   handleLearnCommand: () => handleLearnCommand
 });
 import { readFileSync as readFileSync10, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3 } from "fs";
-import { join as join9 } from "path";
-import { homedir as homedir7 } from "os";
+import { join as join8 } from "path";
+import { homedir as homedir6 } from "os";
 function userProfilesDir() {
-  return process.env.RECALL_USER_PROFILES_PATH ?? join9(homedir7(), ".config", "mcp-recall", "profiles");
+  return process.env.RECALL_USER_PROFILES_PATH ?? join8(homedir6(), ".config", "mcp-recall", "profiles");
 }
 function readClaudeJson() {
-  const path = join9(homedir7(), ".claude.json");
-  const raw = JSON.parse(readFileSync10(path, "utf8"));
+  const raw = JSON.parse(readFileSync10(claudeJsonPath(), "utf8"));
   return raw["mcpServers"] ?? {};
 }
 async function handleLearnCommand(args) {
@@ -12970,7 +12988,7 @@ async function handleLearnCommand(args) {
   try {
     servers = readClaudeJson();
   } catch {
-    console.error("Could not read ~/.claude.json");
+    console.error(`Could not read ${tildePath(claudeJsonPath())}`);
     process.exit(1);
   }
   const candidates = Object.entries(servers).filter(([key, cfg]) => {
@@ -13022,9 +13040,9 @@ Learning from ${candidates.length} MCP server(s)\u2026
       console.log(toml);
       continue;
     }
-    const profileDir = join9(outputDir, `mcp__${key.replace(/-/g, "_")}`);
+    const profileDir = join8(outputDir, `mcp__${key.replace(/-/g, "_")}`);
     mkdirSync3(profileDir, { recursive: true });
-    const filePath = join9(profileDir, "default.toml");
+    const filePath = join8(profileDir, "default.toml");
     writeFileSync3(filePath, toml);
     console.log(`     \u2192 ${filePath}`);
     written++;
@@ -13047,6 +13065,7 @@ var init_learn = __esm(() => {
   init_http_client();
   init_generate();
   init_loader();
+  init_claude_paths();
 });
 
 // src/import/index.ts
@@ -13244,7 +13263,7 @@ Next steps:`);
     console.log("  recall__list_stored      \u2014 browse imported items");
   }
 }
-var LARGE_FILE_BYTES, EMPTY_EXPORT_SENTINEL = "[recall: no items to export]", StoredOutputSchema, MAX_REPORTED_ISSUES = 5, formatIssue = (path, message) => `[${path.map(String).join(".")}] ${message}`;
+var LARGE_FILE_BYTES, EMPTY_EXPORT_SENTINEL = "[recall: no items to export]", StoredOutputSchema, MAX_REPORTED_ISSUES = 5, formatIssue = (path2, message) => `[${path2.map(String).join(".")}] ${message}`;
 var init_import = __esm(() => {
   init_zod();
   init_schema();
@@ -13466,16 +13485,16 @@ var init_pi_extension = () => {};
 // src/agents/pi.ts
 import { existsSync as existsSync3 } from "fs";
 import { mkdir, readFile, rm, writeFile } from "fs/promises";
-import os from "os";
-import path from "path";
+import os2 from "os";
+import path2 from "path";
 function defaultPiDir() {
-  return process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
+  return process.env.PI_CODING_AGENT_DIR || path2.join(os2.homedir(), ".pi", "agent");
 }
 function piDetected(piDir) {
   return existsSync3(piDir);
 }
 function piExtensionDir(piDir) {
-  return path.join(piDir, "extensions", "mcp-recall");
+  return path2.join(piDir, "extensions", "mcp-recall");
 }
 function piLaunch(cliWords, server) {
   return { cli: cliWords, server: { command: server.command, args: server.args } };
@@ -13489,8 +13508,8 @@ async function readText(p) {
 }
 async function installPi(piDir, launch, dryRun = false) {
   const dir = piExtensionDir(piDir);
-  const indexPath = path.join(dir, "index.ts");
-  const launchPath = path.join(dir, "launch.json");
+  const indexPath = path2.join(dir, "index.ts");
+  const launchPath = path2.join(dir, "launch.json");
   const launchJson = JSON.stringify(launch, null, 2) + `
 `;
   const [oldIndex, oldLaunch] = await Promise.all([readText(indexPath), readText(launchPath)]);
@@ -13513,10 +13532,10 @@ async function uninstallPi(piDir, dryRun = false) {
 }
 async function piStatus(piDir) {
   const dir = piExtensionDir(piDir);
-  const index = await readText(path.join(dir, "index.ts"));
+  const index = await readText(path2.join(dir, "index.ts"));
   let launch = null;
   try {
-    const parsed = JSON.parse(await readText(path.join(dir, "launch.json")) ?? "");
+    const parsed = JSON.parse(await readText(path2.join(dir, "launch.json")) ?? "");
     if (Array.isArray(parsed.cli) && typeof parsed.server?.command === "string")
       launch = parsed;
   } catch {}
@@ -13779,19 +13798,19 @@ var init_opencode_plugin = () => {};
 // src/agents/opencode.ts
 import { existsSync as existsSync4 } from "fs";
 import { mkdir as mkdir2, readFile as readFile2, rm as rm2, writeFile as writeFile2 } from "fs/promises";
-import os2 from "os";
-import path2 from "path";
+import os3 from "os";
+import path3 from "path";
 function defaultOpencodeDir() {
-  return path2.join(process.env.XDG_CONFIG_HOME || path2.join(os2.homedir(), ".config"), "opencode");
+  return path3.join(process.env.XDG_CONFIG_HOME || path3.join(os3.homedir(), ".config"), "opencode");
 }
 function opencodeDetected(dir) {
   return existsSync4(dir);
 }
 function opencodePluginPath(dir) {
-  return path2.join(dir, "plugins", "mcp-recall.ts");
+  return path3.join(dir, "plugins", "mcp-recall.ts");
 }
 function launchPath(dir) {
-  return path2.join(dir, "plugins", "mcp-recall.launch.json");
+  return path3.join(dir, "plugins", "mcp-recall.launch.json");
 }
 async function readText2(p) {
   try {
@@ -13807,7 +13826,7 @@ async function installOpencode(dir, launch, dryRun = false) {
   if (oldPlugin === OPENCODE_PLUGIN_SOURCE && oldLaunch === launchJson)
     return "present";
   if (!dryRun) {
-    await mkdir2(path2.join(dir, "plugins"), { recursive: true });
+    await mkdir2(path3.join(dir, "plugins"), { recursive: true });
     await writeFile2(opencodePluginPath(dir), OPENCODE_PLUGIN_SOURCE);
     await writeFile2(launchPath(dir), launchJson);
   }
@@ -13879,22 +13898,22 @@ __export(exports_install, {
 });
 import { existsSync as existsSync5 } from "fs";
 import { mkdir as mkdir3, rename, readFile as readFile3, realpath, readlink, stat, chmod, rm as rm3, writeFile as writeFile3 } from "fs/promises";
-import path3 from "path";
-import os3 from "os";
+import path4 from "path";
+import os4 from "os";
 function isEnoent(e) {
   return typeof e === "object" && e !== null && e.code === "ENOENT";
 }
 function defaultClaudeJsonPath() {
-  return path3.join(os3.homedir(), ".claude.json");
+  return claudeJsonPath();
 }
 function defaultSettingsPath() {
-  return path3.join(os3.homedir(), ".claude", "settings.json");
+  return path4.join(claudeConfigDir(), "settings.json");
 }
 function defaultClaudeMdPath() {
-  return path3.join(os3.homedir(), ".claude", "CLAUDE.md");
+  return path4.join(claudeConfigDir(), "CLAUDE.md");
 }
 function defaultPluginsPath() {
-  return path3.join(os3.homedir(), ".claude", "plugins", "installed_plugins.json");
+  return path4.join(claudeConfigDir(), "plugins", "installed_plugins.json");
 }
 function isBunfsPath(modulePath) {
   return /^(\/\$bunfs\/|[A-Za-z]:[\\/]~BUN[\\/])/.test(modulePath);
@@ -13948,9 +13967,9 @@ function detectLaunch(standalone = isStandaloneBinary()) {
     };
   }
   const isBuilt = import.meta.path.endsWith(".js");
-  const distDir = isBuilt ? import.meta.dir : path3.resolve(import.meta.dir, "../../plugins/mcp-recall/dist");
-  const serverJs = path3.join(distDir, "server.js");
-  const cliJs = path3.join(distDir, "cli.js");
+  const distDir = isBuilt ? import.meta.dir : path4.resolve(import.meta.dir, "../../plugins/mcp-recall/dist");
+  const serverJs = path4.join(distDir, "server.js");
+  const cliJs = path4.join(distDir, "cli.js");
   return {
     cli: `bun ${shellWord(cliJs)}`,
     server: { type: "stdio", command: "bun", args: [serverJs] },
@@ -13981,7 +14000,7 @@ async function writeTarget(filePath) {
   let target = filePath;
   for (let hop = 0;hop < MAX_LINK_HOPS; hop++) {
     try {
-      target = path3.resolve(path3.dirname(target), await readlink(target));
+      target = path4.resolve(path4.dirname(target), await readlink(target));
     } catch {
       return target;
     }
@@ -13990,7 +14009,7 @@ async function writeTarget(filePath) {
 }
 async function writeTextFile(filePath, content) {
   const target = await writeTarget(filePath);
-  await mkdir3(path3.dirname(target), { recursive: true });
+  await mkdir3(path4.dirname(target), { recursive: true });
   const mode = await stat(target).then((s) => s.mode & 4095, () => {
     return;
   });
@@ -14189,7 +14208,7 @@ function piLaunchOf(launch) {
 async function installCommand(opts = {}) {
   const {
     dryRun = false,
-    claudeJsonPath = defaultClaudeJsonPath(),
+    claudeJsonPath: claudeJsonPath2 = defaultClaudeJsonPath(),
     settingsPath = defaultSettingsPath(),
     claudeMdPath = defaultClaudeMdPath(),
     launch = detectLaunch(),
@@ -14218,7 +14237,7 @@ async function installCommand(opts = {}) {
   }
   let anyChange = false;
   if (agents.includes("claude")) {
-    anyChange = await installClaude(claudeJsonPath, settingsPath, claudeMdPath, launch, dryRun) || anyChange;
+    anyChange = await installClaude(claudeJsonPath2, settingsPath, claudeMdPath, launch, dryRun) || anyChange;
   }
   let printed = agents.includes("claude");
   for (const a of fileAgents(piDir, opencodeDir).filter((f) => agents.includes(f.agent))) {
@@ -14252,9 +14271,9 @@ Next steps:`);
     console.log(`    ${BOLD}mcp-recall completions fish > ~/.config/fish/completions/mcp-recall.fish${RESET}  ${DIM}# fish${RESET}`);
   }
 }
-async function installClaude(claudeJsonPath, settingsPath, claudeMdPath, launch, dryRun) {
+async function installClaude(claudeJsonPath2, settingsPath, claudeMdPath, launch, dryRun) {
   let anyChange = false;
-  const claudeJson = await readJsonFile(claudeJsonPath);
+  const claudeJson = await readJsonFile(claudeJsonPath2);
   const mcpServers = claudeJson["mcpServers"] ?? {};
   const newServer = launch.server;
   const existing = mcpServers["recall"];
@@ -14262,16 +14281,16 @@ async function installClaude(claudeJsonPath, settingsPath, claudeMdPath, launch,
   if (!existing) {
     if (!dryRun) {
       claudeJson["mcpServers"] = { ...mcpServers, recall: newServer };
-      await writeJsonFile(claudeJsonPath, claudeJson);
+      await writeJsonFile(claudeJsonPath2, claudeJson);
     }
-    console.log(`${GREEN}\u2713${RESET} MCP server registered     ${DIM}(${claudeJsonPath})${RESET}`);
+    console.log(`${GREEN}\u2713${RESET} MCP server registered     ${DIM}(${claudeJsonPath2})${RESET}`);
     anyChange = true;
   } else if (!sameServer) {
     if (!dryRun) {
       claudeJson["mcpServers"] = { ...mcpServers, recall: { ...existing, ...newServer } };
-      await writeJsonFile(claudeJsonPath, claudeJson);
+      await writeJsonFile(claudeJsonPath2, claudeJson);
     }
-    console.log(`${YELLOW}\u21BA${RESET} MCP server path updated    ${DIM}(${claudeJsonPath})${RESET}`);
+    console.log(`${YELLOW}\u21BA${RESET} MCP server path updated    ${DIM}(${claudeJsonPath2})${RESET}`);
     anyChange = true;
   } else {
     console.log(`${DIM}\u2139 MCP server already registered${RESET}`);
@@ -14324,7 +14343,7 @@ Restart Claude Code to activate mcp-recall.`);
 }
 async function uninstallCommand(opts = {}) {
   const {
-    claudeJsonPath = defaultClaudeJsonPath(),
+    claudeJsonPath: claudeJsonPath2 = defaultClaudeJsonPath(),
     settingsPath = defaultSettingsPath(),
     claudeMdPath = defaultClaudeMdPath(),
     launch = detectLaunch(),
@@ -14337,7 +14356,7 @@ async function uninstallCommand(opts = {}) {
     console.log(`${DIM}dry run \u2014 no files will be modified${RESET}
 `);
   if (agents.includes("claude"))
-    await uninstallClaude(claudeJsonPath, settingsPath, claudeMdPath, launch, dryRun);
+    await uninstallClaude(claudeJsonPath2, settingsPath, claudeMdPath, launch, dryRun);
   let printed = agents.includes("claude");
   for (const a of fileAgents(piDir, opencodeDir)) {
     if (!agents.includes(a.agent) || !(opts.agents?.includes(a.agent) || a.detected))
@@ -14355,17 +14374,17 @@ ${a.restart} to deactivate mcp-recall.`);
     }
   }
 }
-async function uninstallClaude(claudeJsonPath, settingsPath, claudeMdPath, launch, dryRun) {
+async function uninstallClaude(claudeJsonPath2, settingsPath, claudeMdPath, launch, dryRun) {
   let anyChange = false;
-  const claudeJson = await readJsonFile(claudeJsonPath);
+  const claudeJson = await readJsonFile(claudeJsonPath2);
   const mcpServers = claudeJson["mcpServers"];
   const ours = recallHooks(knownClis(launch, mcpServers?.["recall"]));
   if (mcpServers?.["recall"]) {
     if (!dryRun) {
       delete mcpServers["recall"];
-      await writeJsonFile(claudeJsonPath, claudeJson);
+      await writeJsonFile(claudeJsonPath2, claudeJson);
     }
-    console.log(`${GREEN}\u2713${RESET} Removed mcpServers.recall  ${DIM}(${claudeJsonPath})${RESET}`);
+    console.log(`${GREEN}\u2713${RESET} Removed mcpServers.recall  ${DIM}(${claudeJsonPath2})${RESET}`);
     anyChange = true;
   } else {
     console.log(`${DIM}\u2139 mcpServers.recall not present${RESET}`);
@@ -14418,7 +14437,7 @@ function describeLaunch(command) {
   return typeof command === "string" && !isBunProgram(command) ? `the binary at ${command}` : "the npm install";
 }
 function locate(program) {
-  if (path3.isAbsolute(program) || path3.win32.isAbsolute(program)) {
+  if (path4.isAbsolute(program) || path4.win32.isAbsolute(program)) {
     return { path: program, exists: existsSync5(program) };
   }
   const found = Bun.which(program);
@@ -14436,7 +14455,7 @@ function registeredFiles(launches) {
     if (isBunProgram(program)) {
       add("bun", program);
       if (script)
-        add(path3.basename(script), script);
+        add(path4.basename(script), script);
     } else {
       add("binary", program);
     }
@@ -14447,7 +14466,7 @@ async function printFileAgentStatus(a, launch) {
   const st = await a.status();
   if (!a.detected && !st.installed)
     return;
-  const shown = a.location.replace(os3.homedir(), "~");
+  const shown = a.location.replace(os4.homedir(), "~");
   if (!st.installed && st.launch === null) {
     console.log(`
 ${a.name}: ${BOLD}${YELLOW}detected, not set up${RESET}
@@ -14499,15 +14518,15 @@ async function readPluginRegistry(filePath) {
     return {};
   }
 }
-function printPluginStatus(plugin, claudeMdOk, cliRegistered) {
+function printPluginStatus(plugin, claudeMdOk, cliRegistered, claudeMdPath) {
   if (!plugin.enabled) {
     console.log(`
   Claude Code plugin ${plugin.key}: disabled`);
     return;
   }
   const files = [
-    { label: "dist/server.js", ...locate(path3.join(plugin.installPath, "dist", "server.js")) },
-    { label: "bin/recall", ...locate(path3.join(plugin.installPath, "bin", "recall")) },
+    { label: "dist/server.js", ...locate(path4.join(plugin.installPath, "dist", "server.js")) },
+    { label: "bin/recall", ...locate(path4.join(plugin.installPath, "bin", "recall")) },
     { label: "bun", ...locate("bun") }
   ];
   const filesOk = files.every((f) => f.exists);
@@ -14519,7 +14538,7 @@ Installation: ${BOLD}${label}${RESET}
 `);
   }
   console.log(`${cliRegistered ? `
-` : ""}  Claude Code plugin ${plugin.key}  ${DIM}${plugin.installPath.replace(os3.homedir(), "~")}${RESET}`);
+` : ""}  Claude Code plugin ${plugin.key}  ${DIM}${plugin.installPath.replace(os4.homedir(), "~")}${RESET}`);
   for (const f of files)
     console.log(`    ${tick(f.exists)} ${f.label} ${DIM}${f.path}${RESET}`);
   if (cliRegistered) {
@@ -14529,7 +14548,7 @@ Installation: ${BOLD}${label}${RESET}
     console.log(`    ${BOLD}claude plugin uninstall ${plugin.key}${RESET}   ${DIM}# removes the plugin${RESET}`);
     return;
   }
-  console.log(`  ${pad30("~/.claude/CLAUDE.md")}  ${tick(claudeMdOk)} mcp-recall instructions`);
+  console.log(`  ${pad30(tildePath(claudeMdPath))}  ${tick(claudeMdOk)} mcp-recall instructions`);
   if (!filesOk)
     console.log(`
   What is marked ${RED}\u2717${RESET} is gone: run ${BOLD}claude plugin update ${plugin.key}${RESET}`);
@@ -14548,10 +14567,10 @@ function printCliStatus(c) {
   console.log(`
 Installation: ${BOLD}${label}${RESET}
 `);
-  console.log(`  ${pad30("~/.claude.json")}  ${tick(c.serverRegistered)} mcpServers.recall`);
-  console.log(`  ${pad30("~/.claude/settings.json")}  ${tick(c.ssRegistered)} SessionStart hook`);
+  console.log(`  ${pad30(tildePath(c.paths.claudeJson))}  ${tick(c.serverRegistered)} mcpServers.recall`);
+  console.log(`  ${pad30(tildePath(c.paths.settings))}  ${tick(c.ssRegistered)} SessionStart hook`);
   console.log(`  ${pad30("")}  ${tick(c.ptuRegistered)} PostToolUse hook`);
-  console.log(`  ${pad30("~/.claude/CLAUDE.md")}  ${tick(c.claudeMdOk)} mcp-recall instructions`);
+  console.log(`  ${pad30(tildePath(c.paths.claudeMd))}  ${tick(c.claudeMdOk)} mcp-recall instructions`);
   if (c.files.length > 0) {
     console.log("");
     console.log(`  ${pad30("Registered launch")}`);
@@ -14578,7 +14597,7 @@ Installation: ${BOLD}${label}${RESET}
 }
 async function statusCommand(opts = {}) {
   const {
-    claudeJsonPath = defaultClaudeJsonPath(),
+    claudeJsonPath: claudeJsonPath2 = defaultClaudeJsonPath(),
     settingsPath = defaultSettingsPath(),
     claudeMdPath = defaultClaudeMdPath(),
     pluginsPath = defaultPluginsPath(),
@@ -14586,7 +14605,7 @@ async function statusCommand(opts = {}) {
     piDir = defaultPiDir(),
     opencodeDir = defaultOpencodeDir()
   } = opts;
-  const claudeJson = await readJsonFile(claudeJsonPath);
+  const claudeJson = await readJsonFile(claudeJsonPath2);
   const settings = await readJsonFile(settingsPath);
   const hooks = settings["hooks"] ?? {};
   const mcpServers = claudeJson["mcpServers"];
@@ -14607,15 +14626,25 @@ async function statusCommand(opts = {}) {
     ...ourHookCommands(hooks["PostToolUse"], ours.PostToolUse).map(shellWords)
   ]);
   const elsewhere = server !== undefined && !runsServer(server, launch.server);
-  const cli = { serverRegistered, ssRegistered, ptuRegistered, claudeMdOk, files, elsewhere, server, launch };
+  const cli = {
+    serverRegistered,
+    ssRegistered,
+    ptuRegistered,
+    claudeMdOk,
+    files,
+    elsewhere,
+    server,
+    launch,
+    paths: { claudeJson: claudeJsonPath2, settings: settingsPath, claudeMd: claudeMdPath }
+  };
   const plugin = findPluginInstall(await readPluginRegistry(pluginsPath), settings);
   const cliRegistered = serverRegistered || ssRegistered || ptuRegistered;
   if (plugin?.enabled && !cliRegistered) {
-    printPluginStatus(plugin, claudeMdOk, false);
+    printPluginStatus(plugin, claudeMdOk, false, claudeMdPath);
   } else {
     printCliStatus(cli);
     if (plugin)
-      printPluginStatus(plugin, claudeMdOk, cliRegistered);
+      printPluginStatus(plugin, claudeMdOk, cliRegistered, claudeMdPath);
   }
   for (const a of fileAgents(piDir, opencodeDir))
     await printFileAgentStatus(a, launch);
@@ -14659,6 +14688,7 @@ var init_install = __esm(() => {
   init_loader();
   init_gc();
   init_config();
+  init_claude_paths();
   RUNNER_CACHES = [
     ["npx", /[\\/]_npx[\\/]/],
     ["bunx", /[\\/]\.bunx-[^\\/]*[\\/]/],
@@ -14683,7 +14713,7 @@ __export(exports_discover, {
 });
 import { Database as Database4 } from "bun:sqlite";
 import { existsSync as existsSync6, readdirSync as readdirSync5 } from "fs";
-import { join as join10 } from "path";
+import { join as join9 } from "path";
 function hasHandlerColumn(db) {
   const cols = db.prepare(`PRAGMA table_info(stored_outputs)`).all();
   return cols.some((c) => c.name === "handler");
@@ -14748,7 +14778,7 @@ function storeFiles(all, cwd = process.cwd()) {
   const dir = dataDir();
   if (!existsSync6(dir))
     return [];
-  return readdirSync5(dir).filter((n) => n.endsWith(".db")).map((n) => join10(dir, n));
+  return readdirSync5(dir).filter((n) => n.endsWith(".db")).map((n) => join9(dir, n));
 }
 function pct(part, whole) {
   return whole > 0 ? `${(part / whole * 100).toFixed(0)}%` : "\u2014";
@@ -15468,7 +15498,7 @@ function deliveredBytes(summary, originalSize, hints) {
 
 // src/cli.ts
 init_log();
-import { join as join11 } from "path";
+import { join as join10 } from "path";
 async function getVersion() {
   const pkg = await Promise.resolve().then(() => __toESM(require_package(), 1));
   return pkg.version;
@@ -15808,7 +15838,7 @@ async function main() {
     process.exit(0);
   }
   if (subcommand === "serve") {
-    await import(join11(import.meta.dir, import.meta.path.endsWith(".js") ? "server.js" : "server.ts"));
+    await import(join10(import.meta.dir, import.meta.path.endsWith(".js") ? "server.js" : "server.ts"));
     return;
   }
   if (subcommand === "gc") {

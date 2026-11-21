@@ -4,7 +4,8 @@
  * Implements `mcp-recall install`, `mcp-recall uninstall`, and `mcp-recall status`.
  *
  * Writes the MCP server entry to ~/.claude.json, the two hook entries to
- * ~/.claude/settings.json, and a short instruction block to ~/.claude/CLAUDE.md.
+ * ~/.claude/settings.json, and a short instruction block to ~/.claude/CLAUDE.md,
+ * or to the same files under CLAUDE_CONFIG_DIR when it is set (#494).
  * All operations are non-destructive — existing entries from other tools are
  * never touched. Writes are atomic (tmp → rename).
  */
@@ -22,6 +23,7 @@ import { loadProfiles } from "../profiles/loader";
 import { storeFootprint } from "../gc/index";
 import { loadConfig } from "../config";
 import { formatBytes } from "../format";
+import { claudeConfigDir, claudeJsonPath as claudeJsonFile, tildePath } from "../claude-paths";
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 
@@ -40,21 +42,23 @@ const RESET = "\x1b[0m";
 
 // ── Default paths ─────────────────────────────────────────────────────────────
 
+// All follow CLAUDE_CONFIG_DIR when it is set (#494); see src/claude-paths.ts.
+
 export function defaultClaudeJsonPath(): string {
-  return path.join(os.homedir(), ".claude.json");
+  return claudeJsonFile();
 }
 
 export function defaultSettingsPath(): string {
-  return path.join(os.homedir(), ".claude", "settings.json");
+  return path.join(claudeConfigDir(), "settings.json");
 }
 
 export function defaultClaudeMdPath(): string {
-  return path.join(os.homedir(), ".claude", "CLAUDE.md");
+  return path.join(claudeConfigDir(), "CLAUDE.md");
 }
 
 /** Claude Code's record of installed plugins, which a marketplace install of recall is in (#456). */
 export function defaultPluginsPath(): string {
-  return path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json");
+  return path.join(claudeConfigDir(), "plugins", "installed_plugins.json");
 }
 
 // ── Launch detection ─────────────────────────────────────────────────────────
@@ -918,7 +922,7 @@ async function readPluginRegistry(filePath: string): Promise<Record<string, unkn
  * the CLAUDE.md block decide the label. Beside a CLI install it is a second
  * registration, and disabled it is a note above the CLI's own checks.
  */
-function printPluginStatus(plugin: PluginInstall, claudeMdOk: boolean, cliRegistered: boolean): void {
+function printPluginStatus(plugin: PluginInstall, claudeMdOk: boolean, cliRegistered: boolean, claudeMdPath: string): void {
   if (!plugin.enabled) {
     console.log(`\n  Claude Code plugin ${plugin.key}: disabled`);
     return;
@@ -942,7 +946,7 @@ function printPluginStatus(plugin: PluginInstall, claudeMdOk: boolean, cliRegist
     console.log(`    ${BOLD}claude plugin uninstall ${plugin.key}${RESET}   ${DIM}# removes the plugin${RESET}`);
     return;
   }
-  console.log(`  ${pad30("~/.claude/CLAUDE.md")}  ${tick(claudeMdOk)} mcp-recall instructions`);
+  console.log(`  ${pad30(tildePath(claudeMdPath))}  ${tick(claudeMdOk)} mcp-recall instructions`);
   if (!filesOk) console.log(`\n  What is marked ${RED}✗${RESET} is gone: run ${BOLD}claude plugin update ${plugin.key}${RESET}`);
   if (!claudeMdOk) {
     console.log(`  Add the instructions yourself: see ${BOLD}https://github.com/sakebomb/mcp-recall/blob/main/docs/install.md#claude-instructions${RESET}`);
@@ -959,6 +963,8 @@ interface CliStatus {
   ssRegistered: boolean;
   ptuRegistered: boolean;
   claudeMdOk: boolean;
+  /** The config files status read, shown in place of fixed `~/.claude` labels (#494). */
+  paths: { claudeJson: string; settings: string; claudeMd: string };
   files: RegisteredFile[];
   elsewhere: boolean;
   server: Record<string, unknown> | undefined;
@@ -978,10 +984,10 @@ function printCliStatus(c: CliStatus): void {
 
   console.log(`\nInstallation: ${BOLD}${label}${RESET}\n`);
 
-  console.log(`  ${pad30("~/.claude.json")}  ${tick(c.serverRegistered)} mcpServers.recall`);
-  console.log(`  ${pad30("~/.claude/settings.json")}  ${tick(c.ssRegistered)} SessionStart hook`);
+  console.log(`  ${pad30(tildePath(c.paths.claudeJson))}  ${tick(c.serverRegistered)} mcpServers.recall`);
+  console.log(`  ${pad30(tildePath(c.paths.settings))}  ${tick(c.ssRegistered)} SessionStart hook`);
   console.log(`  ${pad30("")}  ${tick(c.ptuRegistered)} PostToolUse hook`);
-  console.log(`  ${pad30("~/.claude/CLAUDE.md")}  ${tick(c.claudeMdOk)} mcp-recall instructions`);
+  console.log(`  ${pad30(tildePath(c.paths.claudeMd))}  ${tick(c.claudeMdOk)} mcp-recall instructions`);
   if (c.files.length > 0) {
     console.log("");
     console.log(`  ${pad30("Registered launch")}`);
@@ -1060,16 +1066,19 @@ export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
     ...ourHookCommands(hooks["PostToolUse"], ours.PostToolUse).map(shellWords),
   ]);
   const elsewhere = server !== undefined && !runsServer(server, launch.server);
-  const cli: CliStatus = { serverRegistered, ssRegistered, ptuRegistered, claudeMdOk, files, elsewhere, server, launch };
+  const cli: CliStatus = {
+    serverRegistered, ssRegistered, ptuRegistered, claudeMdOk, files, elsewhere, server, launch,
+    paths: { claudeJson: claudeJsonPath, settings: settingsPath, claudeMd: claudeMdPath },
+  };
 
   // A marketplace install writes none of the entries above: Claude Code runs the plugin's own (#456).
   const plugin = findPluginInstall(await readPluginRegistry(pluginsPath), settings);
   const cliRegistered = serverRegistered || ssRegistered || ptuRegistered;
   if (plugin?.enabled && !cliRegistered) {
-    printPluginStatus(plugin, claudeMdOk, false);
+    printPluginStatus(plugin, claudeMdOk, false, claudeMdPath);
   } else {
     printCliStatus(cli);
-    if (plugin) printPluginStatus(plugin, claudeMdOk, cliRegistered);
+    if (plugin) printPluginStatus(plugin, claudeMdOk, cliRegistered, claudeMdPath);
   }
 
   for (const a of fileAgents(piDir, opencodeDir)) await printFileAgentStatus(a, launch);

@@ -18,6 +18,8 @@ Install globally, not through `npx`, `bunx` or `pnpm dlx`. `mcp-recall install` 
 
 `mcp-recall install` writes the MCP server entry and hooks to `~/.claude.json` and `~/.claude/settings.json`, and adds a short [instruction block](#claude-instructions) to `~/.claude/CLAUDE.md` so Claude knows how to use the recall tools. It's idempotent — safe to re-run after updates. `mcp-recall install --dry-run` prints what it would write and writes nothing; `uninstall --dry-run` does the same for removal.
 
+With `CLAUDE_CONFIG_DIR` set, Claude Code keeps all of these files in that directory, `.claude.json` included, and so do `install`, `uninstall`, `status`, `learn` and `profiles seed`. To use mcp-recall in a second Claude Code config, run install once with that config's `CLAUDE_CONFIG_DIR`: `CLAUDE_CONFIG_DIR=~/.claude-work mcp-recall install`. `status` prints the files it checked.
+
 ## Option B — Claude Code plugin marketplace
 
 ```bash
