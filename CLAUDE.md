@@ -68,6 +68,8 @@ src/
   hooks/                Hook implementations (SessionStart, PostToolUse)
   gc/                   mcp-recall gc — classifies every project DB and reclaims disk.
                         Deletion policy lives in STATUS_POLICY; see the safety note below.
+  stats/                mcp-recall stats — savings by tool for this project or --all (#495).
+                        Read-only over every store; same totals as recall__stats
   discover/             mcp-recall discover — ranks fallback-routed output by bytes, with
                         reduction and retrieval rate (#341). Read-only over every store.
                         A NULL `handler` means "stored before #341", never a fallback.
@@ -111,6 +113,7 @@ That skip guard matters when reasoning about behaviour: output which does not co
 mcp-recall install            # write MCP entry, hooks, and CLAUDE.md instructions into Claude Code config
 mcp-recall uninstall          # reverse of install
 mcp-recall status             # report install health (MCP entry, hooks, CLAUDE.md block, store size)
+mcp-recall stats [--all]      # savings by tool, without asking Claude (same totals as recall__stats)
 mcp-recall gc [--force]       # list/reclaim orphaned project DBs (--stale-days N, --vacuum). Dry run by default
 mcp-recall discover [--all]   # rank fallback-routed output by bytes, reduction, retrieval rate (--since, --limit)
 mcp-recall import <file>      # restore from a recall__export dump (--overwrite, --dry-run). --keep-project-key removed in #226 (rejected)

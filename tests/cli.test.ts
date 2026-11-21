@@ -12,6 +12,13 @@ const PROFILES_SUBCOMMANDS = [
   "seed", "feed", "check", "retrain", "test",
 ] as const;
 
+// Every user-facing top-level command dispatched by src/cli.ts (not the hook
+// entry points or `serve`, which Claude Code runs). Same defect class as above.
+const TOP_LEVEL_COMMANDS = [
+  "install", "uninstall", "status", "stats", "gc", "discover",
+  "profiles", "learn", "import", "completions",
+] as const;
+
 // ── getVersion ────────────────────────────────────────────────────────────────
 
 describe("getVersion", () => {
@@ -48,12 +55,9 @@ describe("printHelp", () => {
     }
     const output = lines.join("\n");
     expect(output).toContain("Usage: mcp-recall <command>");
-    expect(output).toContain("install");
-    expect(output).toContain("uninstall");
-    expect(output).toContain("status");
-    expect(output).toContain("profiles");
-    expect(output).toContain("learn");
-    expect(output).toContain("completions");
+    for (const cmd of TOP_LEVEL_COMMANDS) {
+      expect(output).toMatch(new RegExp(`^  ${cmd}\\b`, "m"));
+    }
     expect(output).toContain("--help");
     expect(output).toContain("--version");
   });
@@ -84,9 +88,16 @@ describe("completionScript", () => {
   });
 
   test("bash script includes all top-level commands", () => {
-    const script = completionScript("bash");
-    for (const cmd of ["install", "uninstall", "status", "gc", "profiles", "learn", "import", "completions"]) {
-      expect(script).toContain(cmd);
+    const list = completionScript("bash").match(/local commands="([^"]+)"/)?.[1].split(" ") ?? [];
+    for (const cmd of TOP_LEVEL_COMMANDS) {
+      expect(list).toContain(cmd);
+    }
+  });
+
+  test("zsh script includes all top-level commands", () => {
+    const script = completionScript("zsh");
+    for (const cmd of TOP_LEVEL_COMMANDS) {
+      expect(script).toContain(`'${cmd}:`);
     }
   });
 
@@ -124,8 +135,10 @@ describe("completionScript", () => {
 
   test("fish script includes all top-level commands", () => {
     const script = completionScript("fish");
-    for (const cmd of ["install", "uninstall", "status", "gc", "profiles", "learn", "import", "completions"]) {
-      expect(script).toContain(`-a ${cmd}`);
+    const declared = script.match(/set -l commands (.+)/)?.[1].split(" ") ?? [];
+    for (const cmd of TOP_LEVEL_COMMANDS) {
+      expect(declared).toContain(cmd);
+      expect(script).toContain(`-a ${cmd} `);
     }
   });
 

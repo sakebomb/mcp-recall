@@ -7476,6 +7476,22 @@ function sampleBySession(db, where, params, perSession = SAMPLE_PER_SESSION) {
   const overflow = counts.map((r) => ({ session_id: r.session_id, count: r.count - (shown.get(r.session_id) ?? 0) })).filter((r) => r.count > 0).sort((a, b) => b.count - a.count || a.session_id.localeCompare(b.session_id));
   return { items, total, overflow };
 }
+function getStats(db, project_key) {
+  const row = db.prepare(`
+    SELECT
+      COALESCE(SUM(CASE WHEN tool_name != 'recall__note' THEN 1 ELSE 0 END), 0) as total_items,
+      COALESCE(SUM(CASE WHEN tool_name != 'recall__note' THEN original_size ELSE 0 END), 0) as total_original_bytes,
+      COALESCE(SUM(CASE WHEN tool_name != 'recall__note' THEN ${DELIVERED_EXPR} ELSE 0 END), 0) as total_summary_bytes,
+      COALESCE(SUM(pinned), 0) as pinned_items,
+      COALESCE(SUM(CASE WHEN pinned = 1 THEN ${EFFECTIVE_SIZE_EXPR} ELSE 0 END), 0) as pinned_bytes,
+      COALESCE(SUM(CASE WHEN tool_name = 'recall__note' THEN 1 ELSE 0 END), 0) as note_items,
+      COALESCE(SUM(CASE WHEN tool_name = 'recall__note' THEN original_size ELSE 0 END), 0) as note_bytes
+    FROM stored_outputs
+    WHERE project_key = ?
+  `).get(project_key);
+  const compression_ratio = row.total_original_bytes > 0 ? row.total_summary_bytes / row.total_original_bytes : 0;
+  return { ...row, compression_ratio };
+}
 function handlerWhere(project_key, opts, recorded = true) {
   const params = [project_key];
   let where = `WHERE project_key = ? AND tool_name != 'recall__note' AND handler IS ${recorded ? "NOT " : ""}NULL`;
@@ -14868,6 +14884,109 @@ var init_discover = __esm(() => {
   EMPTY2 = { routes: [], handlers: [], unrecorded: 0, stores: 0 };
 });
 
+// src/stats/index.ts
+var exports_stats = {};
+__export(exports_stats, {
+  statsCommand: () => statsCommand,
+  readStatsStore: () => readStatsStore,
+  mergeStats: () => mergeStats,
+  formatStats: () => formatStats,
+  MAX_TOOL_ROWS: () => MAX_TOOL_ROWS
+});
+import { Database as Database5 } from "bun:sqlite";
+function readStatsStore(file) {
+  let db = null;
+  try {
+    db = new Database5(file, { readonly: true });
+    const isRecallDb = db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='stored_outputs'`).get();
+    if (!isRecallDb)
+      return EMPTY3;
+    const keys = db.prepare(`SELECT DISTINCT project_key FROM stored_outputs`).all().map((r) => r.project_key);
+    const reports = keys.map((key) => {
+      const s = getStats(db, key);
+      return {
+        items: s.total_items,
+        original_bytes: s.total_original_bytes,
+        delivered_bytes: s.total_summary_bytes,
+        tools: getToolBreakdown(db, key).filter((r) => r.tool_name !== NOTE_TOOL),
+        stores: 0,
+        unreadable: 0
+      };
+    });
+    return { ...mergeStats(reports), stores: 1 };
+  } catch {
+    return { ...EMPTY3, unreadable: 1 };
+  } finally {
+    db?.close();
+  }
+}
+function mergeStats(reports) {
+  const tools = new Map;
+  for (const row of reports.flatMap((r) => r.tools)) {
+    const prev = tools.get(row.tool_name);
+    tools.set(row.tool_name, prev ? {
+      tool_name: row.tool_name,
+      items: prev.items + row.items,
+      original_bytes: prev.original_bytes + row.original_bytes,
+      summary_bytes: prev.summary_bytes + row.summary_bytes
+    } : row);
+  }
+  const sum = (f) => reports.reduce((n, r) => n + f(r), 0);
+  return {
+    items: sum((r) => r.items),
+    original_bytes: sum((r) => r.original_bytes),
+    delivered_bytes: sum((r) => r.delivered_bytes),
+    tools: [...tools.values()].sort((a, b) => b.original_bytes - a.original_bytes),
+    stores: sum((r) => r.stores),
+    unreadable: sum((r) => r.unreadable)
+  };
+}
+function reduction2(original, delivered) {
+  return original > 0 ? `${((original - delivered) / original * 100).toFixed(0)}%` : "\u2014";
+}
+function table2(header, rows) {
+  const widths = header.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)));
+  const fmt = (cells) => "  " + cells.map((c, i) => i === 0 ? c.padEnd(widths[i]) : c.padStart(widths[i])).join("  ");
+  return [fmt(header), ...rows.map(fmt)];
+}
+function formatStats(report, all) {
+  const lines = [];
+  if (report.items === 0) {
+    lines.push(all ? "Nothing summarized yet in any store." : "Nothing summarized yet for this project.", "That is normal right after install: there is no warm-up, and output too small to", "summarize passes through untouched and is not stored. To see it work, follow", `step 3 of the Quick start: ${QUICK_START_URL}`);
+  } else {
+    const saved = report.original_bytes - report.delivered_bytes;
+    const shown = report.tools.slice(0, MAX_TOOL_ROWS);
+    const hidden = report.tools.length - shown.length;
+    lines.push(`  Outputs summarized:  ${report.items}`, `  Original size:       ${formatBytes(report.original_bytes)}`, `  Delivered to Claude: ${formatBytes(report.delivered_bytes)}`, `  Kept out of context: ${formatBytes(saved)} (${reduction2(report.original_bytes, report.delivered_bytes)} smaller, ` + `~${Math.floor(saved / BYTES_PER_TOKEN).toLocaleString()} tokens at ~${BYTES_PER_TOKEN} bytes each)`, "", "By tool:", ...table2(["tool", "outputs", "original", "delivered", "reduction"], shown.map((r) => [
+      r.tool_name,
+      String(r.items),
+      formatBytes(r.original_bytes),
+      formatBytes(r.summary_bytes),
+      reduction2(r.original_bytes, r.summary_bytes)
+    ])), ...hidden > 0 ? [`  \u2026 ${hidden} more tool${hidden === 1 ? "" : "s"} with less output`] : [], "", "Counts cover what is in the store now: expired or evicted output no longer counts,", "and output too small to summarize is never stored.");
+  }
+  if (report.unreadable > 0) {
+    lines.push(`${report.unreadable} store${report.unreadable === 1 ? "" : "s"} could not be read ` + "(locked, or not opened since an upgrade) and are not included.");
+  }
+  return lines.join(`
+`);
+}
+function statsCommand(opts = {}) {
+  const all = opts.all ?? false;
+  const files = storeFiles(all);
+  const report = mergeStats(files.map(readStatsStore));
+  const scope = all ? `${report.stores} store${report.stores === 1 ? "" : "s"}` : "this project";
+  console.log(`mcp-recall stats \xB7 ${scope}
+`);
+  console.log(formatStats(report, all));
+}
+var NOTE_TOOL = "recall__note", BYTES_PER_TOKEN = 4, QUICK_START_URL = "https://github.com/sakebomb/mcp-recall#quick-start", MAX_TOOL_ROWS = 15, EMPTY3;
+var init_stats = __esm(() => {
+  init_db();
+  init_discover();
+  EMPTY3 = { items: 0, original_bytes: 0, delivered_bytes: 0, tools: [], stores: 0, unreadable: 0 };
+});
+
 // src/hooks/session-start.ts
 init_config();
 init_project_key();
@@ -15515,6 +15634,8 @@ Commands:
     --dry-run          Show what would change; write nothing
   uninstall            Remove hooks + MCP server (--agent NAME, --dry-run)
   status               Show current configuration and health
+  stats                What has been summarized, and how much smaller, by tool
+    --all              Every project's store, not just this one
   serve                Run the MCP server on stdio (Claude Code starts this)
   gc [--force]         Reclaim disk: list/delete orphaned project DBs
     --stale-days N     Legacy DBs (no recorded path) older than N days are candidates (default 90)
@@ -15571,7 +15692,7 @@ _mcp_recall() {
   COMPREPLY=()
   cur="\${COMP_WORDS[COMP_CWORD]}"
 
-  local commands="install uninstall status gc discover profiles learn import completions --help --version"
+  local commands="install uninstall status stats gc discover profiles learn import completions --help --version"
   local profiles_cmds="list install update remove available info seed feed check retrain test"
 
   if [[ \${COMP_CWORD} -eq 1 ]]; then
@@ -15657,6 +15778,7 @@ _mcp_recall() {
         'install:register hooks and MCP server in Claude Code'
         'uninstall:remove hooks and MCP server'
         'status:show current configuration and health'
+        'stats:what has been summarized and how much it saved'
         'gc:reclaim disk from orphaned project databases'
         'discover:rank output routed to fallback handlers'
         'profiles:manage compression profiles'
@@ -15687,7 +15809,7 @@ function fishCompletion() {
   return `# mcp-recall fish completions
 # Save to: mcp-recall completions fish > ~/.config/fish/completions/mcp-recall.fish
 
-set -l commands install uninstall status gc discover profiles learn import completions
+set -l commands install uninstall status stats gc discover profiles learn import completions
 
 # Top-level commands
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
@@ -15696,6 +15818,8 @@ complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
   -a uninstall -d "Remove hooks and MCP server"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
   -a status -d "Show current configuration and health"
+complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
+  -a stats -d "What has been summarized and how much it saved"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
   -a gc -d "Reclaim disk from orphaned project databases"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
@@ -15814,6 +15938,11 @@ async function main() {
   if (subcommand === "status") {
     const { statusCommand: statusCommand2 } = await Promise.resolve().then(() => (init_install(), exports_install));
     await statusCommand2();
+    process.exit(0);
+  }
+  if (subcommand === "stats") {
+    const { statsCommand: statsCommand2 } = await Promise.resolve().then(() => (init_stats(), exports_stats));
+    statsCommand2({ all: process.argv.includes("--all") });
     process.exit(0);
   }
   if (subcommand === "discover") {
