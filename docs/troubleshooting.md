@@ -54,7 +54,7 @@ If the issue persists, [open an issue](https://github.com/sakebomb/mcp-recall/is
 `mcp-recall status` ends its install checks with a `Self-test` line. It runs the registered PostToolUse hook, the same command Claude Code runs, on a sample `git log`, and writes to a throwaway store, never yours. A green line means the hook summarizes output. A red line says why it did not:
 
 - `exited with code N`: the hook failed to start, often a missing file or runtime. Status prints the hook's first error line; reinstall with `mcp-recall install`.
-- `returned the output unchanged`: the hook ran but summarized nothing. Check that `[denylist]` in your config does not block `Bash`, then run the hook with `RECALL_DEBUG=1` to see its log.
+- `returned the output unchanged`: the hook ran but summarized nothing. The self-test reads your config, so check that `[denylist]` does not block `Bash`. Then run the hook with `RECALL_DEBUG=1` to see its log.
 - `did not finish within 10s`: Claude Code gives a hook 10 seconds, and drops its output after that.
 
 If the self-test is green but `mcp-recall stats` shows nothing, the hook has not seen a call in this project yet. Stats count from the first call; no build-up is needed. `mcp-recall stats` also counts the calls that passed through untouched, and why.

@@ -67,23 +67,34 @@ export function deliveredText(hookStdout: string): string | null {
  * on stdin. `env` adds variables the command line expands, such as
  * CLAUDE_PLUGIN_ROOT for a marketplace install.
  */
-export async function runSelfTest(command: string, env: Record<string, string> = {}): Promise<SelfTestResult> {
+export async function runSelfTest(
+  command: string, env: Record<string, string> = {}, timeoutMs = TIMEOUT_MS,
+): Promise<SelfTestResult> {
   const dir = mkdtempSync(join(tmpdir(), "mcp-recall-self-test-"));
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const log = syntheticGitLog();
-    const proc = Bun.spawn(["sh", "-c", `${command}`], {
+    const proc = Bun.spawn(["sh", "-c", command], {
       cwd: dir,
       stdin: new TextEncoder().encode(selfTestPayload(dir, log)),
       stdout: "pipe",
       stderr: "pipe",
       env: { ...process.env, ...env, RECALL_DB_PATH: join(dir, "self-test.db") },
     });
-    const timer = setTimeout(() => proc.kill(), TIMEOUT_MS);
-    const [stdout, stderr, code] = await Promise.all([
-      new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
-    ]);
-    clearTimeout(timer);
-    if (proc.signalCode) return { ok: false, reason: `the hook did not finish within ${TIMEOUT_MS / 1000}s` };
+    const out = proc.stdout.getReader();
+    const err = proc.stderr.getReader();
+    // The whole run is bounded, not just sh: a hung child of the hook keeps the
+    // pipes open after sh is killed, and waiting on them would hang status.
+    const timedOut = new Promise<"timeout">((done) => { timer = setTimeout(() => done("timeout"), timeoutMs); });
+    const finished = Promise.all([readAll(out), readAll(err), proc.exited]);
+    const winner = await Promise.race([finished, timedOut]);
+    if (winner === "timeout") {
+      proc.kill();
+      void out.cancel().catch(() => {});
+      void err.cancel().catch(() => {});
+      return { ok: false, reason: `the hook did not finish within ${timeoutMs / 1000}s` };
+    }
+    const [stdout, stderr, code] = winner;
     if (code !== 0) {
       const first = stderr.trim().split("\n")[0] ?? "";
       return { ok: false, reason: `the hook exited with code ${code}${first ? `: ${first}` : ""}` };
@@ -96,7 +107,17 @@ export async function runSelfTest(command: string, env: Record<string, string> =
   } catch (e) {
     return { ok: false, reason: `could not run the hook: ${e instanceof Error ? e.message : String(e)}` };
   } finally {
+    clearTimeout(timer);
     rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+async function readAll(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<string> {
+  const chunks: Uint8Array[] = [];
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return Buffer.concat(chunks).toString("utf8");
+    chunks.push(value);
   }
 }
 

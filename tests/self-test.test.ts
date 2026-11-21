@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve } from "path";
 import {
@@ -31,6 +31,19 @@ describe("runSelfTest", () => {
   it("fails with the exit code and the first stderr line when the hook errors", async () => {
     const r = await runSelfTest(`cat >/dev/null; echo 'module not found' >&2; echo more >&2; exit 3`);
     expect(r).toEqual({ ok: false, reason: "the hook exited with code 3: module not found" });
+  });
+
+  it("gives up at the timeout even when the hook's child holds the pipes open", async () => {
+    const start = Date.now();
+    const r = await runSelfTest(`cat >/dev/null; sleep 30; true`, {}, 300);
+    expect(r).toEqual({ ok: false, reason: "the hook did not finish within 0.3s" });
+    expect(Date.now() - start).toBeLessThan(5_000);
+  });
+
+  it("fails when the hook replaces the output with something other than a summary", async () => {
+    const reply = JSON.stringify({ hookSpecificOutput: { updatedToolOutput: { stdout: "rewritten", stderr: "" } } });
+    const r = await runSelfTest(`cat >/dev/null; echo '${reply}'`);
+    expect(r).toEqual({ ok: false, reason: "the hook returned the output unchanged" });
   });
 
   it("points the hook at a throwaway store and removes it afterwards", async () => {
@@ -120,6 +133,23 @@ describe("status self-test", () => {
     const out = await status(async () => ({ ok: false, reason: "the hook exited with code 1" }));
     expect(out).toContain("✗ Self-test: the hook exited with code 1");
     expect(out).toContain("RECALL_DEBUG=1");
+  });
+
+  it("runs an enabled plugin's own hook, with CLAUDE_PLUGIN_ROOT set, when the CLI registered none", async () => {
+    const installPath = join(dir, "cache", "mcp-recall", "1.22.0");
+    const cmd = `"\${CLAUDE_PLUGIN_ROOT}/bin/recall" post-tool-use`;
+    mkdirSync(join(installPath, "hooks"), { recursive: true });
+    writeFileSync(join(installPath, "hooks", "hooks.json"), JSON.stringify({
+      hooks: { PostToolUse: [{ matcher: "mcp__.*|Bash", hooks: [{ type: "command", command: cmd }] }] },
+    }));
+    const key = "mcp-recall@mcp-recall";
+    writeFileSync(join(dir, "plugins"), JSON.stringify({
+      version: 2, plugins: { [key]: [{ scope: "user", installPath, version: "1.22.0" }] },
+    }));
+    writeFileSync(settingsPath, JSON.stringify({ enabledPlugins: { [key]: true } }));
+    const ran: Array<[string, Record<string, string>]> = [];
+    await status(async (c, e) => { ran.push([c, e]); return { ok: true, original: 2, delivered: 1 }; });
+    expect(ran).toEqual([[cmd, { CLAUDE_PLUGIN_ROOT: installPath }]]);
   });
 
   it("skips with a warning when no hook is registered, and runs nothing", async () => {

@@ -14081,26 +14081,32 @@ function deliveredText(hookStdout) {
   const stdout = updated?.stdout;
   return typeof stdout === "string" ? stdout : null;
 }
-async function runSelfTest(command, env = {}) {
+async function runSelfTest(command, env = {}, timeoutMs = TIMEOUT_MS) {
   const dir = mkdtempSync(join10(tmpdir2(), "mcp-recall-self-test-"));
+  let timer;
   try {
     const log2 = syntheticGitLog();
-    const proc = Bun.spawn(["sh", "-c", `${command}`], {
+    const proc = Bun.spawn(["sh", "-c", command], {
       cwd: dir,
       stdin: new TextEncoder().encode(selfTestPayload(dir, log2)),
       stdout: "pipe",
       stderr: "pipe",
       env: { ...process.env, ...env, RECALL_DB_PATH: join10(dir, "self-test.db") }
     });
-    const timer = setTimeout(() => proc.kill(), TIMEOUT_MS);
-    const [stdout, stderr, code] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited
-    ]);
-    clearTimeout(timer);
-    if (proc.signalCode)
-      return { ok: false, reason: `the hook did not finish within ${TIMEOUT_MS / 1000}s` };
+    const out = proc.stdout.getReader();
+    const err = proc.stderr.getReader();
+    const timedOut = new Promise((done) => {
+      timer = setTimeout(() => done("timeout"), timeoutMs);
+    });
+    const finished = Promise.all([readAll(out), readAll(err), proc.exited]);
+    const winner = await Promise.race([finished, timedOut]);
+    if (winner === "timeout") {
+      proc.kill();
+      out.cancel().catch(() => {});
+      err.cancel().catch(() => {});
+      return { ok: false, reason: `the hook did not finish within ${timeoutMs / 1000}s` };
+    }
+    const [stdout, stderr, code] = winner;
     if (code !== 0) {
       const first = stderr.trim().split(`
 `)[0] ?? "";
@@ -14114,7 +14120,17 @@ async function runSelfTest(command, env = {}) {
   } catch (e) {
     return { ok: false, reason: `could not run the hook: ${e instanceof Error ? e.message : String(e)}` };
   } finally {
+    clearTimeout(timer);
     rmSync3(dir, { recursive: true, force: true });
+  }
+}
+async function readAll(reader) {
+  const chunks = [];
+  for (;; ) {
+    const { done, value } = await reader.read();
+    if (done)
+      return Buffer.concat(chunks).toString("utf8");
+    chunks.push(value);
   }
 }
 function pluginHookCommand(installPath) {
