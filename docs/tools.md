@@ -165,6 +165,7 @@ Session stats for current project:
   ~Tokens saved:     ~84,000
   Session days:      4
   Notes/memory:      5 items (18KB) — stored memory, not interception
+  Calls seen:        58 since 2026-03-01 (23 summarized, 4 reused, 27 passed through as too small to summarize, 4 short file reads passed through)
 
 By tool (sorted by original size):
   mcp__playwright__browser_snapshot    4 items    215KB →  1.2KB    99%

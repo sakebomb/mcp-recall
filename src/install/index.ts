@@ -24,6 +24,7 @@ import { storeFootprint } from "../gc/index";
 import { loadConfig } from "../config";
 import { formatBytes } from "../format";
 import { claudeConfigDir, claudeJsonPath as claudeJsonFile, tildePath } from "../claude-paths";
+import { formatSelfTest, pluginHookCommand, runSelfTest, type SelfTestResult } from "./self-test";
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 
@@ -1025,6 +1026,29 @@ export interface StatusOptions {
   piDir?: string;
   /** OpenCode's config dir; defaults to {@link defaultOpencodeDir}. */
   opencodeDir?: string;
+  /** Runs the registered hook for the self-test; defaults to {@link runSelfTest}. */
+  selfTest?: (command: string, env: Record<string, string>) => Promise<SelfTestResult>;
+}
+
+/**
+ * Runs the PostToolUse hook Claude Code would run, the CLI install's or else an
+ * enabled plugin's, on a synthetic output, and prints what came back (#495).
+ */
+async function printSelfTest(
+  cliCommand: string | undefined, plugin: PluginInstall | null,
+  run: (command: string, env: Record<string, string>) => Promise<SelfTestResult>,
+): Promise<void> {
+  const pluginCommand = !cliCommand && plugin?.enabled ? pluginHookCommand(plugin.installPath) : null;
+  const command = cliCommand ?? pluginCommand;
+  console.log("");
+  if (!command) {
+    console.log(`  ${YELLOW}!${RESET} Self-test: skipped, no PostToolUse hook is registered`);
+    return;
+  }
+  const result = await run(command, pluginCommand ? { CLAUDE_PLUGIN_ROOT: plugin!.installPath } : {});
+  const icon = result.ok ? `${GREEN}✓${RESET}` : `${RED}✗${RESET}`;
+  console.log(`  ${icon} ${formatSelfTest(result)}`);
+  if (!result.ok) console.log(`    → Run it by hand with ${BOLD}RECALL_DEBUG=1${RESET} to see why; see docs/troubleshooting.md`);
 }
 
 export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
@@ -1036,6 +1060,7 @@ export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
     launch         = detectLaunch(),
     piDir          = defaultPiDir(),
     opencodeDir    = defaultOpencodeDir(),
+    selfTest       = runSelfTest,
   } = opts;
 
   // Config entries
@@ -1082,6 +1107,8 @@ export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
   }
 
   for (const a of fileAgents(piDir, opencodeDir)) await printFileAgentStatus(a, launch);
+
+  await printSelfTest(ourHookCommands(hooks["PostToolUse"], ours.PostToolUse)[0], plugin, selfTest);
 
   // Profiles
   console.log("");
