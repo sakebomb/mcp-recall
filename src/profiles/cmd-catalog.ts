@@ -1,6 +1,5 @@
 import { readFileSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
+import { claudeJsonPath, tildePath } from "../claude-paths";
 import { loadProfiles, clearProfileCache, getShortName } from "./loader";
 import {
   sanitize,
@@ -114,19 +113,18 @@ export async function cmdSeed(args: string[]): Promise<void> {
   }
 
   let serverKeys: string[] = [];
+  const shownJson = tildePath(claudeJsonPath());
   try {
-    const raw = JSON.parse(
-      readFileSync(join(homedir(), ".claude.json"), "utf8")
-    ) as Record<string, unknown>;
+    const raw = JSON.parse(readFileSync(claudeJsonPath(), "utf8")) as Record<string, unknown>;
     const mcpServers = raw["mcpServers"] as Record<string, unknown> | undefined;
     serverKeys = Object.keys(mcpServers ?? {}).filter((k) => k !== "recall");
   } catch {
-    console.log("Could not read ~/.claude.json — no MCPs detected.");
+    console.log(`Could not read ${shownJson} — no MCPs detected.`);
     return;
   }
 
   if (serverKeys.length === 0) {
-    console.log("No MCP servers found in ~/.claude.json (other than recall).");
+    console.log(`No MCP servers found in ${shownJson} (other than recall).`);
     return;
   }
 
