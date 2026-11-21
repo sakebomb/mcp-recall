@@ -11,6 +11,7 @@
 import { Database } from "bun:sqlite";
 import { getStats, getToolBreakdown, type ToolBreakdownRow } from "../db/index";
 import { storeFiles } from "../discover/index";
+import { getProjectKey } from "../project-key";
 import { formatBytes } from "../format";
 
 /** recall__note rows are project memory, not intercepted output (as in recall__stats). */
@@ -42,8 +43,12 @@ export interface StatsOptions {
 
 const EMPTY: StatsReport = { items: 0, original_bytes: 0, delivered_bytes: 0, tools: [], stores: 0, unreadable: 0 };
 
-/** The report for one store file, across every project key it holds. */
-export function readStatsStore(file: string): StatsReport {
+/**
+ * The report for one store file: for `projectKey` alone when given, as
+ * recall__stats counts, or across every project key the file holds. One file
+ * can hold several keys when RECALL_DB_PATH points every project at it.
+ */
+export function readStatsStore(file: string, projectKey?: string): StatsReport {
   let db: Database | null = null;
   try {
     db = new Database(file, { readonly: true });
@@ -52,8 +57,10 @@ export function readStatsStore(file: string): StatsReport {
       .get();
     if (!isRecallDb) return EMPTY;
 
-    const keys = (db.prepare(`SELECT DISTINCT project_key FROM stored_outputs`).all() as Array<{ project_key: string }>)
-      .map((r) => r.project_key);
+    const keys = projectKey !== undefined
+      ? [projectKey]
+      : (db.prepare(`SELECT DISTINCT project_key FROM stored_outputs`).all() as Array<{ project_key: string }>)
+          .map((r) => r.project_key);
     const reports = keys.map((key): StatsReport => {
       const s = getStats(db!, key);
       return {
@@ -112,7 +119,9 @@ function table(header: string[], rows: string[][]): string[] {
 
 export function formatStats(report: StatsReport, all: boolean): string {
   const lines: string[] = [];
-  if (report.items === 0) {
+  if (report.items === 0 && report.unreadable > 0) {
+    lines.push(all ? "Nothing to report from the stores that could be read." : "Nothing to report: this project's store could not be read.");
+  } else if (report.items === 0) {
     lines.push(
       all ? "Nothing summarized yet in any store." : "Nothing summarized yet for this project.",
       "That is normal right after install: there is no warm-up, and output too small to",
@@ -145,9 +154,11 @@ export function formatStats(report: StatsReport, all: boolean): string {
     );
   }
   if (report.unreadable > 0) {
+    const one = report.unreadable === 1;
     lines.push(
-      `${report.unreadable} store${report.unreadable === 1 ? "" : "s"} could not be read ` +
-        "(locked, or not opened since an upgrade) and are not included.",
+      `${report.unreadable} store${one ? "" : "s"} could not be read ` +
+        `(locked, or not opened since an upgrade) and ${one ? "is" : "are"} not included. ` +
+        "Starting a Claude Code session in that project upgrades its store.",
     );
   }
   return lines.join("\n");
@@ -156,7 +167,8 @@ export function formatStats(report: StatsReport, all: boolean): string {
 export function statsCommand(opts: StatsOptions = {}): void {
   const all = opts.all ?? false;
   const files = storeFiles(all);
-  const report = mergeStats(files.map(readStatsStore));
+  const key = all ? undefined : getProjectKey(process.cwd());
+  const report = mergeStats(files.map((f) => readStatsStore(f, key)));
   const scope = all ? `${report.stores} store${report.stores === 1 ? "" : "s"}` : "this project";
   console.log(`mcp-recall stats · ${scope}\n`);
   console.log(formatStats(report, all));

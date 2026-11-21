@@ -14894,14 +14894,14 @@ __export(exports_stats, {
   MAX_TOOL_ROWS: () => MAX_TOOL_ROWS
 });
 import { Database as Database5 } from "bun:sqlite";
-function readStatsStore(file) {
+function readStatsStore(file, projectKey) {
   let db = null;
   try {
     db = new Database5(file, { readonly: true });
     const isRecallDb = db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='stored_outputs'`).get();
     if (!isRecallDb)
       return EMPTY3;
-    const keys = db.prepare(`SELECT DISTINCT project_key FROM stored_outputs`).all().map((r) => r.project_key);
+    const keys = projectKey !== undefined ? [projectKey] : db.prepare(`SELECT DISTINCT project_key FROM stored_outputs`).all().map((r) => r.project_key);
     const reports = keys.map((key) => {
       const s = getStats(db, key);
       return {
@@ -14951,7 +14951,9 @@ function table2(header, rows) {
 }
 function formatStats(report, all) {
   const lines = [];
-  if (report.items === 0) {
+  if (report.items === 0 && report.unreadable > 0) {
+    lines.push(all ? "Nothing to report from the stores that could be read." : "Nothing to report: this project's store could not be read.");
+  } else if (report.items === 0) {
     lines.push(all ? "Nothing summarized yet in any store." : "Nothing summarized yet for this project.", "That is normal right after install: there is no warm-up, and output too small to", "summarize passes through untouched and is not stored. To see it work, follow", `step 3 of the Quick start: ${QUICK_START_URL}`);
   } else {
     const saved = report.original_bytes - report.delivered_bytes;
@@ -14966,7 +14968,8 @@ function formatStats(report, all) {
     ])), ...hidden > 0 ? [`  \u2026 ${hidden} more tool${hidden === 1 ? "" : "s"} with less output`] : [], "", "Counts cover what is in the store now: expired or evicted output no longer counts,", "and output too small to summarize is never stored.");
   }
   if (report.unreadable > 0) {
-    lines.push(`${report.unreadable} store${report.unreadable === 1 ? "" : "s"} could not be read ` + "(locked, or not opened since an upgrade) and are not included.");
+    const one = report.unreadable === 1;
+    lines.push(`${report.unreadable} store${one ? "" : "s"} could not be read ` + `(locked, or not opened since an upgrade) and ${one ? "is" : "are"} not included. ` + "Starting a Claude Code session in that project upgrades its store.");
   }
   return lines.join(`
 `);
@@ -14974,7 +14977,8 @@ function formatStats(report, all) {
 function statsCommand(opts = {}) {
   const all = opts.all ?? false;
   const files = storeFiles(all);
-  const report = mergeStats(files.map(readStatsStore));
+  const key = all ? undefined : getProjectKey(process.cwd());
+  const report = mergeStats(files.map((f) => readStatsStore(f, key)));
   const scope = all ? `${report.stores} store${report.stores === 1 ? "" : "s"}` : "this project";
   console.log(`mcp-recall stats \xB7 ${scope}
 `);
@@ -14984,6 +14988,7 @@ var NOTE_TOOL = "recall__note", BYTES_PER_TOKEN = 4, QUICK_START_URL = "https://
 var init_stats = __esm(() => {
   init_db();
   init_discover();
+  init_project_key();
   EMPTY3 = { items: 0, original_bytes: 0, delivered_bytes: 0, tools: [], stores: 0, unreadable: 0 };
 });
 

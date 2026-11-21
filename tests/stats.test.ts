@@ -51,6 +51,18 @@ describe("readStatsStore", () => {
     ]);
   });
 
+  it("counts only the given project key, as recall__stats does", () => {
+    const file = storeWith("shared.db", [
+      { tool_name: "Bash", original_size: 1000, project_key: "statsA" },
+      { tool_name: "Bash", original_size: 7000, project_key: "statsB" },
+    ]);
+    const r = readStatsStore(file, "statsA");
+
+    expect(r.items).toBe(1);
+    expect(r.original_bytes).toBe(1000);
+    expect(r.tools.map((t) => [t.tool_name, t.items])).toEqual([["Bash", 1]]);
+  });
+
   it("leaves recall__note memory out of the totals and the tool list", () => {
     const file = storeWith("a.db", [
       { tool_name: "Bash", original_size: 1000 },
@@ -135,7 +147,16 @@ describe("formatStats", () => {
     expect(out).toContain(`mcp__t${MAX_TOOL_ROWS + 1}__x`);
   });
 
-  it("says how many stores were left out", () => {
+  it("says how many stores were left out, with the verb matching the count", () => {
     expect(formatStats({ ...empty, unreadable: 2 }, true)).toContain("2 stores could not be read");
+    expect(formatStats({ ...empty, unreadable: 2 }, true)).toContain("are not included");
+    expect(formatStats({ ...empty, unreadable: 1 }, true)).toContain("1 store could not be read");
+    expect(formatStats({ ...empty, unreadable: 1 }, true)).toContain("is not included");
+  });
+
+  it("does not call an unreadable store normal right after install", () => {
+    const out = formatStats({ ...empty, stores: 0, unreadable: 1 }, false);
+    expect(out).toContain("this project's store could not be read");
+    expect(out).not.toContain("normal right after install");
   });
 });
