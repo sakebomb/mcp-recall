@@ -89,7 +89,7 @@ git log — 30 commits
   …
 ```
 
-There is no warm-up: the store starts empty, and each large output is summarized from the first call. Short output usually passes through untouched, with no header. For the running total, ask Claude "what has recall saved in this project?", which calls `recall__stats`. The savings grow with how much large, structured output your tools return, such as browser snapshots, GitHub and API results, and long test logs: [Is it for you?](#is-it-for-you) says who gains most.
+Ask again while the log is unchanged and the header reads `[recall:… · cached · <date>]`: mcp-recall reuses the summary it already made. There is no warm-up: the store starts empty, and each large output is summarized from the first call. Short output usually passes through untouched, with no header. For the running total, ask Claude "what has recall saved in this project?", which calls `recall__stats`. The savings grow with how much large, structured output your tools return, such as browser snapshots, GitHub and API results, and long test logs: [Is it for you?](#is-it-for-you) says who gains most.
 
 `mcp-recall install` writes the MCP server entry and hooks to `~/.claude.json` and `~/.claude/settings.json`, and adds a short instruction block to `~/.claude/CLAUDE.md` (or the same files under `CLAUDE_CONFIG_DIR` when it is set). It is idempotent, so re-run it after every update.
 
