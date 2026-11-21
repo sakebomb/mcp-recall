@@ -9,6 +9,7 @@
  *   install         — register hooks + MCP server in Claude Code
  *   uninstall       — remove hooks + MCP server
  *   status          — show configuration and health
+ *   stats           — what has been summarized and how much it saved
  *   serve           — run the MCP server on stdio (what Claude Code starts)
  *   gc              — reclaim disk from orphaned project databases
  *   discover        — report output routed to fallback handlers (missed savings)
@@ -41,6 +42,8 @@ Commands:
     --dry-run          Show what would change; write nothing
   uninstall            Remove hooks + MCP server (--agent NAME, --dry-run)
   status               Show current configuration and health
+  stats                What has been summarized, and how much smaller, by tool
+    --all              Every project's store, not just this one
   serve                Run the MCP server on stdio (Claude Code starts this)
   gc [--force]         Reclaim disk: list/delete orphaned project DBs
     --stale-days N     Legacy DBs (no recorded path) older than N days are candidates (default 90)
@@ -99,7 +102,7 @@ _mcp_recall() {
   COMPREPLY=()
   cur="\${COMP_WORDS[COMP_CWORD]}"
 
-  local commands="install uninstall status gc discover profiles learn import completions --help --version"
+  local commands="install uninstall status stats gc discover profiles learn import completions --help --version"
   local profiles_cmds="list install update remove available info seed feed check retrain test"
 
   if [[ \${COMP_CWORD} -eq 1 ]]; then
@@ -186,6 +189,7 @@ _mcp_recall() {
         'install:register hooks and MCP server in Claude Code'
         'uninstall:remove hooks and MCP server'
         'status:show current configuration and health'
+        'stats:what has been summarized and how much it saved'
         'gc:reclaim disk from orphaned project databases'
         'discover:rank output routed to fallback handlers'
         'profiles:manage compression profiles'
@@ -217,7 +221,7 @@ function fishCompletion(): string {
   return `# mcp-recall fish completions
 # Save to: mcp-recall completions fish > ~/.config/fish/completions/mcp-recall.fish
 
-set -l commands install uninstall status gc discover profiles learn import completions
+set -l commands install uninstall status stats gc discover profiles learn import completions
 
 # Top-level commands
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\
@@ -226,6 +230,8 @@ complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\
   -a uninstall -d "Remove hooks and MCP server"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\
   -a status -d "Show current configuration and health"
+complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\
+  -a stats -d "What has been summarized and how much it saved"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\
   -a gc -d "Reclaim disk from orphaned project databases"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from \$commands" \\
@@ -359,6 +365,12 @@ export async function main(): Promise<void> {
   if (subcommand === "status") {
     const { statusCommand } = await import("./install/index");
     await statusCommand();
+    process.exit(0);
+  }
+
+  if (subcommand === "stats") {
+    const { statsCommand } = await import("./stats/index");
+    statsCommand({ all: process.argv.includes("--all") });
     process.exit(0);
   }
 

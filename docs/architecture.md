@@ -105,6 +105,7 @@ so a change lands in the right file.
 | Retrieval logic | `tools.ts` | Pure handlers for every `recall__*` tool; `server.ts` only wires them |
 | Identity | `project-key.ts` | Resolving cwd → stable per-project key and path |
 | Lifecycle | `gc/`, `import/`, `install/` | Disk reclamation, dump restore, and config install/uninstall/status |
+| Reports | `stats/`, `discover/` | Read-only CLI reports over the stores: savings by tool, and fallback-routed output |
 | Support | `config.ts`, `config-schema.ts`, `hints.ts`, `log.ts`, `format.ts` | TOML config (Zod), search-term extraction, stderr logging, formatting |
 
 The `db/` layer is deliberately many small files behind one re-export barrel
