@@ -66,13 +66,30 @@ Using an agent that isn't listed? Say so in [#473](https://github.com/sakebomb/m
 
 You need [Claude Code](https://claude.ai/claude-code) and [Bun](https://bun.sh) (`curl -fsSL https://bun.sh/install | bash`). To run without Bun, use the [standalone binary](docs/install.md#option-d--standalone-binary-no-bun).
 
+**1. Install.**
+
 ```bash
 bun add -g mcp-recall    # or: npm i -g mcp-recall
 mcp-recall install       # register the hooks and MCP server in Claude Code
 mcp-recall profiles seed # optional: compression profiles for the MCPs you use
 ```
 
-Restart Claude Code, then run `mcp-recall status`: every check should be green. A yellow `detected, not set up` or `Profiles: none installed` line is optional; `partial / stale` is a fault: follow the fix line status prints under it. That's it. Claude now receives summaries, and uses the `recall__*` tools when it needs the full output.
+**2. Check.** Restart Claude Code, then run `mcp-recall status`: every check should be green. A yellow `detected, not set up` or `Profiles: none installed` line is optional; `partial / stale` is a fault: follow the fix line status prints under it.
+
+**3. See it work.** In a repository with at least 30 commits, ask Claude:
+
+> Run `git log -30`, then tell me the first line of the output you got.
+
+Claude receives a summary instead of the full log, and its first line is mcp-recall's header. On this repository:
+
+```
+[recall:recall_2657b795dd67cdd4 · 28.1KB→1.4KB (95% reduction) · search: "sakebomb", "users", "github", "noreply", "off"]
+git log — 30 commits
+  bc50fe7  fix: honour CLAUDE_CONFIG_DIR in install, status, learn and seed (#498)
+  …
+```
+
+Ask again while the log is unchanged and the header reads `[recall:… · cached · <date>]`: mcp-recall reuses the summary it already made. There is no warm-up: the store starts empty, and each large output is summarized from the first call. Short output usually passes through untouched, with no header. For the running total, ask Claude "what has recall saved in this project?", which calls `recall__stats`. The savings grow with how much large, structured output your tools return, such as browser snapshots, GitHub and API results, and long test logs: [Is it for you?](#is-it-for-you) says who gains most.
 
 `mcp-recall install` writes the MCP server entry and hooks to `~/.claude.json` and `~/.claude/settings.json`, and adds a short instruction block to `~/.claude/CLAUDE.md` (or the same files under `CLAUDE_CONFIG_DIR` when it is set). It is idempotent, so re-run it after every update.
 
