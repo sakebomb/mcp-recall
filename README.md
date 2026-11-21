@@ -215,7 +215,7 @@ mcp-recall works out of the box. To customize it, create `~/.config/mcp-recall/c
 ```bash
 mcp-recall install              # register hooks + MCP server in Claude Code
 mcp-recall uninstall            # remove hooks + MCP server
-mcp-recall status               # report install health and store size
+mcp-recall status               # report install health, run a hook self-test, show store size
 mcp-recall stats [--all]        # what has been summarized, and how much smaller, by tool
 mcp-recall serve                # run the MCP server on stdio (Claude Code starts it)
 mcp-recall gc [--force]         # reclaim disk (dry run unless --force)

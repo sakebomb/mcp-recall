@@ -14044,6 +14044,114 @@ var init_opencode = __esm(() => {
   OPENCODE_PLUGIN_SOURCE = opencode_plugin_default;
 });
 
+// src/install/self-test.ts
+import { mkdtempSync, readFileSync as readFileSync13, rmSync as rmSync3 } from "fs";
+import { tmpdir as tmpdir2 } from "os";
+import { join as join10 } from "path";
+function syntheticGitLog() {
+  const lines = [];
+  for (let i = 0;i < COMMITS; i++) {
+    const sha = (i * 2654435761 >>> 0).toString(16).padStart(8, "0").repeat(5);
+    const day = String(i % 28 + 1).padStart(2, "0");
+    lines.push(`commit ${sha}`, `Author: Self Test <self-test@example.invalid>`, `Date:   Mon Nov ${day} 10:00:00 2026 +0000`, "", `    feat: synthetic change number ${i} for the mcp-recall self-test`, "", `    Body line explaining change ${i}, long enough to look like a real commit message.`, `    A second body line so each entry carries the weight a real log does.`, "");
+  }
+  return lines.join(`
+`);
+}
+function selfTestPayload(cwd, stdout) {
+  return JSON.stringify({
+    session_id: "mcp-recall-self-test",
+    hook_event_name: "PostToolUse",
+    cwd,
+    tool_name: "Bash",
+    tool_input: { command: "git log" },
+    tool_response: { stdout, stderr: "", interrupted: false, isImage: false }
+  });
+}
+function deliveredText(hookStdout) {
+  let out;
+  try {
+    out = JSON.parse(hookStdout);
+  } catch {
+    return null;
+  }
+  const updated = out?.hookSpecificOutput?.updatedToolOutput;
+  if (typeof updated === "string")
+    return updated;
+  const stdout = updated?.stdout;
+  return typeof stdout === "string" ? stdout : null;
+}
+async function runSelfTest(command, env = {}, timeoutMs = TIMEOUT_MS) {
+  const dir = mkdtempSync(join10(tmpdir2(), "mcp-recall-self-test-"));
+  let timer;
+  try {
+    const log2 = syntheticGitLog();
+    const proc = Bun.spawn(["sh", "-c", command], {
+      cwd: dir,
+      stdin: new TextEncoder().encode(selfTestPayload(dir, log2)),
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, ...env, RECALL_DB_PATH: join10(dir, "self-test.db") }
+    });
+    const out = proc.stdout.getReader();
+    const err = proc.stderr.getReader();
+    const timedOut = new Promise((done) => {
+      timer = setTimeout(() => done("timeout"), timeoutMs);
+    });
+    const finished = Promise.all([readAll(out), readAll(err), proc.exited]);
+    const winner = await Promise.race([finished, timedOut]);
+    if (winner === "timeout") {
+      proc.kill();
+      out.cancel().catch(() => {});
+      err.cancel().catch(() => {});
+      return { ok: false, reason: `the hook did not finish within ${timeoutMs / 1000}s` };
+    }
+    const [stdout, stderr, code] = winner;
+    if (code !== 0) {
+      const first = stderr.trim().split(`
+`)[0] ?? "";
+      return { ok: false, reason: `the hook exited with code ${code}${first ? `: ${first}` : ""}` };
+    }
+    const text = deliveredText(stdout);
+    if (text === null || !text.startsWith("[recall:")) {
+      return { ok: false, reason: "the hook returned the output unchanged" };
+    }
+    return { ok: true, original: Buffer.byteLength(log2), delivered: Buffer.byteLength(text) };
+  } catch (e) {
+    return { ok: false, reason: `could not run the hook: ${e instanceof Error ? e.message : String(e)}` };
+  } finally {
+    clearTimeout(timer);
+    rmSync3(dir, { recursive: true, force: true });
+  }
+}
+async function readAll(reader) {
+  const chunks = [];
+  for (;; ) {
+    const { done, value } = await reader.read();
+    if (done)
+      return Buffer.concat(chunks).toString("utf8");
+    chunks.push(value);
+  }
+}
+function pluginHookCommand(installPath) {
+  try {
+    const hooks = JSON.parse(readFileSync13(join10(installPath, "hooks", "hooks.json"), "utf8"));
+    const entries = hooks?.hooks?.PostToolUse ?? [];
+    const cmd = entries.flatMap((e) => e.hooks ?? []).map((h) => h.command).find((c) => typeof c === "string");
+    return typeof cmd === "string" ? cmd : null;
+  } catch {
+    return null;
+  }
+}
+function formatSelfTest(r) {
+  if (!r.ok)
+    return `Self-test: ${r.reason}`;
+  const pct = Math.round((1 - r.delivered / r.original) * 100);
+  return `Self-test: the hook summarized a ${formatBytes(r.original)} git log to ${formatBytes(r.delivered)} (${pct}% smaller)`;
+}
+var TIMEOUT_MS = 1e4, COMMITS = 60;
+var init_self_test = () => {};
+
 // src/install/index.ts
 var exports_install = {};
 __export(exports_install, {
@@ -14785,6 +14893,20 @@ Installation: ${BOLD}${label}${RESET}
     }
   }
 }
+async function printSelfTest(cliCommand, plugin, run) {
+  const pluginCommand = !cliCommand && plugin?.enabled ? pluginHookCommand(plugin.installPath) : null;
+  const command = cliCommand ?? pluginCommand;
+  console.log("");
+  if (!command) {
+    console.log(`  ${YELLOW}!${RESET} Self-test: skipped, no PostToolUse hook is registered`);
+    return;
+  }
+  const result = await run(command, pluginCommand ? { CLAUDE_PLUGIN_ROOT: plugin.installPath } : {});
+  const icon = result.ok ? `${GREEN}\u2713${RESET}` : `${RED}\u2717${RESET}`;
+  console.log(`  ${icon} ${formatSelfTest(result)}`);
+  if (!result.ok)
+    console.log(`    \u2192 Run it by hand with ${BOLD}RECALL_DEBUG=1${RESET} to see why; see docs/troubleshooting.md`);
+}
 async function statusCommand(opts = {}) {
   const {
     claudeJsonPath: claudeJsonPath2 = defaultClaudeJsonPath(),
@@ -14793,7 +14915,8 @@ async function statusCommand(opts = {}) {
     pluginsPath = defaultPluginsPath(),
     launch = detectLaunch(),
     piDir = defaultPiDir(),
-    opencodeDir = defaultOpencodeDir()
+    opencodeDir = defaultOpencodeDir(),
+    selfTest = runSelfTest
   } = opts;
   const claudeJson = await readJsonFile(claudeJsonPath2);
   const settings = await readJsonFile(settingsPath);
@@ -14838,6 +14961,7 @@ async function statusCommand(opts = {}) {
   }
   for (const a of fileAgents(piDir, opencodeDir))
     await printFileAgentStatus(a, launch);
+  await printSelfTest(ourHookCommands(hooks["PostToolUse"], ours.PostToolUse)[0], plugin, selfTest);
   console.log("");
   const profiles = loadProfiles();
   if (profiles.length === 0) {
@@ -14879,6 +15003,7 @@ var init_install = __esm(() => {
   init_gc();
   init_config();
   init_claude_paths();
+  init_self_test();
   RUNNER_CACHES = [
     ["npx", /[\\/]_npx[\\/]/],
     ["bunx", /[\\/]\.bunx-[^\\/]*[\\/]/],
@@ -14903,7 +15028,7 @@ __export(exports_discover, {
 });
 import { Database as Database4 } from "bun:sqlite";
 import { existsSync as existsSync7, readdirSync as readdirSync6 } from "fs";
-import { join as join10 } from "path";
+import { join as join11 } from "path";
 function hasHandlerColumn(db) {
   const cols = db.prepare(`PRAGMA table_info(stored_outputs)`).all();
   return cols.some((c) => c.name === "handler");
@@ -14968,7 +15093,7 @@ function storeFiles(all, cwd = process.cwd()) {
   const dir = dataDir();
   if (!existsSync7(dir))
     return [];
-  return readdirSync6(dir).filter((n) => n.endsWith(".db")).map((n) => join10(dir, n));
+  return readdirSync6(dir).filter((n) => n.endsWith(".db")).map((n) => join11(dir, n));
 }
 function pct(part, whole) {
   return whole > 0 ? `${(part / whole * 100).toFixed(0)}%` : "\u2014";
@@ -15904,7 +16029,7 @@ function deliveredBytes(summary, originalSize, hints) {
 
 // src/cli.ts
 init_log();
-import { join as join11 } from "path";
+import { join as join12 } from "path";
 async function getVersion() {
   const pkg = await Promise.resolve().then(() => __toESM(require_package(), 1));
   return pkg.version;
@@ -16254,7 +16379,7 @@ async function main() {
     process.exit(0);
   }
   if (subcommand === "serve") {
-    await import(join11(import.meta.dir, import.meta.path.endsWith(".js") ? "server.js" : "server.ts"));
+    await import(join12(import.meta.dir, import.meta.path.endsWith(".js") ? "server.js" : "server.ts"));
     return;
   }
   if (subcommand === "gc") {

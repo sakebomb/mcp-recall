@@ -74,7 +74,9 @@ src/
                         reduction and retrieval rate (#341). Read-only over every store.
                         A NULL `handler` means "stored before #341", never a fallback.
   import/               mcp-recall import — restores a recall__export dump into a store
-  install/              mcp-recall install / uninstall / status — writes to ~/.claude.json, settings.json, CLAUDE.md
+  install/              mcp-recall install / uninstall / status — writes to ~/.claude.json, settings.json, CLAUDE.md.
+                        status's self-test (self-test.ts) runs the registered PostToolUse command on a
+                        synthetic git log against a throwaway RECALL_DB_PATH, never the user's store
   learn/                mcp-recall learn — reads ~/.claude.json, spawns MCP servers via stdio, generates TOML profiles
   profiles/             mcp-recall profiles subcommands (list, install, update, remove, seed, feed, check, test, info, available, retrain)
 tests/                  Bun tests, co-located by module name
