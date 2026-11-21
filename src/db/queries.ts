@@ -1,7 +1,7 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { randomBytes, createHash } from "crypto";
 import { log } from "../log";
-import { appendFileSync, existsSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync } from "fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, utimesSync } from "fs";
 import { basename, dirname, join } from "path";
 import type { StoredOutput, StoreInput, SearchOptions, ListOptions, ForgetOptions, CallRecord } from "./types";
 import { CALL_OUTCOMES } from "./types";
@@ -228,6 +228,11 @@ export function recordCall(db: Database, call: CallRecord): void {
  * atomic rename before it is read, so two folds never count a line twice; a
  * hook appending meanwhile starts a fresh log. Call it where the store is being
  * written anyway. Never throws.
+ *
+ * The counts are best effort, never exact: an append already open on the log
+ * when it is claimed can land after the read and be lost; a crash between the
+ * upsert and the unlink counts that file again once its claim goes stale; and a
+ * reader between those two steps sees the file's lines twice, briefly.
  */
 export function foldCallLog(db: Database): void {
   const live = callLogPath(db.filename);
@@ -235,7 +240,11 @@ export function foldCallLog(db: Database): void {
   const claims: string[] = [];
   const claim = (file: string): void => {
     const to = `${live}.${process.pid}-${Date.now()}-${claims.length}${FOLDING_SUFFIX}`;
-    try { renameSync(file, to); claims.push(to); } catch { /* gone, or another fold took it */ }
+    try { renameSync(file, to); } catch { return; /* gone, or another fold took it */ }
+    claims.push(to);
+    // A rename keeps the log's last-append mtime, so a quiet project's log would
+    // look stale the moment it is claimed and another fold could take it over.
+    try { const now = new Date(); utimesSync(to, now, now); } catch { /* best effort */ }
   };
   if (existsSync(live)) claim(live);
   for (const file of callLogFiles(db.filename)) {

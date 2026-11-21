@@ -91,6 +91,20 @@ describe("foldCallLog", () => {
     expect(existsSync(fresh)).toBe(true); // a fold in progress elsewhere may own it
   });
 
+  it("leaves a log alone that another fold claimed just now, however old its appends", () => {
+    const live = callLogPath(file)!;
+    writeFileSync(live, JSON.stringify({ ...call(), day: "2026-01-01" }) + "\n");
+    const old = new Date(Date.now() - 10 * 60_000);
+    utimesSync(live, old, old);
+    db.close(); // the first fold claims the log, then fails to write: its claim stays
+    foldCallLog(db);
+    db = new Database(file);
+    foldCallLog(db);
+
+    expect(rowCount()).toBe(0);
+    expect(readdirSync(dir).filter((f) => f.endsWith(".folding"))).toHaveLength(1);
+  });
+
   it("skips a torn or foreign line instead of failing", () => {
     recordCall(db, call());
     appendFileSync(callLogPath(file)!, '{"project_key":"ccA","tool_na\nnot json\n{"outcome":"bogus"}\n');

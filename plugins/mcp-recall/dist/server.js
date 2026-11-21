@@ -22033,7 +22033,7 @@ function sanitizeFtsQuery(query) {
 }
 // src/db/queries.ts
 import { randomBytes, createHash as createHash2 } from "crypto";
-import { appendFileSync, existsSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync } from "fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, utimesSync } from "fs";
 import { basename, dirname as dirname2, join as join2 } from "path";
 var EFFECTIVE_SIZE_EXPR = "CASE WHEN full_retained = 1 THEN original_size ELSE summary_size END";
 function generateId() {
@@ -22168,7 +22168,13 @@ function foldCallLog(db) {
     const to = `${live}.${process.pid}-${Date.now()}-${claims.length}${FOLDING_SUFFIX}`;
     try {
       renameSync(file, to);
-      claims.push(to);
+    } catch {
+      return;
+    }
+    claims.push(to);
+    try {
+      const now = new Date;
+      utimesSync(to, now, now);
     } catch {}
   };
   if (existsSync(live))

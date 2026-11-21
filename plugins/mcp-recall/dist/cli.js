@@ -7326,7 +7326,7 @@ var CHUNK_SIZE = 512, CHUNK_OVERLAP = 64;
 
 // src/db/queries.ts
 import { randomBytes, createHash as createHash2 } from "crypto";
-import { appendFileSync, existsSync, readdirSync, readFileSync as readFileSync2, renameSync, statSync, unlinkSync } from "fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync as readFileSync2, renameSync, statSync, unlinkSync, utimesSync } from "fs";
 import { basename, dirname as dirname2, join as join3 } from "path";
 function generateId() {
   return `recall_${randomBytes(8).toString("hex")}`;
@@ -7478,7 +7478,13 @@ function foldCallLog(db) {
     const to = `${live}.${process.pid}-${Date.now()}-${claims.length}${FOLDING_SUFFIX}`;
     try {
       renameSync(file, to);
-      claims.push(to);
+    } catch {
+      return;
+    }
+    claims.push(to);
+    try {
+      const now = new Date;
+      utimesSync(to, now, now);
     } catch {}
   };
   if (existsSync(live))
