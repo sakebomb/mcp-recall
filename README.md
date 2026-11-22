@@ -217,6 +217,7 @@ mcp-recall install              # register hooks + MCP server in Claude Code
 mcp-recall uninstall            # remove hooks + MCP server
 mcp-recall status               # report install health, run a hook self-test, show store size
 mcp-recall stats [--all]        # what has been summarized, and how much smaller, by tool
+mcp-recall statusline           # one line for Claude Code's status line: today's calls and bytes kept out
 mcp-recall serve                # run the MCP server on stdio (Claude Code starts it)
 mcp-recall gc [--force]         # reclaim disk (dry run unless --force)
 mcp-recall discover [--all]     # rank output routed to fallback handlers (--since, --limit)

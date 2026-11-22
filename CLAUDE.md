@@ -69,7 +69,10 @@ src/
   gc/                   mcp-recall gc — classifies every project DB and reclaims disk.
                         Deletion policy lives in STATUS_POLICY; see the safety note below.
   stats/                mcp-recall stats — savings by tool for this project or --all (#495).
-                        Read-only over every store; same totals as recall__stats
+                        Read-only over every store; same totals as recall__stats.
+                        statusline.ts is `mcp-recall statusline`: today's calls for one project,
+                        run by Claude Code on every status refresh, so it never writes and a
+                        fault prints nothing (a non-zero exit blanks the user's status line)
   discover/             mcp-recall discover — ranks fallback-routed output by bytes, with
                         reduction and retrieval rate (#341). Read-only over every store.
                         A NULL `handler` means "stored before #341", never a fallback.
@@ -118,6 +121,7 @@ mcp-recall install            # write MCP entry, hooks, and CLAUDE.md instructio
 mcp-recall uninstall          # reverse of install
 mcp-recall status             # report install health (MCP entry, hooks, CLAUDE.md block, store size)
 mcp-recall stats [--all]      # savings by tool, without asking Claude (same totals as recall__stats)
+mcp-recall statusline         # one line for Claude Code's statusLine: today's calls and bytes kept out
 mcp-recall gc [--force]       # list/reclaim orphaned project DBs (--stale-days N, --vacuum). Dry run by default
 mcp-recall discover [--all]   # rank fallback-routed output by bytes, reduction, retrieval rate (--since, --limit)
 mcp-recall import <file>      # restore from a recall__export dump (--overwrite, --dry-run). --keep-project-key removed in #226 (rejected)
