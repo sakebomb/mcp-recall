@@ -15,7 +15,7 @@ import { csvHandler, looksLikeCsv } from "./csv";
 import { jsonHandler } from "./json";
 import { genericHandler } from "./generic";
 import { extractText } from "./types";
-import { getProfileHandler } from "../profiles";
+import { getProfileHandler, loadProfiles } from "../profiles";
 
 export type { CompressionResult, Handler } from "./types";
 export { extractText } from "./types";
@@ -28,6 +28,8 @@ export { extractText } from "./types";
 type HandlerMatcher = {
   match: (toolName: string, output: unknown) => boolean;
   handler: Handler;
+  /** Whether a server's tool prefix lands here, for a `match` that needs the output to tell. */
+  servesPrefix?: (toolPrefix: string) => boolean;
 };
 
 /**
@@ -42,6 +44,7 @@ const HANDLER_REGISTRY: HandlerMatcher[] = [
     // Every Playwright action and evaluate returns the page response, not only browser_snapshot (#424).
     match: (t, output) => t.includes("playwright") && (t.includes("snapshot") || isPlaywrightResponse(output)),
     handler: playwrightHandler,
+    servesPrefix: (t) => t.includes("playwright"),
   },
   {
     match: (t) => t.startsWith("mcp__github__"),
@@ -168,4 +171,20 @@ export function getHandler(toolName: string, output: unknown, input?: unknown): 
   }
 
   return genericHandler;
+}
+
+/**
+ * Whether a handler or an installed profile is written for a server's tools, or
+ * they fall to the content fallbacks. `toolPrefix` is `mcp__<server>__`. Install
+ * uses it to say what to expect (#496); dispatch never calls it.
+ */
+export function hasDedicatedHandler(toolPrefix: string): boolean {
+  const byProfile = loadProfiles().some((p) =>
+    p.patterns.some((pat) => {
+      const wildcard = pat.endsWith("*");
+      const stem = wildcard ? pat.slice(0, -1) : pat;
+      return stem.startsWith(toolPrefix) || (wildcard && toolPrefix.startsWith(stem));
+    })
+  );
+  return byProfile || HANDLER_REGISTRY.some((m) => (m.servesPrefix ?? ((t) => m.match(t, undefined)))(toolPrefix));
 }

@@ -4,9 +4,11 @@
  * project the session was started in.
  *
  * Claude Code runs the command on every status refresh and shows nothing if it
- * exits non-zero or prints nothing. So this never writes a store (readonly, and
- * it adds the unfolded log lines instead of folding them), and a fault prints
- * nothing: a broken store must not cost the user the rest of their status line.
+ * exits non-zero or prints nothing. So this never changes a store's contents
+ * (readonly, and it adds the unfolded log lines instead of folding them), and a
+ * fault prints nothing: a broken store must not cost the user the rest of their
+ * status line. A readonly open can still recreate the `-wal` and `-shm` files,
+ * and fails where it cannot, as in a read-only directory.
  *
  * Measured bytes and calls only, as in `mcp-recall stats`.
  */
