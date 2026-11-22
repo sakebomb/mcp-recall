@@ -143,9 +143,19 @@ export function storeOutput(db: Database, input: StoreInput): StoredOutput {
 // into call_counts by writes that happen anyway: storing a summary, a session
 // starting, forget-all. Readers add the unfolded lines, so counts are current.
 
-/** A counted call with the UTC day it happened. */
+/** A counted call with the local day it happened. */
 export interface PendingCall extends CallRecord {
   day: string;
+}
+
+/**
+ * The local calendar date, YYYY-MM-DD: the day a call is counted under. Local,
+ * not UTC, so "today" on the status line turns over at the user's midnight
+ * (UTC's falls in the working evening across the Americas).
+ */
+export function localDay(now: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
 /** A fold claims the log by renaming it to `<log>.<unique>.folding` first. */
@@ -208,13 +218,13 @@ function upsertCalls(db: Database, calls: PendingCall[]): void {
 }
 
 /**
- * Counts one intercepted call under today's UTC date: one appended line, no
+ * Counts one intercepted call under today's local date: one appended line, no
  * SQLite write. An in-memory store has no file to log beside, so it is
  * written directly. Never throws: a counter must not cost the user the summary.
  */
 export function recordCall(db: Database, call: CallRecord): void {
   try {
-    const pending: PendingCall = { ...call, day: new Date().toISOString().slice(0, 10) };
+    const pending: PendingCall = { ...call, day: localDay() };
     const log_ = callLogPath(db.filename);
     if (log_ === null) upsertCalls(db, [pending]);
     else appendFileSync(log_, JSON.stringify(pending) + "\n");

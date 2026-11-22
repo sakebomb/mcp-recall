@@ -7403,6 +7403,10 @@ function storeOutput(db, input) {
     handler
   };
 }
+function localDay(now = new Date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
 function callLogPath(dbFile) {
   return dbFile === "" || dbFile === ":memory:" ? null : `${dbFile}.calls`;
 }
@@ -7458,7 +7462,7 @@ function upsertCalls(db, calls) {
 }
 function recordCall(db, call) {
   try {
-    const pending = { ...call, day: new Date().toISOString().slice(0, 10) };
+    const pending = { ...call, day: localDay() };
     const log_ = callLogPath(db.filename);
     if (log_ === null)
       upsertCalls(db, [pending]);
@@ -15389,6 +15393,102 @@ var init_stats = __esm(() => {
   };
 });
 
+// src/stats/statusline.ts
+var exports_statusline = {};
+__export(exports_statusline, {
+  statuslineText: () => statuslineText,
+  statuslineCommand: () => statuslineCommand,
+  sessionDir: () => sessionDir,
+  readSession: () => readSession,
+  readDayTotals: () => readDayTotals,
+  formatStatusline: () => formatStatusline,
+  STDIN_TIMEOUT_MS: () => STDIN_TIMEOUT_MS
+});
+import { Database as Database6 } from "bun:sqlite";
+import { existsSync as existsSync8 } from "fs";
+function readDayTotals(file, projectKey, day) {
+  if (!existsSync8(file))
+    return NO_CALLS;
+  let db = null;
+  try {
+    db = new Database6(file, { readonly: true });
+    const folded2 = hasCallCounts(db) ? db.prepare(`
+          SELECT COALESCE(SUM(calls), 0) AS calls,
+                 COALESCE(SUM(original_bytes - delivered_bytes), 0) AS saved_bytes
+          FROM call_counts
+          WHERE project_key = ? AND day = ?
+        `).get(projectKey, day) : NO_CALLS;
+    const pending = readCallLog(file).filter((c) => c.project_key === projectKey && c.day === day);
+    return {
+      calls: folded2.calls + pending.length,
+      saved_bytes: folded2.saved_bytes + pending.reduce((n, c) => n + c.original_bytes - c.delivered_bytes, 0)
+    };
+  } catch {
+    return null;
+  } finally {
+    db?.close();
+  }
+}
+function formatStatusline(totals) {
+  if (totals === null)
+    return "";
+  if (totals.calls === 0)
+    return "recall: no calls yet today";
+  const calls = `${totals.calls} call${totals.calls === 1 ? "" : "s"}`;
+  if (totals.saved_bytes <= 0)
+    return `recall: ${calls} today, none large enough to summarize`;
+  return `recall: ${formatBytes(totals.saved_bytes)} kept out today \xB7 ${calls}`;
+}
+function sessionDir(raw, fallback) {
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+  if (typeof data !== "object" || data === null)
+    return fallback;
+  const { workspace, cwd } = data;
+  const ws = typeof workspace === "object" && workspace !== null ? workspace : {};
+  const dir = [ws.project_dir, ws.current_dir, cwd].find((d) => typeof d === "string" && d !== "");
+  return typeof dir === "string" ? dir : fallback;
+}
+function defaultStoreFor(cwd) {
+  const projectKey = getProjectKey(cwd);
+  return { file: defaultDbPath(projectKey), projectKey };
+}
+function statuslineText(raw, deps = {}) {
+  try {
+    const { file, projectKey } = (deps.storeFor ?? defaultStoreFor)(sessionDir(raw, process.cwd()));
+    return formatStatusline(readDayTotals(file, projectKey, localDay()));
+  } catch {
+    return "";
+  }
+}
+async function readSession(timeoutMs = STDIN_TIMEOUT_MS) {
+  if (process.stdin.isTTY)
+    return "";
+  try {
+    return await Promise.race([
+      Bun.stdin.text(),
+      new Promise((resolve4) => setTimeout(() => resolve4(""), timeoutMs))
+    ]);
+  } catch {
+    return "";
+  }
+}
+async function statuslineCommand() {
+  const text = statuslineText(await readSession());
+  if (text !== "")
+    console.log(text);
+}
+var NO_CALLS, STDIN_TIMEOUT_MS = 1000;
+var init_statusline = __esm(() => {
+  init_db();
+  init_project_key();
+  NO_CALLS = { calls: 0, saved_bytes: 0 };
+});
+
 // src/hooks/session-start.ts
 init_config();
 init_project_key();
@@ -16048,6 +16148,7 @@ Commands:
   status               Show current configuration and health
   stats                What has been summarized, and how much smaller, by tool
     --all              Every project's store, not just this one
+  statusline           One line for Claude Code's statusLine: today's calls and bytes kept out
   serve                Run the MCP server on stdio (Claude Code starts this)
   gc [--force]         Reclaim disk: list/delete orphaned project DBs
     --stale-days N     Legacy DBs (no recorded path) older than N days are candidates (default 90)
@@ -16104,7 +16205,7 @@ _mcp_recall() {
   COMPREPLY=()
   cur="\${COMP_WORDS[COMP_CWORD]}"
 
-  local commands="install uninstall status stats gc discover profiles learn import completions --help --version"
+  local commands="install uninstall status stats statusline gc discover profiles learn import completions --help --version"
   local profiles_cmds="list install update remove available info seed feed check retrain test"
 
   if [[ \${COMP_CWORD} -eq 1 ]]; then
@@ -16191,6 +16292,7 @@ _mcp_recall() {
         'uninstall:remove hooks and MCP server'
         'status:show current configuration and health'
         'stats:what has been summarized and how much it saved'
+        'statusline:one line for the Claude Code status line'
         'gc:reclaim disk from orphaned project databases'
         'discover:rank output routed to fallback handlers'
         'profiles:manage compression profiles'
@@ -16221,7 +16323,7 @@ function fishCompletion() {
   return `# mcp-recall fish completions
 # Save to: mcp-recall completions fish > ~/.config/fish/completions/mcp-recall.fish
 
-set -l commands install uninstall status stats gc discover profiles learn import completions
+set -l commands install uninstall status stats statusline gc discover profiles learn import completions
 
 # Top-level commands
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
@@ -16232,6 +16334,8 @@ complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
   -a status -d "Show current configuration and health"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
   -a stats -d "What has been summarized and how much it saved"
+complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
+  -a statusline -d "One line for the Claude Code status line"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
   -a gc -d "Reclaim disk from orphaned project databases"
 complete -c mcp-recall -f -n "not __fish_seen_subcommand_from $commands" \\
@@ -16355,6 +16459,13 @@ async function main() {
   if (subcommand === "stats") {
     const { statsCommand: statsCommand2 } = await Promise.resolve().then(() => (init_stats(), exports_stats));
     statsCommand2({ all: process.argv.includes("--all") });
+    process.exit(0);
+  }
+  if (subcommand === "statusline") {
+    const { statuslineCommand: statuslineCommand2 } = await Promise.resolve().then(() => (init_statusline(), exports_statusline));
+    try {
+      await statuslineCommand2();
+    } catch {}
     process.exit(0);
   }
   if (subcommand === "discover") {
