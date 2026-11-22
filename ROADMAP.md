@@ -8,9 +8,9 @@ the system, [docs/architecture.md](docs/architecture.md).
 
 ## Status: adoption and visible effect (since 2026-11-20)
 
-The pipeline is settled and maintained: no changes are planned to what
-mcp-recall summarizes, stores or retrieves. Reporting on what it does is in
-scope. The work now is making what it already does easy to install, easy to
+The pipeline is settled and maintained: beyond the fixes listed below, no
+changes are planned to what mcp-recall summarizes, stores or retrieves.
+Reporting on what it does is in scope. The work now is making what it already does easy to install, easy to
 see, and available in more places. Releases ship on the weekly train
 ([CONTRIBUTING.md](CONTRIBUTING.md#releases)).
 
@@ -84,8 +84,9 @@ the three kinds of work above is not planned.
   on bytes saved. A handler that keeps less of what Claude went on to use than a
   same-size cut of the raw output (`bun run fidelity`, `bun run quality`,
   [docs/benchmarks.md](docs/benchmarks.md)) is a bug to fix, not a feature to add.
-  A new or improved handler counts as a summary-quality fix when it keeps more
-  of what Claude uses than the fallback does; open an issue first if unsure.
+  A new or improved handler counts as a summary-quality fix when it beats that
+  same baseline, keeping more of what Claude uses than a same-size cut of the
+  raw output; open an issue first if unsure.
 - **Compatibility** — keeping up with Claude Code's hook and tool-output formats,
   Bun, and the MCP servers whose output the handlers parse.
 - **Docs accuracy** — the docs should never overstate what the code does.
