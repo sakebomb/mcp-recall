@@ -35,7 +35,7 @@ input=$(cat)
 recall=$(printf '%s' "$input" | mcp-recall statusline)
 ```
 
-`recall: no calls yet today` means the hook has seen nothing in this project today. A line that says calls were seen but none was large enough means the hook is running and your output was short. The command prints nothing at all if the store cannot be read, so a fault never breaks the rest of your status line. It reads the store and never writes it. The day is your local date. For totals beyond today, run `mcp-recall stats`.
+`recall: no calls yet today` means the hook has seen nothing in this project today. A line that says calls were seen but none was large enough means the hook is running and your output was short. The command prints nothing at all if the store cannot be read, so a fault never breaks the rest of your status line. It opens the store read-only and changes nothing in it. SQLite may still recreate the store's `-wal` and `-shm` files beside it, so in a directory it cannot write to the open can fail, and the line stays empty. The day is your local date. For totals beyond today, run `mcp-recall stats`.
 
 ### Will it hide something Claude needs?
 

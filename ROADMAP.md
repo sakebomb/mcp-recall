@@ -47,8 +47,8 @@ Three kinds of work are in scope, beyond the fixes listed under
   agent's status. An agent whose documented hooks qualify but that no maintainer
   can test, such as Copilot CLI, is built on request.
 
-Beyond those fixes, changes to what is summarized, stored or retrieved are not
-planned. That follows the paired task-success studies in
+Beyond the fixes in [What always gets fixed](#what-always-gets-fixed), changes
+to what is summarized, stored or retrieved are not planned. That follows the paired task-success studies in
 [#414](https://github.com/sakebomb/mcp-recall/issues/414), with an exit rule
 agreed before they ran. Where sessions were long enough to compact, mcp-recall
 made them compact less often, and on Haiku it made them cheaper. No study found a

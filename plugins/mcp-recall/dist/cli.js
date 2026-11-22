@@ -11520,6 +11520,14 @@ function getHandler(toolName, output, input) {
   }
   return genericHandler;
 }
+function hasDedicatedHandler(toolPrefix) {
+  const byProfile = loadProfiles().some((p) => p.patterns.some((pat) => {
+    const wildcard = pat.endsWith("*");
+    const stem = wildcard ? pat.slice(0, -1) : pat;
+    return stem.startsWith(toolPrefix) || wildcard && toolPrefix.startsWith(stem);
+  }));
+  return byProfile || HANDLER_REGISTRY.some((m) => (m.servesPrefix ?? ((t) => m.match(t, undefined)))(toolPrefix));
+}
 var HANDLER_REGISTRY;
 var init_handlers = __esm(() => {
   init_playwright();
@@ -11543,7 +11551,8 @@ var init_handlers = __esm(() => {
   HANDLER_REGISTRY = [
     {
       match: (t, output) => t.includes("playwright") && (t.includes("snapshot") || isPlaywrightResponse(output)),
-      handler: playwrightHandler
+      handler: playwrightHandler,
+      servesPrefix: (t) => t.includes("playwright")
     },
     {
       match: (t) => t.startsWith("mcp__github__"),
@@ -14048,6 +14057,56 @@ var init_opencode = __esm(() => {
   OPENCODE_PLUGIN_SOURCE = opencode_plugin_default;
 });
 
+// src/install/expectations.ts
+function toolPrefixes(server) {
+  const name = server.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return [...new Set([name, name.replace(/-/g, "_")])].map((n) => `mcp__${n}__`);
+}
+function scanServers(claudeJson) {
+  const raw = claudeJson["mcpServers"];
+  const isMap = raw !== null && typeof raw === "object" && !Array.isArray(raw);
+  const servers = isMap ? Object.keys(raw).filter((k) => k !== "recall") : [];
+  const isDedicated = (s) => toolPrefixes(s).some(hasDedicatedHandler);
+  return {
+    dedicated: servers.filter(isDedicated),
+    fallback: servers.filter((s) => !isDedicated(s))
+  };
+}
+function serverLines(scan, shownJson) {
+  if (scan.dedicated.length + scan.fallback.length === 0) {
+    return [
+      `  No user-scope MCP servers in ${shownJson}, so expect savings mainly on large`,
+      `  Bash output such as test logs and diffs. Project and plugin servers are not`,
+      `  checked here.`
+    ];
+  }
+  const lines = [`  Your user-scope MCP servers ${DIM}(${shownJson})${RESET}:`];
+  if (scan.dedicated.length > 0) {
+    lines.push(`    handler or profile for some or all tools: ${scan.dedicated.join(", ")}`);
+  }
+  if (scan.fallback.length > 0) {
+    lines.push(`    general summarizer, for now:              ${scan.fallback.join(", ")}`);
+  }
+  return lines;
+}
+function whatHappensNext(scan, shownJson) {
+  return [
+    ``,
+    `What happens next:`,
+    `  The store starts empty and there is no warm-up. Large tool output is replaced`,
+    `  by a summary from the first call; short output usually passes through untouched.`,
+    ...scan ? serverLines(scan, shownJson) : [],
+    ``,
+    `  See what it has done:`,
+    `    ${BOLD}mcp-recall stats${RESET}        ${DIM}# savings by tool${RESET}`,
+    `    ${BOLD}mcp-recall statusline${RESET}   ${DIM}# today's calls, for Claude Code's status line${RESET}`
+  ];
+}
+var BOLD = "\x1B[1m", DIM = "\x1B[2m", RESET = "\x1B[0m";
+var init_expectations = __esm(() => {
+  init_handlers();
+});
+
 // src/install/self-test.ts
 import { mkdtempSync, readFileSync as readFileSync13, rmSync as rmSync3 } from "fs";
 import { tmpdir as tmpdir2 } from "os";
@@ -14520,21 +14579,21 @@ async function installCommand(opts = {}) {
   const agents = opts.agents ?? detectAgents(piDir, opencodeDir);
   const missing = launch.artifacts.find((a) => !existsSync6(a.path));
   if (missing) {
-    console.error(`${RED}\u2717 Build artifacts not found.${RESET}`);
-    console.error(`  Expected: ${DIM}${missing.path}${RESET}`);
-    console.error(`  Run ${BOLD}bun run build${RESET} first.`);
+    console.error(`${RED}\u2717 Build artifacts not found.${RESET2}`);
+    console.error(`  Expected: ${DIM2}${missing.path}${RESET2}`);
+    console.error(`  Run ${BOLD2}bun run build${RESET2} first.`);
     process.exit(1);
   }
   const runner = launch.artifacts.map((a) => ephemeralRunner(a.path)).find((r) => r !== null);
   if (runner) {
-    console.error(`${RED}\u2717 mcp-recall is running from ${runner}'s temporary cache.${RESET}`);
+    console.error(`${RED}\u2717 mcp-recall is running from ${runner}'s temporary cache.${RESET2}`);
     console.error(`  Registering it there breaks once that cache is cleaned. Install it globally, then install from there:`);
-    console.error(`    ${BOLD}npm install -g mcp-recall${RESET}   ${DIM}# or: bun add -g mcp-recall${RESET}`);
-    console.error(`    ${BOLD}mcp-recall install${RESET}`);
+    console.error(`    ${BOLD2}npm install -g mcp-recall${RESET2}   ${DIM2}# or: bun add -g mcp-recall${RESET2}`);
+    console.error(`    ${BOLD2}mcp-recall install${RESET2}`);
     process.exit(1);
   }
   if (dryRun) {
-    console.log(`${DIM}dry run \u2014 no files will be modified${RESET}
+    console.log(`${DIM2}dry run \u2014 no files will be modified${RESET2}
 `);
   }
   let anyChange = false;
@@ -14548,11 +14607,11 @@ async function installCommand(opts = {}) {
     printed = true;
     const result = await a.install(piLaunchOf(launch), dryRun);
     if (result === "added") {
-      console.log(`${GREEN}\u2713${RESET} ${`${a.thing} added`.padEnd(26)}${DIM}(${a.location})${RESET}`);
+      console.log(`${GREEN}\u2713${RESET2} ${`${a.thing} added`.padEnd(26)}${DIM2}(${a.location})${RESET2}`);
     } else if (result === "updated") {
-      console.log(`${YELLOW}\u21BA${RESET} ${`${a.thing} updated`.padEnd(26)}${DIM}(${a.location})${RESET}`);
+      console.log(`${YELLOW}\u21BA${RESET2} ${`${a.thing} updated`.padEnd(26)}${DIM2}(${a.location})${RESET2}`);
     } else {
-      console.log(`${DIM}\u2139 ${a.thing} already installed${RESET}`);
+      console.log(`${DIM2}\u2139 ${a.thing} already installed${RESET2}`);
     }
     if (result !== "present") {
       anyChange = true;
@@ -14562,15 +14621,18 @@ ${a.restart} to activate mcp-recall.`);
     }
   }
   if (anyChange && !dryRun) {
+    const scan = agents.includes("claude") ? scanServers(await readJsonFile(claudeJsonPath2)) : null;
+    for (const line of whatHappensNext(scan, tildePath(claudeJsonPath2)))
+      console.log(line);
     console.log(`
 Next steps:`);
     console.log(`  Install compression profiles for your MCPs:`);
-    console.log(`    ${BOLD}mcp-recall profiles seed${RESET}`);
+    console.log(`    ${BOLD2}mcp-recall profiles seed${RESET2}`);
     console.log(`
   Optional \u2014 enable shell completions:`);
-    console.log(`    ${BOLD}mcp-recall completions zsh > ~/.zfunc/_mcp-recall${RESET}   ${DIM}# zsh${RESET}`);
-    console.log(`    ${BOLD}mcp-recall completions bash >> ~/.bash_completion${RESET}    ${DIM}# bash${RESET}`);
-    console.log(`    ${BOLD}mcp-recall completions fish > ~/.config/fish/completions/mcp-recall.fish${RESET}  ${DIM}# fish${RESET}`);
+    console.log(`    ${BOLD2}mcp-recall completions zsh > ~/.zfunc/_mcp-recall${RESET2}   ${DIM2}# zsh${RESET2}`);
+    console.log(`    ${BOLD2}mcp-recall completions bash >> ~/.bash_completion${RESET2}    ${DIM2}# bash${RESET2}`);
+    console.log(`    ${BOLD2}mcp-recall completions fish > ~/.config/fish/completions/mcp-recall.fish${RESET2}  ${DIM2}# fish${RESET2}`);
   }
 }
 async function installClaude(claudeJsonPath2, settingsPath, claudeMdPath, launch, dryRun) {
@@ -14585,17 +14647,17 @@ async function installClaude(claudeJsonPath2, settingsPath, claudeMdPath, launch
       claudeJson["mcpServers"] = { ...mcpServers, recall: newServer };
       await writeJsonFile(claudeJsonPath2, claudeJson);
     }
-    console.log(`${GREEN}\u2713${RESET} MCP server registered     ${DIM}(${claudeJsonPath2})${RESET}`);
+    console.log(`${GREEN}\u2713${RESET2} MCP server registered     ${DIM2}(${claudeJsonPath2})${RESET2}`);
     anyChange = true;
   } else if (!sameServer) {
     if (!dryRun) {
       claudeJson["mcpServers"] = { ...mcpServers, recall: { ...existing, ...newServer } };
       await writeJsonFile(claudeJsonPath2, claudeJson);
     }
-    console.log(`${YELLOW}\u21BA${RESET} MCP server path updated    ${DIM}(${claudeJsonPath2})${RESET}`);
+    console.log(`${YELLOW}\u21BA${RESET2} MCP server path updated    ${DIM2}(${claudeJsonPath2})${RESET2}`);
     anyChange = true;
   } else {
-    console.log(`${DIM}\u2139 MCP server already registered${RESET}`);
+    console.log(`${DIM2}\u2139 MCP server already registered${RESET2}`);
   }
   const settings = await readJsonFile(settingsPath);
   const hooks = settings["hooks"] ?? {};
@@ -14604,20 +14666,20 @@ async function installClaude(claudeJsonPath2, settingsPath, claudeMdPath, launch
   const ss = upsertHook(hooks["SessionStart"] ?? [], ours.SessionStart, makeSessionStartEntry(launch.cli));
   hooks["SessionStart"] = ss.entries;
   if (ss.result === "added") {
-    console.log(`${GREEN}\u2713${RESET} SessionStart hook added    ${DIM}(${settingsPath})${RESET}`);
+    console.log(`${GREEN}\u2713${RESET2} SessionStart hook added    ${DIM2}(${settingsPath})${RESET2}`);
   } else if (ss.result === "updated") {
-    console.log(`${YELLOW}\u21BA${RESET} SessionStart hook updated   ${DIM}(${settingsPath})${RESET}`);
+    console.log(`${YELLOW}\u21BA${RESET2} SessionStart hook updated   ${DIM2}(${settingsPath})${RESET2}`);
   } else {
-    console.log(`${DIM}\u2139 SessionStart hook already registered${RESET}`);
+    console.log(`${DIM2}\u2139 SessionStart hook already registered${RESET2}`);
   }
   const ptu = upsertHook(hooks["PostToolUse"] ?? [], ours.PostToolUse, makePostToolUseEntry(launch.cli));
   hooks["PostToolUse"] = ptu.entries;
   if (ptu.result === "added") {
-    console.log(`${GREEN}\u2713${RESET} PostToolUse hook added     ${DIM}(${settingsPath})${RESET}`);
+    console.log(`${GREEN}\u2713${RESET2} PostToolUse hook added     ${DIM2}(${settingsPath})${RESET2}`);
   } else if (ptu.result === "updated") {
-    console.log(`${YELLOW}\u21BA${RESET} PostToolUse hook updated    ${DIM}(${settingsPath})${RESET}`);
+    console.log(`${YELLOW}\u21BA${RESET2} PostToolUse hook updated    ${DIM2}(${settingsPath})${RESET2}`);
   } else {
-    console.log(`${DIM}\u2139 PostToolUse hook already registered${RESET}`);
+    console.log(`${DIM2}\u2139 PostToolUse hook already registered${RESET2}`);
   }
   if (ss.result !== "present" || ptu.result !== "present") {
     settingsChanged = true;
@@ -14629,13 +14691,13 @@ async function installClaude(claudeJsonPath2, settingsPath, claudeMdPath, launch
   }
   const claudeMdResult = await injectClaudeMd(claudeMdPath, dryRun);
   if (claudeMdResult === "added") {
-    console.log(`${GREEN}\u2713${RESET} CLAUDE.md instructions added  ${DIM}(${claudeMdPath})${RESET}`);
+    console.log(`${GREEN}\u2713${RESET2} CLAUDE.md instructions added  ${DIM2}(${claudeMdPath})${RESET2}`);
     anyChange = true;
   } else if (claudeMdResult === "updated") {
-    console.log(`${YELLOW}\u21BA${RESET} CLAUDE.md instructions updated ${DIM}(${claudeMdPath})${RESET}`);
+    console.log(`${YELLOW}\u21BA${RESET2} CLAUDE.md instructions updated ${DIM2}(${claudeMdPath})${RESET2}`);
     anyChange = true;
   } else {
-    console.log(`${DIM}\u2139 CLAUDE.md instructions already present${RESET}`);
+    console.log(`${DIM2}\u2139 CLAUDE.md instructions already present${RESET2}`);
   }
   if (anyChange && !dryRun) {
     console.log(`
@@ -14655,7 +14717,7 @@ async function uninstallCommand(opts = {}) {
     dryRun = false
   } = opts;
   if (dryRun)
-    console.log(`${DIM}dry run \u2014 no files will be modified${RESET}
+    console.log(`${DIM2}dry run \u2014 no files will be modified${RESET2}
 `);
   if (agents.includes("claude"))
     await uninstallClaude(claudeJsonPath2, settingsPath, claudeMdPath, launch, dryRun);
@@ -14667,12 +14729,12 @@ async function uninstallCommand(opts = {}) {
       console.log("");
     printed = true;
     if (await a.uninstall(dryRun)) {
-      console.log(`${GREEN}\u2713${RESET} ${`Removed ${a.thing}`.padEnd(28)}${DIM}(${a.location})${RESET}`);
+      console.log(`${GREEN}\u2713${RESET2} ${`Removed ${a.thing}`.padEnd(28)}${DIM2}(${a.location})${RESET2}`);
       if (!dryRun)
         console.log(`
 ${a.restart} to deactivate mcp-recall.`);
     } else {
-      console.log(`${DIM}\u2139 ${a.thing} not present${RESET}`);
+      console.log(`${DIM2}\u2139 ${a.thing} not present${RESET2}`);
     }
   }
 }
@@ -14686,10 +14748,10 @@ async function uninstallClaude(claudeJsonPath2, settingsPath, claudeMdPath, laun
       delete mcpServers["recall"];
       await writeJsonFile(claudeJsonPath2, claudeJson);
     }
-    console.log(`${GREEN}\u2713${RESET} Removed mcpServers.recall  ${DIM}(${claudeJsonPath2})${RESET}`);
+    console.log(`${GREEN}\u2713${RESET2} Removed mcpServers.recall  ${DIM2}(${claudeJsonPath2})${RESET2}`);
     anyChange = true;
   } else {
-    console.log(`${DIM}\u2139 mcpServers.recall not present${RESET}`);
+    console.log(`${DIM2}\u2139 mcpServers.recall not present${RESET2}`);
   }
   const settings = await readJsonFile(settingsPath);
   const hooks = settings["hooks"] ?? {};
@@ -14699,18 +14761,18 @@ async function uninstallClaude(claudeJsonPath2, settingsPath, claudeMdPath, laun
     hooks["SessionStart"] = ss.entries;
     settingsChanged = true;
     anyChange = true;
-    console.log(`${GREEN}\u2713${RESET} Removed SessionStart hook   ${DIM}(${settingsPath})${RESET}`);
+    console.log(`${GREEN}\u2713${RESET2} Removed SessionStart hook   ${DIM2}(${settingsPath})${RESET2}`);
   } else {
-    console.log(`${DIM}\u2139 SessionStart hook not present${RESET}`);
+    console.log(`${DIM2}\u2139 SessionStart hook not present${RESET2}`);
   }
   const ptu = removeOurHooks(hooks["PostToolUse"] ?? [], ours.PostToolUse);
   if (ptu.removed > 0) {
     hooks["PostToolUse"] = ptu.entries;
     settingsChanged = true;
     anyChange = true;
-    console.log(`${GREEN}\u2713${RESET} Removed PostToolUse hook    ${DIM}(${settingsPath})${RESET}`);
+    console.log(`${GREEN}\u2713${RESET2} Removed PostToolUse hook    ${DIM2}(${settingsPath})${RESET2}`);
   } else {
-    console.log(`${DIM}\u2139 PostToolUse hook not present${RESET}`);
+    console.log(`${DIM2}\u2139 PostToolUse hook not present${RESET2}`);
   }
   if (settingsChanged && !dryRun) {
     settings["hooks"] = hooks;
@@ -14718,10 +14780,10 @@ async function uninstallClaude(claudeJsonPath2, settingsPath, claudeMdPath, laun
   }
   const removed = await removeClaudeMd(claudeMdPath, dryRun);
   if (removed) {
-    console.log(`${GREEN}\u2713${RESET} Removed CLAUDE.md instructions  ${DIM}(${claudeMdPath})${RESET}`);
+    console.log(`${GREEN}\u2713${RESET2} Removed CLAUDE.md instructions  ${DIM2}(${claudeMdPath})${RESET2}`);
     anyChange = true;
   } else {
-    console.log(`${DIM}\u2139 CLAUDE.md instructions not present${RESET}`);
+    console.log(`${DIM2}\u2139 CLAUDE.md instructions not present${RESET2}`);
   }
   if (anyChange && !dryRun) {
     console.log(`
@@ -14771,30 +14833,30 @@ async function printFileAgentStatus(a, launch) {
   const shown = a.location.replace(os4.homedir(), "~");
   if (!st.installed && st.launch === null) {
     console.log(`
-${a.name}: ${BOLD}${YELLOW}detected, not set up${RESET}
+${a.name}: ${BOLD2}${YELLOW}detected, not set up${RESET2}
 `);
-    console.log(`  To add it: ${BOLD}mcp-recall install --agent ${a.agent}${RESET}`);
+    console.log(`  To add it: ${BOLD2}mcp-recall install --agent ${a.agent}${RESET2}`);
     return;
   }
-  const tick = (ok2) => ok2 ? `${GREEN}\u2713${RESET}` : `${RED}\u2717${RESET}`;
+  const tick = (ok2) => ok2 ? `${GREEN}\u2713${RESET2}` : `${RED}\u2717${RESET2}`;
   const files = st.launch ? registeredFiles([st.launch.cli, [st.launch.server.command, ...st.launch.server.args]]) : [];
   const ok = st.installed && st.launch !== null && !st.stale && files.every((f) => f.exists);
-  const label = ok ? `${GREEN}installed${RESET}` : st.installed ? `${YELLOW}partial / stale${RESET}` : `${RED}not installed${RESET}`;
+  const label = ok ? `${GREEN}installed${RESET2}` : st.installed ? `${YELLOW}partial / stale${RESET2}` : `${RED}not installed${RESET2}`;
   console.log(`
-${a.name}: ${BOLD}${label}${RESET}
+${a.name}: ${BOLD2}${label}${RESET2}
 `);
   console.log(`  ${shown}`);
   console.log(`    ${tick(st.installed && !st.stale)} ${a.fileLabels[0]}${st.stale ? " (from another version)" : ""}`);
   console.log(`    ${tick(st.launch !== null)} ${a.fileLabels[1]}`);
   for (const f of files)
-    console.log(`    ${tick(f.exists)} ${f.label} ${DIM}${f.path}${RESET}`);
+    console.log(`    ${tick(f.exists)} ${f.label} ${DIM2}${f.path}${RESET2}`);
   if (st.launch && JSON.stringify(st.launch) !== JSON.stringify(piLaunchOf(launch))) {
     console.log(`
   The ${a.fileLabels[0]} runs another install of mcp-recall than this one.`);
   }
   if (!ok)
     console.log(`
-  Run ${BOLD}mcp-recall install --agent ${a.agent}${RESET}`);
+  Run ${BOLD2}mcp-recall install --agent ${a.agent}${RESET2}`);
 }
 function ourHookCommands(entries, ours) {
   return (entries ?? []).filter(ours.entry).flatMap((e) => e.hooks.filter(ours.hook).map((h) => h.command));
@@ -14832,42 +14894,42 @@ function printPluginStatus(plugin, claudeMdOk, cliRegistered, claudeMdPath) {
     { label: "bun", ...locate("bun") }
   ];
   const filesOk = files.every((f) => f.exists);
-  const tick = (ok) => ok ? `${GREEN}\u2713${RESET}` : `${RED}\u2717${RESET}`;
+  const tick = (ok) => ok ? `${GREEN}\u2713${RESET2}` : `${RED}\u2717${RESET2}`;
   if (!cliRegistered) {
-    const label = filesOk && claudeMdOk ? `${GREEN}installed${RESET}` : `${YELLOW}partial / stale${RESET}`;
+    const label = filesOk && claudeMdOk ? `${GREEN}installed${RESET2}` : `${YELLOW}partial / stale${RESET2}`;
     console.log(`
-Installation: ${BOLD}${label}${RESET}
+Installation: ${BOLD2}${label}${RESET2}
 `);
   }
   console.log(`${cliRegistered ? `
-` : ""}  Claude Code plugin ${plugin.key}  ${DIM}${plugin.installPath.replace(os4.homedir(), "~")}${RESET}`);
+` : ""}  Claude Code plugin ${plugin.key}  ${DIM2}${plugin.installPath.replace(os4.homedir(), "~")}${RESET2}`);
   for (const f of files)
-    console.log(`    ${tick(f.exists)} ${f.label} ${DIM}${f.path}${RESET}`);
+    console.log(`    ${tick(f.exists)} ${f.label} ${DIM2}${f.path}${RESET2}`);
   if (cliRegistered) {
     console.log(`
-  ${YELLOW}mcp-recall is registered twice:${RESET} by the plugin and by the entries above. Keep one:`);
-    console.log(`    ${BOLD}mcp-recall uninstall${RESET}   ${DIM}# removes the CLI entries${RESET}`);
-    console.log(`    ${BOLD}claude plugin uninstall ${plugin.key}${RESET}   ${DIM}# removes the plugin${RESET}`);
+  ${YELLOW}mcp-recall is registered twice:${RESET2} by the plugin and by the entries above. Keep one:`);
+    console.log(`    ${BOLD2}mcp-recall uninstall${RESET2}   ${DIM2}# removes the CLI entries${RESET2}`);
+    console.log(`    ${BOLD2}claude plugin uninstall ${plugin.key}${RESET2}   ${DIM2}# removes the plugin${RESET2}`);
     return;
   }
   console.log(`  ${pad30(tildePath(claudeMdPath))}  ${tick(claudeMdOk)} mcp-recall instructions`);
   if (!filesOk)
     console.log(`
-  What is marked ${RED}\u2717${RESET} is gone: run ${BOLD}claude plugin update ${plugin.key}${RESET}`);
+  What is marked ${RED}\u2717${RESET2} is gone: run ${BOLD2}claude plugin update ${plugin.key}${RESET2}`);
   if (!claudeMdOk) {
-    console.log(`  Add the instructions yourself: see ${BOLD}https://github.com/sakebomb/mcp-recall/blob/main/docs/install.md#claude-instructions${RESET}`);
+    console.log(`  Add the instructions yourself: see ${BOLD2}https://github.com/sakebomb/mcp-recall/blob/main/docs/install.md#claude-instructions${RESET2}`);
   }
 }
 function pad30(s) {
   return s + " ".repeat(Math.max(0, 30 - s.length));
 }
 function printCliStatus(c) {
-  const tick = (ok) => ok ? `${GREEN}\u2713${RESET}` : `${RED}\u2717${RESET}`;
+  const tick = (ok) => ok ? `${GREEN}\u2713${RESET2}` : `${RED}\u2717${RESET2}`;
   const filesOk = c.files.every((f) => f.exists);
   const fullyInstalled = c.serverRegistered && c.ssRegistered && c.ptuRegistered && c.claudeMdOk && filesOk;
-  const label = fullyInstalled ? `${GREEN}installed${RESET}` : c.serverRegistered || c.ssRegistered || c.ptuRegistered ? `${YELLOW}partial / stale${RESET}` : `${RED}not installed${RESET}`;
+  const label = fullyInstalled ? `${GREEN}installed${RESET2}` : c.serverRegistered || c.ssRegistered || c.ptuRegistered ? `${YELLOW}partial / stale${RESET2}` : `${RED}not installed${RESET2}`;
   console.log(`
-Installation: ${BOLD}${label}${RESET}
+Installation: ${BOLD2}${label}${RESET2}
 `);
   console.log(`  ${pad30(tildePath(c.paths.claudeJson))}  ${tick(c.serverRegistered)} mcpServers.recall`);
   console.log(`  ${pad30(tildePath(c.paths.settings))}  ${tick(c.ssRegistered)} SessionStart hook`);
@@ -14877,23 +14939,23 @@ Installation: ${BOLD}${label}${RESET}
     console.log("");
     console.log(`  ${pad30("Registered launch")}`);
     for (const f of c.files) {
-      console.log(`  ${pad30(`  ${f.label}`)}  ${tick(f.exists)} ${DIM}${f.path}${RESET}`);
+      console.log(`  ${pad30(`  ${f.label}`)}  ${tick(f.exists)} ${DIM2}${f.path}${RESET2}`);
     }
   }
   if (c.elsewhere && c.server) {
     console.log("");
     console.log(`  Registered: ${describeLaunch(c.server["command"])}; this is ${describeLaunch(c.launch.server.command)}.`);
-    console.log(`  Run ${BOLD}mcp-recall install${RESET} from this one to switch Claude Code to it.`);
+    console.log(`  Run ${BOLD2}mcp-recall install${RESET2} from this one to switch Claude Code to it.`);
   }
   if (!fullyInstalled) {
     console.log("");
     if (!filesOk) {
-      console.log(`  Run ${BOLD}mcp-recall install${RESET} from the install Claude Code should use: what is marked ${RED}\u2717${RESET} is gone`);
+      console.log(`  Run ${BOLD2}mcp-recall install${RESET2} from the install Claude Code should use: what is marked ${RED}\u2717${RESET2} is gone`);
     } else {
-      console.log(`  Run ${BOLD}mcp-recall install${RESET}`);
+      console.log(`  Run ${BOLD2}mcp-recall install${RESET2}`);
     }
     if (!c.claudeMdOk) {
-      console.log(`  Or add instructions manually: see ${BOLD}https://github.com/sakebomb/mcp-recall/blob/main/docs/install.md#claude-instructions${RESET}`);
+      console.log(`  Or add instructions manually: see ${BOLD2}https://github.com/sakebomb/mcp-recall/blob/main/docs/install.md#claude-instructions${RESET2}`);
     }
   }
 }
@@ -14902,14 +14964,14 @@ async function printSelfTest(cliCommand, plugin, run) {
   const command = cliCommand ?? pluginCommand;
   console.log("");
   if (!command) {
-    console.log(`  ${YELLOW}!${RESET} Self-test: skipped, no PostToolUse hook is registered`);
+    console.log(`  ${YELLOW}!${RESET2} Self-test: skipped, no PostToolUse hook is registered`);
     return;
   }
   const result = await run(command, pluginCommand ? { CLAUDE_PLUGIN_ROOT: plugin.installPath } : {});
-  const icon = result.ok ? `${GREEN}\u2713${RESET}` : `${RED}\u2717${RESET}`;
+  const icon = result.ok ? `${GREEN}\u2713${RESET2}` : `${RED}\u2717${RESET2}`;
   console.log(`  ${icon} ${formatSelfTest(result)}`);
   if (!result.ok)
-    console.log(`    \u2192 Run it by hand with ${BOLD}RECALL_DEBUG=1${RESET} to see why; see docs/troubleshooting.md`);
+    console.log(`    \u2192 Run it by hand with ${BOLD2}RECALL_DEBUG=1${RESET2} to see why; see docs/troubleshooting.md`);
 }
 async function statusCommand(opts = {}) {
   const {
@@ -14969,28 +15031,28 @@ async function statusCommand(opts = {}) {
   console.log("");
   const profiles = loadProfiles();
   if (profiles.length === 0) {
-    console.log(`  ${YELLOW}!${RESET} Profiles: none installed (optional)`);
-    console.log(`    \u2192 Run: ${BOLD}mcp-recall profiles seed${RESET}`);
+    console.log(`  ${YELLOW}!${RESET2} Profiles: none installed (optional)`);
+    console.log(`    \u2192 Run: ${BOLD2}mcp-recall profiles seed${RESET2}`);
   } else {
     const counts = profiles.reduce((acc, p) => {
       acc[p.tier] = (acc[p.tier] ?? 0) + 1;
       return acc;
     }, {});
     const summary = Object.entries(counts).map(([t, n]) => `${n} ${t}`).join(", ");
-    console.log(`  ${GREEN}\u2713${RESET} Profiles: ${profiles.length} installed (${summary})`);
+    console.log(`  ${GREEN}\u2713${RESET2} Profiles: ${profiles.length} installed (${summary})`);
   }
   console.log("");
   const { totalBytes, dbCount } = storeFootprint();
   const reminderMb = loadConfig().store.gc_reminder_mb;
   const large = reminderMb > 0 && totalBytes >= reminderMb * 1024 * 1024;
-  const storeIcon = large ? `${YELLOW}!${RESET}` : `${GREEN}\u2713${RESET}`;
+  const storeIcon = large ? `${YELLOW}!${RESET2}` : `${GREEN}\u2713${RESET2}`;
   console.log(`  ${storeIcon} Store: ${formatBytes(totalBytes)} across ${dbCount} project database${dbCount === 1 ? "" : "s"}`);
   if (large) {
-    console.log(`    \u2192 Reclaim space: ${BOLD}mcp-recall gc${RESET} (review, then re-run with ${BOLD}--force${RESET})`);
+    console.log(`    \u2192 Reclaim space: ${BOLD2}mcp-recall gc${RESET2} (review, then re-run with ${BOLD2}--force${RESET2})`);
   }
   console.log("");
 }
-var BOLD = "\x1B[1m", GREEN = "\x1B[32m", YELLOW = "\x1B[33m", RED = "\x1B[31m", DIM = "\x1B[2m", RESET = "\x1B[0m", RUNNER_CACHES, MAX_LINK_HOPS = 40, CLAUDE_MD_MARKER_START = "<!-- BEGIN mcp-recall -->", CLAUDE_MD_MARKER_END = "<!-- END mcp-recall -->", CLAUDE_MD_SNIPPET = `## mcp-recall
+var BOLD2 = "\x1B[1m", GREEN = "\x1B[32m", YELLOW = "\x1B[33m", RED = "\x1B[31m", DIM2 = "\x1B[2m", RESET2 = "\x1B[0m", RUNNER_CACHES, MAX_LINK_HOPS = 40, CLAUDE_MD_MARKER_START = "<!-- BEGIN mcp-recall -->", CLAUDE_MD_MARKER_END = "<!-- END mcp-recall -->", CLAUDE_MD_SNIPPET = `## mcp-recall
 
 Session context from previous sessions is automatically injected at startup (pinned items, notes, recent activity). If it was truncated, call \`recall__context()\` for the full view.
 
@@ -15007,6 +15069,7 @@ var init_install = __esm(() => {
   init_gc();
   init_config();
   init_claude_paths();
+  init_expectations();
   init_self_test();
   RUNNER_CACHES = [
     ["npx", /[\\/]_npx[\\/]/],

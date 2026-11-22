@@ -71,13 +71,15 @@ src/
   stats/                mcp-recall stats — savings by tool for this project or --all (#495).
                         Read-only over every store; same totals as recall__stats.
                         statusline.ts is `mcp-recall statusline`: today's calls for one project,
-                        run by Claude Code on every status refresh, so it never writes and a
+                        run by Claude Code on every status refresh, so it opens stores read-only and a
                         fault prints nothing (a non-zero exit blanks the user's status line)
   discover/             mcp-recall discover — ranks fallback-routed output by bytes, with
                         reduction and retrieval rate (#341). Read-only over every store.
                         A NULL `handler` means "stored before #341", never a fallback.
   import/               mcp-recall import — restores a recall__export dump into a store
   install/              mcp-recall install / uninstall / status — writes to ~/.claude.json, settings.json, CLAUDE.md.
+                        install ends with a "what happens next" block (expectations.ts, #496): it sorts the user's
+                        MCP servers by whether a handler or installed profile covers them, offline
                         status's self-test (self-test.ts) runs the registered PostToolUse command on a
                         synthetic git log against a throwaway RECALL_DB_PATH, never the user's store
   learn/                mcp-recall learn — reads ~/.claude.json, spawns MCP servers via stdio, generates TOML profiles

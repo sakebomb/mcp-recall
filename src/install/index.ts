@@ -24,6 +24,7 @@ import { storeFootprint } from "../gc/index";
 import { loadConfig } from "../config";
 import { formatBytes } from "../format";
 import { claudeConfigDir, claudeJsonPath as claudeJsonFile, tildePath } from "../claude-paths";
+import { scanServers, whatHappensNext } from "./expectations";
 import { formatSelfTest, pluginHookCommand, runSelfTest, type SelfTestResult } from "./self-test";
 
 // ── Utilities ────────────────────────────────────────────────────────────────
@@ -586,6 +587,8 @@ export async function installCommand(opts: InstallOptions = {}): Promise<void> {
   }
 
   if (anyChange && !dryRun) {
+    const scan = agents.includes("claude") ? scanServers(await readJsonFile(claudeJsonPath)) : null;
+    for (const line of whatHappensNext(scan, tildePath(claudeJsonPath))) console.log(line);
     console.log(`\nNext steps:`);
     console.log(`  Install compression profiles for your MCPs:`);
     console.log(`    ${BOLD}mcp-recall profiles seed${RESET}`);
