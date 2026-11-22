@@ -6,24 +6,39 @@ dated plan — a solo open-source project makes no delivery promises. For detail
 per-phase status, see the phase table in [CLAUDE.md](CLAUDE.md); for the shape of
 the system, [docs/architecture.md](docs/architecture.md).
 
-## Status: maintenance mode (since 2026-11-04)
+## Status: adoption and visible effect (since 2026-11-20)
 
-mcp-recall is maintained, not extended. Releases keep shipping on the weekly
-train ([CONTRIBUTING.md](CONTRIBUTING.md#releases)) with bug, security,
-compatibility and install fixes, and with handler fixes where a summary drops
-what Claude needs. New features are not planned.
+The pipeline is settled: what mcp-recall summarizes, stores and retrieves is
+not growing. The work now is making what it already does easy to install, easy
+to see, and available in more places: a tool whose effect cannot be seen is hard
+to adopt and hard to trust. Releases ship on the weekly train
+([CONTRIBUTING.md](CONTRIBUTING.md#releases)).
 
-One exception, opened deliberately in
-[#458](https://github.com/sakebomb/mcp-recall/issues/458): running under coding
-agents other than Claude Code. The same hook pipeline serves each agent through
-a thin adapter that translates shapes and adds no logic: pi, grok and OpenCode so
-far. An agent qualifies only if it can rewrite a tool's output before the model
-sees it; [#473](https://github.com/sakebomb/mcp-recall/issues/473) records which
-others do, and the README's [Where it runs](README.md#where-it-runs) table gives
-each agent's status. An agent whose documented hooks qualify but that no
-maintainer can test, such as Copilot CLI, is built on request.
+Three kinds of work are in scope, beyond the fixes listed under
+[What always gets fixed](#what-always-gets-fixed):
 
-The decision follows the paired task-success studies in
+- **Showing the effect.** A user should be able to tell, without asking Claude,
+  whether the hook fires and what it saved:
+  [#495](https://github.com/sakebomb/mcp-recall/issues/495) (`mcp-recall stats`,
+  counts of every call including those passed through, a self-test in `status`,
+  a status line). Reports give measured bytes and calls only, never an
+  estimated benefit such as compactions avoided.
+- **Getting started.** Saying what to expect after install
+  ([#496](https://github.com/sakebomb/mcp-recall/issues/496)), and installing or
+  updating a release binary in one step
+  ([#497](https://github.com/sakebomb/mcp-recall/issues/497)).
+- **Running under other coding agents**
+  ([#458](https://github.com/sakebomb/mcp-recall/issues/458)). The same hook
+  pipeline serves each agent through a thin adapter that translates shapes and
+  adds no logic: pi, grok and OpenCode so far. An agent qualifies only if it can
+  rewrite a tool's output before the model sees it;
+  [#473](https://github.com/sakebomb/mcp-recall/issues/473) records which others
+  do, and the README's [Where it runs](README.md#where-it-runs) table gives each
+  agent's status. An agent whose documented hooks qualify but that no maintainer
+  can test, such as Copilot CLI, is built on request.
+
+New compression, storage or retrieval features are not planned. That follows
+the paired task-success studies in
 [#414](https://github.com/sakebomb/mcp-recall/issues/414), with an exit rule
 agreed before they ran. Where sessions were long enough to compact, mcp-recall
 made them compact less often, and on Haiku it made them cheaper. No study found a
@@ -47,10 +62,10 @@ MCP-output-capture-and-retrieval story is in scope; a change that turns the
 project into a different kind of tool is not — however useful that other tool
 might be.
 
-## What maintenance covers
+## What always gets fixed
 
-Work still lands in these areas; anything outside them is a feature, and is not
-planned.
+Whatever the focus, work lands in these areas. Anything outside them and outside
+the three kinds of work above is a new feature, and is not planned.
 
 - **Robustness & store lifecycle** — the store must be safe to leave running for
   months: correct eviction, disk reclamation (`gc`), dedup, and no silent
@@ -67,8 +82,8 @@ planned.
 
 ## On the horizon (not planned)
 
-Two filed ideas are genuine extensions of the bet. Neither is being built while
-the project is in maintenance mode; if one ever ships, it ships as described here.
+Two filed ideas are genuine extensions of the bet. Both add to the pipeline, so
+neither is being built; if one ever ships, it ships as described here.
 
 - **Anthropic memory-tool backend** ([#188](https://github.com/sakebomb/mcp-recall/issues/188))
   — expose mcp-recall's verbatim + FTS store as a backend behind the API memory
@@ -111,6 +126,7 @@ closed; reopening one is a direction change, not a feature request.
 
 A non-goal is not permanent, but changing one is a deliberate decision, not a
 drive-by PR. Open an issue that names the non-goal and argues why the bet has
-changed. The same goes for leaving maintenance mode: bring evidence the studies
-in #414 did not have. Fixes inside what maintenance covers are welcome without
-ceremony; see [CONTRIBUTING.md](CONTRIBUTING.md).
+changed. The same goes for a new compression, storage or retrieval feature: bring
+evidence the studies in #414 did not have. Fixes inside what always gets fixed,
+and work on the three kinds in scope, are welcome without ceremony; see
+[CONTRIBUTING.md](CONTRIBUTING.md).

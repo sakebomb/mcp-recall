@@ -154,7 +154,8 @@ mcp-recall profiles available # list community profiles available to install
 | 12 | Supply chain — manifest attestation restored (profiles repo), exact signer-identity pinning via `--cert-identity`, old-`gh` diagnosis | Complete (v1.10.0) |
 | 12b | Packaging integrity — symlink-safe `bin/recall`, publish-time tag/version guard, packaged-CLI CI job | Complete (v1.10.1) |
 | 13 | Stabilize + document. Docs accuracy, contributor architecture doc (`docs/architecture.md`), `ROADMAP.md` with explicit non-goals. No new features | Complete |
-| 14 | Paired task-success studies (#414) against an exit rule fixed in advance | Complete. **Maintenance mode since 2026-11-04**: fixes only, no new features (`ROADMAP.md` Status) |
+| 14 | Paired task-success studies (#414) against an exit rule fixed in advance | Complete. Maintenance mode from 2026-11-04 to 2026-11-20: fixes only |
+| 15 | Adoption and visible effect: show what it saves (#495), onboarding (#496), one-step install (#497), other coding agents (#458) | In progress. **Current focus since 2026-11-20** (`ROADMAP.md` Status): no new compression, storage or retrieval features |
 
 Phases 1–9 were planned up front. Everything after was reactive — ported ideas from a
 competitive review, then a dogfooding pass, then findings from those. Phase 13 existed to
