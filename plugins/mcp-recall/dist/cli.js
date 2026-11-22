@@ -14064,7 +14064,8 @@ function toolPrefixes(server) {
 }
 function scanServers(claudeJson) {
   const raw = claudeJson["mcpServers"];
-  const servers = raw && typeof raw === "object" ? Object.keys(raw).filter((k) => k !== "recall") : [];
+  const isMap = raw !== null && typeof raw === "object" && !Array.isArray(raw);
+  const servers = isMap ? Object.keys(raw).filter((k) => k !== "recall") : [];
   const isDedicated = (s) => toolPrefixes(s).some(hasDedicatedHandler);
   return {
     dedicated: servers.filter(isDedicated),
@@ -14074,16 +14075,17 @@ function scanServers(claudeJson) {
 function serverLines(scan, shownJson) {
   if (scan.dedicated.length + scan.fallback.length === 0) {
     return [
-      `  No MCP servers in ${shownJson}: expect savings mainly on large Bash output,`,
-      `  such as test logs and diffs.`
+      `  No user-scope MCP servers in ${shownJson}, so expect savings mainly on large`,
+      `  Bash output such as test logs and diffs. Project and plugin servers are not`,
+      `  checked here.`
     ];
   }
-  const lines = [`  Your MCP servers ${DIM}(${shownJson})${RESET}:`];
+  const lines = [`  Your user-scope MCP servers ${DIM}(${shownJson})${RESET}:`];
   if (scan.dedicated.length > 0) {
-    lines.push(`    with their own handler or profile: ${scan.dedicated.join(", ")}`);
+    lines.push(`    handler or profile for some or all tools: ${scan.dedicated.join(", ")}`);
   }
   if (scan.fallback.length > 0) {
-    lines.push(`    on the general summarizer:         ${scan.fallback.join(", ")}`);
+    lines.push(`    general summarizer, for now:              ${scan.fallback.join(", ")}`);
   }
   return lines;
 }

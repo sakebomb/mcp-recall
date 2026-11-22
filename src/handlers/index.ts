@@ -175,7 +175,9 @@ export function getHandler(toolName: string, output: unknown, input?: unknown): 
 
 /**
  * Whether a handler or an installed profile is written for a server's tools, or
- * they fall to the content fallbacks. `toolPrefix` is `mcp__<server>__`. Install
+ * they fall to the content fallbacks. `toolPrefix` is `mcp__<server>__`. True
+ * means some tool, not every tool: a profile may name one tool exactly, and a
+ * matcher may also need the tool name or the output. Install
  * uses it to say what to expect (#496); dispatch never calls it.
  */
 export function hasDedicatedHandler(toolPrefix: string): boolean {

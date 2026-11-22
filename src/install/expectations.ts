@@ -13,7 +13,7 @@ const DIM   = "\x1b[2m";
 const RESET = "\x1b[0m";
 
 export interface ServerScan {
-  /** Servers a TypeScript handler or an installed profile is written for. */
+  /** Servers a TypeScript handler or an installed profile is written for, for some or all of their tools. */
   dedicated: string[];
   /** Servers whose output goes to the JSON, CSV or generic fallback. */
   fallback: string[];
@@ -28,7 +28,8 @@ function toolPrefixes(server: string): string[] {
 /** Sorts the user-scope servers in a parsed ~/.claude.json, recall itself left out. */
 export function scanServers(claudeJson: Record<string, unknown>): ServerScan {
   const raw = claudeJson["mcpServers"];
-  const servers = raw && typeof raw === "object" ? Object.keys(raw).filter((k) => k !== "recall") : [];
+  const isMap = raw !== null && typeof raw === "object" && !Array.isArray(raw);
+  const servers = isMap ? Object.keys(raw).filter((k) => k !== "recall") : [];
   const isDedicated = (s: string) => toolPrefixes(s).some(hasDedicatedHandler);
   return {
     dedicated: servers.filter(isDedicated),
@@ -39,16 +40,17 @@ export function scanServers(claudeJson: Record<string, unknown>): ServerScan {
 function serverLines(scan: ServerScan, shownJson: string): string[] {
   if (scan.dedicated.length + scan.fallback.length === 0) {
     return [
-      `  No MCP servers in ${shownJson}: expect savings mainly on large Bash output,`,
-      `  such as test logs and diffs.`,
+      `  No user-scope MCP servers in ${shownJson}, so expect savings mainly on large`,
+      `  Bash output such as test logs and diffs. Project and plugin servers are not`,
+      `  checked here.`,
     ];
   }
-  const lines = [`  Your MCP servers ${DIM}(${shownJson})${RESET}:`];
+  const lines = [`  Your user-scope MCP servers ${DIM}(${shownJson})${RESET}:`];
   if (scan.dedicated.length > 0) {
-    lines.push(`    with their own handler or profile: ${scan.dedicated.join(", ")}`);
+    lines.push(`    handler or profile for some or all tools: ${scan.dedicated.join(", ")}`);
   }
   if (scan.fallback.length > 0) {
-    lines.push(`    on the general summarizer:         ${scan.fallback.join(", ")}`);
+    lines.push(`    general summarizer, for now:              ${scan.fallback.join(", ")}`);
   }
   return lines;
 }

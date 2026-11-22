@@ -40,7 +40,7 @@ describe("hasDedicatedHandler", () => {
     expect(hasDedicatedHandler("mcp__acme_internal__")).toBe(false);
   });
 
-  it("is true for a server a bundled profile covers", () => {
+  it("is true for a server a bundled profile covers, even for one tool only", () => {
     delete process.env["RECALL_BUNDLED_PROFILES_PATH"];
     clearProfileCache();
     expect(hasDedicatedHandler("mcp__context7__")).toBe(true);
@@ -56,6 +56,8 @@ describe("scanServers", () => {
   it("returns empty lists when mcpServers is missing or not an object", () => {
     expect(scanServers({})).toEqual({ dedicated: [], fallback: [] });
     expect(scanServers({ mcpServers: "nope" })).toEqual({ dedicated: [], fallback: [] });
+    expect(scanServers({ mcpServers: null })).toEqual({ dedicated: [], fallback: [] });
+    expect(scanServers({ mcpServers: ["a", "b"] })).toEqual({ dedicated: [], fallback: [] });
   });
 });
 
@@ -68,15 +70,16 @@ describe("whatHappensNext", () => {
 
   it("says where savings come from when there are no MCP servers", () => {
     const text = plain(whatHappensNext({ dedicated: [], fallback: [] }, "~/.claude.json"));
-    expect(text).toContain("No MCP servers in ~/.claude.json");
-    expect(text).toContain("large Bash output");
+    expect(text).toContain("No user-scope MCP servers in ~/.claude.json");
+    expect(text).toMatch(/large\s+Bash output/);
+    expect(text).toContain("Project and plugin servers are not");
   });
 
   it("lists servers with a handler apart from those on the fallback", () => {
     const text = plain(whatHappensNext({ dedicated: ["github"], fallback: ["acme"] }, "~/.claude.json"));
-    expect(text).toMatch(/handler or profile.*github/);
+    expect(text).toMatch(/handler or profile for some or all tools: github/);
     expect(text).toMatch(/general summarizer.*acme/);
-    expect(text).not.toContain("No MCP servers");
+    expect(text).not.toContain("No user-scope MCP servers");
   });
 
   it("says nothing about servers when none were scanned", () => {
@@ -121,7 +124,7 @@ describe("install ends with what happens next (#496)", () => {
 
   it("sets the Bash expectation when recall is the only server", async () => {
     const out = await run();
-    expect(out).toContain("No MCP servers in");
+    expect(out).toContain("No user-scope MCP servers in");
   });
 
   it("stays quiet on a dry run and when nothing changed", async () => {
