@@ -18,7 +18,7 @@ It works in [Claude Code](https://claude.ai/claude-code), [pi](https://pi.dev), 
 
 The goal is sessions that run for hours instead of hitting the context limit in minutes. [Results](#results) shows what is measured today, and the [quality benchmark](docs/benchmarks.md) what the summaries keep.
 
-**Status: maintenance mode since 2026-11-04.** Fixes keep shipping on a weekly release; new features are not planned. Why, and what it deliberately won't become: [ROADMAP.md](ROADMAP.md).
+**Status: the pipeline is settled and maintained; current work is adoption and visible effect.** Easier install, a way to see what it saves, and more coding agents ship on a weekly release, along with fixes. Beyond fixes, changes to what is summarized, stored or retrieved are not planned. Measured in small studies ([benchmarks](docs/benchmarks.md#task-success-benchmark)): fewer compactions where sessions were long enough to compact, and no change in solved tasks that can be told apart from chance. Why, and what it deliberately won't become: [ROADMAP.md](ROADMAP.md).
 
 ![mcp-recall demo](demo/demo.gif)
 
