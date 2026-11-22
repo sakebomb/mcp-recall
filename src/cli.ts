@@ -46,7 +46,7 @@ Commands:
   stats                What has been summarized, and how much smaller, by tool
     --all              Every project's store, not just this one
   statusline           One line for Claude Code's statusLine: today's calls and bytes kept out
-  serve               Run the MCP server on stdio (Claude Code starts this)
+  serve                Run the MCP server on stdio (Claude Code starts this)
   gc [--force]         Reclaim disk: list/delete orphaned project DBs
     --stale-days N     Legacy DBs (no recorded path) older than N days are candidates (default 90)
     --vacuum           Full-VACUUM surviving DBs to reclaim free pages
