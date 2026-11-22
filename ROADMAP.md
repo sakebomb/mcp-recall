@@ -37,8 +37,8 @@ Three kinds of work are in scope, beyond the fixes listed under
   ([#496](https://github.com/sakebomb/mcp-recall/issues/496)), and installing or
   updating a release binary in one step
   ([#497](https://github.com/sakebomb/mcp-recall/issues/497)).
-- **Running under other coding agents**
-  ([#458](https://github.com/sakebomb/mcp-recall/issues/458)). The same hook
+- **Running under other coding agents**, begun in
+  [#458](https://github.com/sakebomb/mcp-recall/issues/458). The same hook
   pipeline serves each agent through a thin adapter that translates shapes and
   adds no logic: pi, grok and OpenCode so far. An agent qualifies only if it can
   rewrite a tool's output before the model sees it;
@@ -47,8 +47,8 @@ Three kinds of work are in scope, beyond the fixes listed under
   agent's status. An agent whose documented hooks qualify but that no maintainer
   can test, such as Copilot CLI, is built on request.
 
-Changes to what is summarized, stored or retrieved are not planned. That follows
-the paired task-success studies in
+Beyond those fixes, changes to what is summarized, stored or retrieved are not
+planned. That follows the paired task-success studies in
 [#414](https://github.com/sakebomb/mcp-recall/issues/414), with an exit rule
 agreed before they ran. Where sessions were long enough to compact, mcp-recall
 made them compact less often, and on Haiku it made them cheaper. No study found a

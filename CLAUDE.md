@@ -159,7 +159,7 @@ mcp-recall profiles available # list community profiles available to install
 | 12b | Packaging integrity — symlink-safe `bin/recall`, publish-time tag/version guard, packaged-CLI CI job | Complete (v1.10.1) |
 | 13 | Stabilize + document. Docs accuracy, contributor architecture doc (`docs/architecture.md`), `ROADMAP.md` with explicit non-goals. No new features | Complete |
 | 14 | Paired task-success studies (#414) against an exit rule fixed in advance | Complete. Maintenance mode from 2026-11-04 to 2026-11-20: fixes only |
-| 15 | Adoption and visible effect: show what it saves, onboarding, one-step install, other coding agents (issues in `ROADMAP.md` Status, label `adoption`) | In progress. **Current focus since 2026-11-20**: no changes to what is summarized, stored or retrieved; ends when the `adoption` issues close |
+| 15 | Adoption and visible effect: show what it saves, onboarding, one-step install, other coding agents (issues in `ROADMAP.md` Status, label `adoption`) | In progress. **Current focus since 2026-11-20**: beyond fixes, no changes to what is summarized, stored or retrieved; ends when the `adoption` issues close |
 
 Phases 1–9 were planned up front. Everything after was reactive — ported ideas from a
 competitive review, then a dogfooding pass, then findings from those. Phase 13 existed to
