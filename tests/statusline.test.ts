@@ -10,6 +10,7 @@ import { readDayTotals, formatStatusline, sessionDir, statuslineText, STDIN_TIME
 import { getProjectKey } from "../src/project-key";
 
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
+const QUERIES = join(import.meta.dir, "..", "src", "db", "queries.ts");
 
 // `mcp-recall statusline` prints one line for Claude Code's statusLine setting
 // (#495): today's counted calls and the bytes kept out of context, for one
@@ -46,19 +47,19 @@ function logOn(day: string, overrides: Partial<CallRecord> = {}): void {
 
 describe("localDay", () => {
   it("is the local calendar date, not the UTC one", () => {
-    // Pinned zones, so this fails on a UTC date wherever it runs (CI is UTC):
-    // 23:30 in New York is already the next day in UTC, and 00:30 in Tokyo is
-    // still the previous one.
-    const tz = process.env.TZ;
-    try {
-      process.env.TZ = "America/New_York";
-      expect(localDay(new Date(2026, 2, 5, 23, 30))).toBe("2026-03-05");
-      process.env.TZ = "Asia/Tokyo";
-      expect(localDay(new Date(2026, 2, 5, 0, 30))).toBe("2026-03-05");
-    } finally {
-      if (tz === undefined) delete process.env.TZ;
-      else process.env.TZ = tz;
-    }
+    // Pinned zones, so this fails on a UTC date wherever it runs (CI is UTC).
+    // Each runs in its own process: changing TZ in this one does not reliably
+    // change back on Bun 1.3, and would move "today" under every later test.
+    const dayIn = (tz: string, instant: number): string => {
+      const script = `import { localDay } from ${JSON.stringify(QUERIES)}; console.log(localDay(new Date(${instant})));`;
+      const proc = Bun.spawnSync([process.execPath, "-e", script], { env: { ...process.env, TZ: tz } });
+      return proc.stdout.toString().trim();
+    };
+
+    // 23:30 on 5 March in New York is already 6 March in UTC.
+    expect(dayIn("America/New_York", Date.UTC(2026, 2, 6, 4, 30))).toBe("2026-03-05");
+    // 00:30 on 5 March in Tokyo is still 4 March in UTC.
+    expect(dayIn("Asia/Tokyo", Date.UTC(2026, 2, 4, 15, 30))).toBe("2026-03-05");
   });
 
   it("is the day recordCall files a call under", () => {
