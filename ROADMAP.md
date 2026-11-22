@@ -8,11 +8,21 @@ the system, [docs/architecture.md](docs/architecture.md).
 
 ## Status: adoption and visible effect (since 2026-11-20)
 
-The pipeline is settled: what mcp-recall summarizes, stores and retrieves is
-not growing. The work now is making what it already does easy to install, easy
-to see, and available in more places: a tool whose effect cannot be seen is hard
-to adopt and hard to trust. Releases ship on the weekly train
+The pipeline is settled and maintained: no changes are planned to what
+mcp-recall summarizes, stores or retrieves. Reporting on what it does is in
+scope. The work now is making what it already does easy to install, easy to
+see, and available in more places. Releases ship on the weekly train
 ([CONTRIBUTING.md](CONTRIBUTING.md#releases)).
+
+This focus was prompted by one new user who could not tell whether the hook was
+firing ([#495](https://github.com/sakebomb/mcp-recall/issues/495)). It rests on
+the maintainer's judgment, not on a study: a tool whose effect cannot be seen is
+hard to adopt and hard to trust.
+
+It ends when the open issues labelled
+[`adoption`](https://github.com/sakebomb/mcp-recall/labels/adoption) are closed.
+The project then returns to fixes only, with other coding agents still added on
+request.
 
 Three kinds of work are in scope, beyond the fixes listed under
 [What always gets fixed](#what-always-gets-fixed):
@@ -37,14 +47,14 @@ Three kinds of work are in scope, beyond the fixes listed under
   agent's status. An agent whose documented hooks qualify but that no maintainer
   can test, such as Copilot CLI, is built on request.
 
-New compression, storage or retrieval features are not planned. That follows
+Changes to what is summarized, stored or retrieved are not planned. That follows
 the paired task-success studies in
 [#414](https://github.com/sakebomb/mcp-recall/issues/414), with an exit rule
 agreed before they ran. Where sessions were long enough to compact, mcp-recall
 made them compact less often, and on Haiku it made them cheaper. No study found a
 change in solved tasks that could be told apart from chance, in either
-direction: the one harm signal, in the first pilot, did not recur. Agents almost never
-called a `recall__*` tool to fetch stored output. The summaries do the work; the
+direction. The one apparent harm signal, in the first pilot, did not recur.
+Agents almost never called a `recall__*` tool to fetch stored output. The summaries do the work; the
 retrieval side has not shown that it earns more investment.
 
 ## The bet
@@ -65,7 +75,7 @@ might be.
 ## What always gets fixed
 
 Whatever the focus, work lands in these areas. Anything outside them and outside
-the three kinds of work above is a new feature, and is not planned.
+the three kinds of work above is not planned.
 
 - **Robustness & store lifecycle** — the store must be safe to leave running for
   months: correct eviction, disk reclamation (`gc`), dedup, and no silent
@@ -74,6 +84,8 @@ the three kinds of work above is a new feature, and is not planned.
   on bytes saved. A handler that keeps less of what Claude went on to use than a
   same-size cut of the raw output (`bun run fidelity`, `bun run quality`,
   [docs/benchmarks.md](docs/benchmarks.md)) is a bug to fix, not a feature to add.
+  A new or improved handler counts as a summary-quality fix when it keeps more
+  of what Claude uses than the fallback does; open an issue first if unsure.
 - **Compatibility** — keeping up with Claude Code's hook and tool-output formats,
   Bun, and the MCP servers whose output the handlers parse.
 - **Docs accuracy** — the docs should never overstate what the code does.
@@ -126,7 +138,7 @@ closed; reopening one is a direction change, not a feature request.
 
 A non-goal is not permanent, but changing one is a deliberate decision, not a
 drive-by PR. Open an issue that names the non-goal and argues why the bet has
-changed. The same goes for a new compression, storage or retrieval feature: bring
-evidence the studies in #414 did not have. Fixes inside what always gets fixed,
+changed. The same goes for a change to what is summarized, stored or retrieved:
+bring evidence the studies in #414 did not have. Fixes inside what always gets fixed,
 and work on the three kinds in scope, are welcome without ceremony; see
 [CONTRIBUTING.md](CONTRIBUTING.md).
