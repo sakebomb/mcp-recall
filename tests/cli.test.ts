@@ -15,7 +15,7 @@ const PROFILES_SUBCOMMANDS = [
 // Every user-facing top-level command dispatched by src/cli.ts (not the hook
 // entry points or `serve`, which Claude Code runs). Same defect class as above.
 const TOP_LEVEL_COMMANDS = [
-  "install", "uninstall", "status", "stats", "gc", "discover",
+  "install", "uninstall", "status", "stats", "statusline", "gc", "discover",
   "profiles", "learn", "import", "completions",
 ] as const;
 

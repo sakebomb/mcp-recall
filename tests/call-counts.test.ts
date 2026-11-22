@@ -4,7 +4,7 @@ import { appendFileSync, existsSync, mkdtempSync, readdirSync, rmSync, utimesSyn
 import { tmpdir } from "os";
 import { join } from "path";
 import {
-  initSchema, recordCall, foldCallLog, readCallLog, callLogPath, getCallBreakdown, closeDb,
+  initSchema, recordCall, foldCallLog, readCallLog, callLogPath, getCallBreakdown, closeDb, localDay,
   type CallRecord,
 } from "../src/db/index";
 import { handleSessionStart } from "../src/hooks/session-start";
@@ -53,7 +53,7 @@ describe("recordCall on a file store", () => {
     const { rows, since } = getCallBreakdown(db, "ccA");
 
     expect(rows.map((r) => [r.command_fp, r.calls.content_read, r.original_bytes])).toEqual([["cat", 2, 80]]);
-    expect(since).toBe(new Date().toISOString().slice(0, 10));
+    expect(since).toBe(localDay());
   });
 });
 
