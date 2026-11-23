@@ -186,9 +186,13 @@ describe("statuslineText", () => {
 describe("mcp-recall statusline", () => {
   /** Runs the real CLI as Claude Code does: session JSON on stdin, one store. */
   function run(stdin: string, store: string) {
+    // In this process's zone: `bun test` runs in UTC when TZ is unset, and a
+    // child left to the system zone reads another "today" once the two dates
+    // differ (#508).
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const proc = Bun.spawnSync([process.execPath, "run", CLI, "statusline"], {
       stdin: Buffer.from(stdin),
-      env: { ...process.env, RECALL_DB_PATH: store },
+      env: { ...process.env, RECALL_DB_PATH: store, TZ: zone },
     });
     return { code: proc.exitCode, out: proc.stdout.toString(), err: proc.stderr.toString() };
   }
