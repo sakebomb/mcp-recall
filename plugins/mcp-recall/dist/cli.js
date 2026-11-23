@@ -14448,12 +14448,12 @@ function makePostToolUseEntry(cli) {
   };
 }
 function recallHooks(clis = []) {
-  const recogniser = (marker, matchers) => {
+  const recogniser = (marker2, matchers) => {
     const hook = (h) => {
       const cmd = h?.["command"];
       if (typeof cmd !== "string")
         return false;
-      return cmd.includes("recall") && cmd.includes(marker) || clis.some((cli) => cmd === `${cli} ${marker}`);
+      return cmd.includes("recall") && cmd.includes(marker2) || clis.some((cli) => cmd === `${cli} ${marker2}`);
     };
     const entry = (e) => {
       if (!e || typeof e !== "object")
@@ -15995,13 +15995,17 @@ function cutBytes(s, max) {
   }
   return out;
 }
+function marker(cut) {
+  return `  \u2026 (${cut} line${cut === 1 ? "" : "s"} cut to fit Claude Code's preview; retrieve this id for all of it)`;
+}
 function fitLines(summary, maxBytes) {
   if (bytes(summary) <= maxBytes)
     return summary;
   const lines = summary.split(`
 `);
-  const marker = (cut) => `  \u2026 (${cut} lines cut to fit Claude Code's preview; retrieve this id for all of it)`;
   let budget = maxBytes - bytes(marker(lines.length)) - 1;
+  if (budget < 1)
+    return cutBytes(summary, Math.max(maxBytes, 0));
   const tail = [];
   for (let i = lines.length - 1;i > 0 && tail.length < TAIL_LINES2; i--) {
     const cost = bytes(lines[i]) + 1;
@@ -16019,9 +16023,10 @@ function fitLines(summary, maxBytes) {
     head.push(lines[i]);
     budget -= cost;
   }
+  const cut = headEnd - head.length;
   if (head.length === 0)
-    head.push(cutBytes(lines[0], Math.max(budget, 0)));
-  return [...head, marker(headEnd - head.length), ...tail].join(`
+    head.push(cutBytes(lines[0], budget));
+  return [...head, marker(cut), ...tail].join(`
 `);
 }
 

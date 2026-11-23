@@ -28,17 +28,24 @@ function cutBytes(s: string, max: number): string {
   return out;
 }
 
+/** The line that stands where lines were dropped. A line kept only in part counts as cut. */
+function marker(cut: number): string {
+  return `  … (${cut} line${cut === 1 ? "" : "s"} cut to fit Claude Code's preview; retrieve this id for all of it)`;
+}
+
 /**
  * Fits `summary` in `maxBytes` by dropping lines from the middle: the head and
  * the last few lines stay, with a marker between them saying how many went.
- * A summary already within the budget is returned as it is.
+ * A summary already within the budget is returned as it is, and the result is
+ * never over the budget.
  */
 export function fitLines(summary: string, maxBytes: number): string {
   if (bytes(summary) <= maxBytes) return summary;
   const lines = summary.split("\n");
-  const marker = (cut: number) => `  … (${cut} lines cut to fit Claude Code's preview; retrieve this id for all of it)`;
-  // Sized for the largest count it could carry, plus the newlines around it.
+  // Sized for the largest count it could carry, plus the newline before it.
   let budget = maxBytes - bytes(marker(lines.length)) - 1;
+  // No room for a first line and the marker: the start of the summary, unmarked.
+  if (budget < 1) return cutBytes(summary, Math.max(maxBytes, 0));
 
   const tail: string[] = [];
   for (let i = lines.length - 1; i > 0 && tail.length < TAIL_LINES; i--) {
@@ -56,8 +63,9 @@ export function fitLines(summary: string, maxBytes: number): string {
     head.push(lines[i]!);
     budget -= cost;
   }
-  // One line longer than the whole budget: keep its start rather than nothing.
-  if (head.length === 0) head.push(cutBytes(lines[0]!, Math.max(budget, 0)));
+  const cut = headEnd - head.length;
+  // A first line longer than the whole budget: keep its start rather than nothing.
+  if (head.length === 0) head.push(cutBytes(lines[0]!, budget));
 
-  return [...head, marker(headEnd - head.length), ...tail].join("\n");
+  return [...head, marker(cut), ...tail].join("\n");
 }
