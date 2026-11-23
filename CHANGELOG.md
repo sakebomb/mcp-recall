@@ -37,6 +37,14 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   plugin layout. The pi section gives pi's real cut and path, and the docs name
   `--dry-run`, the `--agent` list form, and how a plugin user adds pi or
   OpenCode.
+- **A summary of very large Bash output arrives whole**
+  ([#499](https://github.com/sakebomb/mcp-recall/issues/499)). When Bash output
+  is large enough for Claude Code to save it to a file (about 50 KB), Claude
+  Code shows the model only the first 2 KB of the summary, so a longer one lost
+  its closing lines: the totals, failures or `+N more` footer. Such a summary is
+  now fitted to that preview by dropping lines from its middle, with a line
+  saying how many went. The head and the last lines stay, and the stored output
+  is unchanged.
 
 ## [1.22.0] — 2026-11-18
 
