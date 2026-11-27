@@ -14448,12 +14448,12 @@ function makePostToolUseEntry(cli) {
   };
 }
 function recallHooks(clis = []) {
-  const recogniser = (marker, matchers) => {
+  const recogniser = (marker2, matchers) => {
     const hook = (h) => {
       const cmd = h?.["command"];
       if (typeof cmd !== "string")
         return false;
-      return cmd.includes("recall") && cmd.includes(marker) || clis.some((cli) => cmd === `${cli} ${marker}`);
+      return cmd.includes("recall") && cmd.includes(marker2) || clis.some((cli) => cmd === `${cli} ${marker2}`);
     };
     const entry = (e) => {
       if (!e || typeof e !== "object")
@@ -15342,8 +15342,8 @@ function table2(header, rows) {
   const fmt = (cells) => "  " + cells.map((c, i) => i === 0 ? c.padEnd(widths[i]) : c.padStart(widths[i])).join("  ");
   return [fmt(header), ...rows.map(fmt)];
 }
-function tokens(bytes) {
-  return `~${Math.floor(bytes / BYTES_PER_TOKEN).toLocaleString()} tokens at ~${BYTES_PER_TOKEN} bytes each`;
+function tokens(bytes2) {
+  return `~${Math.floor(bytes2 / BYTES_PER_TOKEN).toLocaleString()} tokens at ~${BYTES_PER_TOKEN} bytes each`;
 }
 function folded(hidden, one, many) {
   return hidden > 0 ? [`  \u2026 ${hidden} more ${hidden === 1 ? one : many}`] : [];
@@ -15980,6 +15980,56 @@ function fromGrok(input, denied) {
   return;
 }
 
+// src/hooks/spill-preview.ts
+var SPILL_PREVIEW_BYTES = 1950;
+var TAIL_LINES2 = 3;
+var bytes = (s) => Buffer.byteLength(s, "utf8");
+function cutBytes(s, max) {
+  let out = "";
+  let used = 0;
+  for (const ch of s) {
+    used += bytes(ch);
+    if (used > max)
+      break;
+    out += ch;
+  }
+  return out;
+}
+function marker(cut) {
+  return `  \u2026 (${cut} line${cut === 1 ? "" : "s"} cut to fit Claude Code's preview; retrieve this id for all of it)`;
+}
+function fitLines(summary, maxBytes) {
+  if (bytes(summary) <= maxBytes)
+    return summary;
+  const lines = summary.split(`
+`);
+  let budget = maxBytes - bytes(marker(lines.length)) - 1;
+  if (budget < 1)
+    return cutBytes(summary, Math.max(maxBytes, 0));
+  const tail = [];
+  for (let i = lines.length - 1;i > 0 && tail.length < TAIL_LINES2; i--) {
+    const cost = bytes(lines[i]) + 1;
+    if (cost > budget / 3)
+      break;
+    tail.unshift(lines[i]);
+    budget -= cost;
+  }
+  const head = [];
+  const headEnd = lines.length - tail.length;
+  for (let i = 0;i < headEnd; i++) {
+    const cost = bytes(lines[i]) + (i > 0 ? 1 : 0);
+    if (cost > budget)
+      break;
+    head.push(lines[i]);
+    budget -= cost;
+  }
+  const cut = headEnd - head.length;
+  if (head.length === 0)
+    head.push(cutBytes(lines[0], budget));
+  return [...head, marker(cut), ...tail].join(`
+`);
+}
+
 // src/hooks/post-tool-use.ts
 function asBashResponse(toolResponse) {
   let value = toolResponse;
@@ -16078,6 +16128,8 @@ function handlePostToolUse(raw) {
   const { tool_name, tool_input, tool_response, cwd, session_id } = input;
   const replyShape = grok ? undefined : tool_response;
   let response = tool_name === "Bash" ? withPersistedOutput(tool_response) : tool_response;
+  const spilled = !grok && tool_name === "Bash" && typeof asBashResponse(tool_response)?.persistedOutputPath === "string";
+  const fitPreview = (header, summary2) => spilled ? fitLines(summary2, SPILL_PREVIEW_BYTES - Buffer.byteLength(header, "utf8") - 1) : summary2;
   if (isDenied(tool_name, config2)) {
     log.debug(`SKIP denylist \xB7 ${tool_name}`);
     return {};
@@ -16117,8 +16169,9 @@ function handlePostToolUse(raw) {
   const output_hash = hashContent(fullContent);
   const cachedResponse = (cached4) => {
     const cachedDate = new Date(cached4.created_at * 1000).toISOString().slice(0, 10);
-    const text = `[recall:${cached4.id} \xB7 cached \xB7 ${cachedDate}]
-${cached4.summary}`;
+    const header = `[recall:${cached4.id} \xB7 cached \xB7 ${cachedDate}]`;
+    const text = `${header}
+${fitPreview(header, cached4.summary)}`;
     const textBytes = Buffer.byteLength(text, "utf8");
     if (!savesEnough(textBytes, contentBytes)) {
       log.debug(`SKIP cached-not-smaller \xB7 ${tool_name} \xB7 id=${cached4.id}`);
@@ -16141,15 +16194,18 @@ ${cached4.summary}`;
     ({ summary, originalSize } = genericHandler(tool_name, response));
     handlerName = genericHandler.name;
   }
-  const summarySize = Buffer.byteLength(summary, "utf8");
   const hints = extractHints(fullContent);
+  const handlerSummary = summary;
+  const HEADER_SLACK = "    ";
+  summary = fitPreview(recallHeader(ID_PLACEHOLDER, originalSize, Buffer.byteLength(summary, "utf8"), hints) + HEADER_SLACK, summary);
+  const summarySize = Buffer.byteLength(summary, "utf8");
   const deliveredSize = deliveredBytes(summary, originalSize, hints);
   if (!savesEnough(deliveredSize, originalSize)) {
     log.debug(`SKIP no-compression \xB7 ${tool_name} \xB7 ${formatBytes(deliveredSize)} of ${formatBytes(originalSize)}`);
     count("too_small", contentBytes);
     return {};
   }
-  const full_retained = shouldRetainFullBody(config2.store.retention, tool_name, command, summary) ? 1 : 0;
+  const full_retained = shouldRetainFullBody(config2.store.retention, tool_name, command, handlerSummary) ? 1 : 0;
   if (!full_retained)
     log.debug(`summary-only \xB7 ${tool_name} \xB7 retention=${config2.store.retention}`);
   const stored = storeOutput(db, {

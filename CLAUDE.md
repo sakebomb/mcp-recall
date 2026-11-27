@@ -93,6 +93,8 @@ plugins/mcp-recall/     Marketplace-installable plugin bundle
 
 **Hook flow** (`src/hooks/post-tool-use.ts`, whose numbered steps are the source of truth): `PostToolUse` intercepts `mcp__*` (except `mcp__recall__*`) and `Bash` → denylist check → secret scan → **a Bash content read (`cat`, `git diff`/`show`, `| head`, `sed -n a,bp`, `grep -A N`) of ≤ 8 KB passes through whole** (#327, #332) → dedup check (`output_hash` from the same tool and command family; never by input alone, since a re-run must see changed output, #324) → compress → **skip unless what Claude receives — the `[recall:…]` header plus the summary — saves at least 25% of the original** (`MIN_SAVING`, #319; the dedup cache applies the same rule) → store in SQLite → evict if over `store.max_size_mb` → return summary to Claude.
 
+A Bash output that Claude Code spilled to `tool-results/` (`persistedOutputPath` set) is summarized from the whole file, and its summary is fitted to Claude Code's 2 KB preview by dropping middle lines (`src/hooks/spill-preview.ts`, #499): anything past the preview never reaches Claude.
+
 That skip guard matters when reasoning about behaviour: output which does not compress usefully — a short, error-dense log, for instance — passes through untouched rather than being stored.
 
 Every call that reaches the store is counted by outcome in `call_counts` (#495), passed through or not. The hook appends each count to `<store>.calls`, never a SQLite write, since a commit cost 15-20 ms per call on Bun 1.4; the log is folded in by writes that happen anyway (storing a summary, session start, forget-all). Keep it that way: a counter that writes the store on every pass-through call brings that cost back.

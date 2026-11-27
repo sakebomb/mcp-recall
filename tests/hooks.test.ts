@@ -4,6 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { handleSessionStart } from "../src/hooks/session-start";
 import { handlePostToolUse, savesEnough } from "../src/hooks/post-tool-use";
+import { fitLines, SPILL_PREVIEW_BYTES } from "../src/hooks/spill-preview";
 import { getDb, closeDb, listOutputs, getSessionDays, retrieveOutput, storeOutput, pinOutput, getMeta, setMeta, hashContent } from "../src/db/index";
 import { resetConfig } from "../src/config";
 import { getProjectKey, getProjectPath } from "../src/project-key";
@@ -1443,6 +1444,129 @@ describe("handlePostToolUse — Bash output cut at ~50 KB (#316)", () => {
     const elsewhere = join(tempDir, "elsewhere.txt");
     writeFileSync(elsewhere, full);
     expect(run(envelope({ persistedOutputPath: elsewhere })).row?.original_size).toBe(Buffer.byteLength(cut, "utf8"));
+  });
+});
+
+describe("handlePostToolUse — a spilled Bash summary fits Claude Code's preview (#499)", () => {
+  // Claude Code shows only the start of the replacement for an output it
+  // spilled, so a summary longer than the preview lost its closing lines.
+  const full = Array.from({ length: 2400 }, (_, i) =>
+    `src/module-${i % 60}/file.ts:${i + 1}:  const value${i} = computeSomething(${i}, withALongerArgumentList, andAnother);`).join("\n") + "\n";
+  let tempDir: string;
+  let persistedPath: string;
+
+  const run = (spill: boolean, shape: "object" | "JSON string" = "object", overrides: Record<string, unknown> = {}) => {
+    const envelope = {
+      stdout: spill ? full.slice(0, 50_000) : full,
+      stderr: "", interrupted: false, isImage: false, noOutputExpected: false,
+      ...(spill ? { persistedOutputPath: persistedPath, persistedOutputSize: Buffer.byteLength(full, "utf8") } : {}),
+      ...overrides,
+    };
+    const response = shape === "object" ? envelope : JSON.stringify(envelope);
+    const result = handlePostToolUse(makePostToolUseInput("Bash", response, { tool_input: { command: "grep -rn const src" } }));
+    const delivered = result.updatedMCPToolOutput ?? "";
+    const id = delivered.match(/recall_[0-9a-f]+/)?.[0] ?? "";
+    return { delivered, row: retrieveOutput(getDb(":memory:"), id) };
+  };
+
+  beforeEach(() => {
+    process.env.RECALL_DB_PATH = ":memory:";
+    tempDir = mkdtempSync(join(tmpdir(), "recall-hooks-499-"));
+    mkdirSync(join(tempDir, "tool-results"));
+    persistedPath = join(tempDir, "tool-results", "bg45rh2hd.txt");
+    writeFileSync(persistedPath, full);
+  });
+
+  afterEach(() => {
+    closeDb();
+    delete process.env.RECALL_DB_PATH;
+    rmSync(tempDir, { recursive: true });
+  });
+
+  it("the handler's own summary is longer than the preview", () => {
+    // Without this the tests below would pass with no cut at all.
+    expect(Buffer.byteLength(run(false).delivered, "utf8")).toBeGreaterThan(SPILL_PREVIEW_BYTES);
+  });
+
+  it("delivers header and summary within the preview, keeping the footer", () => {
+    const { delivered } = run(true);
+    expect(delivered).toStartWith("[recall:recall_");
+    expect(Buffer.byteLength(delivered, "utf8")).toBeLessThanOrEqual(SPILL_PREVIEW_BYTES);
+    expect(delivered).toContain("grep — 2400 matches in 60 files");
+    expect(delivered.trimEnd().split("\n").at(-1)).toMatch(/\(\+\d+ more matches\)/);
+    expect(delivered).toMatch(/\d+ lines cut to fit Claude Code's preview/);
+  });
+
+  it("stores the summary it delivered, and sizes the row by it", () => {
+    const { delivered, row } = run(true);
+    expect(delivered.endsWith(row!.summary)).toBe(true);
+    expect(row!.delivered_size).toBe(Buffer.byteLength(delivered, "utf8"));
+    // Sized from the whole output, not the 50 KB Claude Code handed over.
+    expect(row!.original_size).toBe(Buffer.byteLength(full, "utf8"));
+  });
+
+  it("fits the preview for the JSON string shape too", () => {
+    const { delivered } = run(true, "JSON string");
+    expect(delivered).toContain("lines cut to fit");
+    expect(Buffer.byteLength(delivered, "utf8")).toBeLessThanOrEqual(SPILL_PREVIEW_BYTES);
+  });
+
+  it("fits the preview even when the spilled file cannot be read back", () => {
+    // Claude Code previews the replacement whether or not the hook trusted the file.
+    const { delivered } = run(true, "object", { stdout: full.slice(0, 160_000), persistedOutputSize: 123 });
+    expect(delivered).toStartWith("[recall:recall_");
+    expect(Buffer.byteLength(delivered, "utf8")).toBeLessThanOrEqual(SPILL_PREVIEW_BYTES);
+  });
+
+  it("leaves a summary uncut when the output did not spill", () => {
+    expect(run(false).delivered).not.toContain("lines cut to fit");
+  });
+
+  it("cuts a cached summary stored before the fix", () => {
+    const uncut = run(false).row!.summary;
+    const cached = run(true).delivered;
+    expect(cached).toContain("· cached ·");
+    expect(Buffer.byteLength(cached, "utf8")).toBeLessThanOrEqual(SPILL_PREVIEW_BYTES);
+    expect(cached.trimEnd().split("\n").at(-1)).toBe(uncut.trimEnd().split("\n").at(-1)!);
+  });
+});
+
+describe("fitLines", () => {
+  const body = Array.from({ length: 200 }, (_, i) => `line ${i} of the summary body`);
+
+  it("returns a summary within the budget unchanged", () => {
+    expect(fitLines("one\ntwo", 100)).toBe("one\ntwo");
+  });
+
+  it("keeps the head and the last lines, and says how many lines went", () => {
+    const out = fitLines(["headline", ...body, "total: 200", "FAILED: 3"].join("\n"), 600);
+    const lines = out.split("\n");
+    expect(Buffer.byteLength(out, "utf8")).toBeLessThanOrEqual(600);
+    expect(lines[0]).toBe("headline");
+    expect(lines.slice(-2)).toEqual(["total: 200", "FAILED: 3"]);
+    const cut = Number(out.match(/\((\d+) lines cut/)![1]);
+    expect(lines.length - 1 + cut).toBe(203);
+  });
+
+  it("counts a line kept only in part as cut", () => {
+    const out = fitLines("x".repeat(5000), 1900);
+    expect(Buffer.byteLength(out, "utf8")).toBeLessThanOrEqual(1900);
+    expect(out).toContain("(1 line cut to fit");
+  });
+
+  it("never exceeds a budget too small for its own marker", () => {
+    const text = ["headline", ...body].join("\n");
+    for (const max of [-5, 0, 10, 80, 90, 120]) {
+      expect(Buffer.byteLength(fitLines(text, max), "utf8")).toBeLessThanOrEqual(Math.max(max, 0));
+    }
+  });
+
+  it("stays within the budget for multi-byte text and for one over-long line", () => {
+    for (const text of ["é→".repeat(5000), ["日本語 ".repeat(30), ...body.map((l) => `${l} ✓`)].join("\n")]) {
+      const out = fitLines(text, 500);
+      expect(Buffer.byteLength(out, "utf8")).toBeLessThanOrEqual(500);
+      expect(out).not.toContain("�");
+    }
   });
 });
 

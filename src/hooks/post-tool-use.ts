@@ -20,6 +20,7 @@ import { bashOutputText } from "../handlers/bash-shared";
 import { formatBytes } from "../format";
 import { log } from "../log";
 import { fromGrok } from "./grok";
+import { fitLines, SPILL_PREVIEW_BYTES } from "./spill-preview";
 
 interface PostToolUseInput {
   session_id: string;
@@ -173,6 +174,13 @@ export function handlePostToolUse(raw: string): HookOutput {
   const replyShape = grok ? undefined : tool_response;
   // The whole output, not the cut Claude Code hands over above ~50 KB (#316).
   let response = tool_name === "Bash" ? withPersistedOutput(tool_response) : tool_response;
+  // Claude Code spilled this output, so it will show only a preview of the
+  // replacement: what is delivered has to fit in it (#499). grok does not wrap.
+  const spilled =
+    !grok && tool_name === "Bash" && typeof asBashResponse(tool_response)?.persistedOutputPath === "string";
+  /** `summary` cut to what the preview shows beneath `header`; unchanged when nothing spilled. */
+  const fitPreview = (header: string, summary: string): string =>
+    spilled ? fitLines(summary, SPILL_PREVIEW_BYTES - Buffer.byteLength(header, "utf8") - 1) : summary;
 
   // 1. Denylist check
   if (isDenied(tool_name, config)) {
@@ -255,7 +263,9 @@ export function handlePostToolUse(raw: string): HookOutput {
 
   const cachedResponse = (cached: { id: string; created_at: number; summary: string }): HookOutput => {
     const cachedDate = new Date(cached.created_at * 1000).toISOString().slice(0, 10);
-    const text = `[recall:${cached.id} · cached · ${cachedDate}]\n${cached.summary}`;
+    const header = `[recall:${cached.id} · cached · ${cachedDate}]`;
+    // A row stored before #499 holds the summary uncut.
+    const text = `${header}\n${fitPreview(header, cached.summary)}`;
     // A row stored before #319 may only have beaten the original without its
     // header; replaying it must save as much as a fresh summary would.
     const textBytes = Buffer.byteLength(text, "utf8");
@@ -285,13 +295,22 @@ export function handlePostToolUse(raw: string): HookOutput {
     ({ summary, originalSize } = genericHandler(tool_name, response));
     handlerName = genericHandler.name;
   }
+  const hints = extractHints(fullContent);
+  // Retention reads the handler's own summary: a line it clipped may be one cut here.
+  const handlerSummary = summary;
+  // Sized against the header the uncut summary would carry, plus room for one
+  // whose size and percentage print a few characters longer after the cut.
+  const HEADER_SLACK = "    ";
+  summary = fitPreview(
+    recallHeader(ID_PLACEHOLDER, originalSize, Buffer.byteLength(summary, "utf8"), hints) + HEADER_SLACK,
+    summary,
+  );
   const summarySize = Buffer.byteLength(summary, "utf8");
 
   // 7. Only store when what Claude receives, header included, saves at least
   //    MIN_SAVING of the original: sizing the summary alone delivered small
   //    outputs larger while reporting a reduction (#319), and a small saving
   //    costs lines that may not be retrievable (#319 part 2).
-  const hints = extractHints(fullContent);
   const deliveredSize = deliveredBytes(summary, originalSize, hints);
   if (!savesEnough(deliveredSize, originalSize)) {
     log.debug(`SKIP no-compression · ${tool_name} · ${formatBytes(deliveredSize)} of ${formatBytes(originalSize)}`);
@@ -304,7 +323,7 @@ export function handlePostToolUse(raw: string): HookOutput {
   //    balanced-tier classification for Bash; output_hash (computed above from
   //    the real content) is passed through so dedup works even when the body is
   //    dropped.
-  const full_retained = shouldRetainFullBody(config.store.retention, tool_name, command, summary) ? 1 : 0;
+  const full_retained = shouldRetainFullBody(config.store.retention, tool_name, command, handlerSummary) ? 1 : 0;
   if (!full_retained) log.debug(`summary-only · ${tool_name} · retention=${config.store.retention}`);
 
   const stored = storeOutput(db, {
