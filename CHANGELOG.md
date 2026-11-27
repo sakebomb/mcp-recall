@@ -43,8 +43,9 @@ All notable changes to mcp-recall are documented here. Format based on [Keep a C
   Code shows the model only the first 2 KB of the summary, so a longer one lost
   its closing lines: the totals, failures or `+N more` footer. Such a summary is
   now fitted to that preview by dropping lines from its middle, with a line
-  saying how many went. The head and the last lines stay, and the stored output
-  is unchanged.
+  saying how many went. The head and the last lines stay. The fitted summary is
+  the one stored, so `recall__retrieve` in summary mode returns it too; the full
+  output is stored as before.
 
 ## [1.22.0] — 2026-11-18
 
